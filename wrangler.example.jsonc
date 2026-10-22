@@ -1,0 +1,36 @@
+// Copia este archivo como wrangler.jsonc y pon tu base de datos y tus dominios.
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "terminal-p2p",
+	"main": "worker/index.ts",
+	"compatibility_date": "2026-10-15",
+
+	// La lógica corre en el navegador: se empaqueta web/ en public/app/data.js
+	"build": { "command": "npm run build:web", "watch_dir": ["web", "src"] },
+
+	// Archivos estáticos: public/site (la landing, en el dominio principal) y
+	// public/app (el terminal, en app.). El Worker atiende primero todas las
+	// peticiones: elige la carpeta según el dominio, redirige www y hace de relé
+	"assets": {
+		"directory": "public",
+		"binding": "ASSETS",
+		"run_worker_first": true
+	},
+
+
+	// Histórico público de la tasa (solo agregados de QvaPay, sin datos de usuarios).
+	// El cron lo alimenta cada 10 minutos con una única llamada sin token.
+	"d1_databases": [
+		{ "binding": "DB", "database_name": "terminal-p2p", "database_id": "<id de tu base D1>" }
+	],
+	"triggers": { "crons": ["*/10 * * * *"] },
+
+	"routes": [
+		{ "pattern": "example.com", "custom_domain": true },
+		{ "pattern": "www.example.com", "custom_domain": true },
+		{ "pattern": "app.example.com", "custom_domain": true }
+	],
+
+	// Solo errores de la app; sin registro por petición (URLs, IPs, cabeceras)
+	"observability": { "enabled": true, "logs": { "invocation_logs": false } }
+}

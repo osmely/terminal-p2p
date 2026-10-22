@@ -1,0 +1,28 @@
+Terminal P2P
+Copyright 2026 osmely (https://github.com/osmely)
+
+Este producto incluye software desarrollado por osmely para Terminal P2P:
+https://github.com/osmely/terminal-p2p · https://terminalp2p.com
+
+Si usas, modificas o distribuyes este código (o una obra derivada), la
+licencia Apache 2.0 te obliga a conservar este aviso NOTICE y el aviso de
+copyright, y a incluirlos de forma visible en la documentación o en la
+sección "acerca de" / créditos de tu producto, junto con una indicación de
+los cambios que hayas hecho.
+
+This product includes software developed by osmely for Terminal P2P
+(https://github.com/osmely/terminal-p2p). Under the Apache License 2.0 you
+must retain this NOTICE and the copyright notice, include them in a visible
+attribution (documentation or about/credits section) of any distribution or
+derivative work, and state the changes you made.
+
+------------------------------------------------------------------------
+Componentes de terceros incluidos en public/app/vendor/
+(sus licencias están en public/app/vendor/licenses/):
+
+- TradingView Lightweight Charts™ 4.2.0 — Copyright (c) TradingView, Inc.
+  https://www.tradingview.com/ · Apache License 2.0
+- Inter — Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  SIL Open Font License 1.1
+- JetBrains Mono — Copyright 2020 The JetBrains Mono Project Authors
+  (https://github.com/JetBrains/JetBrainsMono) · SIL Open Font License 1.1

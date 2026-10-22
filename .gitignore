@@ -1,0 +1,5 @@
+node_modules/
+.wrangler/
+public/app/data.js
+public/app/data.js.map
+wrangler.jsonc

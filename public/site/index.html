@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Terminal P2P · El P2P de QvaPay como un exchange</title>
+	<meta name="description" content="Libro de órdenes en vivo, profundidad, histórico de la tasa y tus operaciones P2P de QvaPay paso a paso. Gratis, de código abierto y sin custodia: todo corre en tu navegador." />
+	<meta property="og:title" content="Terminal P2P · El P2P de QvaPay como un exchange" />
+	<meta property="og:description" content="Libro de órdenes en vivo, histórico de la tasa y tus operaciones P2P de QvaPay paso a paso. Código abierto y sin custodia." />
+	<meta property="og:url" content="https://terminalp2p.com/" />
+	<meta property="og:type" content="website" />
+	<link rel="canonical" href="https://terminalp2p.com/" />
+	<script src="/theme.js"></script>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	<link rel="stylesheet" href="/vendor/fonts.css" />
+	<link rel="stylesheet" href="/site.css" />
+	<script src="/site.js" defer></script>
+</head>
+<body>
+	<header class="nav">
+		<div class="wrap nav-in">
+			<a class="brand" href="/" aria-label="Terminal P2P">
+				<span class="brand-mark" aria-hidden="true">
+					<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16l4.5-5 3.5 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</span>
+				<span>Terminal P2P</span>
+			</a>
+			<nav class="nav-links" aria-label="Secciones">
+				<a href="#tasas">Tasas</a>
+				<a href="#funciones">Funciones</a>
+				<a href="#privacidad">Privacidad</a>
+				<a href="#preguntas">Preguntas</a>
+			</nav>
+			<div class="nav-actions">
+				<a class="icon-btn hide-sm" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener" title="Código fuente en GitHub" aria-label="Código fuente en GitHub">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.38-3.37-1.38-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 015 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.26 10.26 0 0022 12.25C22 6.58 17.52 2 12 2z"/></svg>
+				</a>
+				<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+					<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+					<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+				</button>
+				<a class="btn primary" href="https://app.terminalp2p.com">Abrir terminal</a>
+			</div>
+		</div>
+	</header>
+
+	<main>
+		<!-- ── Portada ─────────────────────────────────────────────── -->
+		<section class="hero">
+			<div class="wrap hero-in">
+				<div class="hero-copy">
+					<span class="eyebrow"><i class="pulse" aria-hidden="true"></i> Código abierto · Sin custodia · Gratis</span>
+					<h1>El P2P de QvaPay,<br /><span class="grad">como un exchange.</span></h1>
+					<p class="lead">Libro de órdenes en vivo, profundidad, diferencial e histórico de la tasa de cada moneda. Y tus propias operaciones P2P guiadas paso a paso, de “ya pagué” a la calificación.</p>
+					<div class="cta-row">
+						<a class="btn primary lg" href="https://app.terminalp2p.com">
+							Abrir terminal
+							<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						</a>
+						<a class="btn ghost lg" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">Ver el código</a>
+					</div>
+					<p class="fine">Sin registro. Las tasas y el histórico se ven sin cuenta; el libro en vivo, con tu token de QvaPay.</p>
+				</div>
+
+				<!-- Ilustración del terminal (decorativa) -->
+				<div class="mock" aria-hidden="true">
+					<div class="mock-bar"><i></i><i></i><i></i><span>app.terminalp2p.com</span></div>
+					<div class="mock-head">
+						<b>QUSD / CUP Transferencia</b>
+						<span class="mock-stats"><em class="ask">1.011,50</em><em class="bid">1.004,00</em></span>
+					</div>
+					<div class="mock-cols"><span>Precio</span><span>USD</span><span>Acumulado</span></div>
+					<div class="mock-book asks">
+						<div class="mrow" style="--w: 92%"><span>1.020,00</span><span>210</span><span>612</span></div>
+						<div class="mrow" style="--w: 58%"><span>1.017,50</span><span>95</span><span>402</span></div>
+						<div class="mrow" style="--w: 43%"><span>1.015,00</span><span>120</span><span>307</span></div>
+						<div class="mrow" style="--w: 24%"><span>1.013,00</span><span>64</span><span>187</span></div>
+						<div class="mrow" style="--w: 14%"><span>1.011,50</span><span>123</span><span>123</span></div>
+					</div>
+					<div class="mock-spread"><span>Diferencial</span><span>7,50 · +0,75%</span></div>
+					<div class="mock-book bids">
+						<div class="mrow" style="--w: 11%"><span>1.004,00</span><span>80</span><span>80</span></div>
+						<div class="mrow" style="--w: 30%"><span>1.002,00</span><span>150</span><span>230</span></div>
+						<div class="mrow" style="--w: 45%"><span>1.000,00</span><span>400</span><span>630</span></div>
+						<div class="mrow" style="--w: 63%"><span>998,00</span><span>45</span><span>675</span></div>
+						<div class="mrow" style="--w: 88%"><span>995,00</span><span>260</span><span>935</span></div>
+					</div>
+					<svg class="mock-depth" viewBox="0 0 300 70" preserveAspectRatio="none">
+						<path class="d-bid" d="M0 8 H40 V20 H80 V30 H120 V44 H150 V70 H0 Z" />
+						<path class="d-ask" d="M150 70 V50 H175 V38 H210 V26 H250 V12 H300 V70 Z" />
+					</svg>
+				</div>
+			</div>
+		</section>
+
+		<!-- ── Tasas en vivo (API pública de QvaPay) ──────────────── -->
+		<section class="band" id="tasas">
+			<div class="wrap">
+				<div class="sec-head">
+					<div>
+						<h2>Tasas de hoy en QvaPay</h2>
+						<p>Mediana de lo que realmente se completó en el P2P, por moneda. Se actualiza sola.</p>
+					</div>
+					<a class="link-arrow" href="https://app.terminalp2p.com">Ver libros en vivo →</a>
+				</div>
+				<div class="rates" id="rates">
+					<div class="rate skeleton"></div><div class="rate skeleton"></div><div class="rate skeleton"></div><div class="rate skeleton"></div>
+				</div>
+				<p class="src" id="ratesSrc">Fuente: API pública de QvaPay.</p>
+			</div>
+		</section>
+
+		<!-- ── Funciones ───────────────────────────────────────────── -->
+		<section class="sec" id="funciones">
+			<div class="wrap">
+				<div class="sec-head center">
+					<h2>Todo el mercado en una pantalla</h2>
+					<p>Lo que en QvaPay es una lista de ofertas, aquí es un mercado que se puede leer.</p>
+				</div>
+				<div class="features">
+					<article class="feat">
+						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 10h14M4 14h8M4 18h16" /></svg></span>
+						<h3>Libro de órdenes</h3>
+						<p>Ventas y compras ordenadas por precio, con lo acumulado, la reputación de cada contraparte y filtros por antigüedad, monto y operaciones.</p>
+					</article>
+					<article class="feat">
+						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M4 20V14l4-2 4 3 4-6 4 2v9" /></svg></span>
+						<h3>Profundidad y diferencial</h3>
+						<p>Cuánta liquidez hay cerca del precio medio, el diferencial al momento y aviso cuando el libro se cruza.</p>
+					</article>
+					<article class="feat">
+						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M10 20V4M15 20v-7M20 20V8" /></svg></span>
+						<h3>Operaciones completadas</h3>
+						<p>La distribución de precios de lo que de verdad se cerró en las últimas 48 h, no solo lo que se pide.</p>
+					</article>
+					<article class="feat">
+						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 3 8-8M15 7h5v5" /></svg></span>
+						<h3>Histórico de la tasa</h3>
+						<p>Compra y venta de cada moneda guardadas cada 10 minutos, en rangos de 7 días, 30 días y un año.</p>
+					</article>
+					<article class="feat">
+						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2h9" /></svg></span>
+						<h3>Mis operaciones</h3>
+						<p>Tus operaciones en curso con el paso que toca: datos de pago, “ya pagué”, liberar solo cuando QvaPay confirma el pago, chat y calificación.</p>
+					</article>
+					<article class="feat">
+						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M12 8a4 4 0 100 8 4 4 0 000-8z" /></svg></span>
+						<h3>Lectura del mercado</h3>
+						<p>Observaciones automáticas: distancia a la mediana, quién concentra la liquidez y precios atípicos ocultos.</p>
+					</article>
+				</div>
+			</div>
+		</section>
+
+		<!-- ── Cómo empezar ────────────────────────────────────────── -->
+		<section class="sec alt">
+			<div class="wrap">
+				<div class="sec-head center">
+					<h2>Empieza en un minuto</h2>
+				</div>
+				<ol class="steps">
+					<li>
+						<b>Abre el terminal</b>
+						<p>Las tasas, las operaciones completadas y el histórico se ven al instante, sin cuenta.</p>
+					</li>
+					<li>
+						<b>Conecta tu token</b>
+						<p>Crea un token en qvapay.com/dev/tokens con permisos <code>read</code> y <code>p2p:buy</code> o <code>p2p:sell</code>. Nunca <code>transfer</code> ni <code>withdraw</code>.</p>
+					</li>
+					<li>
+						<b>Mira el libro y opera</b>
+						<p>QvaPay solo enseña las ofertas a cuentas conectadas. Con la tuya ves el libro en vivo y sigues tus operaciones.</p>
+					</li>
+				</ol>
+			</div>
+		</section>
+
+		<!-- ── Privacidad ──────────────────────────────────────────── -->
+		<section class="sec" id="privacidad">
+			<div class="wrap priv">
+				<div class="priv-copy">
+					<h2>Tu cuenta no sale de tu navegador</h2>
+					<p>Terminal P2P no tiene servidor de usuarios ni base de datos de cuentas. Lo que depende de tu token corre en tu navegador, y el dinero de cada operación se queda en el escrow de QvaPay.</p>
+					<a class="link-arrow" href="https://github.com/osmely/terminal-p2p#cómo-funciona" target="_blank" rel="noopener">Cómo funciona por dentro →</a>
+				</div>
+				<ul class="checks">
+					<li><b>Sin custodia.</b> Nunca toca tu dinero: compras y ventas pasan por el escrow de QvaPay.</li>
+					<li><b>Token solo en tu navegador.</b> Se borra al cerrar la pestaña, salvo que elijas recordarlo.</li>
+					<li><b>Solo acciones del P2P.</b> El terminal no puede transferir, retirar ni publicar ofertas: solo marcar pagado, liberar, cancelar, chatear y calificar.</li>
+					<li><b>Nadie ve lo tuyo.</b> El libro se lee con el token de quien mira; tus datos no se comparten con otros usuarios.</li>
+					<li><b>Sin rastreadores.</b> Sin cookies, sin analítica, y las fuentes se sirven desde este dominio.</li>
+					<li><b>Código abierto.</b> Licencia Apache 2.0: puedes revisarlo, o desplegar tu propia copia.</li>
+				</ul>
+			</div>
+		</section>
+
+		<!-- ── Preguntas ───────────────────────────────────────────── -->
+		<section class="sec alt" id="preguntas">
+			<div class="wrap narrow">
+				<div class="sec-head center"><h2>Preguntas frecuentes</h2></div>
+				<details>
+					<summary>¿Es una web de QvaPay?</summary>
+					<p>No. Es un proyecto independiente que usa la API pública de QvaPay. Todas las operaciones se hacen en QvaPay y bajo sus reglas.</p>
+				</details>
+				<details>
+					<summary>¿Cuánto cuesta?</summary>
+					<p>Nada. No hay comisiones propias ni planes de pago. Solo aplican las comisiones normales de QvaPay.</p>
+				</details>
+				<details>
+					<summary>¿Por qué tengo que conectar mi cuenta para ver el libro?</summary>
+					<p>QvaPay solo muestra las ofertas del P2P a cuentas con sesión. Sin cuenta ves las tasas, lo completado y el histórico, que son públicos.</p>
+				</details>
+				<details>
+					<summary>¿Puede el terminal mover mi dinero?</summary>
+					<p>Con un token sin permisos de <code>transfer</code> ni <code>withdraw</code>, no se puede sacar dinero de tu cuenta. El terminal además solo puede hacer las acciones del P2P (marcar pagado, liberar, cancelar, chatear y calificar), y cada una la confirmas tú. Liberar solo se permite cuando QvaPay marca la operación como pagada.</p>
+				</details>
+				<details>
+					<summary>¿Qué guarda el servidor?</summary>
+					<p>Solo el histórico público de la tasa: cada 10 minutos, los promedios que QvaPay publica sin cuenta. Ningún dato de usuarios.</p>
+				</details>
+			</div>
+		</section>
+
+		<section class="final">
+			<div class="wrap final-in">
+				<h2>Mira el mercado ahora</h2>
+				<p>Gratis, sin registro y desde cualquier navegador, también en el móvil.</p>
+				<a class="btn primary lg" href="https://app.terminalp2p.com">Abrir terminal</a>
+			</div>
+		</section>
+	</main>
+
+	<footer class="foot">
+		<div class="wrap foot-in">
+			<span>© 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a> · <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener">Licencia Apache 2.0</a> · <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a></span>
+			<span>Proyecto independiente, sin relación con QvaPay.</span>
+		</div>
+	</footer>
+</body>
+</html>

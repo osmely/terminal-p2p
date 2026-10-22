@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Terminal P2P · Mercado P2P de QvaPay</title>
+	<script src="/theme.js"></script>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	<!-- Fuentes y gráficos servidos desde este dominio: ningún tercero ve a los visitantes -->
+	<link rel="stylesheet" href="/vendor/fonts.css" />
+	<link rel="stylesheet" href="/style.css" />
+	<script src="/vendor/lightweight-charts.js" defer></script>
+	<script src="/data.js" defer></script>
+	<script src="/app.js" defer></script>
+	<script src="/broker.js" defer></script>
+</head>
+<body>
+	<header class="nav">
+		<a class="brand" href="/" aria-label="Terminal P2P">
+			<span class="brand-mark" aria-hidden="true">
+				<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16l4.5-5 3.5 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+			</span>
+			<span class="brand-name">Terminal P2P</span>
+		</a>
+
+		<div class="nav-spacer"></div>
+
+		<div class="status-pill" id="statusPill"><span id="dot" class="dot"></span><span id="updated">Conectando…</span></div>
+		<a class="icon-btn hide-sm" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener" title="Código fuente en GitHub" aria-label="Código fuente en GitHub">
+			<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.38-3.37-1.38-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 015 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.26 10.26 0 0022 12.25C22 6.58 17.52 2 12 2z"/></svg>
+		</a>
+		<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+			<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+			<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+		</button>
+		<div id="account" class="account"></div>
+	</header>
+
+	<!-- Selector de mercado para pantallas sin la columna de mercados -->
+	<nav class="market-strip" id="marketStrip" aria-label="Mercados"></nav>
+
+	<section class="ticker">
+		<div class="ticker-pair">
+			<h1 id="pairName">QUSD / CUP Transferencia</h1>
+			<p id="pairSub">Precio en CUP por cada USD de saldo QvaPay</p>
+		</div>
+		<div class="ticker-stats" id="stats"></div>
+	</section>
+
+	<!-- En el móvil, una sección a la vez -->
+	<nav class="view-tabs" id="viewTabs" role="tablist" aria-label="Secciones">
+		<button class="view-tab" data-view="book" role="tab">Libro</button>
+		<button class="view-tab" data-view="chart" role="tab">Gráficos</button>
+		<button class="view-tab" data-view="insights" role="tab">Lectura</button>
+		<button class="view-tab" data-view="orders" role="tab">Mis operaciones <span class="count" id="cntView" hidden></span></button>
+	</nav>
+
+	<main class="layout" id="layout">
+		<aside class="panel area-markets">
+			<div class="panel-head"><h2>Mercados</h2></div>
+			<div class="markets-search"><input class="input" id="marketSearch" placeholder="Buscar…" autocomplete="off" /></div>
+			<div class="markets-cols"><span>Mercado</span><span>Compra</span><span>Venta</span></div>
+			<div class="markets-list" id="marketList"></div>
+		</aside>
+
+		<section class="panel area-chart">
+			<div class="panel-head">
+				<div class="seg-tabs" role="tablist">
+					<button class="seg-tab active" data-chart="depth" role="tab">Profundidad</button>
+					<button class="seg-tab" data-chart="completed" role="tab">Operaciones 48 h</button>
+					<button class="seg-tab" data-chart="history" role="tab">Histórico</button>
+				</div>
+				<span class="panel-note" id="chartNote"></span>
+			</div>
+			<div class="chart-wrap">
+				<div class="seg-tabs range-tabs" id="rangeTabs" role="tablist" hidden>
+					<button class="seg-tab" data-range="7" role="tab">7 días</button>
+					<button class="seg-tab" data-range="30" role="tab">30 días</button>
+					<button class="seg-tab" data-range="365" role="tab">1 año</button>
+				</div>
+				<canvas id="depth" class="chart"></canvas>
+				<canvas id="completed" class="chart" hidden></canvas>
+				<div id="history" class="chart" hidden></div>
+			</div>
+		</section>
+
+		<section class="panel area-book">
+			<div class="panel-head">
+				<h2>Libro de órdenes</h2>
+				<div class="filter-wrap">
+					<button class="chip-btn" id="filterBtn" aria-haspopup="dialog" aria-expanded="false">
+						<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+						Filtros <span class="count" id="filterCount" hidden></span>
+					</button>
+					<div class="menu filter-menu" id="filterMenu" hidden>
+						<label class="check"><input type="checkbox" id="fVip" checked /> Ocultar ofertas solo-VIP</label>
+						<label class="check"><input type="checkbox" id="fOutlier" checked /> Ocultar precios atípicos</label>
+						<label class="field">Reputación mínima
+							<select class="input" id="fOps">
+								<option value="0">Cualquiera</option>
+								<option value="10">10+ operaciones</option>
+								<option value="50">50+ operaciones</option>
+								<option value="200">200+ operaciones</option>
+							</select>
+						</label>
+						<label class="field">Última actividad
+							<select class="input" id="fAge">
+								<option value="0">Cualquiera</option>
+								<option value="1">Última hora</option>
+								<option value="6">Últimas 6 h</option>
+								<option value="24">Últimas 24 h</option>
+								<option value="72">Últimos 3 días</option>
+								<option value="168">Última semana</option>
+							</select>
+						</label>
+						<label class="field">Monto mínimo
+							<select class="input" id="fUsd">
+								<option value="0">Cualquiera</option>
+								<option value="10">10+ USD</option>
+								<option value="50">50+ USD</option>
+								<option value="100">100+ USD</option>
+							</select>
+						</label>
+						<button class="link small" id="filterReset">Restablecer filtros</button>
+					</div>
+				</div>
+			</div>
+			<div class="book-cols"><span>Precio</span><span>USD</span><span>Acumulado</span><span>Contraparte</span></div>
+			<div class="book-side asks" id="asks"></div>
+			<div class="spread" id="spread">—</div>
+			<div class="book-side bids" id="bids"></div>
+			<div class="book-foot">
+				<span class="legend"><i class="sw ask"></i>Venden USD</span>
+				<span class="legend"><i class="sw bid"></i>Compran USD</span>
+				<span class="book-count" id="bookCount"></span>
+			</div>
+		</section>
+
+		<section class="panel area-insights">
+			<div class="panel-head">
+				<div class="seg-tabs" role="tablist">
+					<button class="seg-tab active" data-pane="insight" role="tab">Lectura del mercado</button>
+					<button class="seg-tab" data-pane="activityPane" role="tab">Actividad</button>
+				</div>
+			</div>
+			<div class="pane" id="insight"></div>
+			<div class="pane" id="activityPane" hidden><ul id="activity" class="feed"></ul></div>
+		</section>
+
+		<section class="panel area-orders">
+			<div class="panel-head">
+				<div class="seg-tabs" role="tablist" id="ordersTabs">
+					<button class="seg-tab active" data-tab="active" role="tab">En curso <span class="count" id="cntActive" hidden></span></button>
+					<button class="seg-tab" data-tab="offers" role="tab">Ofertas<span class="hide-sm">&nbsp;publicadas</span> <span class="count" id="cntOffers" hidden></span></button>
+					<button class="seg-tab" data-tab="done" role="tab">Completadas</button>
+				</div>
+				<div class="head-btns">
+				<button class="icon-btn small" id="alertsBtn" title="Activar avisos" aria-label="Avisos de tus operaciones" aria-pressed="false">
+					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 16V11a6 6 0 1112 0v5l1.5 2h-15L6 16zM10 20.5a2 2 0 004 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</button>
+				<button class="icon-btn small" id="refreshTrades" title="Actualizar" aria-label="Actualizar operaciones">
+					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 12a8 8 0 11-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</button>
+				</div>
+			</div>
+			<div id="myTrades" class="orders"></div>
+		</section>
+	</main>
+
+	<footer class="foot">
+		Todo corre en tu navegador: tu token y tus datos no se guardan en ningún servidor, y el dinero de cada operación queda en el escrow de QvaPay.
+		Código abierto en <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a>
+		· © 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a>
+		· <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener">Licencia Apache 2.0</a>
+		· Gráficos: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView Lightweight Charts™</a>.
+	</footer>
+
+	<div id="tip" class="tip" hidden></div>
+	<div id="modal" class="modal" hidden>
+		<div class="modal-card" role="dialog" aria-modal="true">
+			<button class="icon-btn modal-x" id="modalX" aria-label="Cerrar">
+				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+			</button>
+			<div id="modalBody"></div>
+		</div>
+	</div>
+</body>
+</html>

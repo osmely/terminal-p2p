@@ -1,0 +1,187 @@
+import { logger } from '../log.ts'
+import { QVAPAY_BUCKETS, RateLimiter, type BucketName } from '../ratelimit.ts'
+import type {
+	Averages,
+	ChatMessage,
+	CompletedRates,
+	ListParams,
+	Me,
+	P2POffer,
+	Paginated,
+} from './types.ts'
+
+const log = logger('qvapay')
+
+export const API_BASE = 'https://api.qvapay.com'
+
+export class QvaPayError extends Error {
+	readonly status: number
+	readonly code?: string
+	readonly body: unknown
+
+	constructor(status: number, message: string, code?: string, body?: unknown) {
+		super(`${status}${code ? ` ${code}` : ''}: ${message}`)
+		this.status = status
+		this.code = code
+		this.body = body
+	}
+}
+
+interface RequestOpts {
+	bucket: BucketName
+	query?: Record<string, string | number | boolean | undefined>
+	body?: unknown
+	// Las escrituras solo se reintentan ante 429 (no se ejecutaron), salvo `idempotent`
+	write?: boolean
+	idempotent?: boolean
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+export class QvaPayClient {
+	readonly dryRun: boolean
+	// Sin token solo funcionan los endpoints públicos (/coins, /p2p/averages…)
+	private readonly token: string | undefined
+	// En el navegador las peticiones pasan por el relé del propio dominio (/qp),
+	// porque QvaPay no permite CORS desde otros orígenes
+	private readonly baseUrl: string
+	private readonly limiter = new RateLimiter(QVAPAY_BUCKETS)
+
+	constructor(opts: { token?: string; dryRun: boolean; baseUrl?: string }) {
+		this.baseUrl = (opts.baseUrl ?? API_BASE).replace(/\/$/, '')
+		this.token = opts.token
+		this.dryRun = opts.dryRun
+	}
+
+	// ── Lectura ────────────────────────────────────────────────────────────
+
+	me() {
+		return this.request<Me>('GET', '/user', { bucket: 'general' })
+	}
+
+	averages() {
+		return this.request<Averages>('GET', '/p2p/averages', { bucket: 'averages' })
+	}
+
+	completedRates(coin: string) {
+		return this.request<CompletedRates>('GET', '/p2p/completed_pairs_average', { bucket: 'completed', query: { coin } })
+	}
+
+	listOffers(params: ListParams) {
+		const query: RequestOpts['query'] = { ...params, my: params.my ? 'true' : undefined }
+		return this.request<Paginated<P2POffer>>('GET', '/p2p', { bucket: 'list', query })
+	}
+
+	async getOffer(uuid: string) {
+		const res = await this.request<{ p2p: P2POffer }>('GET', `/p2p/${uuid}`, { bucket: 'general' })
+		return res.p2p
+	}
+
+	async getChat(uuid: string, order?: string) {
+		const res = await this.request<{ chat: ChatMessage[] }>('GET', `/p2p/${uuid}/chat`, {
+			bucket: 'general',
+			query: { order },
+		})
+		return res.chat
+	}
+
+	// ── Escritura (en simulación no se envían) ───────────────────────────────────────
+
+	async markPaid(uuid: string, txId: string, order?: string) {
+		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/paid${order ? `?order=${order}` : ''}`)
+		await this.request('POST', `/p2p/${uuid}/paid`, { bucket: 'paid', query: { order }, body: { tx_id: txId }, write: true })
+	}
+
+	async markReceived(uuid: string, order?: string) {
+		if (this.dryRun) {
+			log.info(`[DRY] POST /p2p/${uuid}/received${order ? `?order=${order}` : ''}`)
+			return { amount: 0, fee: 0, gross_amount: 0 }
+		}
+		return this.request<{ amount: number; fee: number; gross_amount: number }>('POST', `/p2p/${uuid}/received`, {
+			bucket: 'received',
+			query: { order },
+			write: true,
+		})
+	}
+
+	async cancelOrder(uuid: string, order?: string) {
+		if (this.dryRun) {
+			log.info(`[DRY] POST /p2p/${uuid}/cancel${order ? `?order=${order}` : ''}`)
+			return { message: 'dry-run' }
+		}
+		return this.request<{ message: string; status?: string }>('POST', `/p2p/${uuid}/cancel`, {
+			bucket: 'cancel',
+			query: { order },
+			write: true,
+		})
+	}
+
+	async rate(uuid: string, order: string | undefined, rating: number, comment?: string) {
+		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/rate`, { order, rating })
+		await this.request('POST', `/p2p/${uuid}/rate`, {
+			bucket: 'general',
+			body: { order, rating, comment, tags: ['rapido', 'confiable'] },
+			write: true,
+		})
+	}
+
+	async sendChat(uuid: string, message: string, order?: string) {
+		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/chat${order ? `?order=${order}` : ''}`)
+		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, body: { message }, write: true })
+	}
+
+	// ── Transporte ─────────────────────────────────────────────────────────
+
+	private async request<T = unknown>(method: string, path: string, opts: RequestOpts): Promise<T> {
+		const url = new URL(this.baseUrl + path)
+		for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v))
+
+		const maxAttempts = 4
+		for (let attempt = 1; ; attempt++) {
+			let res: Response
+			try {
+				res = await this.limiter.run(opts.bucket, () =>
+					fetch(url, {
+						method,
+						headers: {
+							...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+							Accept: 'application/json',
+							...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+						},
+						body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+						signal: AbortSignal.timeout(20_000),
+					}),
+				)
+			} catch (err) {
+				// Error de red: no sabemos si la escritura llegó, así que solo reintentamos si es idempotente
+				if ((!opts.write || opts.idempotent) && attempt < maxAttempts) {
+					await sleep(1000 * 2 ** attempt)
+					continue
+				}
+				throw err
+			}
+
+			const text = await res.text()
+			let data: any = undefined
+			try {
+				data = text ? JSON.parse(text) : undefined
+			} catch {
+				data = text
+			}
+
+			if (res.ok) return data as T
+
+			const retryable = res.status === 429 || (res.status >= 500 && (!opts.write || opts.idempotent))
+			if (retryable && attempt < maxAttempts) {
+				const retryAfter = Number(res.headers.get('retry-after')) * 1000 || 2000 * 2 ** attempt
+				if (res.status === 429) this.limiter.penalize(opts.bucket, retryAfter)
+				log.warn(`${method} ${path} → ${res.status}, reintento ${attempt}/${maxAttempts - 1} en ${retryAfter} ms`)
+				await sleep(retryAfter)
+				continue
+			}
+
+			const message = (data && typeof data === 'object' && (data.error || data.message)) || res.statusText
+			throw new QvaPayError(res.status, String(message), data?.code, data)
+		}
+	}
+}

@@ -1,0 +1,15 @@
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"lib": ["es2023", "dom", "dom.iterable"],
+		"module": "es2022",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"verbatimModuleSyntax": true,
+		"skipLibCheck": true,
+		"types": []
+	},
+	"include": ["./*.ts", "../src/broker/*.ts", "../src/terminal/*.ts", "../src/qvapay/*.ts", "../src/ratelimit.ts", "../src/log.ts"]
+}
