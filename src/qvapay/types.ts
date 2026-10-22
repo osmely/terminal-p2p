@@ -155,6 +155,8 @@ export interface Averages {
 		median_buy?: number
 		median_sell?: number
 		count: number
+		count_buy?: number
+		count_sell?: number
 		window_hours?: number
 	}
 }

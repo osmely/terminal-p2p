@@ -492,6 +492,20 @@ function drawCompleted() {
 let historyChart = null
 let bidSeries = null
 let askSeries = null
+let opsSeries = null
+const DAY_MS = 86_400_000
+const shortDay = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'America/Havana' })
+
+// Leyenda de las barras: el día bajo el cursor o, si no, el último día completo
+function opsLegend(day) {
+	const el = $('opsLegend')
+	const daily = state.history?.daily ?? []
+	const d = day ?? daily.filter((x) => !x.partial).at(-1) ?? daily.at(-1)
+	el.hidden = !d || state.chart !== 'history'
+	if (!d) return
+	const split = d.buy != null && d.sell != null ? ` · ${d.buy.toLocaleString('es')} compras · ${d.sell.toLocaleString('es')} ventas` : ''
+	el.innerHTML = `<b>${d.ops.toLocaleString('es')}</b> operaciones ${d.partial ? 'en las últimas 24 h' : `el ${shortDay(d.t)}`}${split}`
+}
 function drawHistory() {
 	const el = $('history')
 	if (!window.LightweightCharts) return
@@ -506,6 +520,15 @@ function drawHistory() {
 		})
 		bidSeries = historyChart.addLineSeries({ color: css('--bid'), lineWidth: 2, title: 'compra' })
 		askSeries = historyChart.addLineSeries({ color: css('--ask'), lineWidth: 2, title: 'venta' })
+		// Operaciones por día: barras en una escala propia, en la franja de abajo
+		opsSeries = historyChart.addHistogramSeries({ priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
+		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.74, bottom: 0 } })
+		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.3 } })
+		historyChart.subscribeCrosshairMove((p) => {
+			if (!p.time) return opsLegend()
+			const ms = (p.time - (-new Date().getTimezoneOffset() * 60)) * 1000
+			opsLegend((state.history?.daily ?? []).find((d) => Math.abs(d.t - ms) < DAY_MS / 2))
+		})
 	}
 	themeHistory()
 	const tz = -new Date().getTimezoneOffset() * 60
@@ -513,13 +536,18 @@ function drawHistory() {
 	const series = (key) => points.filter((p) => p[key] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[key] }))
 	bidSeries.setData(series('buy'))
 	askSeries.setData(series('sell'))
+	const accent = css('--accent')
+	opsSeries.setData(
+		(state.history?.daily ?? []).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d.ops, color: `${accent}${d.partial ? '40' : '80'}` })),
+	)
+	opsLegend()
 	historyChart.timeScale().fitContent()
 	const first = state.history?.firstPoint
 	const step = { 600000: 'cada 10 min', 3600000: 'por hora', 86400000: 'por día' }[state.history?.bucketMs] ?? ''
 	$('chartNote').textContent = first
-		? `Mediana de lo completado (24 h), ${step} · desde ${new Date(first).toLocaleDateString('es')}`
+		? `Mediana de lo completado (24 h), ${step} · barras: operaciones por día · desde ${new Date(first).toLocaleDateString('es')}`
 		: 'Se registra cada 10 minutos: vuelve en un rato'
-	$('chartNote').title = 'Mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos'
+	$('chartNote').title = 'Líneas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.'
 }
 
 // Los colores del gráfico histórico siguen al tema claro u oscuro
@@ -546,6 +574,7 @@ function showChart(name) {
 	store.set('chart', name)
 	for (const t of document.querySelectorAll('[data-chart]')) t.classList.toggle('active', t.dataset.chart === name)
 	$('rangeTabs').hidden = name !== 'history'
+	$('opsLegend').hidden = true
 	$('depth').hidden = name !== 'depth'
 	$('completed').hidden = name !== 'completed'
 	$('history').hidden = name !== 'history'

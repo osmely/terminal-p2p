@@ -267,6 +267,9 @@ button { cursor: pointer; }
 /* ══ Gráficos ═════════════════════════════════════════════════════════ */
 .chart-wrap { position: relative; flex: 1; min-height: 0; padding: 8px; }
 .range-tabs { position: absolute; top: 14px; left: 16px; z-index: 3; }
+/* Leyenda de las barras de operaciones por día, sobre la franja de abajo del histórico */
+.ops-legend { position: absolute; left: 16px; top: 54px; z-index: 3; max-width: calc(100% - 90px); padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, var(--surface) 85%, transparent); font-size: 11.5px; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ops-legend b { color: var(--text); font-family: var(--mono); }
 .panel-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .mrow .num.avg { color: var(--muted); font-style: italic; }
 .chart { width: 100%; height: 100%; display: block; }

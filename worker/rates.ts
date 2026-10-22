@@ -29,6 +29,8 @@ export interface RateRow {
 	median_buy: number | null
 	median_sell: number | null
 	count: number
+	count_buy: number | null
+	count_sell: number | null
 	window_h: number | null
 }
 
@@ -51,6 +53,8 @@ export function rowsFrom(avg: Averages, t: number): RateRow[] {
 			median_buy: n(a.median_buy),
 			median_sell: n(a.median_sell),
 			count: a.count,
+			count_buy: Number.isFinite(a.count_buy) ? (a.count_buy as number) : null,
+			count_sell: Number.isFinite(a.count_sell) ? (a.count_sell as number) : null,
 			window_h: n(a.window_hours),
 		})
 	}
@@ -64,9 +68,9 @@ export async function collect(db: D1, now = Date.now()) {
 	const rows = rowsFrom((await res.json()) as Averages, slot(now))
 	if (!rows.length) return 0
 	const stmt = db.prepare(
-		'INSERT OR REPLACE INTO rates (coin, t, average, avg_buy, avg_sell, median, median_buy, median_sell, count, window_h) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+		'INSERT OR REPLACE INTO rates (coin, t, average, avg_buy, avg_sell, median, median_buy, median_sell, count, count_buy, count_sell, window_h) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
 	)
-	await db.batch(rows.map((r) => stmt.bind(r.coin, r.t, r.average, r.avg_buy, r.avg_sell, r.median, r.median_buy, r.median_sell, r.count, r.window_h)))
+	await db.batch(rows.map((r) => stmt.bind(r.coin, r.t, r.average, r.avg_buy, r.avg_sell, r.median, r.median_buy, r.median_sell, r.count, r.count_buy, r.count_sell, r.window_h)))
 	return rows.length
 }
 
@@ -82,18 +86,62 @@ export async function query(db: D1, coin: string, days: number, now = Date.now()
 	const since = now - days * 86_400_000
 	const { results } = await db
 		.prepare(
-			`SELECT (t / ?1) * ?1 AS t,
+			// D1 enlaza los números de JS como REAL: sin CAST la división no trunca y no agrupa nada
+			`SELECT CAST(t / ?1 AS INTEGER) * ?1 AS t,
 			        AVG(COALESCE(median_buy, avg_buy))   AS buy,
 			        AVG(COALESCE(median_sell, avg_sell)) AS sell,
 			        AVG(average)                         AS avg,
 			        MAX(count)                           AS count
 			   FROM rates WHERE coin = ?2 AND t >= ?3
-			  GROUP BY t / ?1 ORDER BY 1`,
+			  GROUP BY CAST(t / ?1 AS INTEGER) ORDER BY 1`,
 		)
 		.bind(bucket, coin, since)
 		.all<{ t: number; buy: number | null; sell: number | null; avg: number | null; count: number }>()
 	const first = await db.prepare('SELECT MIN(t) AS t FROM rates WHERE coin = ?').bind(coin).first<{ t: number | null }>()
-	return { coin, days, bucketMs: bucket, firstPoint: first?.t ?? null, points: results }
+	// Operaciones por día: el último registro de cada día de Cuba (su conteo es el de las 24 h previas)
+	const { results: last } = await db
+		.prepare(
+			`SELECT r.t, r.count, r.count_buy, r.count_sell, r.window_h
+			   FROM rates r
+			   JOIN (SELECT MAX(t) AS t FROM rates WHERE coin = ?1 AND t >= ?2 GROUP BY CAST((t + ?3) / 86400000 AS INTEGER)) d ON d.t = r.t
+			  WHERE r.coin = ?1
+			  ORDER BY r.t`,
+		)
+		.bind(coin, since, CUBA_OFFSET_MS)
+		.all<DayRow>()
+	return { coin, days, bucketMs: bucket, firstPoint: first?.t ?? null, points: results, daily: dailyFrom(last, now) }
+}
+
+// Cuba: UTC-5 (en verano UTC-4; para agrupar por día basta con el horario estándar)
+const CUBA_OFFSET_MS = -5 * 3600_000
+
+interface DayRow {
+	t: number
+	count: number | null
+	count_buy: number | null
+	count_sell: number | null
+	window_h: number | null
+}
+
+// De "operaciones en la ventana de QvaPay" a operaciones por día. En las monedas de poco
+// movimiento la ventana es de 7 días: se reparte para que todas las barras sean diarias
+export function dailyFrom(rows: DayRow[], now = Date.now()) {
+	const today = Math.floor((now + CUBA_OFFSET_MS) / 86_400_000)
+	return rows.map((r) => {
+		const perDay = (r.window_h ?? 24) / 24
+		const per = (v: number | null) => (v == null ? null : Math.round(v / perDay))
+		const day = Math.floor((r.t + CUBA_OFFSET_MS) / 86_400_000)
+		return {
+			// Mediodía de ese día en Cuba, para dibujar la barra
+			t: day * 86_400_000 + 12 * 3600_000 - CUBA_OFFSET_MS,
+			day: new Date(day * 86_400_000).toISOString().slice(0, 10),
+			ops: per(r.count) ?? 0,
+			buy: per(r.count_buy),
+			sell: per(r.count_sell),
+			// El día de hoy aún no terminó: es lo de las últimas 24 h
+			partial: day === today,
+		}
+	})
 }
 
 export const isCoin = (v: string | null): v is string => v !== null && TICKS.has(v)
