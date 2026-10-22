@@ -429,5 +429,19 @@ a.icon-btn { text-decoration: none; }
 	.area-orders .panel-head > .seg-tabs .seg-tab { flex: 1; justify-content: center; }
 	.area-orders .head-btns { width: 100%; }
 	.area-orders .head-btns .btn { flex: 1; }
+	/* Operaciones como tarjetas: lo importante (estado, siguiente paso, plazo) siempre a la vista */
+	.otable thead { display: none; }
+	.otable, .otable tbody { display: block; }
+	.otable tr {
+		display: grid; grid-template-columns: auto 1fr auto; gap: 8px 12px; padding: 12px 14px; border-bottom: 1px solid var(--line);
+		grid-template-areas: 'side mkt status' 'usd price total' 'who who date' 'next next act';
+	}
+	.otable tr:last-child { border-bottom: 0; }
+	.otable td, .otable tr:last-child td { display: block; padding: 0; border: 0; white-space: normal; background: none !important; }
+	.otable .r { text-align: left; }
+	.otable td[data-l]::before { content: attr(data-l); display: block; font: 500 10.5px var(--sans); color: var(--muted); margin-bottom: 1px; }
+	.c-side { grid-area: side; } .c-mkt { grid-area: mkt; } .c-status { grid-area: status; text-align: right; }
+	.c-usd { grid-area: usd; } .c-price { grid-area: price; } .c-total { grid-area: total; text-align: right !important; }
+	.c-who { grid-area: who; } .c-date { grid-area: date; text-align: right; } .c-next { grid-area: next; } .c-act { grid-area: act; }
 	.foot { padding: 6px 12px 22px; }
 }

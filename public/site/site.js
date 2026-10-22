@@ -50,6 +50,21 @@ $('themeBtn').addEventListener('click', () => {
 	} catch {}
 })
 
+// Operar: cada paso muestra su captura
+const steps = [...document.querySelectorAll('.op-step')]
+for (const b of steps)
+	b.addEventListener('click', () => {
+		for (const o of steps) {
+			o.classList.toggle('active', o === b)
+			o.setAttribute('aria-selected', String(o === b))
+		}
+		const img = $('opImg')
+		img.src = b.dataset.img
+		img.width = Number(b.dataset.w)
+		img.height = Number(b.dataset.h)
+		img.alt = b.dataset.alt
+	})
+
 loadRates()
 // Solo con la pestaña visible; el relé las cachea 60 s en el borde
 setInterval(() => !document.hidden && loadRates(), 60_000)

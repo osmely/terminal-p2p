@@ -93,7 +93,7 @@ function renderAccount() {
 					<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 				</button>
 			</div>`
-		: `<button class="btn primary" id="connectBtn">Conectar<span class="hide-sm">&nbsp;QvaPay</span></button>`
+		: `<button class="btn primary" id="connectBtn">Conectar<span class="hide-sm">QvaPay</span></button>`
 	$('connectBtn')?.addEventListener('click', showConnect)
 	$('disconnectBtn')?.addEventListener('click', async () => {
 		if (!(await confirmDialog('Desconectar cuenta', '<p class="muted">Se borra el token de este navegador. Tus operaciones en QvaPay no se tocan.</p>', 'Desconectar', 'danger'))) return
@@ -195,10 +195,10 @@ function renderTrades() {
 						const next = t.actions.map((a) => NEXT[a]).find(Boolean)
 						const clock = t.status === 'processing' && t.expiresAt ? `<span class="countdown" data-expires="${esc(t.expiresAt)}" title="Plazo de pago"></span>` : ''
 						return `<tr data-offer="${t.offerUuid}" data-order="${t.order ?? ''}">
-							<td>${side(t)}</td><td>${esc(nameOf(t.coin))}</td>
-							<td class="r num">${fmtU(t.usd)}</td><td class="r num">${fmtP(t.price)}</td><td class="r num">${fmtU(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
-							<td>${who(t)}</td><td><span class="chip ${t.status}">${STATUS[t.status] ?? t.status}</span></td>
-							<td class="next ${next?.[1] ? 'act' : ''}">${next ? next[0] : '—'}${clock}</td></tr>`
+							<td class="c-side">${side(t)}</td><td class="c-mkt">${esc(nameOf(t.coin))}</td>
+							<td class="r num c-usd" data-l="USD">${fmtU(t.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(t.price)}</td><td class="r num c-total" data-l="Total">${fmtU(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
+							<td class="c-who">${who(t)}</td><td class="c-status"><span class="chip ${t.status}">${STATUS[t.status] ?? t.status}</span></td>
+							<td class="next c-next ${next?.[1] ? 'act' : ''}">${next ? next[0] : '—'}${clock}</td></tr>`
 					})
 					.join('')}</tbody></table>`
 			: '<div class="empty">No tienes operaciones en curso.</div>'
@@ -207,11 +207,11 @@ function renderTrades() {
 			? `<table class="otable">${head([...common, ['Estado'], ['Publicada'], ['', 'r']])}<tbody>${bk.openOffers
 					.map(
 						(o) => `<tr data-offer="${o.offerUuid}">
-							<td>${side(o)}</td><td>${esc(nameOf(o.coin))}</td>
-							<td class="r num">${fmtU(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num">${fmtP(o.price)}</td><td class="r num">${fmtU((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
-							<td>${o.pause ? '<span class="chip revision">Pausada</span>' : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}</td>
-							<td class="muted">${o.updatedAt ? new Date(o.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
-							<td class="r"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}">Cancelar</button></td></tr>`,
+							<td class="c-side">${side(o)}</td><td class="c-mkt">${esc(nameOf(o.coin))}</td>
+							<td class="r num c-usd" data-l="USD">${fmtU(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(o.price)}</td><td class="r num c-total" data-l="Total">${fmtU((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
+							<td class="c-status">${o.pause ? '<span class="chip revision">Pausada</span>' : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}</td>
+							<td class="muted c-date">${o.updatedAt ? new Date(o.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
+							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}">Cancelar</button></td></tr>`,
 					)
 					.join('')}</tbody></table>`
 			: '<div class="empty">No tienes ofertas publicadas. Usa «Publicar oferta» para crear una.</div>'
@@ -220,9 +220,9 @@ function renderTrades() {
 			? `<table class="otable">${head([...common, ['Contraparte'], ['Fecha']])}<tbody>${done
 					.map(
 						(t) => `<tr data-offer="${t.offerUuid}" data-order="${t.order ?? ''}">
-							<td>${side(t)}</td><td>${esc(nameOf(t.coin))}</td>
-							<td class="r num">${fmtU(t.usd)}</td><td class="r num">${fmtP(t.price)}</td><td class="r num">${fmtU(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
-							<td>${who(t)}</td><td class="muted">${t.updatedAt ? new Date(t.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`,
+							<td class="c-side">${side(t)}</td><td class="c-mkt">${esc(nameOf(t.coin))}</td>
+							<td class="r num c-usd" data-l="USD">${fmtU(t.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(t.price)}</td><td class="r num c-total" data-l="Total">${fmtU(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
+							<td class="c-who">${who(t)}</td><td class="muted c-date">${t.updatedAt ? new Date(t.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`,
 					)
 					.join('')}</tbody></table>`
 			: '<div class="empty">Aún no hay operaciones completadas.</div>'
@@ -275,11 +275,11 @@ function renderDetail(t) {
 	let action = ''
 	if (status === 'processing' && payer)
 		action = `<div class="stack">
-			<p>Transfiere <b>${fmtU(t.coinAmount)} ${unit}</b> y marca el pago con la referencia.${clock ? ` Plazo para pagar: ${clock}` : ''}</p>
+			<p>Transfiere <b>${fmtU(t.coinAmount)} ${unit}</b> y marca el pago con la referencia.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
 			<label class="field">Referencia de tu transferencia<input class="input" id="txRef" placeholder="Nº de transacción" /></label>
 			<div class="row-btns"><button class="btn danger" data-act="cancel">Cancelar</button><button class="btn primary" data-act="paid">Ya pagué</button></div></div>`
 	else if (status === 'processing')
-		action = `<p>Esperando que @${esc(t.counterparty)} te pague <b>${fmtU(t.coinAmount)} ${unit}</b>.${clock ? ` Plazo para pagar: ${clock}` : ''}</p>
+		action = `<p>Esperando que @${esc(t.counterparty)} te pague <b>${fmtU(t.coinAmount)} ${unit}</b>.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
 			${needSendDetails ? '<p class="notice">Envía tus datos de pago por el chat para que sepa a dónde transferir.</p>' : ''}`
 	else if (status === 'paid' && !payer)
 		action = `<div class="stack">
@@ -746,7 +746,7 @@ function showTakeOffer(uuid, side) {
 			<p class="muted">${esc(nameOf(state.book.coin.tick))} · @${esc(l.user)} · ${l.ops} operaciones · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : 'sin valoraciones'}${l.kyc ? ' · KYC' : ''}</p></div>
 		<div class="kv">
 			<span>${youBuy ? 'Vende' : 'Compra'}</span><b>${fmtU(l.usd)} USD</b><span></span>
-			${flex ? `<span>Por orden</span><b>${fmtU(min)}–${fmtU(max)} USD</b><span></span>` : ''}
+			${flex ? `<span>Por orden</span><b>${min ? `${fmtU(min)}–${fmtU(max)}` : `hasta ${fmtU(max)}`} USD</b><span></span>` : ''}
 			${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
 			${l.vipOnly ? '<span>Solo</span><b>cuentas VIP</b><span></span>' : ''}
 		</div>
