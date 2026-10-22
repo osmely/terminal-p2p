@@ -343,6 +343,7 @@ button { cursor: pointer; }
 
 /* Publicar, gestionar y tomar ofertas */
 .stack.tight { gap: 8px; }
+.stack > .hint:empty, .stack > div:empty { display: none; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .seg-tabs.choice { display: flex; }
 .seg-tabs.choice .seg-tab { flex: 1; justify-content: center; padding: 8px 12px; font-size: 13.5px; }
@@ -416,7 +417,17 @@ a.icon-btn { text-decoration: none; }
 	.pane { max-height: none; }
 	.feed li { grid-template-columns: 42px 1fr auto; padding: 9px 12px; }
 
-	.modal { padding: 12px; align-items: flex-end; }
-	.modal-card { padding: 18px; border-radius: 14px; }
+	/* Abajo cuando cabe; si es más alto que la pantalla, desde arriba y con scroll
+	   (con align-items: flex-end la parte de arriba quedaría fuera de alcance) */
+	.modal { padding: 12px; align-items: flex-start; }
+	.modal-card { padding: 18px; border-radius: 14px; margin-top: auto; }
+	/* 16 px evita que el iPhone amplíe la página al tocar un campo */
+	.modal .input { font-size: 16px; padding: 9px 11px; }
+	/* Mis operaciones: pestañas en una fila y los botones debajo */
+	.area-orders .panel-head { flex-wrap: wrap; }
+	.area-orders .panel-head > .seg-tabs { flex: 1 1 100%; }
+	.area-orders .panel-head > .seg-tabs .seg-tab { flex: 1; justify-content: center; }
+	.area-orders .head-btns { width: 100%; }
+	.area-orders .head-btns .btn { flex: 1; }
 	.foot { padding: 6px 12px 22px; }
 }
