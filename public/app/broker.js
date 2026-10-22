@@ -204,16 +204,17 @@ function renderTrades() {
 			: '<div class="empty">No tienes operaciones en curso.</div>'
 	} else if (bk.tab === 'offers') {
 		html = bk.openOffers.length
-			? `<table class="otable">${head([...common, ['Publicada'], ['', 'r']])}<tbody>${bk.openOffers
+			? `<table class="otable">${head([...common, ['Estado'], ['Publicada'], ['', 'r']])}<tbody>${bk.openOffers
 					.map(
 						(o) => `<tr data-offer="${o.offerUuid}">
 							<td>${side(o)}</td><td>${esc(nameOf(o.coin))}</td>
-							<td class="r num">${fmtU(o.usd)}</td><td class="r num">${fmtP(o.price)}</td><td class="r num">${fmtU(o.coinAmount)} ${esc(unitOf(o.coin))}</td>
+							<td class="r num">${fmtU(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num">${fmtP(o.price)}</td><td class="r num">${fmtU((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
+							<td>${o.pause ? '<span class="chip revision">Pausada</span>' : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}</td>
 							<td class="muted">${o.updatedAt ? new Date(o.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
 							<td class="r"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}">Cancelar</button></td></tr>`,
 					)
 					.join('')}</tbody></table>`
-			: '<div class="empty">No tienes ofertas publicadas.</div>'
+			: '<div class="empty">No tienes ofertas publicadas. Usa «Publicar oferta» para crear una.</div>'
 	} else {
 		html = done.length
 			? `<table class="otable">${head([...common, ['Contraparte'], ['Fecha']])}<tbody>${done
@@ -364,6 +365,435 @@ function bindDetail(t) {
 	}
 }
 
+// ── Publicar una oferta ───────────────────────────────────────────────
+let coinFields = null
+async function loadCoinFields() {
+	if (!coinFields) coinFields = await api('/coins').then((r) => r.fields).catch(() => null)
+	return coinFields ?? {}
+}
+
+const REQ_OPTIONS = {
+	min_completed: ['Operaciones completadas', [5, 10, 25, 50, 100], (v) => `${v} o más`],
+	min_rating: ['Valoración', [4, 4.5], (v) => `${String(v).replace('.', ',')} ★ o más`],
+	min_account_days: ['Antigüedad de la cuenta', [7, 30, 90, 180], (v) => `${v} días o más`],
+}
+const reqText = (r) =>
+	r
+		? Object.entries(r)
+				.filter(([k, v]) => v && REQ_OPTIONS[k])
+				.map(([k, v]) => `${REQ_OPTIONS[k][0]}: ${REQ_OPTIONS[k][2](v)}`)
+				.join(' · ')
+		: ''
+const num2 = (v) => Math.round(Number(v) * 100) / 100
+
+function myUsername() {
+	return bk.acct.connected ? bk.acct.username : null
+}
+
+// Referencias de precio: del libro si es el mercado que se ve, si no los promedios públicos
+function marketRefs(coin) {
+	const b = state.book?.coin?.tick === coin ? state.book : null
+	if (b) {
+		const asks = filtered(b.ask.levels)
+		const bids = filtered(b.bid.levels)
+		const m = b.completed ? median(b.completed.offers) : null
+		return { refs: [['Mejor venta', asks[0]?.price], ['Mejor compra', bids[0]?.price], ['Mediana completadas', m]].filter(([, p]) => p), mid: m }
+	}
+	const o = state.overview.find((c) => c.tick === coin)
+	const refs = [['Venta media 24 h', o?.avgSell], ['Compra media 24 h', o?.avgBuy]].filter(([, p]) => p)
+	return { refs, mid: o?.avgSell && o?.avgBuy ? (o.avgSell + o.avgBuy) / 2 : (o?.avgSell ?? o?.avgBuy ?? null) }
+}
+
+// Puesto que tendría un precio en el libro que se ve (1 = la mejor de su lado)
+function bookRank(coin, type, price) {
+	const b = state.book?.coin?.tick === coin ? state.book : null
+	if (!b || !(price > 0)) return null
+	// Una venta compite con las ventas (gana la más barata); una compra con las compras (gana la más cara)
+	const levels = filtered(type === 'sell' ? b.ask.levels : b.bid.levels).filter((l) => l.user !== myUsername())
+	return levels.filter((l) => (type === 'sell' ? l.price < price : l.price > price)).length + 1
+}
+
+function priceWarning(type, price, mid) {
+	if (!mid || !(price > 0)) return ''
+	const dev = price / mid - 1
+	if (Math.abs(dev) > 0.3) return `Tu precio está un ${pct(Math.abs(dev)).slice(1)} ${dev > 0 ? 'por encima' : 'por debajo'} de la referencia. ¿Es un error de tipeo?`
+	if (type === 'sell' && dev < -0.03) return `Vendes un ${pct(-dev).slice(1)} por debajo de la referencia (${fmtP(mid)}).`
+	if (type === 'buy' && dev > 0.03) return `Compras un ${pct(dev).slice(1)} por encima de la referencia (${fmtP(mid)}).`
+	return ''
+}
+
+async function showCreateOffer() {
+	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para publicar', true)
+	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin), unit: unitOf(state.coin) }]
+	const key = `tp-${crypto.randomUUID()}` // misma clave si se reintenta: QvaPay no la duplica
+	let type = 'sell'
+	openModal(`<div class="stack offer-form">
+		<div id="ofForm" class="stack">
+			<h3>Publicar oferta</h3>
+			<div class="seg-tabs choice" role="radiogroup" aria-label="Lado">
+				<button type="button" class="seg-tab" data-type="sell" role="radio">Vendo USD</button>
+				<button type="button" class="seg-tab" data-type="buy" role="radio">Compro USD</button>
+			</div>
+			<label class="field">Mercado<select class="input" id="ofCoin">${markets.map((c) => `<option value="${c.tick}">${esc(c.name)}</option>`).join('')}</select></label>
+			<div class="grid2">
+				<label class="field">Monto (USD)<input class="input" id="ofAmount" type="number" min="0.1" max="10000" step="0.01" inputmode="decimal" placeholder="100" /></label>
+				<label class="field"><span>Precio por USD (<span id="ofUnit"></span>)</span><input class="input" id="ofPrice" type="number" min="0" step="any" inputmode="decimal" /></label>
+			</div>
+			<div class="ref-chips" id="ofRefs"></div>
+			<p class="hint" id="ofTotal"></p>
+			<label class="check"><input type="checkbox" id="ofFlex" /> Por rango: que la tomen por partes</label>
+			<div class="grid2" id="ofFlexBox" hidden>
+				<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" type="number" step="0.01" inputmode="decimal" /></label>
+				<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" type="number" step="0.01" inputmode="decimal" /></label>
+			</div>
+			<div class="stack tight"><p class="hint" id="ofDetailsTitle"></p><div class="stack tight" id="ofDetails"><p class="muted small">Cargando campos…</p></div>
+				<label class="check small"><input type="checkbox" id="ofRemember" /> Recordar estos datos en este navegador</label></div>
+			<details class="opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
+				${Object.entries(REQ_OPTIONS)
+					.map(([k, [label, vals, fmt]]) => `<label class="field">${label}<select class="input" data-req="${k}"><option value="0">Sin requisito</option>${vals.map((v) => `<option value="${v}">${fmt(v)}</option>`).join('')}</select></label>`)
+					.join('')}
+				<label class="check"><input type="checkbox" id="ofPrivate" checked /> Privada: no se anuncia en el canal de Telegram de QvaPay</label>
+				<label class="check"><input type="checkbox" id="ofVip" /> Solo cuentas VIP</label>
+			</div></details>
+			<div id="ofWarn"></div>
+			<button class="btn primary block" id="ofReview">Revisar</button>
+		</div>
+		<div id="ofConfirm" class="stack" hidden></div>
+	</div>`)
+	$('ofCoin').value = state.coin
+
+	const fields = await loadCoinFields()
+	const read = () => {
+		const coin = $('ofCoin').value
+		const flex = $('ofFlex').checked
+		const requirements = {}
+		for (const s of document.querySelectorAll('[data-req]')) if (Number(s.value)) requirements[s.dataset.req] = Number(s.value)
+		return {
+			type,
+			coin,
+			amount: num2($('ofAmount').value),
+			price: Number($('ofPrice').value),
+			kind: flex ? 'flexible' : 'fixed',
+			orderMin: flex ? num2($('ofMin').value) : undefined,
+			orderMax: flex ? num2($('ofMax').value) : undefined,
+			details: [...document.querySelectorAll('[data-detail]')].map((i) => ({ name: i.dataset.detail, value: i.value.trim() })),
+			requirements,
+			private: $('ofPrivate').checked,
+			onlyVip: $('ofVip').checked,
+			idempotencyKey: key,
+		}
+	}
+	const renderDetails = () => {
+		const coin = $('ofCoin').value
+		const saved = store.get(`details.${coin}`, {})
+		const list = fields[coin] ?? []
+		$('ofRemember').checked = Object.keys(saved).length > 0
+		$('ofDetails').innerHTML = list.length
+			? list
+					.map((f) => {
+						const label = esc(f.label || f.name)
+						const val = esc(saved[f.name] ?? '')
+						return f.type === 'select' && f.options?.length
+							? `<label class="field">${label}<select class="input" data-detail="${esc(f.name)}">${f.options.map((o) => `<option ${o.value === saved[f.name] ? 'selected' : ''}>${esc(o.value)}</option>`).join('')}</select></label>`
+							: `<label class="field">${label}<input class="input" data-detail="${esc(f.name)}" value="${val}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
+					})
+					.join('')
+			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Inténtalo de nuevo.</p>'
+	}
+	const update = () => {
+		for (const b of document.querySelectorAll('[data-type]')) {
+			b.classList.toggle('active', b.dataset.type === type)
+			b.setAttribute('aria-checked', String(b.dataset.type === type))
+		}
+		const f = read()
+		const unit = unitOf(f.coin)
+		$('ofUnit').textContent = unit
+		$('ofFlexBox').hidden = f.kind !== 'flexible'
+		$('ofDetailsTitle').textContent = type === 'sell' ? 'Dónde quieres recibir el pago' : 'Tus datos de pago (los verá quien tome la oferta)'
+		const { refs, mid } = marketRefs(f.coin)
+		$('ofRefs').innerHTML = refs.map(([label, p]) => `<button type="button" class="chip-btn" data-ref="${p}">${label} <b class="mono">${fmtP(p)}</b></button>`).join('')
+		const total = f.amount > 0 && f.price > 0 ? f.amount * f.price : 0
+		const rank = bookRank(f.coin, type, f.price)
+		$('ofTotal').innerHTML = total
+			? `${type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtU(total)} ${unit}</b>${rank ? ` · serías la <b>${rank}ª</b> ${type === 'sell' ? 'venta' : 'compra'} del libro` : ''}`
+			: ''
+		const w = priceWarning(type, f.price, mid)
+		$('ofWarn').innerHTML = w ? `<p class="notice warn">${w}</p>` : ''
+	}
+	renderDetails()
+	update()
+
+	const body = $('modalBody')
+	for (const b of body.querySelectorAll('[data-type]'))
+		b.onclick = () => {
+			type = b.dataset.type
+			update()
+		}
+	$('ofCoin').onchange = () => {
+		renderDetails()
+		update()
+	}
+	for (const id of ['ofAmount', 'ofPrice', 'ofMin', 'ofMax', 'ofFlex']) $(id).addEventListener('input', update)
+	$('ofRefs').onclick = (e) => {
+		const b = e.target.closest('[data-ref]')
+		if (!b) return
+		$('ofPrice').value = String(Math.round(Number(b.dataset.ref) * 10000) / 10000)
+		update()
+	}
+
+	$('ofReview').onclick = () => {
+		const f = read()
+		const unit = unitOf(f.coin)
+		const err =
+			!(f.amount >= 0.1 && f.amount <= 10000)
+				? 'El monto debe estar entre 0,1 y 10.000 USD'
+				: !(f.price > 0)
+					? 'Pon el precio por cada USD'
+					: f.kind === 'flexible' && !(f.orderMin > 0 && f.orderMax >= f.orderMin && f.orderMax <= f.amount)
+						? 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo ≤ monto'
+						: f.details.some((d) => !d.value)
+							? 'Completa todos tus datos de pago'
+							: ''
+		if (err) return toast(err, true)
+		const total = f.amount * f.price
+		const req = reqText(f.requirements)
+		$('ofForm').hidden = true
+		$('ofConfirm').hidden = false
+		$('ofConfirm').innerHTML = `<h3>Revisa tu oferta</h3>
+			<div class="kv">
+				<span>${type === 'sell' ? 'Vendes' : 'Compras'}</span><b>${fmtU(f.amount)} USD</b><span></span>
+				<span>Precio</span><b>${fmtP(f.price)} ${unit}</b><span></span>
+				<span>${type === 'sell' ? 'Recibes' : 'Pagas'}</span><b>${fmtU(total)} ${unit}</b><span></span>
+				<span>Mercado</span><b>${esc(nameOf(f.coin))}</b><span></span>
+				${f.kind === 'flexible' ? `<span>Por partes</span><b>${fmtU(f.orderMin)}–${fmtU(f.orderMax)} USD</b><span></span>` : ''}
+				${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
+				<span>Visibilidad</span><b>${f.private ? 'Privada' : 'Pública en Telegram'}${f.onlyVip ? ' · solo VIP' : ''}</b><span></span>
+			</div>
+			<p class="notice">${
+				type === 'sell'
+					? `Se reservan <b>${fmtU(f.amount)} USD</b> de tu saldo mientras la oferta esté publicada. Cuando alguien la tome, te pagará a tus datos y liberarás los USD al ver el dinero.`
+					: `No se reserva saldo. Cuando alguien la tome, tendrás que transferirle <b>${fmtU(total)} ${unit}</b> a sus datos y marcar el pago.`
+			}</p>
+			${$('ofWarn').innerHTML}
+			<div class="row-btns"><button class="btn" id="ofBack">Volver</button><button class="btn primary" id="ofPublish">Publicar</button></div>`
+		$('ofBack').onclick = () => {
+			$('ofConfirm').hidden = true
+			$('ofForm').hidden = false
+		}
+		$('ofPublish').onclick = async () => {
+			const btn = $('ofPublish')
+			btn.disabled = true
+			btn.textContent = 'Publicando…'
+			try {
+				const r = await api('/offer/create', f)
+				if ($('ofRemember').checked) store.set(`details.${f.coin}`, Object.fromEntries(f.details.map((d) => [d.name, d.value])))
+				else store.set(`details.${f.coin}`, {})
+				toast(r.message || 'Oferta publicada')
+				bk.tab = 'offers'
+				await loadTrades()
+				showManageOffer(r.offer)
+				loadBook()
+			} catch (e) {
+				btn.disabled = false
+				btn.textContent = 'Publicar'
+				toast(e.message, true)
+			}
+		}
+	}
+}
+
+// ── Gestionar una oferta tuya ─────────────────────────────────────────
+async function showManageOffer(uuid) {
+	bk.detail = null
+	openModal('<p class="muted">Cargando oferta…</p>')
+	let o
+	try {
+		o = await api(`/offer?offer=${uuid}`)
+	} catch (e) {
+		$('modalBody').innerHTML = `<p class="empty">${esc(e.message)}</p>`
+		return
+	}
+	renderManage(o)
+}
+
+function pauseText(p) {
+	if (!p) return ''
+	if (p.reason === 'owner') return 'Pausada por ti: no aparece en el mercado'
+	const until = p.until ? new Date(p.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) : null
+	return `Pausada porque se fue la contraparte${until ? `: vuelve al mercado a las ${until}` : ''}`
+}
+
+function renderManage(o) {
+	const unit = unitOf(o.coin)
+	const flex = o.kind === 'flexible'
+	const amount = flex ? (o.available ?? o.usd) : o.usd
+	const editable = o.status === 'open' && !o.peer
+	const rank = o.status === 'open' && !o.pause ? bookRank(o.coin, o.type, o.price) : null
+	const req = reqText(o.requirements)
+	const orders = o.orders.filter((x) => x.status !== 'cancelled')
+	$('modalBody').innerHTML = `<div class="stack">
+		<div><h3>${o.type === 'sell' ? 'Vendes' : 'Compras'} ${fmtU(amount)} USD a ${fmtP(o.price)} ${unit}</h3>
+			<p class="muted">${esc(nameOf(o.coin))} · <span class="chip ${o.status}">${STATUS[o.status] ?? o.status}</span>${o.isPrivate ? ' · Privada' : ''}${flex ? ` · Por partes de ${fmtU(o.orderMin)}–${fmtU(o.orderMax)} USD` : ''}</p></div>
+		${o.pause ? `<p class="notice warn">${pauseText(o.pause)}</p>` : rank ? `<p class="hint">Ahora mismo es la <b>${rank}ª</b> ${o.type === 'sell' ? 'venta' : 'compra'} del libro.</p>` : ''}
+		${o.status !== 'open' ? `<p class="notice">Alguien tomó esta oferta. <button class="link" data-open-trade>Ver la operación</button></p>` : ''}
+		${
+			editable
+				? `<div class="stack tight"><p class="hint">Cambiar precio o monto</p>
+				<div class="grid2">
+					<label class="field">${flex ? 'Disponible' : 'Monto'} (USD)<input class="input" id="edAmount" type="number" step="0.01" inputmode="decimal" value="${amount}" /></label>
+					<label class="field">Precio por USD (${unit})<input class="input" id="edPrice" type="number" step="any" inputmode="decimal" value="${Math.round(o.price * 10000) / 10000}" /></label>
+					${flex ? `<label class="field">Mínimo por orden<input class="input" id="edMin" type="number" step="0.01" value="${o.orderMin ?? ''}" /></label><label class="field">Máximo por orden<input class="input" id="edMax" type="number" step="0.01" value="${o.orderMax ?? ''}" /></label>` : ''}
+				</div>
+				<p class="hint" id="edTotal"></p><div id="edWarn"></div>
+				<button class="btn" id="edSave">Guardar cambios</button></div>`
+				: ''
+		}
+		${req ? `<p class="hint">Requisitos: ${esc(req)}</p>` : ''}
+		${
+			o.details.length
+				? `<div><p class="hint">Tus datos de pago en esta oferta</p><div class="kv">${o.details.map((d) => `<span>${esc(d.name)}</span><b>${esc(d.value)}</b><span></span>`).join('')}</div></div>`
+				: ''
+		}
+		${
+			flex && orders.length
+				? `<div><p class="hint">Órdenes</p><table class="otable"><tbody>${orders
+						.map(
+							(x) =>
+								`<tr data-order-row="${x.order}"><td class="num">${fmtU(x.usd)} USD</td><td class="num">${fmtU(x.coinAmount)} ${unit}</td><td>@${esc(x.taker ?? '—')}</td><td><span class="chip ${x.status}">${STATUS[x.status] ?? x.status}</span></td></tr>`,
+						)
+						.join('')}</tbody></table></div>`
+				: ''
+		}
+		<div class="row-btns">
+			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? 'Volver a publicar' : 'Pausar'}</button><button class="btn danger" id="mgCancel">Cancelar oferta</button>` : ''}
+		</div>
+		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${o.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
+	</div>`
+
+	const refresh = () => showManageOffer(o.offer)
+	if (editable) {
+		const upd = () => {
+			const a = num2($('edAmount').value)
+			const p = Number($('edPrice').value)
+			$('edTotal').innerHTML = a > 0 && p > 0 ? `${o.type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtU(a * p)} ${unit}</b>` : ''
+			const w = priceWarning(o.type, p, marketRefs(o.coin).mid)
+			$('edWarn').innerHTML = w ? `<p class="notice warn">${w}</p>` : ''
+		}
+		for (const id of ['edAmount', 'edPrice']) $(id).addEventListener('input', upd)
+		upd()
+		$('edSave').onclick = async () => {
+			const btn = $('edSave')
+			btn.disabled = true
+			try {
+				const r = await api('/offer/edit', {
+					offer: o.offer,
+					amount: num2($('edAmount').value),
+					price: Number($('edPrice').value),
+					orderMin: flex ? num2($('edMin').value) : undefined,
+					orderMax: flex ? num2($('edMax').value) : undefined,
+				})
+				toast(r.message)
+				loadTrades()
+				loadBook()
+				refresh()
+			} catch (e) {
+				btn.disabled = false
+				toast(e.message, true)
+			}
+		}
+	}
+	$('mgPause')?.addEventListener('click', async () => {
+		try {
+			const r = await api('/offer/pause', { offer: o.offer, paused: !o.pause })
+			toast(r.message)
+			loadTrades()
+			loadBook()
+			refresh()
+		} catch (e) {
+			toast(e.message, true)
+		}
+	})
+	$('mgCancel')?.addEventListener('click', async () => {
+		const msg = o.type === 'sell' ? 'Se retira del mercado y los USD reservados vuelven a tu saldo.' : 'Se retira del mercado.'
+		if (!(await confirmDialog('Cancelar oferta', `<p class="muted">${msg}</p>`, 'Cancelar oferta', 'danger'))) return showManageOffer(o.offer)
+		try {
+			const r = await api('/trade/action', { offer: o.offer, action: 'cancel_offer' })
+			toast(r.message || 'Oferta cancelada')
+			loadTrades()
+			loadBook()
+		} catch (e) {
+			toast(e.message, true)
+		}
+	})
+	$('modalBody').querySelector('[data-open-trade]')?.addEventListener('click', () => openTrade(o.offer, null))
+	for (const r of $('modalBody').querySelectorAll('[data-order-row]')) r.onclick = () => openTrade(o.offer, r.dataset.orderRow)
+}
+
+// ── Tomar una oferta del libro ────────────────────────────────────────
+function showTakeOffer(uuid, side) {
+	const l = findLevel(uuid, side)
+	if (!l) return
+	if (myUsername() && l.user === myUsername()) return showManageOffer(uuid)
+	const unit = state.book.coin.unit
+	// En una venta ajena compras USD (pagas tú); en una compra ajena vendes USD (te pagan)
+	const youBuy = side === 'ask'
+	const flex = l.kind === 'flexible'
+	const max = flex ? Math.min(l.orderMax ?? l.usd, l.usd) : l.usd
+	const min = flex ? (l.orderMin ?? 0) : l.usd
+	const req = reqText(l.requirements)
+	openModal(`<div class="stack">
+		<div><h3>${youBuy ? 'Comprar' : 'Vender'} USD a ${fmtP(l.price)} ${unit}</h3>
+			<p class="muted">${esc(nameOf(state.book.coin.tick))} · @${esc(l.user)} · ${l.ops} operaciones · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : 'sin valoraciones'}${l.kyc ? ' · KYC' : ''}</p></div>
+		<div class="kv">
+			<span>${youBuy ? 'Vende' : 'Compra'}</span><b>${fmtU(l.usd)} USD</b><span></span>
+			${flex ? `<span>Por orden</span><b>${fmtU(min)}–${fmtU(max)} USD</b><span></span>` : ''}
+			${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
+			${l.vipOnly ? '<span>Solo</span><b>cuentas VIP</b><span></span>' : ''}
+		</div>
+		${flex ? `<label class="field">¿Cuántos USD ${youBuy ? 'compras' : 'vendes'}?<input class="input" id="tkAmount" type="number" min="${min}" max="${max}" step="0.01" inputmode="decimal" value="${max}" /></label>` : ''}
+		<p class="hint" id="tkTotal"></p>
+		<p class="notice">${
+			youBuy
+				? 'Al tomarla tendrás que transferir el total a los datos de pago del vendedor y marcar el pago antes de que venza el plazo.'
+				: 'Al tomarla se reservan esos USD de tu saldo como garantía. Los liberas solo cuando veas el pago en tu cuenta.'
+		}</p>
+		${
+			bk.acct.connected
+				? '<button class="btn primary block" id="tkGo"></button>'
+				: '<p class="notice warn">Conecta tu cuenta de QvaPay (arriba a la derecha) para tomarla.</p>'
+		}
+		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${uuid}" target="_blank" rel="noopener">Ver en QvaPay</a></p>
+	</div>`)
+	const amount = () => (flex ? num2($('tkAmount').value) : l.usd)
+	const upd = () => {
+		const a = amount()
+		const total = a * l.price
+		$('tkTotal').innerHTML = a > 0 ? `${youBuy ? 'Pagas' : 'Recibes'} <b>${fmtU(total)} ${unit}</b> por <b>${fmtU(a)} USD</b>` : ''
+		if ($('tkGo')) $('tkGo').textContent = `Tomar: ${youBuy ? 'comprar' : 'vender'} ${fmtU(a)} USD`
+	}
+	$('tkAmount')?.addEventListener('input', upd)
+	upd()
+	$('tkGo')?.addEventListener('click', async () => {
+		const a = amount()
+		if (flex && !(a >= min && a <= max)) return toast(`El monto debe estar entre ${fmtU(min)} y ${fmtU(max)} USD`, true)
+		const btn = $('tkGo')
+		btn.disabled = true
+		btn.textContent = 'Tomando…'
+		try {
+			const r = await api('/offer/apply', { offer: uuid, amount: flex ? a : undefined })
+			toast(r.message || 'Tomaste la oferta')
+			bk.tab = 'active'
+			await loadTrades()
+			loadBook()
+			openTrade(r.offer, r.order)
+		} catch (e) {
+			btn.disabled = false
+			upd()
+			toast(e.message, true)
+		}
+	})
+}
+
 // ── Avisos ────────────────────────────────────────────────────────────
 // Notificación del navegador (si la pestaña no está a la vista), sonido y aviso
 // en la página. Los sucesos los detecta data.js comparando lecturas seguidas.
@@ -465,6 +895,7 @@ function bindBroker() {
 	})
 	$('refreshTrades').onclick = loadTrades
 	$('alertsBtn').onclick = toggleAlerts
+	for (const b of document.querySelectorAll('[data-new-offer]')) b.addEventListener('click', showCreateOffer)
 	renderAlertsBtn()
 	$('myTrades').addEventListener('click', async (e) => {
 		const cancel = e.target.closest('[data-cancel-btn]')
@@ -481,7 +912,9 @@ function bindBroker() {
 			return
 		}
 		const row = e.target.closest('tr[data-offer]')
-		if (row && bk.tab !== 'offers') openTrade(row.dataset.offer, row.dataset.order || null)
+		if (!row) return
+		if (bk.tab === 'offers') showManageOffer(row.dataset.offer)
+		else openTrade(row.dataset.offer, row.dataset.order || null)
 	})
 	for (const t of document.querySelectorAll('#ordersTabs [data-tab]'))
 		t.addEventListener('click', () => {

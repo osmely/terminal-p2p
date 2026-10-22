@@ -16,7 +16,7 @@ Libro de órdenes por moneda (CUP Transferencia, Saldo ETECSA, Tarjeta Clásica,
 
 ## Mis operaciones
 
-Conecta tu cuenta con un token de [qvapay.com/dev/tokens](https://www.qvapay.com/dev/tokens) (`read` + `p2p:buy` y/o `p2p:sell`; **nunca** `transfer` ni `withdraw`). "Mis operaciones" muestra tus operaciones en curso, tus ofertas publicadas y las completadas, y guía cada paso: datos de pago de la contraparte, "ya pagué" con referencia, **liberar en dos pasos y solo si QvaPay confirma que está en "pagado"**, cancelar o disputar, chat y calificación. Puede avisarte cuando te pagan, te escriben o se acaba el plazo de pago.
+Conecta tu cuenta con un token de [qvapay.com/dev/tokens](https://www.qvapay.com/dev/tokens) (`read` + `p2p:buy` y/o `p2p:sell`; **nunca** `transfer` ni `withdraw`). Desde el terminal publicas ofertas (fijas o por partes, con requisitos), las editas, pausas o cancelas, y tomas ofertas del libro. "Mis operaciones" muestra tus operaciones en curso, tus ofertas publicadas y las completadas, y guía cada paso: datos de pago de la contraparte, "ya pagué" con referencia, **liberar en dos pasos y solo si QvaPay confirma que está en "pagado"**, cancelar o disputar, chat y calificación. Puede avisarte cuando te pagan, te escriben o se acaba el plazo de pago.
 
 ## Desarrollo
 

@@ -3,7 +3,10 @@ import { QVAPAY_BUCKETS, RateLimiter, type BucketName } from '../ratelimit.ts'
 import type {
 	Averages,
 	ChatMessage,
+	CoinCategory,
 	CompletedRates,
+	CreateOfferBody,
+	EditOfferBody,
 	ListParams,
 	Me,
 	P2POffer,
@@ -85,7 +88,50 @@ export class QvaPayClient {
 		return res.chat
 	}
 
+	// Monedas y sus campos de pago (público)
+	coins() {
+		return this.request<CoinCategory[]>('GET', '/coins', { bucket: 'coins' })
+	}
+
 	// ── Escritura (en simulación no se envían) ───────────────────────────────────────
+
+	// Publicar una oferta. Con idempotency_key se puede reintentar sin duplicarla
+	async createOffer(body: CreateOfferBody) {
+		if (this.dryRun) {
+			log.info('[DRY] POST /p2p/create', body)
+			return { p2p: { uuid: 'dry-run', ...body, status: 'open' } as unknown as P2POffer, duplicate: false }
+		}
+		return this.request<{ p2p: P2POffer; duplicate?: boolean }>('POST', '/p2p/create', {
+			bucket: 'create',
+			body,
+			write: true,
+			idempotent: !!body.idempotency_key,
+		})
+	}
+
+	async editOffer(uuid: string, body: EditOfferBody) {
+		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/edit`, body)
+		await this.request('POST', `/p2p/${uuid}/edit`, { bucket: 'edit', body, write: true })
+	}
+
+	// Pausar es idempotente: repetirlo deja el mismo estado
+	async pauseOffer(uuid: string, paused: boolean) {
+		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/pause`, { paused })
+		await this.request('POST', `/p2p/${uuid}/pause`, { bucket: 'pause', body: { paused }, write: true, idempotent: true })
+	}
+
+	// Tomar una oferta ajena (en las de rango, una parte entre el mínimo y el máximo)
+	async applyOffer(uuid: string, amount?: number) {
+		if (this.dryRun) {
+			log.info(`[DRY] POST /p2p/${uuid}/apply`, { amount })
+			return { order: null as string | null }
+		}
+		return this.request<{ message: string; order?: string | null }>('POST', `/p2p/${uuid}/apply`, {
+			bucket: 'apply',
+			body: amount === undefined ? {} : { amount },
+			write: true,
+		})
+	}
 
 	async markPaid(uuid: string, txId: string, order?: string) {
 		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/paid${order ? `?order=${order}` : ''}`)

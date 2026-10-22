@@ -339,6 +339,21 @@ button { cursor: pointer; }
 .chip.paid { color: var(--accent); background: var(--accent-bg); }
 .chip.completed { color: var(--bid); background: var(--bid-bg); }
 .chip.revision { color: var(--ask); background: var(--ask-bg); }
+.chip.open { color: var(--bid); background: var(--bid-bg); }
+
+/* Publicar, gestionar y tomar ofertas */
+.stack.tight { gap: 8px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.seg-tabs.choice { display: flex; }
+.seg-tabs.choice .seg-tab { flex: 1; justify-content: center; padding: 8px 12px; font-size: 13.5px; }
+.ref-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ref-chips:empty { display: none; }
+.ref-chips b { font-weight: 600; color: var(--text); }
+details.opts { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 12px; }
+details.opts summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); }
+details.opts[open] summary { margin-bottom: 10px; }
+.lvl.mine { box-shadow: inset 2px 0 0 var(--accent); }
+.lvl .who .you { font: 700 10px var(--sans); color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 0 4px; margin-right: 4px; }
 
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 50; background: var(--surface); border: 1px solid var(--line-strong); padding: 10px 16px; border-radius: var(--r-sm); font-size: 13px; box-shadow: var(--shadow); }
 .toast.bad { border-color: var(--ask); color: var(--ask); }

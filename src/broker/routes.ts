@@ -4,10 +4,10 @@
 
 import { logger } from '../log.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
-import { num, type Me } from '../qvapay/types.ts'
-import type { Market } from '../terminal/market.ts'
+import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type PaymentField, type Requirements } from '../qvapay/types.ts'
+import { COINS, type Market } from '../terminal/market.ts'
 import { pendingCount, tradeAlerts } from './alerts.ts'
-import { paymentDetails, toTrades, type Trade } from './trades.ts'
+import { orderTrades, paymentDetails, toTrades, type Trade } from './trades.ts'
 
 export interface Account {
 	sid: string
@@ -32,6 +32,16 @@ const CONNECT_WINDOW_MS = 10 * 60_000
 // Chats que se consultan en cada lectura, para avisar de mensajes nuevos
 const CHAT_WATCH = 3
 const CHAT_ACTIVE = new Set(['processing', 'paid', 'revision'])
+// Ofertas por rango propias cuyo detalle se lee para ver las órdenes que otros tomaron
+const FLEX_WATCH = 4
+const TICKS = new Set<string>(COINS.map((c) => c.tick))
+// Valores que QvaPay acepta en los requisitos de una oferta
+const REQUIREMENTS: Record<keyof Requirements, number[]> = {
+	min_completed: [5, 10, 25, 50, 100],
+	min_rating: [4, 4.5],
+	min_account_days: [7, 30, 90, 180],
+	min_trustscore: [50, 85],
+}
 
 // Lectura anterior de cada cuenta, para saber qué cambió
 interface Seen {
@@ -52,6 +62,7 @@ export class Broker {
 	readonly dryRun: boolean
 	private connectAttempts = new Map<string, number[]>()
 	private seen: Seen | null = null
+	private coinFields: Record<string, PaymentField[]> | null = null
 
 	constructor(opts: { accounts: AccountStore; market: Pick<Market, 'wake'>; dryRun: boolean }) {
 		this.accounts = opts.accounts
@@ -86,6 +97,18 @@ export class Broker {
 					return await this.trade(ctx, acc)
 				case 'POST /trade/action':
 					return await this.action(ctx, acc)
+				case 'GET /coins':
+					return await this.coins(acc)
+				case 'GET /offer':
+					return await this.offer(ctx, acc)
+				case 'POST /offer/create':
+					return await this.createOffer(ctx, acc)
+				case 'POST /offer/edit':
+					return await this.editOffer(ctx, acc)
+				case 'POST /offer/pause':
+					return await this.pauseOffer(ctx, acc)
+				case 'POST /offer/apply':
+					return await this.applyOffer(ctx, acc)
 			}
 			return json(404, { error: 'Ruta desconocida' })
 		} catch (err) {
@@ -157,6 +180,11 @@ export class Broker {
 	private async trades(acc: Account) {
 		const list = await acc.client.listOffers({ my: true, take: 50 })
 		const { trades, openOffers } = toTrades(list.data, acc.me.uuid)
+		// Las órdenes de tus ofertas por rango solo vienen en su detalle
+		const flex = openOffers.filter((o) => o.kind === 'flexible').slice(0, FLEX_WATCH)
+		const orders = await Promise.all(flex.map((o) => acc.client.getOffer(o.offerUuid).then((d) => orderTrades(d, acc.me.uuid)).catch(() => [])))
+		const ids = new Set(trades.map((t) => t.id))
+		for (const t of orders.flat()) if (!ids.has(t.id)) trades.push(t)
 		await Promise.all(
 			trades
 				.filter((t) => CHAT_ACTIVE.has(t.status))
@@ -210,6 +238,94 @@ export class Broker {
 		})
 	}
 
+	// ── Ofertas: publicar, ver, editar, pausar y tomar ───────────────────
+
+	// Campos de pago que pide cada moneda (GET /coins es público; se guarda en memoria)
+	private async coins(acc: Account) {
+		if (!this.coinFields) {
+			const fields: Record<string, PaymentField[]> = {}
+			for (const cat of await acc.client.coins())
+				for (const c of cat.Coins ?? []) if (TICKS.has(c.tick)) fields[c.tick] = (c.working_data ?? []).filter((f) => f && f.name)
+			this.coinFields = fields
+		}
+		return json(200, { fields: this.coinFields })
+	}
+
+	private async offer({ url }: Ctx, acc: Account) {
+		const o = await acc.client.getOffer(url.searchParams.get('offer') ?? '')
+		return json(200, offerView(o, acc.me.uuid))
+	}
+
+	private async createOffer({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		const type = b.type === 'buy' || b.type === 'sell' ? b.type : null
+		const coin = String(b.coin ?? '')
+		if (!type || !TICKS.has(coin)) return json(400, { error: 'Elige si compras o vendes USD y el mercado' })
+		const terms = offerTerms(b, b.kind === 'flexible')
+		if ('error' in terms) return json(400, terms)
+		const details = (Array.isArray(b.details) ? b.details : [])
+			.map((d: { name?: unknown; value?: unknown }) => ({ name: String(d?.name ?? '').slice(0, 60), value: String(d?.value ?? '').trim().slice(0, 200) }))
+			.filter((d: { name: string; value: string }) => d.name && d.value)
+			.slice(0, 10)
+		if (!details.length) return json(400, { error: 'Completa tus datos de pago' })
+		const key = String(b.idempotencyKey ?? '')
+		const body: CreateOfferBody = {
+			type,
+			coin,
+			amount: terms.amount,
+			receive: terms.receive,
+			details,
+			private: b.private === false ? 0 : 1,
+			only_vip: b.onlyVip ? 1 : 0,
+			...(terms.kind === 'flexible' ? { offer_kind: 'flexible' as const, order_min: terms.orderMin, order_max: terms.orderMax } : {}),
+			...(terms.requirements ? { requirements: terms.requirements } : {}),
+			...(typeof b.message === 'string' && b.message.trim() ? { message: b.message.trim().slice(0, 79) } : {}),
+			...(/^[A-Za-z0-9._-]{8,64}$/.test(key) ? { idempotency_key: key } : {}),
+		}
+		const r = await acc.client.createOffer(body)
+		return json(200, { ok: true, offer: r.p2p.uuid, message: r.duplicate ? 'La oferta ya estaba publicada' : 'Oferta publicada' })
+	}
+
+	private async editOffer({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		const o = await acc.client.getOffer(String(b.offer ?? ''))
+		if (o.User?.uuid !== acc.me.uuid) return json(403, { error: 'Solo puedes editar tus ofertas' })
+		if (o.status !== 'open') return json(400, { error: 'Solo se edita una oferta publicada y sin contraparte' })
+		const flexible = o.offer_kind === 'flexible'
+		const terms = offerTerms(b, flexible)
+		if ('error' in terms) return json(400, terms)
+		const body: EditOfferBody = flexible
+			? { available_amount: terms.amount, receive: terms.receive, order_min: terms.orderMin, order_max: terms.orderMax }
+			: { amount: terms.amount, receive: terms.receive }
+		if (b.requirements !== undefined) body.requirements = terms.requirements ?? {}
+		await acc.client.editOffer(o.uuid, body)
+		return json(200, { ok: true, message: 'Oferta actualizada' })
+	}
+
+	private async pauseOffer({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		const paused = b.paused === true
+		await acc.client.pauseOffer(String(b.offer ?? ''), paused)
+		return json(200, { ok: true, message: paused ? 'Oferta pausada: ya no aparece en el mercado' : 'Oferta de nuevo en el mercado' })
+	}
+
+	private async applyOffer({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		// Estado fresco antes de comprometer nada
+		const o = await acc.client.getOffer(String(b.offer ?? ''))
+		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
+		if (o.status !== 'open' || o.pause) return json(409, { error: 'Esta oferta ya no está disponible' })
+		let amount: number | undefined
+		if (o.offer_kind === 'flexible') {
+			amount = Math.round(Number(b.amount) * 100) / 100
+			const min = num(o.order_min ?? 0)
+			const max = Math.min(num(o.order_max ?? Infinity), num(o.available_amount ?? o.amount))
+			if (!(amount >= min && amount <= max)) return json(400, { error: `El monto debe estar entre ${min} y ${max} USD` })
+		}
+		const r = await acc.client.applyOffer(o.uuid, amount)
+		return json(200, { ok: true, offer: o.uuid, order: r.order ?? null, message: 'Tomaste la oferta' })
+	}
+
 	private async action({ req }: Ctx, acc: Account) {
 		const b = await readJson(req)
 		const offer = String(b.offer ?? '')
@@ -249,6 +365,72 @@ export class Broker {
 			}
 		}
 		return json(400, { error: 'Acción desconocida' })
+	}
+}
+
+// ── Ofertas: validación y vista ────────────────────────────────────────
+
+const round2 = (n: number) => Math.round(n * 100) / 100
+
+// Monto, precio, límites por orden y requisitos de una oferta, con los rangos de QvaPay
+export function offerTerms(b: Record<string, unknown>, flexible: boolean) {
+	const amount = round2(Number(b.amount))
+	const price = Number(b.price)
+	if (!(amount >= 0.1 && amount <= 10_000)) return { error: 'El monto debe estar entre 0,1 y 10.000 USD' }
+	if (!(price > 0)) return { error: 'Pon el precio por cada USD' }
+	const receive = round2(amount * price)
+	if (!(receive >= 0.1 && receive <= 100_000_000)) return { error: 'El total a recibir está fuera de los límites de QvaPay' }
+	let orderMin: number | undefined
+	let orderMax: number | undefined
+	if (flexible) {
+		orderMin = round2(Number(b.orderMin))
+		orderMax = round2(Number(b.orderMax))
+		if (!(orderMin > 0 && orderMax >= orderMin && orderMax <= amount)) return { error: 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo ≤ monto' }
+	}
+	let requirements: Requirements | undefined
+	if (b.requirements && typeof b.requirements === 'object') {
+		requirements = {}
+		for (const [k, v] of Object.entries(b.requirements as Record<string, unknown>)) {
+			const n = Number(v)
+			if (!n) continue
+			const allowed = REQUIREMENTS[k as keyof Requirements]
+			if (!allowed?.includes(n)) return { error: 'Requisito no válido' }
+			requirements[k as keyof Requirements] = n
+		}
+		if (!Object.keys(requirements).length) requirements = undefined
+	}
+	return { amount, receive, price, kind: flexible ? ('flexible' as const) : ('fixed' as const), orderMin, orderMax, requirements }
+}
+
+// Lo que muestra el terminal de una oferta (propia o ajena)
+export function offerView(o: P2POffer, meUuid: string) {
+	const isOwner = o.User?.uuid === meUuid
+	const usd = num(o.amount)
+	const receive = num(o.receive)
+	return {
+		offer: o.uuid,
+		type: o.type,
+		coin: o.coin,
+		status: o.status,
+		kind: o.offer_kind === 'flexible' ? 'flexible' : 'fixed',
+		usd,
+		coinAmount: receive,
+		price: usd ? receive / usd : 0,
+		available: o.available_amount == null ? null : num(o.available_amount),
+		reserved: o.reserved_amount == null ? null : num(o.reserved_amount),
+		orderMin: o.order_min == null ? null : num(o.order_min),
+		orderMax: o.order_max == null ? null : num(o.order_max),
+		pause: o.pause ?? null,
+		requirements: o.requirements ?? null,
+		isPrivate: !!o.private,
+		onlyVip: !!o.only_vip,
+		isOwner,
+		owner: o.User ? { username: o.User.username, ops: (o.User._count?.P2P ?? 0) + (o.User._count?.P2P_Peer ?? 0), rating: o.User.rating_count ? (o.User.rating_avg ?? null) : null } : null,
+		peer: o.Peer?.username ?? null,
+		details: isOwner ? paymentDetails(o.details) : [],
+		orders: isOwner
+			? (o.Orders ?? []).map((x) => ({ order: x.uuid, status: x.status, usd: num(x.amount), coinAmount: num(x.receive), taker: x.Taker?.username ?? null, createdAt: x.created_at ?? null }))
+			: [],
 	}
 }
 
@@ -300,6 +482,11 @@ function friendly(err: unknown): string {
 		ORDER_IN_DISPUTE: 'La orden está en disputa: la resuelve un moderador',
 		KYC_REQUIRED: 'Tu cuenta necesita KYC aprobado',
 		DUPLICATE_REQUEST: 'Ya hay una petición igual en curso',
+		FLEXIBLE_OFFER_EXISTS: 'Ya tienes una oferta por rango de ese lado en este mercado: edítala o cancélala antes',
+		OFFER_HAS_OPEN_ORDERS: 'La oferta tiene órdenes en curso: termínalas o pausa la oferta',
+		OFFER_NOT_EDITABLE: 'Alguien tomó la oferta mientras la editabas',
+		FLEXIBLE_AMOUNT_REQUIRED: 'Indica cuántos USD tomas',
+		INVALID_REQUIREMENTS: 'Requisito no válido',
 	}
 	if (err.code && map[err.code]) return map[err.code]
 	if (err.status === 409) return 'La oferta ya no está disponible (la tomó otra persona o cambió)'

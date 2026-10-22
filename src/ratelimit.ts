@@ -15,6 +15,11 @@ export const QVAPAY_BUCKETS = {
 	received: { max: 1, windowMs: 10_500 },
 	averages: { max: 1, windowMs: 60_000 }, // cacheado 60 s del lado del servidor
 	completed: { max: 8, windowMs: 60_000 }, // /p2p/completed_pairs_average: 10/min por IP
+	create: { max: 1, windowMs: 10_500 }, // POST /p2p/create: 1 cada 10 s
+	edit: { max: 1, windowMs: 10_500 }, // POST /p2p/:uuid/edit: 1 cada 10 s
+	pause: { max: 5, windowMs: 61_000 }, // POST /p2p/:uuid/pause: 5/min
+	apply: { max: 2, windowMs: 61_000 }, // POST /p2p/:uuid/apply: 2/min
+	coins: { max: 2, windowMs: 60_000 }, // GET /coins (público)
 } satisfies Record<string, BucketSpec>
 
 export type BucketName = keyof typeof QVAPAY_BUCKETS

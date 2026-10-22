@@ -1,7 +1,7 @@
 // Convierte "mis ofertas" de QvaPay (GET /p2p?my=true) en operaciones vistas
 // desde el usuario: qué lado juega, si le toca pagar y qué puede hacer ahora.
 
-import { num, type P2POffer, type P2PUser } from '../qvapay/types.ts'
+import { num, type P2POffer, type P2PUser, type Pause } from '../qvapay/types.ts'
 
 export type Action = 'pay' | 'cancel' | 'wait_payment' | 'release' | 'dispute' | 'wait_release' | 'wait_moderator' | 'rate' | 'cancel_offer'
 
@@ -28,6 +28,12 @@ export interface Trade {
 	// Resumen del chat de las operaciones en curso, para avisar de mensajes nuevos
 	chat?: ChatSummary | null
 	actions: Action[]
+	// Solo en tus ofertas publicadas
+	pause?: Pause | null
+	available?: number | null
+	orderMin?: number | null
+	orderMax?: number | null
+	isPrivate?: boolean
 }
 
 export interface ChatSummary {
@@ -110,10 +116,50 @@ export function toTrades(offers: P2POffer[], meUuid: string): { trades: Trade[];
 			expiresAt: o.payment_window_expires_at ?? null,
 			actions: actionsFor(o.status, side === 'buy', role, !!o.Peer),
 		}
-		if (o.status === 'open' && isOwner) openOffers.push(t)
+		if (o.status === 'open' && isOwner) {
+			t.pause = o.pause ?? null
+			t.available = o.available_amount == null ? null : num(o.available_amount)
+			t.orderMin = o.order_min == null ? null : num(o.order_min)
+			t.orderMax = o.order_max == null ? null : num(o.order_max)
+			t.isPrivate = !!o.private
+			openOffers.push(t)
+		}
 		else if (!FINAL.has(o.status) || o.status === 'completed') trades.push(t)
 	}
 	return { trades, openOffers }
+}
+
+// Órdenes que otros tomaron de una oferta por rango tuya. Solo vienen en el
+// detalle de la oferta (GET /p2p/:uuid), no en el listado
+export function orderTrades(o: P2POffer, meUuid: string): Trade[] {
+	if (o.User?.uuid !== meUuid) return []
+	// Dueño de una venta: vende USD y recibe el pago; dueño de una compra: paga
+	const side: 'buy' | 'sell' = o.type === 'sell' ? 'sell' : 'buy'
+	return (o.Orders ?? [])
+		.filter((x) => x.status !== 'cancelled')
+		.map((x) => {
+			const usd = num(x.amount)
+			const coinAmount = num(x.receive)
+			return {
+				id: `${o.uuid}:${x.uuid}`,
+				offerUuid: o.uuid,
+				order: x.uuid,
+				coin: o.coin,
+				offerType: o.type,
+				role: 'owner' as const,
+				side,
+				payer: side === 'buy',
+				status: x.status,
+				usd,
+				coinAmount,
+				price: usd ? coinAmount / usd : 0,
+				counterparty: party(x.Taker),
+				kind: 'flexible' as const,
+				updatedAt: x.created_at ?? null,
+				expiresAt: x.payment_window_expires_at ?? null,
+				actions: actionsFor(x.status, side === 'buy', 'owner', true),
+			}
+		})
 }
 
 // Los datos de pago llegan como objeto o como lista según la ruta

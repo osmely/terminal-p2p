@@ -64,6 +64,57 @@ export interface P2POffer {
 	requirements_met?: boolean
 }
 
+// Datos de una moneda (GET /coins): working_data son los campos de pago que pide
+export interface PaymentField {
+	name: string
+	type?: string
+	label?: string
+	placeholder?: string
+	required?: boolean
+	options?: { value: string }[]
+}
+
+export interface Coin {
+	tick: string
+	name: string
+	enabled_p2p?: boolean
+	working_data?: PaymentField[] | null
+}
+
+export interface CoinCategory {
+	name: string
+	Coins?: Coin[]
+}
+
+export type Requirements = Partial<Record<'min_completed' | 'min_rating' | 'min_account_days' | 'min_trustscore', number>>
+
+export interface CreateOfferBody {
+	type: OfferType
+	coin: string
+	amount: number
+	receive: number
+	details: { name: string; value: string }[]
+	offer_kind?: 'fixed' | 'flexible'
+	order_min?: number
+	order_max?: number
+	requirements?: Requirements
+	only_vip?: 0 | 1
+	private?: 0 | 1
+	message?: string
+	idempotency_key?: string
+}
+
+export interface EditOfferBody {
+	amount?: number
+	available_amount?: number
+	receive?: number
+	order_min?: number
+	order_max?: number
+	requirements?: Requirements
+	message?: string | null
+	only_vip?: 0 | 1
+}
+
 export interface Paginated<T> {
 	current_page: number
 	data: T[]

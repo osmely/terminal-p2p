@@ -5,8 +5,8 @@
 // quien la hace, se reenvía tal cual y se devuelve la respuesta. No guarda ni
 // registra nada: ningún usuario ve datos obtenidos con el token de otro.
 //
-// Única excepción: los datos PÚBLICOS (promedios y operaciones completadas,
-// que QvaPay da sin cuenta) se cachean 60 s en el borde, y solo cuando la
+// Única excepción: los datos PÚBLICOS (promedios, operaciones completadas y
+// monedas, que QvaPay da sin cuenta) se cachean 60 s en el borde, y solo cuando la
 // petición no lleva token. Así QvaPay recibe una consulta por minuto aunque
 // haya muchos usuarios, y no se choca con su límite por IP.
 
@@ -15,17 +15,19 @@ const UPSTREAM = 'https://api.qvapay.com'
 const MAX_BODY = 64 * 1024
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const PUBLIC_TTL_S = 60
-const PUBLIC_PATHS = new Set(['/p2p/averages', '/p2p/completed_pairs_average'])
+const PUBLIC_PATHS = new Set(['/p2p/averages', '/p2p/completed_pairs_average', '/coins'])
 
 // Solo lo que usa la app; cualquier otra ruta se rechaza
 const RULES: [method: string, path: RegExp][] = [
 	['GET', /^\/user$/],
+	['GET', /^\/coins$/],
 	['GET', /^\/p2p$/],
 	['GET', /^\/p2p\/averages$/],
 	['GET', /^\/p2p\/completed_pairs_average$/],
 	['GET', new RegExp(`^/p2p/${UUID}$`)],
 	['GET', new RegExp(`^/p2p/${UUID}/chat$`)],
-	['POST', new RegExp(`^/p2p/${UUID}/(paid|received|cancel|chat|rate)$`)],
+	['POST', /^\/p2p\/create$/],
+	['POST', new RegExp(`^/p2p/${UUID}/(paid|received|cancel|chat|rate|edit|pause|apply)$`)],
 ]
 
 export function allowed(method: string, path: string) {

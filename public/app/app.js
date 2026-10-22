@@ -255,10 +255,12 @@ function levelRow(l, side, cum, maxCum) {
 		.filter(Boolean)
 		.join('')
 	const rep = l.rating ? `⭐${l.rating.toFixed(1)}` : 'nuevo'
-	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''}" data-uuid="${l.uuid}" data-side="${side}"
+	// Tus propias ofertas se marcan en el libro (broker.js sabe quién eres)
+	const mine = typeof myUsername === 'function' && myUsername() === l.user
+	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who"><em>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? '<b class="you">tú</b>' : ''}<em>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 function renderBook(b, asks, bids) {
@@ -570,7 +572,7 @@ function tooltip(l, side) {
 		l.vipOnly ? '<div>👑 Solo cuentas VIP</div>' : '',
 		l.promoted ? '<div>★ Puesto promocionado</div>' : '',
 		l.outlier ? '<div style="color:var(--warn)">⚠️ Precio atípico: probable error</div>' : '',
-		'<div class="muted">Clic para abrir en QvaPay</div>',
+		'<div class="muted">Clic para ver y tomar la oferta</div>',
 	].join('')
 }
 
@@ -688,7 +690,11 @@ function bind() {
 		el.addEventListener('mouseleave', () => (tip.hidden = true))
 		el.addEventListener('click', (e) => {
 			const row = e.target.closest('.lvl')
-			if (row) window.open(`https://www.qvapay.com/p2p/${row.dataset.uuid}`, '_blank', 'noopener')
+			if (!row) return
+			tip.hidden = true
+			// broker.js abre la oferta para tomarla; sin él, se abre en QvaPay
+			if (typeof showTakeOffer === 'function') showTakeOffer(row.dataset.uuid, row.dataset.side)
+			else window.open(`https://www.qvapay.com/p2p/${row.dataset.uuid}`, '_blank', 'noopener')
 		})
 	}
 	window.addEventListener('resize', () => drawActive())
