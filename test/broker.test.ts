@@ -20,6 +20,8 @@ test('toTrades: roles, lado y acciones', () => {
 			offer({ uuid: 'd', type: 'sell', offer_kind: 'flexible', User: other, status: 'open', my_order: { uuid: 'ord', amount: '20', receive: '20200', status: 'processing' } }),
 			// Cancelada: no se muestra
 			offer({ uuid: 'e', type: 'sell', User: other, Peer: me, status: 'cancelled' }),
+			// Oferta ajena que volvió a estar abierta (te fuiste): ya no es tuya
+			offer({ uuid: 'g', type: 'sell', User: other, Peer: null, status: 'open' }),
 		],
 		'me',
 	)
@@ -30,6 +32,7 @@ test('toTrades: roles, lado y acciones', () => {
 	assert.deepEqual([byId.b.side, byId.b.payer, byId.b.actions], ['sell', false, ['release', 'dispute']])
 	assert.deepEqual([byId['d:ord'].order, byId['d:ord'].usd, byId['d:ord'].actions], ['ord', 20, ['pay', 'cancel']])
 	assert.equal(byId.e, undefined)
+	assert.equal(byId.g, undefined)
 	assert.deepEqual(
 		openOffers.map((t) => [t.id, t.side, t.actions]),
 		[['c', 'sell', ['cancel_offer']]],

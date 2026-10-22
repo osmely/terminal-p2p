@@ -38,6 +38,8 @@ export interface Trade {
 
 export interface ChatSummary {
 	count: number
+	// El último mensaje: un mensaje nuevo cambia este id aunque la API devuelva un número fijo de mensajes
+	lastId?: string | null
 	lastMine: boolean
 	lastText: string | null
 }
@@ -91,6 +93,9 @@ export function toTrades(offers: P2POffer[], meUuid: string): { trades: Trade[];
 			})
 			continue
 		}
+
+		// Una oferta ajena que volvió a estar abierta ya no es una operación tuya
+		if (!isOwner && o.status === 'open') continue
 
 		const role = isOwner ? 'owner' : 'taker'
 		// Dueño de una sell o taker de una buy: vende USD

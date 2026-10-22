@@ -85,3 +85,26 @@ test('plazo de pago: avisa una vez y solo al que paga', () => {
 test('pendingCount cuenta lo que espera una acción tuya', () => {
 	assert.equal(pendingCount([trade({}), trade({ status: 'paid', payer: false, side: 'sell' }), trade({ status: 'paid' })]), 2)
 })
+
+test('mensaje nuevo aunque el número de mensajes no cambie (la API devuelve un máximo)', () => {
+	const at = (lastId: string, lastMine: boolean) => trade({ chat: { count: 50, lastId, lastMine, lastText: 'Listo' } })
+	assert.deepEqual(kinds(tradeAlerts(read([at('m1', true)]), [at('m2', false)], NOW, new Set())), ['chat'])
+	assert.deepEqual(tradeAlerts(read([at('m1', false)]), [at('m1', false)], NOW, new Set()), [])
+})
+
+test('la contraparte deja tu oferta y vuelve al mercado', () => {
+	const taken = trade({ id: 'o', offerUuid: 'o', role: 'owner', side: 'sell', payer: false })
+	const reopened = { ...taken, status: 'open', counterparty: null, pause: { reason: 'taker_left' as const, until: null } }
+	const a = tradeAlerts(read([taken]), [], NOW, new Set(), [reopened])
+	assert.deepEqual(kinds(a), ['left'])
+	assert.match(a[0].body, /@otro canceló.*pausa/)
+})
+
+test('una oferta fija tomada otra vez por otra persona vuelve a avisar', () => {
+	const mine = (who: string) => trade({ id: 'o', offerUuid: 'o', role: 'owner', side: 'sell', payer: false, counterparty: { username: who, ops: 1, rating: null } })
+	const open = { ...mine('x'), status: 'open', counterparty: null }
+	const first = tradeAlerts(read([], [open]), [mine('ana')], NOW, new Set())
+	const sent = new Set(first.map((x) => x.key))
+	const again = tradeAlerts(read([], [open]), [mine('luis')], NOW, sent)
+	assert.deepEqual([kinds(first), kinds(again)], [['taken'], ['taken']])
+})

@@ -182,7 +182,18 @@ export class Broker {
 		const { trades, openOffers } = toTrades(list.data, acc.me.uuid)
 		// Las órdenes de tus ofertas por rango solo vienen en su detalle
 		const flex = openOffers.filter((o) => o.kind === 'flexible').slice(0, FLEX_WATCH)
-		const orders = await Promise.all(flex.map((o) => acc.client.getOffer(o.offerUuid).then((d) => orderTrades(d, acc.me.uuid)).catch(() => [])))
+		// Si un detalle falla, sus órdenes de la lectura anterior siguen: si desaparecieran un ciclo,
+		// al volver no se sabría qué cambió entretanto y se perdería el aviso
+		const before = this.seen?.user === acc.me.uuid ? (this.seen.last?.trades ?? []) : []
+		const previousOrders = (offer: string) => before.filter((t) => t.offerUuid === offer && t.role === 'owner' && t.order)
+		const orders = await Promise.all(
+			flex.map((o) =>
+				acc.client
+					.getOffer(o.offerUuid)
+					.then((d) => orderTrades(d, acc.me.uuid))
+					.catch(() => previousOrders(o.offerUuid)),
+			),
+		)
 		const ids = new Set(trades.map((t) => t.id))
 		for (const t of orders.flat()) if (!ids.has(t.id)) trades.push(t)
 		await Promise.all(
@@ -192,13 +203,13 @@ export class Broker {
 				.map(async (t) => {
 					const chat = await acc.client.getChat(t.offerUuid, t.order ?? undefined).catch(() => null)
 					const last = chat?.at(-1)
-					t.chat = chat ? { count: chat.length, lastMine: last?.peer_id === acc.me.uuid, lastText: last?.message?.slice(0, 140) ?? null } : null
+					t.chat = chat ? { count: chat.length, lastId: last?.id ?? null, lastMine: last?.peer_id === acc.me.uuid, lastText: last?.message?.slice(0, 140) ?? null } : null
 				}),
 		)
 		// Los avisos se calculan contra la lectura anterior de esta misma cuenta
 		if (this.seen?.user !== acc.me.uuid) this.seen = { user: acc.me.uuid, last: null, sent: new Set() }
 		const seen = this.seen
-		const alerts = tradeAlerts(seen.last, trades, Date.now(), seen.sent)
+		const alerts = tradeAlerts(seen.last, trades, Date.now(), seen.sent, openOffers)
 		for (const a of alerts) seen.sent.add(a.key)
 		// Si un chat no se pudo leer, se conserva su resumen anterior para no avisar dos veces
 		const prevChat = new Map(seen.last?.trades.map((t) => [t.id, t.chat]))
@@ -292,7 +303,7 @@ export class Broker {
 		if (o.User?.uuid !== acc.me.uuid) return json(403, { error: 'Solo puedes editar tus ofertas' })
 		if (o.status !== 'open') return json(400, { error: 'Solo se edita una oferta publicada y sin contraparte' })
 		const flexible = o.offer_kind === 'flexible'
-		const terms = offerTerms(b, flexible)
+		const terms = offerTerms(b, flexible, true)
 		if ('error' in terms) return json(400, terms)
 		const body: EditOfferBody = flexible
 			? { available_amount: terms.amount, receive: terms.receive, order_min: terms.orderMin, order_max: terms.orderMax }
@@ -344,7 +355,7 @@ export class Broker {
 				const status = order ? o.Orders?.find((x) => x.uuid === order)?.status : o.status
 				if (status !== 'paid') return json(400, { error: `La operación está en «${status ?? 'desconocido'}», no en pagado. No se libera.` })
 				const r = await c.markReceived(offer, order)
-				return json(200, { ok: true, message: `Liberado. Neto ${r.amount} USD, comisión ${r.fee}.` })
+				return json(200, { ok: true, message: r && r.amount != null ? `Liberado. Recibe ${r.amount} USD netos (comisión ${r.fee ?? 0}).` : 'Liberado' })
 			}
 			case 'cancel':
 			case 'dispute':
@@ -373,7 +384,9 @@ export class Broker {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 // Monto, precio, límites por orden y requisitos de una oferta, con los rangos de QvaPay
-export function offerTerms(b: Record<string, unknown>, flexible: boolean) {
+// En una edición por partes el máximo por orden puede superar lo que queda disponible
+// (QvaPay toma el menor de los dos al aplicar), así que no se compara con el monto
+export function offerTerms(b: Record<string, unknown>, flexible: boolean, editing = false) {
 	const amount = round2(Number(b.amount))
 	const price = Number(b.price)
 	if (!(amount >= 0.1 && amount <= 10_000)) return { error: 'El monto debe estar entre 0,1 y 10.000 USD' }
@@ -385,7 +398,8 @@ export function offerTerms(b: Record<string, unknown>, flexible: boolean) {
 	if (flexible) {
 		orderMin = round2(Number(b.orderMin))
 		orderMax = round2(Number(b.orderMax))
-		if (!(orderMin > 0 && orderMax >= orderMin && orderMax <= amount)) return { error: 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo ≤ monto' }
+		if (!(orderMin > 0 && orderMax >= orderMin && (editing || orderMax <= amount)))
+			return { error: editing ? 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo' : 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo ≤ monto' }
 	}
 	let requirements: Requirements | undefined
 	if (b.requirements && typeof b.requirements === 'object') {

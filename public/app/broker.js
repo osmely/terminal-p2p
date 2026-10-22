@@ -136,8 +136,11 @@ function showConnect() {
 }
 
 // ── Mis operaciones ───────────────────────────────────────────────────
+// Una sola lectura a la vez: si QvaPay va lento, las siguientes no se acumulan en cola
+let tradesBusy = false
 async function loadTrades() {
-	if (!bk.acct.connected) return
+	if (!bk.acct.connected || tradesBusy) return
+	tradesBusy = true
 	try {
 		const r = await api('/trades')
 		bk.trades = r.trades
@@ -151,6 +154,8 @@ async function loadTrades() {
 		if (e.status === 401) return loadAccount()
 		$('myTrades').innerHTML = `<p class="empty">${esc(e.message)}</p>`
 		return
+	} finally {
+		tradesBusy = false
 	}
 	renderTrades()
 }
@@ -238,17 +243,24 @@ async function openTrade(offer, order) {
 	await refreshDetail()
 }
 
+// La operación que se está cargando: abrir otra no espera a la anterior,
+// pero el refresco periódico de la misma no se solapa
+let detailLoading = null
 async function refreshDetail() {
 	const d = bk.detail
-	if (!d) return
+	if (!d || detailLoading === d) return
+	detailLoading = d
 	let t
 	try {
 		t = await api(`/trade?offer=${d.offer}${d.order ? `&order=${d.order}` : ''}`)
 	} catch (e) {
-		$('modalBody').innerHTML = `<p class="empty">${esc(e.message)}</p>`
+		if (bk.detail === d) $('modalBody').innerHTML = `<p class="empty">${esc(e.message)}</p>`
 		return
+	} finally {
+		if (detailLoading === d) detailLoading = null
 	}
-	if (!bk.detail || bk.detail.offer !== d.offer) return
+	// Mientras cargaba se abrió otra operación (u otra orden de la misma oferta)
+	if (bk.detail !== d) return
 	// El refresco periódico no debe borrar lo que el usuario está escribiendo
 	const keep = { txRef: $('txRef')?.value, chatInput: $('chatInput')?.value, seenMoney: $('seenMoney')?.checked }
 	renderDetail(t)
@@ -307,7 +319,7 @@ function renderDetail(t) {
 				? t.chat
 						.map(
 							(m) =>
-								`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${esc(m.text ?? '')}${m.image ? ` <a href="${esc(m.image)}" target="_blank" rel="noopener">🖼</a>` : ''}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
+								`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${esc(m.text ?? '')}${m.image && /^https:\/\//.test(m.image) ? ` <a href="${esc(m.image)}" target="_blank" rel="noopener">🖼</a>` : ''}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
 						)
 						.join('')
 				: '<p class="muted small">Sin mensajes.</p>'
@@ -857,7 +869,9 @@ function deliver(alerts) {
 			n.onclick = () => {
 				window.focus()
 				n.close()
-				openTrade(a.offer, a.order)
+				// Si la contraparte se fue, la oferta vuelve a ser tuya y se gestiona; si no, se abre la operación
+				if (a.kind === 'left') showManageOffer(a.offer)
+				else openTrade(a.offer, a.order)
 			}
 		} catch {
 			// Algunos navegadores móviles no permiten notificaciones sin service worker: quedan el sonido y el título

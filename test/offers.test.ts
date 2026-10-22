@@ -73,3 +73,12 @@ test('offerView: los datos de pago y las órdenes solo para el dueño', () => {
 	const other = offerView(flexOffer, 'otro')
 	assert.deepEqual([other.isOwner, other.details, other.orders], [false, [], []])
 })
+
+test('offerTerms al editar: el máximo por orden puede superar lo que queda', () => {
+	// Quedan 20 USD de una oferta por partes con máximo 50: cambiar el precio debe poder hacerse
+	const edit = offerTerms({ amount: 20, price: 1015, orderMin: 10, orderMax: 50 }, true, true)
+	assert.ok(!('error' in edit))
+	assert.ok('error' in offerTerms({ amount: 20, price: 1015, orderMin: 60, orderMax: 50 }, true, true))
+	// Al crear sí: el máximo no puede superar el monto
+	assert.ok('error' in offerTerms({ amount: 20, price: 1015, orderMin: 10, orderMax: 50 }, true))
+})

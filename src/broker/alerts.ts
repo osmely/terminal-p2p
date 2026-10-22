@@ -6,7 +6,7 @@
 import { COINS } from '../terminal/market.ts'
 import type { Trade } from './trades.ts'
 
-export type AlertKind = 'taken' | 'paid' | 'released' | 'dispute' | 'chat' | 'expiring'
+export type AlertKind = 'taken' | 'paid' | 'released' | 'dispute' | 'chat' | 'expiring' | 'left'
 
 export interface Alert {
 	// Única por suceso: sirve para no repetir el aviso
@@ -27,8 +27,16 @@ const ACTIVE = new Set(['processing', 'paid', 'revision'])
 const fmt = (n: number) => n.toLocaleString('es', { maximumFractionDigits: 2 })
 const unit = (coin: string) => COINS.find((c) => c.tick === coin)?.unit ?? coin
 const who = (t: Trade) => (t.counterparty ? `@${t.counterparty.username}` : 'La contraparte')
+// Una oferta fija puede tomarse, abandonarse y volver a tomarse: cada trato es otro aviso
+const deal = (t: Trade) => `${t.id}:${t.counterparty?.username ?? ''}`
 
-export function tradeAlerts(prev: { trades: Trade[]; openOffers: Trade[] } | null, next: Trade[], now: number, sent: ReadonlySet<string>): Alert[] {
+export function tradeAlerts(
+	prev: { trades: Trade[]; openOffers: Trade[] } | null,
+	next: Trade[],
+	now: number,
+	sent: ReadonlySet<string>,
+	nextOpen: Trade[] = [],
+): Alert[] {
 	const out: Alert[] = []
 	const push = (t: Trade, kind: AlertKind, key: string, title: string, body: string, urgent = false) => {
 		if (sent.has(key)) return
@@ -46,7 +54,7 @@ export function tradeAlerts(prev: { trades: Trade[]; openOffers: Trade[] } | nul
 		if (t.payer && t.status === 'processing' && t.expiresAt) {
 			const left = Date.parse(t.expiresAt) - now
 			if (left > 0 && left <= EXPIRING_MS)
-				push(t, 'expiring', `${t.id}:expiring`, `Quedan ${Math.max(1, Math.round(left / 60_000))} min para pagar`, `Transfiere ${money} a ${who(t)} y marca el pago.`, true)
+				push(t, 'expiring', `${deal(t)}:expiring`, `Quedan ${Math.max(1, Math.round(left / 60_000))} min para pagar`, `Transfiere ${money} a ${who(t)} y marca el pago.`, true)
 		}
 
 		// Sin lectura anterior no se sabe qué es nuevo
@@ -58,7 +66,7 @@ export function tradeAlerts(prev: { trades: Trade[]; openOffers: Trade[] } | nul
 				push(
 					t,
 					'taken',
-					`${t.id}:taken`,
+					`${deal(t)}:taken`,
 					'Tomaron tu oferta',
 					`${who(t)} ${t.side === 'sell' ? 'te compra' : 'te vende'} ${fmt(t.usd)} USD. ${t.payer ? `Te toca pagar ${money}.` : `Espera su pago de ${money}.`}`,
 					t.payer,
@@ -67,14 +75,23 @@ export function tradeAlerts(prev: { trades: Trade[]; openOffers: Trade[] } | nul
 		}
 
 		if (p.status !== t.status) {
-			if (t.status === 'paid' && !t.payer) push(t, 'paid', `${t.id}:paid`, 'Te pagaron: comprueba y libera', `${who(t)} marcó el pago de ${money}. Míralo en tu banco antes de liberar.`, true)
-			else if (t.status === 'completed' && t.payer) push(t, 'released', `${t.id}:released`, `Te liberaron ${fmt(t.usd)} USD`, `${who(t)} completó la operación.`)
-			else if (t.status === 'revision') push(t, 'dispute', `${t.id}:dispute`, 'La operación pasó a disputa', `Un moderador revisará el chat con ${who(t)}.`)
+			if (t.status === 'paid' && !t.payer) push(t, 'paid', `${deal(t)}:paid`, 'Te pagaron: comprueba y libera', `${who(t)} marcó el pago de ${money}. Míralo en tu banco antes de liberar.`, true)
+			else if (t.status === 'completed' && t.payer) push(t, 'released', `${deal(t)}:released`, `Te liberaron ${fmt(t.usd)} USD`, `${who(t)} completó la operación.`)
+			else if (t.status === 'revision') push(t, 'dispute', `${deal(t)}:dispute`, 'La operación pasó a disputa', `Un moderador revisará el chat con ${who(t)}.`)
 		}
 
-		if (t.chat && p.chat && t.chat.count > p.chat.count && !t.chat.lastMine)
-			push(t, 'chat', `${t.id}:chat:${t.chat.count}`, `Mensaje de ${who(t)}`, t.chat.lastText?.trim() || 'Te envió una imagen.')
+		const newMessage = t.chat && p.chat && (t.chat.lastId && p.chat.lastId ? t.chat.lastId !== p.chat.lastId : t.chat.count > p.chat.count)
+		if (newMessage && t.chat && !t.chat.lastMine)
+			push(t, 'chat', `${t.id}:chat:${t.chat.lastId ?? t.chat.count}`, `Mensaje de ${who(t)}`, t.chat.lastText?.trim() || 'Te envió una imagen.')
 	}
+
+	// Una oferta tuya que estaba en curso y vuelve a estar publicada: la contraparte se fue
+	if (prev)
+		for (const o of nextOpen) {
+			const p = before.get(o.id)
+			if (p && ACTIVE.has(p.status))
+				push(o, 'left', `${deal(p)}:left`, 'La contraparte dejó tu oferta', `${who(p)} canceló o se le venció el plazo. Tu oferta vuelve al mercado${o.pause ? ' tras una pausa de unos minutos para que revises el precio' : ''}.`)
+		}
 	return out
 }
 

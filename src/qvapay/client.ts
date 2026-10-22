@@ -166,7 +166,8 @@ export class QvaPayClient {
 		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/rate`, { order, rating })
 		await this.request('POST', `/p2p/${uuid}/rate`, {
 			bucket: 'general',
-			body: { order, rating, comment, tags: ['rapido', 'confiable'] },
+			// Sin etiquetas automáticas: "rápido" o "confiable" no valen para una mala nota
+			body: { order, rating, comment },
 			write: true,
 		})
 	}
