@@ -192,7 +192,7 @@ function render() {
 	const offline = !b.live && !b.ask.levels.length && !b.bid.levels.length
 	document.querySelector('.area-book').classList.toggle('offline', offline)
 	if (offline) {
-		const msg = '<div class="empty">QvaPay solo deja ver las ofertas con una cuenta conectada.</div>'
+		const msg = '<div class="empty">Las ofertas del libro se ven con tu cuenta de QvaPay conectada.</div>'
 		$('asks').innerHTML = msg
 		$('bids').innerHTML = ''
 		$('spread').className = 'spread'
