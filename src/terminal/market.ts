@@ -259,7 +259,9 @@ export class Market {
 			this.diffActivity(c, side, c[side].levels, levels)
 			c[side] = { levels, total: res.total, updatedAt: Date.now(), error: null }
 		} catch (err) {
-			c[side].error = (err as Error).message
+			// El mensaje de QvaPay tal cual (p. ej. "Debes vincular tu cuenta de Telegram…"), sin el código delante
+			const body = err instanceof QvaPayError ? (err.body as { error?: unknown } | undefined) : undefined
+			c[side].error = typeof body?.error === 'string' ? body.error : (err as Error).message
 			c[side].updatedAt = Date.now()
 			// Token revocado: esa cuenta se desconecta y la próxima lectura usa otra
 			if (err instanceof QvaPayError && err.status === 401) {

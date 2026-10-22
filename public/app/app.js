@@ -214,6 +214,12 @@ function render() {
 }
 
 function renderStatus(b) {
+	// Si QvaPay rechaza la lectura de los dos lados, no es "actualizado": no hay libro
+	if (b.ask.error && b.bid.error) {
+		$('updated').textContent = 'Sin acceso al libro con esta cuenta'
+		$('dot').className = 'dot stale'
+		return
+	}
 	const times = [b.ask.updatedAt, b.bid.updatedAt].filter(Boolean)
 	if (!times.length) {
 		$('updated').textContent = 'Leyendo el libro…'
@@ -266,7 +272,8 @@ function levelRow(l, side, cum, maxCum) {
 function renderBook(b, asks, bids) {
 	const N = 30
 	const side = (levels, s) => {
-		if (!levels.length) return `<div class="empty">${b[s].error ? `Error: ${esc(b[s].error)}` : 'Sin ofertas con estos filtros'}</div>`
+		if (!levels.length)
+			return `<div class="empty">${b[s].error ? `QvaPay no deja leer el libro con tu cuenta:<br><b>${esc(b[s].error)}</b>` : 'Sin ofertas con estos filtros'}</div>`
 		let cum = 0
 		const rows = levels.slice(0, N).map((l) => ({ l, cum: (cum += l.usd) }))
 		const max = rows.at(-1).cum
