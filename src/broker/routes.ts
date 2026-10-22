@@ -152,7 +152,7 @@ export class Broker {
 		} catch (err) {
 			if (err instanceof QvaPayError && err.code === 'INSUFFICIENT_SCOPE')
 				return json(400, { error: 'El token necesita el permiso "read" para identificar tu cuenta. Créalo con read + p2p:buy y/o p2p:sell.' })
-			if (err instanceof QvaPayError && err.status === 401) return json(400, { error: 'QvaPay rechazó el token: revisa que esté completo y no revocado.' })
+			if (err instanceof QvaPayError && err.status === 401) return json(400, { error: 'El token no es válido: revisa que esté completo y activo en tu cuenta de QvaPay.' })
 			throw err
 		}
 		this.market.wake()
@@ -490,7 +490,7 @@ function friendly(err: unknown): string {
 	}
 	if (err.code && map[err.code]) return map[err.code]
 	if (err.status === 409) return 'La oferta ya no está disponible (la tomó otra persona o cambió)'
-	if (err.status === 429) return 'QvaPay pide esperar: demasiadas peticiones seguidas'
+	if (err.status === 429) return 'Demasiadas acciones seguidas: espera unos segundos y vuelve a intentarlo'
 	const body = err.body as { error?: string } | undefined
 	return body?.error ?? err.message
 }

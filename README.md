@@ -2,7 +2,7 @@
 
 **El mercado P2P de QvaPay como un exchange, en vivo.** → [app.terminalp2p.com](https://app.terminalp2p.com) · presentación en [terminalp2p.com](https://terminalp2p.com)
 
-Libro de órdenes por moneda (CUP Transferencia, Saldo ETECSA, Tarjeta Clásica, MLC, Zelle, Bandec Prepago, TropiPay, CUP Efectivo, Bolsa TM), diferencial, profundidad, distribución de las operaciones completadas en 48 h, histórico de la tasa, lectura automática del mercado y actividad del libro. Además, cada usuario puede conectar su cuenta y seguir sus operaciones P2P paso a paso.
+Libro de órdenes por moneda (CUP Transferencia, Saldo ETECSA, Tarjeta Clásica, MLC, Zelle, Bandec Prepago, TropiPay, CUP Efectivo, Bolsa TM), diferencial, profundidad, distribución de las operaciones completadas en 48 h, histórico de la tasa, lectura automática del mercado y actividad del libro. Además, cada usuario puede conectar su cuenta y operar desde aquí: publicar y tomar ofertas y seguir cada operación paso a paso.
 
 > **Sin custodia.** El dinero de cada operación queda siempre en el escrow de QvaPay, y tu token y tus datos se quedan en tu navegador.
 
