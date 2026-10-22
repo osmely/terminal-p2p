@@ -57,7 +57,7 @@ html { scroll-behavior: smooth; scroll-padding-top: 72px; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
 a { color: inherit; }
 button { font: inherit; color: inherit; cursor: pointer; }
-h1, h2, h3 { letter-spacing: -0.025em; line-height: 1.15; margin: 0; }
+h1, h2, h3 { letter-spacing: -0.025em; line-height: 1.15; margin: 0; text-wrap: balance; }
 p { margin: 0; }
 code { font: 0.88em var(--mono); background: var(--surface-3); padding: 1px 6px; border-radius: 5px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -267,6 +267,33 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.rate .px { font-size: 13.5px; gap: 2px 8px; }
 	.mock-head b { font-size: 12.5px; }
 	.final-in { padding: 40px 20px; }
+	/* Ilustración más corta: tres niveles por lado y sin el gráfico */
+	.mock-book.asks .mrow:nth-child(-n+2), .mock-book.bids .mrow:nth-child(n+4), .mock-depth { display: none; }
+	/* Tasas como lista: una fila por moneda, venta y compra a la derecha */
+	.rates { grid-template-columns: 1fr; gap: 0; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--bg); }
+	.rate {
+		display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'name px' 'unit px' 'ops px'; column-gap: 12px;
+		min-height: 0; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+	}
+	.rate:last-child { border-bottom: 0; }
+	.rate.skeleton { min-height: 72px; }
+	.rate h3 { grid-area: name; font-size: 14.5px; }
+	.rate .unit { grid-area: unit; }
+	.rate .ops { grid-area: ops; margin-top: 2px; font-size: 11.5px; }
+	.rate .px { grid-area: px; align-self: center; margin-top: 0; font-size: 14px; gap: 1px 10px; }
+	/* Funciones: icono al lado del título */
+	.feat { display: grid; grid-template-columns: 38px 1fr; column-gap: 14px; padding: 16px; }
+	.feat .ico { grid-row: span 2; width: 38px; height: 38px; }
+	.feat h3 { margin-top: 0; font-size: 16.5px; align-self: center; }
+	.feat p { grid-column: 2; margin-top: 4px; font-size: 14.5px; }
+	.features { gap: 10px; }
+	/* Pasos y privacidad más compactos */
+	.steps li { padding: 18px 18px 18px 62px; }
+	.steps li::before { left: 16px; top: 18px; width: 32px; height: 32px; }
+	.checks { gap: 10px; }
+	.checks li { padding: 14px 14px 14px 46px; }
+	.checks li::before { left: 14px; top: 16px; }
+	.foot { line-height: 2; }
 	/* Operar en el móvil: pasos en una fila deslizable y solo la descripción del activo */
 	.op-steps { flex-direction: row; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 4px; scroll-snap-type: x proximity; }
 	.op-steps::-webkit-scrollbar { display: none; }
