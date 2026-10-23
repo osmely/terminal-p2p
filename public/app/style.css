@@ -325,7 +325,8 @@ button { cursor: pointer; }
 .kv span { color: var(--muted); }
 .kv b { font-family: var(--mono); word-break: break-all; }
 .copy { border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 500; }
-.chatbox { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px; }
+/* Alto fijo: la ventana no crece con cada mensaje; los mensajes se desplazan dentro */
+.chatbox { display: flex; flex-direction: column; gap: 6px; height: 240px; overflow-y: auto; overscroll-behavior: contain; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px; }
 .msg { max-width: 82%; padding: 7px 10px; border-radius: 10px; font-size: 12.5px; background: var(--surface-3); align-self: flex-start; }
 .msg.mine { align-self: flex-end; background: var(--accent-bg); }
 .msg.mod { border: 1px solid var(--warn); }
@@ -428,6 +429,7 @@ a.icon-btn { text-decoration: none; }
 	.modal-card { padding: 18px; border-radius: 14px; margin-top: auto; }
 	/* 16 px evita que el iPhone amplíe la página al tocar un campo */
 	.modal .input { font-size: 16px; padding: 9px 11px; }
+	.chatbox { height: 200px; }
 	/* Mis operaciones: pestañas en una fila y los botones debajo */
 	.area-orders .panel-head { flex-wrap: wrap; }
 	.area-orders .panel-head > .seg-tabs { flex: 1 1 100%; }

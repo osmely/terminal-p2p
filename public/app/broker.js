@@ -273,7 +273,10 @@ async function refreshDetail() {
 	const cb = $('chatbox')
 	if (cb) cb.scrollTop = chatAtEnd ? cb.scrollHeight : chatTop
 	$('modal').scrollTop = modalTop
-	if (keep.txRef && $('txRef')) $('txRef').value = keep.txRef
+	if (keep.txRef && $('txRef')) {
+		$('txRef').value = keep.txRef
+		$('txRef').dispatchEvent(new Event('input')) // vuelve a activar "Ya pagué" si ya había referencia
+	}
 	if (keep.chatInput && $('chatInput')) $('chatInput').value = keep.chatInput
 	if (keep.seenMoney && $('seenMoney')) {
 		$('seenMoney').checked = true
@@ -298,7 +301,7 @@ function renderDetail(t) {
 		action = `<div class="stack">
 			<p>Transfiere <b>${fmtU(t.coinAmount)} ${unit}</b> y marca el pago con la referencia.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
 			<label class="field">Referencia de tu transferencia<input class="input" id="txRef" placeholder="Nº de transacción" /></label>
-			<div class="row-btns"><button class="btn danger" data-act="cancel">Cancelar</button><button class="btn primary" data-act="paid">Ya pagué</button></div></div>`
+			<div class="row-btns"><button class="btn danger" data-act="cancel">Cancelar</button><button class="btn primary" data-act="paid" disabled title="Escribe antes la referencia de tu transferencia">Ya pagué</button></div></div>`
 	else if (status === 'processing')
 		action = `<p>Esperando que @${esc(t.counterparty)} te pague <b>${fmtU(t.coinAmount)} ${unit}</b>.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
 			${needSendDetails ? '<p class="notice">Envía tus datos de pago por el chat para que sepa a dónde transferir.</p>' : ''}`
@@ -360,12 +363,20 @@ function bindDetail(t) {
 		}
 	const seen = $('seenMoney')
 	if (seen) seen.onchange = () => (body.querySelector('[data-act="release"]').disabled = !seen.checked)
+	// "Ya pagué" solo con la referencia de la transferencia escrita
+	const tx = $('txRef')
+	const paidBtn = body.querySelector('[data-act="paid"]')
+	if (tx && paidBtn) {
+		const upd = () => (paidBtn.disabled = tx.value.trim().length < 4)
+		tx.addEventListener('input', upd)
+		upd()
+	}
 	for (const b of body.querySelectorAll('[data-act]'))
 		b.onclick = async () => {
 			const a = b.dataset.act
 			if (a === 'paid') {
 				const tx = $('txRef').value.trim()
-				if (!tx) return toast('Pon la referencia de la transferencia', true)
+				if (tx.length < 4) return toast('Escribe la referencia de tu transferencia', true)
 				return act('paid', { txId: tx })
 			}
 			if (a === 'release') {
