@@ -28,6 +28,8 @@ const state = {
 	history: [],
 	overview: [],
 	informal: null,
+	ranking: null,
+	rank: { crit: store.get('rankCrit', 'liquidity'), scope: store.get('rankScope', 'all'), side: store.get('rankSide', '') },
 }
 
 // Mercados en CUP por USD de QvaPay, comparables con el USD y el USDT del mercado informal
@@ -129,6 +131,7 @@ function selectCoin(tick) {
 	render()
 	loadBook()
 	loadHistory()
+	if (state.rank.scope === 'coin') loadRanking()
 }
 
 // ── Render ────────────────────────────────────────────────────────────
@@ -317,10 +320,11 @@ function levelRow(l, side, cum, maxCum) {
 	const rep = l.rating ? `⭐${l.rating.toFixed(1)}` : 'nuevo'
 	// Tus propias ofertas se marcan en el libro (broker.js sabe quién eres)
 	const mine = typeof myUsername === 'function' && myUsername() === l.user
+	const medal = rankMedal(l.user)
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? '<b class="you">tú</b>' : ''}<em>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 function renderBook(b, asks, bids) {
@@ -714,6 +718,101 @@ function showChart(name) {
 	drawActive()
 }
 
+// ── Ranking de usuarios ───────────────────────────────────────────────
+// Lo calcula el navegador con los libros que ha leído con tu cuenta (data.js, /api/ranking):
+// no se guarda ni se comparte. Los puestos de las insignias son de todos los mercados
+const RANK_NAMES = { liquidity: 'liquidez', experience: 'experiencia', reputation: 'reputación', best: 'mejor precio', maker: 'ambos lados', active: 'actividad' }
+const ordinal = (n) => `${n}.º`
+
+async function loadRanking() {
+	try {
+		const q = new URLSearchParams()
+		if (state.rank.scope === 'coin') q.set('coin', state.coin)
+		if (state.rank.side) q.set('side', state.rank.side)
+		const r = await TPApi.fetch(`/api/ranking?${q}`)
+		if (!r.ok) throw new Error(String(r.status))
+		state.ranking = await r.json()
+		renderRanking()
+	} catch {}
+}
+
+// Puestos de un usuario entre los 10 primeros, del mejor al peor
+function rankTop(user, max = 10) {
+	const pos = state.ranking?.positions?.[user]
+	if (!pos) return []
+	return Object.entries(pos)
+		.filter(([, r]) => r <= max)
+		.sort((a, b) => a[1] - b[1])
+}
+function rankText(user, n = 3) {
+	return rankTop(user)
+		.slice(0, n)
+		.map(([c, r]) => `${ordinal(r)} en ${RANK_NAMES[c]}`)
+		.join(' · ')
+}
+// Medalla discreta en el libro para el top 3 de experiencia o reputación
+function rankMedal(user) {
+	const top = rankTop(user, 3).filter(([c]) => c === 'experience' || c === 'reputation')
+	if (!top.length) return ''
+	const title = top.map(([c, r]) => `${ordinal(r)} en ${RANK_NAMES[c]}`).join(' · ')
+	return `<span class="medal" title="Top 3: ${title}" aria-label="Top 3: ${title}"><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><circle cx="6" cy="7" r="4.2"/><path d="M3.6 1h1.8L6 2.6 6.6 1h1.8L7.2 3.6H4.8z"/></svg></span>`
+}
+
+function rankValue(c, u) {
+	const plural = (n, one, many) => `${n.toLocaleString('es')} ${n === 1 ? one : many}`
+	switch (c) {
+		case 'liquidity':
+			return [`${fmtU(u.usdAsk + u.usdBid)} USD`, `${plural(u.offers, 'oferta', 'ofertas')} · ${plural(u.markets.length, 'mercado', 'mercados')}`]
+		case 'experience':
+			return [plural(u.ops, 'operación', 'operaciones'), u.rating ? `⭐ ${u.rating.toFixed(2)}` : 'sin valoraciones']
+		case 'reputation':
+			return [`⭐ ${u.rating.toFixed(2)}`, `${plural(u.ops, 'operación', 'operaciones')} · ajustada ${u.score.toFixed(2)}`]
+		case 'best':
+			return [plural(u.best, 'lado', 'lados'), u.markets.map(nameOfTick).join(', ')]
+		case 'maker':
+			return [`${fmtU(u.usdBid)} / ${fmtU(u.usdAsk)} USD`, 'compra / venta']
+		case 'active':
+			return [`${plural(u.recent, 'oferta', 'ofertas')} en 24 h`, u.lastUpdate ? `la última hace ${ago(Date.now() - u.lastUpdate)}` : '']
+	}
+	return ['', '']
+}
+const nameOfTick = (t) => state.overview.find((c) => c.tick === t)?.name ?? t
+
+function renderRanking() {
+	for (const b of document.querySelectorAll('[data-crit]')) {
+		b.classList.toggle('active', b.dataset.crit === state.rank.crit)
+		b.setAttribute('aria-selected', String(b.dataset.crit === state.rank.crit))
+	}
+	$('rankScope').value = state.rank.scope
+	$('rankSide').value = state.rank.side
+	const data = state.ranking
+	const list = $('rankList')
+	if (!data || !data.markets.read) {
+		list.innerHTML = data?.connected
+			? '<li class="empty">Leyendo los libros: el ranking aparece en unos segundos.</li>'
+			: '<li class="empty">El ranking se calcula con el libro en vivo: conecta tu cuenta de QvaPay para verlo.</li>'
+		$('rankNote').textContent = ''
+		return
+	}
+	const rows = data.rankings[state.rank.crit] ?? []
+	const me = typeof myUsername === 'function' ? myUsername() : null
+	list.innerHTML = rows.length
+		? rows
+				.map(({ rank, stats: u }) => {
+					const [main, sub] = rankValue(state.rank.crit, u)
+					// KYC no se muestra: QvaPay lo exige a todos para el P2P
+					const badges = [u.gold ? 'GOLD' : '', u.vip ? 'VIP' : ''].filter(Boolean).map((b) => `<span class="chip">${b}</span>`).join('')
+					return `<li class="${rank <= 3 ? `top top${rank}` : ''} ${u.user === me ? 'mine' : ''}">
+						<span class="rk">${rank}</span>
+						<span class="ru"><b>${u.user === me ? '<em class="you">tú</em> ' : ''}${esc(u.user)}</b>${badges}</span>
+						<span class="rv"><b>${main}</b><small>${esc(sub)}</small></span></li>`
+				})
+				.join('')
+		: '<li class="empty">Nadie cumple este criterio con los libros leídos.</li>'
+	const scope = state.rank.scope === 'coin' ? nameOfTick(state.coin) : `${data.markets.read} de ${data.markets.total} mercados leídos`
+	$('rankNote').textContent = `Con las ofertas publicadas ahora en el libro (${scope}). Lo calcula tu navegador con tu cuenta; no se guarda ni se comparte.`
+}
+
 // ── Tooltip de cada oferta ────────────────────────────────────────────
 function tooltip(l, side) {
 	const unit = state.book.coin.unit
@@ -727,6 +826,7 @@ function tooltip(l, side) {
 		l.kind === 'flexible' ? `<div>↔ Por rango: órdenes de ${fmtU(l.orderMin ?? 0)} a ${fmtU(l.orderMax ?? l.usd)} USD</div>` : '<div>Oferta fija: se toma entera</div>',
 		`<div>@${esc(l.user)} · ${l.ops} operaciones · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : 'sin valoraciones'}</div>`,
 		`<div>${[l.kyc ? 'KYC ✓' : 'sin KYC', l.vip ? 'VIP' : '', l.gold ? 'GOLD' : ''].filter(Boolean).join(' · ')}</div>`,
+		rankText(l.user) ? `<div>🏆 Ranking: ${rankText(l.user)}</div>` : '',
 		l.createdAt != null
 			? `<div class="muted">Publicada hace ${ago(state.book.serverTime - l.createdAt)}${l.updatedAt && l.updatedAt - l.createdAt > 60_000 ? ` · actualizada hace ${ago(state.book.serverTime - l.updatedAt)}` : ''}</div>`
 			: '',
@@ -783,6 +883,22 @@ function bind() {
 	document.addEventListener('keydown', (e) => e.key === 'Escape' && closeMenus())
 
 	for (const t of document.querySelectorAll('[data-chart]')) t.addEventListener('click', () => showChart(t.dataset.chart))
+	for (const b of document.querySelectorAll('[data-crit]'))
+		b.addEventListener('click', () => {
+			state.rank.crit = b.dataset.crit
+			store.set('rankCrit', state.rank.crit)
+			renderRanking()
+		})
+	$('rankScope').addEventListener('change', (e) => {
+		state.rank.scope = e.target.value
+		store.set('rankScope', state.rank.scope)
+		loadRanking()
+	})
+	$('rankSide').addEventListener('change', (e) => {
+		state.rank.side = e.target.value
+		store.set('rankSide', state.rank.side)
+		loadRanking()
+	})
 	for (const t of document.querySelectorAll('[data-range]')) {
 		t.classList.toggle('active', Number(t.dataset.range) === state.range)
 		t.addEventListener('click', () => {
@@ -874,6 +990,8 @@ function every(ms, fn) {
 	setInterval(() => !document.hidden && fn(), ms)
 }
 every(5000, loadBook)
+loadRanking()
+every(10_000, loadRanking)
 every(15_000, loadOverview)
 every(60_000, loadHistory)
 loadInformal()

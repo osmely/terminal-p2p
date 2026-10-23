@@ -180,6 +180,7 @@ button { cursor: pointer; }
 .ticker-pair h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
 .ticker-pair p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
 .ticker-stats { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
+@media (max-width: 1280px) { .ticker { gap: 24px; } .ticker-stats { gap: 18px; } }
 .stat { display: flex; flex-direction: column; gap: 3px; }
 .stat label { font-size: 11px; color: var(--muted); font-weight: 500; }
 .stat b { font: 600 14.5px var(--mono); font-variant-numeric: tabular-nums; }
@@ -299,6 +300,34 @@ button { cursor: pointer; }
 .insight-list li { position: relative; padding-left: 16px; font-size: 13px; color: var(--text-2); line-height: 1.55; }
 .insight-list li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .insight-list li.warn::before { background: var(--warn); }
+/* Ranking de usuarios */
+.rank-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.rank-crits { display: flex; flex-wrap: wrap; gap: 6px; }
+.rank-crit { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); font-size: 12px; font-weight: 500; color: var(--muted); }
+.rank-crit:hover { color: var(--text-2); border-color: var(--line-strong); }
+.rank-crit.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-bg); }
+.rank-scope { display: flex; gap: 6px; }
+.rank-scope select { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); font-size: 12px; color: var(--text-2); }
+.rank-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+.rank-list li { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 6px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.rank-list li:last-child { border-bottom: 0; }
+.rank-list li.empty { display: block; padding: 18px 6px; text-align: center; color: var(--muted); }
+.rank-list li.mine { background: var(--accent-bg); border-radius: 6px; }
+.rank-list .rk { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font: 600 11.5px var(--mono); color: var(--muted); background: var(--surface-3); }
+.rank-list .top1 .rk { background: #d4a72c; color: #1b1405; }
+.rank-list .top2 .rk { background: #a9b4c2; color: #10151c; }
+.rank-list .top3 .rk { background: #c27c4a; color: #1b0f05; }
+.rank-list .ru { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rank-list .ru b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rank-list .ru .you { font-style: normal; font-size: 11px; color: var(--accent); }
+.rank-list .ru .chip { font-size: 10px; padding: 1px 6px; }
+.rank-list .rv { display: flex; flex-direction: column; align-items: flex-end; text-align: right; }
+.rank-list .rv b { font: 600 13px var(--mono); white-space: nowrap; }
+.rank-list .rv small { font-size: 11px; color: var(--muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-note { margin: 10px 0 0; font-size: 11.5px; color: var(--muted); }
+.medal { display: inline-flex; vertical-align: -1px; margin-right: 3px; color: #d4a72c; }
+.medal svg { fill: currentColor; }
+.rank-line { margin: 4px 0 0; font-size: 12.5px; color: var(--text-2); }
 .insight-list li.head { margin-top: 6px; padding-left: 0; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .insight-list li.head::before { display: none; }
 .insight-list li.head a { color: var(--accent); text-decoration: none; }

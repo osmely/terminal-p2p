@@ -8,6 +8,7 @@
 import { Broker, json } from '../src/broker/routes.ts'
 import { QvaPayClient } from '../src/qvapay/client.ts'
 import { COINS, Market, type Tick } from '../src/terminal/market.ts'
+import { CRITERIA, positions, rank, userStats } from '../src/terminal/ranking.ts'
 import { BrowserAccounts } from './accounts.ts'
 
 const RELAY = `${location.origin}/qp`
@@ -65,6 +66,22 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 		market.touch(coin)
 		wake()
 		return json(200, market.snapshot(coin))
+	}
+	// Ranking de usuarios con los libros que ha leído este navegador (?coin=TICK para un mercado,
+	// ?side=ask|bid para un lado). Los puestos de cada usuario son siempre de todos los mercados
+	if (url.pathname === '/api/ranking') {
+		const coin = url.searchParams.get('coin')
+		const side = url.searchParams.get('side')
+		const now = Date.now()
+		const scoped = market.sides(isTick(coin) ? coin : undefined, side === 'ask' || side === 'bid' ? side : undefined)
+		const all = market.sides()
+		const stats = userStats(scoped, now)
+		return json(200, {
+			connected: (await accounts.reader()) != null,
+			markets: { read: new Set(all.map((s) => s.tick)).size, total: COINS.length },
+			rankings: Object.fromEntries(CRITERIA.map((c) => [c, rank(stats, c).rows])),
+			positions: positions(userStats(all, now)),
+		})
 	}
 	return json(404, { error: 'no encontrado' })
 }

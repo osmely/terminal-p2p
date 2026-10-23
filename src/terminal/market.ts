@@ -177,6 +177,15 @@ export class Market {
 		}
 	}
 
+	// Los lados de cada mercado que ya se han leído (para el ranking de usuarios)
+	sides(tick?: Tick, side?: 'ask' | 'bid') {
+		const out: { tick: Tick; side: 'ask' | 'bid'; levels: Level[] }[] = []
+		for (const [t, c] of this.coins)
+			for (const sd of ['ask', 'bid'] as const)
+				if ((!tick || t === tick) && (!side || sd === side) && c[sd].updatedAt !== null) out.push({ tick: t, side: sd, levels: c[sd].levels })
+		return out
+	}
+
 	overview() {
 		return COINS.map((meta) => {
 			const c = this.coins.get(meta.tick)!

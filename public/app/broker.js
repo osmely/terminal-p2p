@@ -913,7 +913,8 @@ function renderTake(uuid, side, l, coin) {
 	const req = reqText(l.requirements)
 	openModal(`<div class="stack">
 		<div><h3>${youBuy ? 'Comprar' : 'Vender'} USD a ${fmtP(l.price)} ${unit}</h3>
-			<p class="muted">${esc(nameOf(coin))} · @${esc(l.user)}${l.ops != null ? ` · ${l.ops} operaciones` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ' · sin valoraciones' : ''}${l.kyc ? ' · KYC' : ''}</p></div>
+			<p class="muted">${esc(nameOf(coin))} · @${esc(l.user)}${l.ops != null ? ` · ${l.ops} operaciones` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ' · sin valoraciones' : ''}${l.kyc ? ' · KYC' : ''}</p>
+			${typeof rankText === 'function' && rankText(l.user) ? `<p class="rank-line">🏆 Ranking: ${esc(rankText(l.user))}</p>` : ''}</div>
 		<div class="kv">
 			<span>${youBuy ? 'Vende' : 'Compra'}</span><b>${fmtU(l.usd)} USD</b><span></span>
 			${flex ? `<span>Por orden</span><b>${min ? `${fmtU(min)}–${fmtU(max)}` : `hasta ${fmtU(max)}`} USD</b><span></span>` : ''}
