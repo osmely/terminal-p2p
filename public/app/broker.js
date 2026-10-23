@@ -138,8 +138,9 @@ function showConnect() {
 		<div class="notice">
 			Crea un token en <b>qvapay.com/dev/tokens</b> con estos permisos:
 			<ul><li><b>read</b> (para ver tu usuario y saldo)</li><li><b>p2p:buy</b> para comprar USD</li><li><b>p2p:sell</b> solo si también vas a vender</li></ul>
+			<a class="guide-link" href="https://terminalp2p.com/blog/conectar-qvapay-token/" target="_blank" rel="noopener">Guía paso a paso con capturas →</a>
 		</div>
-		<div class="notice warn">No marques <b>transfer</b> ni <b>withdraw</b>, y nunca pegues el token de tu sesión de login.</div>
+		<div class="notice warn">No marques <b>store</b>, <b>transfer</b> ni <b>withdraw</b>, y nunca pegues el token de tu sesión de login.</div>
 		<label class="field">Token de API<input class="input" id="tokenInput" type="password" autocomplete="off" placeholder="12345|abcdef…" /></label>
 		<label class="check"><input type="checkbox" id="rememberToken" /> Recordar en este navegador</label>
 		<p class="hint">Tu token se guarda <strong>solo en este navegador</strong>, nunca en un servidor, y solo se usa para tu cuenta. Sin "recordar" se borra al cerrar la pestaña. Puedes revocar el token en QvaPay cuando quieras.</p>

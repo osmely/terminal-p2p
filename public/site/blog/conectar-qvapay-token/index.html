@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Cómo conectar Terminal P2P con tu cuenta de QvaPay, paso a paso · Terminal P2P</title>
+	<meta name="description" content="Guía ilustrada: crea un token en QvaPay con los permisos justos, conéctalo en Terminal P2P y empieza a ver el libro en vivo y operar. Qué hace cada permiso y cuáles no marcar nunca." />
+	<meta property="og:title" content="Cómo conectar Terminal P2P con tu cuenta de QvaPay, paso a paso · Terminal P2P" />
+	<meta property="og:description" content="Guía ilustrada: crea un token en QvaPay con los permisos justos, conéctalo en Terminal P2P y empieza a ver el libro en vivo y operar. Qué hace cada permiso y cuáles no marcar nunca." />
+	<meta property="og:url" content="https://terminalp2p.com/blog/conectar-qvapay-token/" />
+	<meta property="og:type" content="article" />
+	<meta property="og:image" content="https://terminalp2p.com/img/terminal-escritorio.jpg" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta property="article:published_time" content="2026-10-23" />
+	<link rel="canonical" href="https://terminalp2p.com/blog/conectar-qvapay-token/" />
+	<script src="/theme.js"></script>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	<link rel="stylesheet" href="/vendor/fonts.css" />
+	<link rel="stylesheet" href="/site.css" />
+	<script src="/site.js" defer></script>
+</head>
+<body>
+	<header class="nav">
+		<div class="wrap nav-in">
+			<a class="brand" href="/" aria-label="Terminal P2P">
+				<span class="brand-mark" aria-hidden="true">
+					<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16l4.5-5 3.5 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</span>
+				<span>Terminal P2P</span>
+			</a>
+			<nav class="nav-links" aria-label="Secciones">
+				<a href="/#tasas">Tasas</a>
+				<a href="/#operar">Operar</a>
+				<a href="/#funciones">Funciones</a>
+				<a href="/#privacidad">Privacidad</a>
+				<a href="/#preguntas">Preguntas</a>
+				<a href="/blog/" aria-current="page">Blog</a>
+			</nav>
+			<div class="nav-actions">
+				<a class="icon-btn tg-icon" href="https://t.me/terminalp2p" target="_blank" rel="noopener" title="Grupo de Telegram @terminalp2p" aria-label="Grupo de Telegram @terminalp2p">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+				</a>
+				<a class="icon-btn hide-sm" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener" title="Código fuente en GitHub" aria-label="Código fuente en GitHub">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.38-3.37-1.38-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 015 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.26 10.26 0 0022 12.25C22 6.58 17.52 2 12 2z"/></svg>
+				</a>
+				<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+					<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+					<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+				</button>
+				<a class="btn primary" href="https://app.terminalp2p.com">Abrir terminal</a>
+			</div>
+		</div>
+	</header>
+
+	<main>
+		<article>
+			<header class="article">
+				<div class="wrap narrow">
+					<p class="crumbs"><a href="/blog/">Blog</a></p>
+					<h1>Cómo conectar Terminal P2P con tu cuenta de QvaPay, paso a paso</h1>
+					<p class="post-meta">Guía de Terminal P2P · <time datetime="2026-10-23">23 de octubre de 2026</time> · 5 min de lectura</p>
+					<p class="dek">Para ver el libro de órdenes en vivo y operar desde el terminal, conectas tu cuenta de QvaPay con un <strong>token</strong>: una llave con permisos limitados que creas tú y puedes borrar cuando quieras. Así se hace, con capturas de cada paso.</p>
+				</div>
+			</header>
+
+			<div class="wrap narrow prose">
+				<h2>Antes de empezar</h2>
+				<ul>
+					<li><strong>Una cuenta de QvaPay con el P2P activo.</strong> QvaPay pide verificar tu identidad (KYC), tu teléfono y vincular Telegram para usar el P2P. Si aún no tienes cuenta: <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">crea una en QvaPay</a> <small>(usuario referido)</small>.</li>
+					<li><strong>Un minuto.</strong> Lo puedes hacer desde el móvil; las capturas son de un teléfono.</li>
+				</ul>
+				<p>Sin conectar nada ya puedes ver en el terminal las tasas, las operaciones completadas y el histórico. El token solo hace falta para el libro en vivo y para operar.</p>
+
+				<h2>Paso 1 · Abre la página de tokens de QvaPay</h2>
+				<p>Inicia sesión en QvaPay y entra en <a href="https://www.qvapay.com/dev/tokens" target="_blank" rel="noopener">qvapay.com/dev/tokens</a>. Verás tus tokens (si ya tienes alguno) y el botón <strong>«Crear token»</strong>.</p>
+				<figure class="phone">
+					<img src="/img/guia/1-tokens.webp" width="590" height="880" alt="Página Tokens de API de QvaPay con el botón Crear token y la lista de tokens" loading="lazy" />
+					<figcaption>La página de tokens de QvaPay. El saldo y los datos de la cuenta están ocultos.</figcaption>
+				</figure>
+
+				<h2>Paso 2 · Ponle nombre y marca los cuatro primeros permisos</h2>
+				<p>Pulsa «Crear token». En <strong>Nombre</strong> escribe algo que lo identifique, por ejemplo <code>Terminal P2P</code>. Luego marca <strong>los cuatro primeros permisos</strong>:</p>
+				<figure class="phone">
+					<img src="/img/guia/2-formulario.webp" width="590" height="908" alt="Formulario de nuevo token con el nombre Terminal P2P y los permisos Lectura, Mercado P2P, Comprar en P2P y Vender en P2P marcados" loading="lazy" />
+					<figcaption>Lectura, Mercado P2P, Comprar en P2P y Vender en P2P, marcados.</figcaption>
+				</figure>
+				<div class="tbl text"><table>
+					<thead><tr><th>Permiso</th><th>Qué permite al terminal</th><th>¿Marcar?</th></tr></thead>
+					<tbody>
+						<tr><td><code>read</code> · Lectura</td><td>Saber qué cuenta eres y mostrar tu saldo. No mueve nada.</td><td class="yes">Sí</td></tr>
+						<tr><td><code>p2p:read</code> · Mercado P2P</td><td>Leer el libro de órdenes en vivo. Comprar y vender ya lo incluyen.</td><td class="yes">Sí</td></tr>
+						<tr><td><code>p2p:buy</code> · Comprar en P2P</td><td>Publicar ofertas de compra, tomar ventas, marcar pagado, chatear y calificar. Nunca bloquea tu saldo.</td><td class="yes">Si compras USD</td></tr>
+						<tr><td><code>p2p:sell</code> · Vender en P2P</td><td>Publicar ofertas de venta, tomar compras y liberar el pago. Bloquea tu saldo en el escrow de QvaPay mientras dura la operación.</td><td class="yes">Si vendes USD</td></tr>
+						<tr><td><code>store</code> · Tienda</td><td>El terminal no lo usa.</td><td class="no">No</td></tr>
+						<tr><td><code>transfer</code> · Transferir</td><td>Enviar saldo a otra cuenta. El terminal no lo usa.</td><td class="no">Nunca</td></tr>
+						<tr><td><code>withdraw</code> · Retirar</td><td>Sacar dinero de QvaPay. El permiso más peligroso; el terminal no lo usa.</td><td class="no">Nunca</td></tr>
+					</tbody>
+				</table></div>
+				<p class="note">¿Solo quieres mirar el mercado? Marca únicamente <code>read</code> y <code>p2p:read</code>: verás el libro en vivo, pero el token no podrá publicar ni tomar ofertas.</p>
+
+				<h2>Paso 3 · Deja sin marcar los tres de abajo, elige la caducidad y confirma</h2>
+				<p><strong>Tienda, Transferir y Retirar se quedan sin marcar.</strong> Así, aunque alguien consiguiera tu token, no podría sacar dinero de tu cuenta ni enviarlo a otra.</p>
+				<p>En <strong>Caduca</strong> elige el tiempo que quieras: 90 días es un buen equilibrio. Cuando caduque, creas otro en un minuto.</p>
+				<p>Como este token puede operar en el P2P, QvaPay te pide tu <strong>PIN o el código de tu app de autenticación</strong> (o te lo envía por correo con «Enviarme un PIN por correo»). Escríbelo y pulsa <strong>«Crear token»</strong>.</p>
+				<figure class="phone">
+					<img src="/img/guia/3-permisos-pin.webp" width="590" height="980" alt="Permisos Tienda, Transferir y Retirar sin marcar, caducidad de 90 días y campo para el PIN" loading="lazy" />
+					<figcaption>Tienda, Transferir y Retirar sin marcar; caducidad de 90 días; PIN.</figcaption>
+				</figure>
+
+				<h2>Paso 4 · Copia el token</h2>
+				<p>QvaPay te muestra el token <strong>una sola vez</strong>. Pulsa <strong>«Copiar»</strong>. Si lo pierdes, no pasa nada: revócalo y crea otro.</p>
+				<figure class="phone">
+					<img src="/img/guia/4-token-creado.webp" width="590" height="330" alt="Recuadro Copia tu token ahora con el token oculto y el botón Copiar" loading="lazy" />
+					<figcaption>El token, oculto en la captura. Es como una contraseña: no lo compartas con nadie.</figcaption>
+				</figure>
+
+				<h2>Paso 5 · Conéctalo en Terminal P2P</h2>
+				<p>Abre <a href="https://app.terminalp2p.com">app.terminalp2p.com</a> y pulsa <strong>«Conectar»</strong>, arriba a la derecha.</p>
+				<figure class="phone">
+					<img src="/img/guia/5-terminal-sin-conectar.webp" width="750" height="1060" alt="Terminal P2P en el móvil sin cuenta conectada, con el botón Conectar arriba a la derecha" loading="lazy" />
+					<figcaption>El terminal sin cuenta conectada: las tasas y lo completado ya se ven.</figcaption>
+				</figure>
+				<p>Pega el token en <strong>«Token de API»</strong> y pulsa <strong>«Conectar»</strong>. Si marcas <strong>«Recordar en este navegador»</strong>, no tendrás que pegarlo cada vez; si no, se borra al cerrar la pestaña.</p>
+				<figure class="phone">
+					<img src="/img/guia/6-conectar.webp" width="750" height="1370" alt="Ventana Conectar tu cuenta de QvaPay con el campo Token de API y la opción Recordar en este navegador" loading="lazy" />
+					<figcaption>La ventana de conectar del terminal.</figcaption>
+				</figure>
+
+				<h2>Listo: libro en vivo y tus operaciones</h2>
+				<p>Con la cuenta conectada ves el <strong>libro de órdenes en vivo</strong>, la profundidad y el indicador de intención, y en <strong>«Mis operaciones»</strong> publicas ofertas, tomas las del libro y sigues cada operación hasta liberar y calificar.</p>
+				<figure class="phone">
+					<img src="/img/guia/7-conectado-libro.webp" width="590" height="1278" alt="Terminal P2P con la cuenta conectada mostrando el libro de órdenes en vivo, con los nombres de usuario ocultos" loading="lazy" />
+					<figcaption>Cuenta conectada: el libro en vivo. Usuario, saldo y nombres ocultos en la captura.</figcaption>
+				</figure>
+				<figure class="phone">
+					<img src="/img/guia/8-mis-operaciones.webp" width="590" height="860" alt="Mis operaciones en Terminal P2P con el botón Publicar oferta" loading="lazy" />
+					<figcaption>Mis operaciones: desde aquí publicas y sigues tus operaciones.</figcaption>
+				</figure>
+
+				<h2>Tu token, seguro</h2>
+				<ul>
+					<li><strong>Solo vive en tu navegador.</strong> Terminal P2P no lo guarda en ningún servidor ni lo comparte con nadie.</li>
+					<li><strong>Sin transferir ni retirar,</strong> el token no puede sacar dinero de tu cuenta. Y el terminal pide confirmación antes de cada paso importante: tomar, marcar pagado, liberar o cancelar.</li>
+					<li><strong>Puedes cortarlo cuando quieras:</strong> el botón de desconectar del terminal lo borra de tu navegador, y en <a href="https://www.qvapay.com/dev/tokens" target="_blank" rel="noopener">qvapay.com/dev/tokens</a> lo revocas con «Revocar». Si cambias la contraseña de QvaPay, se revocan todos tus tokens.</li>
+					<li><strong>Nunca pegues el token de tu sesión de login</strong> ni le des a nadie tu contraseña. El terminal solo necesita este token con permisos limitados.</li>
+				</ul>
+
+				<h2>Si algo no funciona</h2>
+				<ul>
+					<li><strong>«QvaPay no deja leer el libro con tu cuenta»:</strong> a tu cuenta le falta algún requisito del P2P (identidad verificada, teléfono o Telegram vinculado). Complétalo en QvaPay y vuelve a conectar.</li>
+					<li><strong>«El token necesita el permiso read»:</strong> crea otro token marcando también Lectura.</li>
+					<li><strong>«Tu token no tiene permiso para esto»:</strong> falta <code>p2p:buy</code> o <code>p2p:sell</code> para la operación que intentas.</li>
+					<li><strong>Dejó de funcionar de repente:</strong> probablemente caducó o lo revocaste (o cambiaste la contraseña). Crea uno nuevo y conéctalo.</li>
+				</ul>
+				<p>¿Otra duda? Pregunta en el grupo de Telegram <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.</p>
+
+				<aside class="article-cta">
+					<h2>Conecta tu cuenta ahora</h2>
+					<p>Un minuto y tendrás el libro en vivo y todas tus operaciones en una pantalla.</p>
+					<div class="cta-row">
+						<a class="btn primary lg" href="https://app.terminalp2p.com">Abrir terminal</a>
+						<a class="btn lg" href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener"><span class="btn-stack">Crear cuenta en QvaPay<small>(usuario referido)</small></span></a>
+					</div>
+					<p class="tg-line"><a href="https://t.me/terminalp2p" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg><span>¿Preguntas o ideas? Únete al grupo de Telegram <b>@terminalp2p</b></span></a></p>
+				</aside>
+			</div>
+		</article>
+	</main>
+
+	<footer class="foot">
+		<div class="wrap foot-in">
+			<span>© 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a> · <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener">Licencia Apache 2.0</a> · <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a> · <a href="/blog/">Blog</a> · <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">Telegram</a></span>
+			<span>Proyecto independiente que usa la API pública de QvaPay.</span>
+		</div>
+	</footer>
+</body>
+</html>

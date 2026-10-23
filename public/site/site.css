@@ -346,6 +346,18 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .article-cta .cta-row { justify-content: center; margin-top: 22px; }
 .article-cta .btn:not(.primary) { color: var(--text); }
 
+/* Capturas de móvil en las guías */
+.prose figure.phone { margin: 24px 0 32px; }
+.prose figure.phone img { width: auto; max-width: min(320px, 100%); max-height: none; margin: 0 auto; border-radius: 20px; border: 1px solid var(--line-strong); box-shadow: var(--shadow); }
+.tbl td.yes { color: var(--bid); font-family: var(--sans); font-weight: 600; }
+.tbl td.no { color: var(--ask); font-family: var(--sans); font-weight: 600; }
+.tbl td code { white-space: nowrap; }
+.prose .tbl td { white-space: normal; font-family: var(--sans); font-size: 14px; }
+/* La tabla de permisos es texto: todo a la izquierda */
+.tbl.text th, .tbl.text td { text-align: left; vertical-align: top; }
+.prose .tbl td:first-child { min-width: 150px; }
+.post-card img.tall { height: 190px; object-fit: cover; object-position: top; }
+
 /* Gráficos y tablas de los artículos */
 .prose .chart-fig { margin: 28px 0; padding: 18px 18px 12px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
 .chart-fig .chart-title { margin: 0; text-align: left; font-size: 15px; font-weight: 650; color: var(--text); }
@@ -432,6 +444,14 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.article-cta { padding: 26px 18px; }
 	.article-cta .cta-row .btn { flex: 1 1 100%; }
 	.prose .chart-fig { padding: 14px 10px 10px; margin-left: -6px; margin-right: -6px; }
+	/* Tabla de permisos en tarjetas: permiso y respuesta arriba, explicación debajo */
+	.tbl.text { overflow: visible; }
+	.tbl.text thead { display: none; }
+	.tbl.text tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+	.tbl.text tr:last-child { border-bottom: 0; }
+	.tbl.text td { padding: 0; border: 0; min-width: 0 !important; }
+	.tbl.text td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; color: var(--text-2); font-size: 13.5px; }
+	.tbl.text td:nth-child(3) { grid-row: 1; grid-column: 2; text-align: right; white-space: nowrap; }
 	.tchart .ax { font-size: 21px; }
 	.tchart .end { font-size: 20px; }
 	/* Ilustración más corta: tres niveles por lado y sin el gráfico */
