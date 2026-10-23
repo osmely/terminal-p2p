@@ -280,6 +280,10 @@ button { cursor: pointer; }
 .insight-list li { position: relative; padding-left: 16px; font-size: 13px; color: var(--text-2); line-height: 1.55; }
 .insight-list li::before { content: ''; position: absolute; left: 0; top: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .insight-list li.warn::before { background: var(--warn); }
+.insight-list li.head { margin-top: 6px; padding-left: 0; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.insight-list li.head::before { display: none; }
+.insight-list li.head a { color: var(--accent); text-decoration: none; }
+.insight-list li.head:first-child { margin-top: 0; }
 .insight-list b { color: var(--text); font-family: var(--mono); font-weight: 600; }
 #activityPane { padding: 0; }
 .feed { list-style: none; margin: 0; padding: 0; }

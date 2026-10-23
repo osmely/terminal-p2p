@@ -342,15 +342,59 @@ function renderInsight(b, asks, bids) {
 	}
 	const ta = top(asks)
 	if (ta && ta.share > 0.3) out.push(`<li>@${esc(ta.user)} concentra el <b>${Math.round(ta.share * 100)}%</b> de la liquidez vendedora visible.</li>`)
-	const inf = state.informal?.last
-	const ref = m ?? (ask && bid ? (ask.price + bid.price) / 2 : null)
-	if (inf && ref && INFORMAL_MARKETS.has(b.coin.tick) && inf.usd && inf.usdt)
-		out.push(
-			`<li>En el mercado informal el USD está a <b>${fmtP(inf.usd)}</b> CUP y el USDT a <b>${fmtP(inf.usdt)}</b> (elTOQUE): aquí se cotiza a <b>${pct(ref / inf.usd - 1)}</b> del USD informal y a <b>${pct(ref / inf.usdt - 1)}</b> del USDT.</li>`,
-		)
 	const outliers = [...b.ask.levels, ...b.bid.levels].filter((l) => l.outlier).length
 	if (outliers) out.push(`<li><b>${outliers}</b> oferta(s) con precio atípico (probable error de tipeo), ocultas por defecto.</li>`)
+	const ref = m ?? (ask && bid ? (ask.price + bid.price) / 2 : (b.averages24h?.average ?? null))
+	out.push(...informalInsight(b.coin.tick, ref))
 	$('insight').innerHTML = out.length ? `<ul class="insight-list">${out.join('')}</ul>` : '<div class="empty">Sin observaciones destacables por ahora.</div>'
+}
+
+// Mercado informal según elTOQUE: cómo cotiza este mercado frente a él, la tendencia y la
+// relación entre divisas. Las tasas son de elTOQUE; aquí solo se comparan
+const INFORMAL_CURS = [
+	['usd', 'USD'],
+	['eur', 'EUR'],
+	['mlc', 'MLC'],
+	['usdt', 'USDT'],
+]
+function informalInsight(tick, ref) {
+	const inf = state.informal
+	const now = inf?.last
+	if (!now?.usd) return []
+	const out = [`<li class="head">Mercado informal · <a href="${esc(inf.url)}" target="_blank" rel="noopener">elTOQUE</a></li>`]
+	const ratio = (a, b) => (a > 0 && b > 0 ? a / b : null)
+
+	// Este mercado frente al informal
+	if (ref && INFORMAL_MARKETS.has(tick) && now.usdt)
+		out.push(`<li>Aquí se cotiza a <b>${pct(ref / now.usd - 1)}</b> del USD informal (<b>${fmtP(now.usd)}</b> CUP) y a <b>${pct(ref / now.usdt - 1)}</b> del USDT (<b>${fmtP(now.usdt)}</b> CUP).</li>`)
+	const usdMlc = ratio(now.usd, now.mlc)
+	if (ref && tick === 'BANK_MLC' && usdMlc)
+		out.push(`<li>En el informal 1 USD equivale a <b>${fmtP(usdMlc)}</b> MLC: aquí se cotiza a <b>${pct(ref / usdMlc - 1)}</b> de esa relación.</li>`)
+	const usdEur = ratio(now.usd, now.eur)
+	if (ref && tick === 'TROPIPAY' && usdEur)
+		out.push(`<li>En el informal 1 USD equivale a <b>${fmtP(usdEur)}</b> EUR: aquí se cotiza a <b>${pct(ref / usdEur - 1)}</b> de esa relación.</li>`)
+
+	// Tasas de hoy y tendencia: 7 y 30 días o, mientras no estén guardados, desde ayer
+	out.push(`<li>Hoy: ${INFORMAL_CURS.filter(([k]) => now[k] > 0).map(([k, l]) => `${l} <b>${fmtP(now[k])}</b>`).join(' · ')} CUP.</li>`)
+	const trend = (past, label) => {
+		const parts = INFORMAL_CURS.filter(([k]) => now[k] > 0 && past?.[k] > 0).map(([k, l]) => `${l} <b>${pct(now[k] / past[k] - 1)}</b>`)
+		return parts.length ? `${label}: ${parts.join(' · ')}` : null
+	}
+	const lines = [trend(inf.d7, 'En 7 días'), trend(inf.d30, 'en 30 días')].filter(Boolean)
+	if (!lines.length && inf.prev) lines.push(trend(inf.prev, 'Desde ayer'))
+	const fast = inf.d7?.usd > 0 && Math.abs(now.usd / inf.d7.usd - 1) >= 0.03
+	if (lines.length) out.push(`<li${fast ? ' class="warn"' : ''}>${lines.filter(Boolean).join('; ')}.${fast ? ` El USD se movió más de un 3% en una semana.` : ''}</li>`)
+
+	// El dólar digital frente al efectivo y la relación entre divisas
+	const digital = ratio(now.usdt, now.usd)
+	if (digital)
+		out.push(`<li>El USDT vale <b>${pct(digital - 1)}</b> ${digital >= 1 ? 'más' : 'menos'} que el USD en efectivo: el dólar digital cotiza ${digital >= 1 ? 'por encima' : 'por debajo'} del físico.</li>`)
+	const eurUsd = ratio(now.eur, now.usd)
+	if (eurUsd || usdMlc)
+		out.push(
+			`<li>${[eurUsd ? `1 EUR = <b>${fmtP(eurUsd)}</b> USD` : '', usdMlc ? `1 USD = <b>${fmtP(usdMlc)}</b> MLC (el MLC vale <b>${pct(1 / usdMlc - 1)}</b> frente al USD)` : ''].filter(Boolean).join(' y ')}.</li>`,
+		)
+	return out
 }
 
 function renderActivity(b) {

@@ -109,10 +109,13 @@ export function noonCuba(day: string) {
 	return noon - cubaOffset(noon + 5 * 3600_000)
 }
 
-// Lo último guardado: la tasa de hoy y la del día anterior, para la variación
-export async function latestInformal(db: D1) {
-	const rows = await informalSince(db, addDays(cubaDate(Date.now()), -7))
+// Lo último guardado y, para ver la tendencia, el día anterior y los de hace 7 y 30 días
+// (el día cerrado más reciente que no pase de esa fecha; null si aún no está guardado)
+export async function latestInformal(db: D1, now = Date.now()) {
+	const today = cubaDate(now)
+	const rows = await informalSince(db, addDays(today, -35))
 	const last = rows.at(-1) ?? null
-	const prev = rows.filter((r) => r.final && r.day !== last?.day).at(-1) ?? null
-	return { source: 'elTOQUE', url: 'https://eltoque.com/tasas-de-cambio-de-moneda-en-cuba-hoy', last, prev }
+	const closed = rows.filter((r) => r.final && r.day !== last?.day)
+	const upTo = (n: number) => closed.filter((r) => r.day <= addDays(last?.day ?? today, -n) && r.day >= addDays(last?.day ?? today, -n - 3)).at(-1) ?? null
+	return { source: 'elTOQUE', url: 'https://eltoque.com/tasas-de-cambio-de-moneda-en-cuba-hoy', last, prev: closed.at(-1) ?? null, d7: upTo(7), d30: upTo(30) }
 }
