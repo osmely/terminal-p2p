@@ -325,6 +325,14 @@ function renderDetail(t) {
 	const needSendDetails = !payer && !t.isOwner && status === 'processing'
 
 	let action = ''
+	// La oferta volvió a estar publicada y no es tuya: ya no participas en ella
+	if (status === 'open' && !t.isOwner) {
+		$('modalBody').innerHTML = `<div class="stack"><h3>Ya no participas en esta operación</h3>
+			<p class="muted">Se canceló y la oferta de @${esc(t.counterparty ?? '—')} volvió al mercado.</p>
+			<div class="row-btns"><button class="btn" id="gotIt">Cerrar</button></div></div>`
+		$('gotIt').onclick = closeModal
+		return
+	}
 	if (status === 'processing' && payer)
 		action = `<div class="stack">
 			<p>Transfiere <b>${fmtU(t.coinAmount)} ${unit}</b> y marca el pago con la referencia.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
@@ -504,7 +512,10 @@ function marketRefs(coin) {
 		const asks = filtered(b.ask.levels)
 		const bids = filtered(b.bid.levels)
 		const m = b.completed ? median(b.completed.offers) : null
-		return { refs: [['Mejor venta', asks[0]?.price], ['Mejor compra', bids[0]?.price], ['Mediana completadas', m]].filter(([, p]) => p), mid: m }
+		// Recién cargado el libro aún no hay operaciones completadas: la referencia es el promedio público
+		const o = state.overview.find((c) => c.tick === coin)
+		const avg = o?.avgSell && o?.avgBuy ? (o.avgSell + o.avgBuy) / 2 : (o?.avgSell ?? o?.avgBuy ?? null)
+		return { refs: [['Mejor venta', asks[0]?.price], ['Mejor compra', bids[0]?.price], ['Mediana completadas', m]].filter(([, p]) => p), mid: m ?? avg }
 	}
 	const o = state.overview.find((c) => c.tick === coin)
 	const refs = [['Venta media 24 h', o?.avgSell], ['Compra media 24 h', o?.avgBuy]].filter(([, p]) => p)

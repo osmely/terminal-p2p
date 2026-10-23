@@ -97,7 +97,7 @@ test('la contraparte deja tu oferta y vuelve al mercado', () => {
 	const reopened = { ...taken, status: 'open', counterparty: null, pause: { reason: 'taker_left' as const, until: null } }
 	const a = tradeAlerts(read([taken]), [], NOW, new Set(), [reopened])
 	assert.deepEqual(kinds(a), ['left'])
-	assert.match(a[0].body, /@otro canceló.*pausa/)
+	assert.match(a[0].body, /@otro canceló.*vuelve al mercado/)
 })
 
 test('una oferta fija tomada otra vez por otra persona vuelve a avisar', () => {
@@ -107,4 +107,14 @@ test('una oferta fija tomada otra vez por otra persona vuelve a avisar', () => {
 	const sent = new Set(first.map((x) => x.key))
 	const again = tradeAlerts(read([], [open]), [mine('luis')], NOW, sent)
 	assert.deepEqual([kinds(first), kinds(again)], [['taken'], ['taken']])
+})
+
+test('aviso de la contraparte que se fue aunque no se viera la operación en curso (pausa taker_left)', () => {
+	const open = trade({ id: 'o', offerUuid: 'o', role: 'owner', side: 'sell', payer: false, status: 'open', counterparty: null })
+	const paused = { ...open, pause: { reason: 'taker_left' as const, until: '2026-10-23T01:38:38Z' } }
+	const a = tradeAlerts(read([], [open]), [], NOW, new Set(), [paused])
+	assert.deepEqual(kinds(a), ['left'])
+	assert.match(a[0].body, /Quien la tomó canceló.*vuelve al mercado a las/)
+	// La misma pausa en la lectura siguiente no vuelve a avisar
+	assert.deepEqual(tradeAlerts(read([], [paused]), [], NOW, new Set(), [paused]), [])
 })

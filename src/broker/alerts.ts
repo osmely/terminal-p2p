@@ -85,13 +85,27 @@ export function tradeAlerts(
 			push(t, 'chat', `${t.id}:chat:${t.chat.lastId ?? t.chat.count}`, `Mensaje de ${who(t)}`, t.chat.lastText?.trim() || 'Te envió una imagen.')
 	}
 
-	// Una oferta tuya que estaba en curso y vuelve a estar publicada: la contraparte se fue
-	if (prev)
+	// Una oferta tuya que vuelve a estar publicada porque la contraparte se fue. Se detecta por la
+	// operación que estaba en curso o por la pausa automática de QvaPay (taker_left): esta última
+	// avisa también si la tomaron y la dejaron entre dos lecturas, sin llegar a verla en curso
+	if (prev) {
+		const wasPaused = new Map(prev.openOffers.map((o) => [o.id, o.pause]))
 		for (const o of nextOpen) {
 			const p = before.get(o.id)
-			if (p && ACTIVE.has(p.status))
-				push(o, 'left', `${deal(p)}:left`, 'La contraparte dejó tu oferta', `${who(p)} canceló o se le venció el plazo. Tu oferta vuelve al mercado${o.pause ? ' tras una pausa de unos minutos para que revises el precio' : ''}.`)
+			const wasActive = !!p && ACTIVE.has(p.status)
+			const pp = wasPaused.get(o.id)
+			const freshPause = o.pause?.reason === 'taker_left' && !(pp?.reason === 'taker_left' && pp.until === o.pause.until)
+			if (!wasActive && !freshPause) continue
+			const until = o.pause?.until ? new Date(o.pause.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) : null
+			push(
+				o,
+				'left',
+				`${o.id}:left:${o.pause?.until ?? (p ? deal(p) : '')}`,
+				'La contraparte dejó tu oferta',
+				`${p ? who(p) : 'Quien la tomó'} canceló o se le venció el plazo. ${until ? `Tu oferta vuelve al mercado a las ${until}: revisa el precio mientras tanto.` : 'Tu oferta vuelve al mercado.'}`,
+			)
 		}
+	}
 	return out
 }
 
