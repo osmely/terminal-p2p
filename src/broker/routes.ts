@@ -439,7 +439,10 @@ export function offerView(o: P2POffer, meUuid: string) {
 		isPrivate: !!o.private,
 		onlyVip: !!o.only_vip,
 		isOwner,
-		owner: o.User ? { username: o.User.username, ops: (o.User._count?.P2P ?? 0) + (o.User._count?.P2P_Peer ?? 0), rating: o.User.rating_count ? (o.User.rating_avg ?? null) : null } : null,
+		// El detalle de una oferta no siempre trae el conteo de operaciones: sin él, null (no un 0 falso)
+		owner: o.User
+			? { username: o.User.username, ops: o.User._count ? (o.User._count.P2P ?? 0) + (o.User._count.P2P_Peer ?? 0) : null, rating: o.User.rating_count ? (o.User.rating_avg ?? null) : null }
+			: null,
 		peer: o.Peer?.username ?? null,
 		details: isOwner ? paymentDetails(o.details) : [],
 		orders: isOwner

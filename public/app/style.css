@@ -325,7 +325,7 @@ button { cursor: pointer; }
 .kv span { color: var(--muted); }
 .kv b { font-family: var(--mono); word-break: break-all; }
 .copy { border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 500; }
-.chatbox { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px; }
+.chatbox { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; overscroll-behavior: contain; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px; }
 .msg { max-width: 82%; padding: 7px 10px; border-radius: 10px; font-size: 12.5px; background: var(--surface-3); align-self: flex-start; }
 .msg.mine { align-self: flex-end; background: var(--accent-bg); }
 .msg.mod { border: 1px solid var(--warn); }
@@ -357,6 +357,8 @@ details.opts { border: 1px solid var(--line); border-radius: var(--r-sm); paddin
 details.opts summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); }
 details.opts[open] summary { margin-bottom: 10px; }
 .lvl.mine { box-shadow: inset 2px 0 0 var(--accent); }
+.share .row-btns .input { flex: 1; min-width: 0; font: 12px var(--mono); }
+.share .row-btns .btn { flex: none; }
 .lvl .who .you { font: 700 10px var(--sans); color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 0 4px; margin-right: 4px; }
 
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 50; background: var(--surface); border: 1px solid var(--line-strong); padding: 10px 16px; border-radius: var(--r-sm); font-size: 13px; box-shadow: var(--shadow); }

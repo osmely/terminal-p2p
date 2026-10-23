@@ -261,9 +261,18 @@ async function refreshDetail() {
 	}
 	// Mientras cargaba se abrió otra operación (u otra orden de la misma oferta)
 	if (bk.detail !== d) return
-	// El refresco periódico no debe borrar lo que el usuario está escribiendo
+	// El refresco periódico no debe borrar lo que el usuario está escribiendo ni moverle el scroll:
+	// el chat sigue al final solo si ya estaba al final (si subió a leer, se queda donde estaba)
+	const cb0 = $('chatbox')
+	const chatAtEnd = !cb0 || bk.chatToEnd || cb0.scrollHeight - cb0.scrollTop - cb0.clientHeight < 40
+	bk.chatToEnd = false
+	const chatTop = cb0?.scrollTop ?? 0
+	const modalTop = $('modal').scrollTop
 	const keep = { txRef: $('txRef')?.value, chatInput: $('chatInput')?.value, seenMoney: $('seenMoney')?.checked }
 	renderDetail(t)
+	const cb = $('chatbox')
+	if (cb) cb.scrollTop = chatAtEnd ? cb.scrollHeight : chatTop
+	$('modal').scrollTop = modalTop
 	if (keep.txRef && $('txRef')) $('txRef').value = keep.txRef
 	if (keep.chatInput && $('chatInput')) $('chatInput').value = keep.chatInput
 	if (keep.seenMoney && $('seenMoney')) {
@@ -327,8 +336,6 @@ function renderDetail(t) {
 		<form class="chatform" id="chatform"><input class="input" id="chatInput" maxlength="599" placeholder="Escribe un mensaje…" /><button class="btn">Enviar</button></form></div>
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${t.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
 	</div>`
-	const cb = $('chatbox')
-	cb.scrollTop = cb.scrollHeight
 	tickClocks()
 	bindDetail(t)
 }
@@ -373,7 +380,11 @@ function bindDetail(t) {
 	$('chatform').onsubmit = (e) => {
 		e.preventDefault()
 		const text = $('chatInput').value.trim()
-		if (text) act('chat', { message: text })
+		if (!text) return
+		// Tras enviar, el chat baja para enseñar el mensaje aunque se estuviera leyendo más arriba
+		bk.chatToEnd = true
+		$('chatInput').value = ''
+		act('chat', { message: text })
 	}
 }
 
@@ -421,8 +432,13 @@ function bookRank(coin, type, price) {
 	const b = state.book?.coin?.tick === coin ? state.book : null
 	if (!b || !(price > 0)) return null
 	// Una venta compite con las ventas (gana la más barata); una compra con las compras (gana la más cara)
-	const levels = filtered(type === 'sell' ? b.ask.levels : b.bid.levels).filter((l) => l.user !== myUsername())
-	return levels.filter((l) => (type === 'sell' ? l.price < price : l.price > price)).length + 1
+	const side = type === 'sell' ? b.ask : b.bid
+	const levels = filtered(side.levels).filter((l) => l.user !== myUsername())
+	// Sin libro cargado todavía, o con un precio más allá de las ofertas que se leyeron, el puesto no se sabe
+	if (!levels.length) return null
+	const rank = levels.filter((l) => (type === 'sell' ? l.price < price : l.price > price)).length + 1
+	if (rank > levels.length && side.total > side.levels.length) return null
+	return rank
 }
 
 function priceWarning(type, price, mid) {
@@ -679,9 +695,14 @@ function renderManage(o) {
 		<div class="row-btns">
 			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? 'Volver a publicar' : 'Pausar'}</button><button class="btn danger" id="mgCancel">Cancelar oferta</button>` : ''}
 		</div>
+		${o.status === 'open' ? `<div class="share"><p class="hint">Enlace para que alguien la tome desde el terminal${o.isPrivate ? ' (útil en ofertas privadas)' : ''}</p><div class="row-btns"><input class="input" id="mgLink" readonly value="${location.origin}/#p2p/${o.offer}" /><button class="btn" id="mgCopy">Copiar enlace</button></div></div>` : ''}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${o.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
 	</div>`
 
+	$('mgCopy')?.addEventListener('click', () => {
+		navigator.clipboard?.writeText($('mgLink').value)
+		toast('Enlace copiado')
+	})
 	const refresh = () => showManageOffer(o.offer)
 	if (editable) {
 		const upd = () => {
@@ -746,7 +767,44 @@ function showTakeOffer(uuid, side) {
 	const l = findLevel(uuid, side)
 	if (!l) return
 	if (myUsername() && l.user === myUsername()) return showManageOffer(uuid)
-	const unit = state.book.coin.unit
+	renderTake(uuid, side, l, state.book.coin.tick)
+}
+
+// Una oferta por su enlace (#p2p/<uuid>): la carga aunque no esté entre las que muestra el libro
+async function showTakeOfferById(uuid) {
+	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para abrir la oferta', true)
+	openModal('<p class="muted">Cargando oferta…</p>')
+	let o
+	try {
+		o = await api(`/offer?offer=${encodeURIComponent(uuid)}`)
+	} catch (e) {
+		$('modalBody').innerHTML = `<p class="empty">${esc(e.message)}</p>`
+		return
+	}
+	if (o.isOwner) return renderManage(o)
+	if (o.status !== 'open' || o.pause) {
+		$('modalBody').innerHTML = `<div class="stack"><h3>Esta oferta ya no está disponible</h3><p class="muted">Está ${esc((STATUS[o.status] ?? o.status).toLowerCase())}${o.pause ? ' y pausada' : ''}.</p></div>`
+		return
+	}
+	const flex = o.kind === 'flexible'
+	const level = {
+		price: o.price,
+		usd: flex ? (o.available ?? o.usd) : o.usd,
+		kind: o.kind,
+		orderMin: o.orderMin,
+		orderMax: o.orderMax,
+		requirements: o.requirements,
+		vipOnly: o.onlyVip,
+		user: o.owner?.username ?? '—',
+		ops: o.owner?.ops ?? null,
+		rating: o.owner?.rating ?? null,
+		kyc: false,
+	}
+	renderTake(o.offer, o.type === 'sell' ? 'ask' : 'bid', level, o.coin)
+}
+
+function renderTake(uuid, side, l, coin) {
+	const unit = unitOf(coin)
 	// En una venta ajena compras USD (pagas tú); en una compra ajena vendes USD (te pagan)
 	const youBuy = side === 'ask'
 	const flex = l.kind === 'flexible'
@@ -755,7 +813,7 @@ function showTakeOffer(uuid, side) {
 	const req = reqText(l.requirements)
 	openModal(`<div class="stack">
 		<div><h3>${youBuy ? 'Comprar' : 'Vender'} USD a ${fmtP(l.price)} ${unit}</h3>
-			<p class="muted">${esc(nameOf(state.book.coin.tick))} · @${esc(l.user)} · ${l.ops} operaciones · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : 'sin valoraciones'}${l.kyc ? ' · KYC' : ''}</p></div>
+			<p class="muted">${esc(nameOf(coin))} · @${esc(l.user)}${l.ops != null ? ` · ${l.ops} operaciones` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ' · sin valoraciones' : ''}${l.kyc ? ' · KYC' : ''}</p></div>
 		<div class="kv">
 			<span>${youBuy ? 'Vende' : 'Compra'}</span><b>${fmtU(l.usd)} USD</b><span></span>
 			${flex ? `<span>Por orden</span><b>${min ? `${fmtU(min)}–${fmtU(max)}` : `hasta ${fmtU(max)}`} USD</b><span></span>` : ''}
@@ -937,8 +995,18 @@ function bindBroker() {
 		})
 }
 
+// Enlace directo a una oferta: app.terminalp2p.com/#p2p/<uuid>
+const OFFER_LINK = /^#p2p\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+function openOfferLink() {
+	const m = OFFER_LINK.exec(location.hash)
+	if (!m) return
+	history.replaceState(null, '', location.pathname + location.search) // que recargar no la vuelva a abrir
+	showTakeOfferById(m[1].toLowerCase())
+}
+window.addEventListener('hashchange', openOfferLink)
+
 bindBroker()
-loadAccount()
+loadAccount().then(openOfferLink)
 // Con la pestaña visible, cada 15 s. En segundo plano solo con los avisos activos
 // y algo que vigilar (operaciones en curso u ofertas publicadas), cada 30 s
 let tradeTicks = 0

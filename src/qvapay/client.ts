@@ -85,7 +85,9 @@ export class QvaPayClient {
 			bucket: 'general',
 			query: { order },
 		})
-		return res.chat
+		// QvaPay los devuelve del más nuevo al más antiguo: se ordenan cronológicamente para que
+		// el último del array sea el último mensaje (chat de abajo arriba, avisos de mensaje nuevo)
+		return [...(res.chat ?? [])].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || Number(a.id) - Number(b.id))
 	}
 
 	// Monedas y sus campos de pago (público)
