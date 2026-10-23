@@ -1,15 +1,19 @@
 // Entrada del Worker de Terminal P2P:
 //   · landing en terminalp2p.com (public/site) y terminal en app.terminalp2p.com (public/app)
 //   · relé sin estado hacia QvaPay (/qp/*)
-//   · histórico público de la tasa (/data/rates), alimentado por un cron
+//   · histórico público de la tasa (/data/rates), alimentado por un cron, con la
+//     referencia del mercado informal de elTOQUE (/data/informal)
 // Todo lo que depende de la cuenta del usuario corre en su navegador.
 
+import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 
 interface Env {
 	ASSETS: Fetcher
 	DB: D1Database
+	// Clave de la API de tasas de elTOQUE (secreto del Worker). Sin ella no hay referencia informal
+	ELTOQUE_TOKEN?: string
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -18,6 +22,7 @@ const SECURITY_HEADERS: Record<string, string> = {
 	'X-Frame-Options': 'DENY',
 }
 const RATES_TTL_S = 120
+const INFORMAL_TTL_S = 600
 // La landing reutiliza estos archivos del terminal en vez de duplicarlos
 const SHARED = ['/vendor/', '/favicon.svg', '/theme.js']
 
@@ -36,15 +41,22 @@ export default {
 
 		if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`)) return secure(await relay(req, url, ctx))
 		if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
+		if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 		return assets(req, url, env)
 	},
 
-	// Cada 10 minutos: guarda los agregados públicos de QvaPay
+	// Cada 10 minutos: guarda los agregados públicos de QvaPay y la tasa informal de elTOQUE
 	async scheduled(_event, env) {
 		try {
 			await collect(env.DB)
 		} catch (err) {
 			console.error(`histórico: ${(err as Error).message}`)
+		}
+		if (!env.ELTOQUE_TOKEN) return
+		try {
+			await syncInformal(env.DB, env.ELTOQUE_TOKEN)
+		} catch (err) {
+			console.error(`elTOQUE: ${(err as Error).message}`)
 		}
 	},
 } satisfies ExportedHandler<Env>
@@ -59,13 +71,26 @@ async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	const hit = await caches.default.match(key)
 	if (hit) return new Response(hit.body, hit)
 
-	const data = await query(env.DB, coin, days)
-	const empty = data.points.length === 0
+	const data = { ...(await query(env.DB, coin, days)), informal: await informalSince(env.DB, cubaDate(Date.now() - days * 86_400_000)) }
+	const empty = data.points.length === 0 && data.informal.length === 0
 	const res = new Response(JSON.stringify(data), {
 		headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': empty ? 'no-store' : `public, max-age=${RATES_TTL_S}` },
 	})
 	// Una respuesta vacía no se guarda: el primer punto debe verse en cuanto exista
 	if (!empty) ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
+}
+
+// La tasa informal más reciente (para la landing y la lectura del mercado), cacheada 10 minutos
+async function informal(url: URL, env: Env, ctx: ExecutionContext) {
+	const key = new Request(`${url.origin}/data/informal`)
+	const hit = await caches.default.match(key)
+	if (hit) return new Response(hit.body, hit)
+	const data = await latestInformal(env.DB)
+	const res = new Response(JSON.stringify(data), {
+		headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': data.last ? `public, max-age=${INFORMAL_TTL_S}` : 'no-store' },
+	})
+	if (data.last) ctx.waitUntil(caches.default.put(key, res.clone()))
 	return res
 }
 

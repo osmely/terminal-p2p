@@ -27,7 +27,11 @@ const state = {
 	book: null,
 	history: [],
 	overview: [],
+	informal: null,
 }
+
+// Mercados en CUP por USD de QvaPay, comparables con el USD y el USDT del mercado informal
+const INFORMAL_MARKETS = new Set(['BANK_CUP', 'CUPCASH', 'BOLSATM'])
 
 // ── Formato ───────────────────────────────────────────────────────────
 const decimals = (p) => (p >= 100 ? 2 : 4)
@@ -101,6 +105,16 @@ async function loadHistory() {
 		if (!r.ok) throw new Error(String(r.status))
 		state.history = await r.json()
 		if (state.chart === 'history') drawHistory()
+	} catch {}
+}
+
+// Tasa del mercado informal de hoy según elTOQUE (la guarda el servidor, es pública)
+async function loadInformal() {
+	try {
+		const r = await fetch('/data/informal')
+		if (!r.ok) throw new Error(String(r.status))
+		state.informal = await r.json()
+		if (state.book) render()
 	} catch {}
 }
 
@@ -328,6 +342,12 @@ function renderInsight(b, asks, bids) {
 	}
 	const ta = top(asks)
 	if (ta && ta.share > 0.3) out.push(`<li>@${esc(ta.user)} concentra el <b>${Math.round(ta.share * 100)}%</b> de la liquidez vendedora visible.</li>`)
+	const inf = state.informal?.last
+	const ref = m ?? (ask && bid ? (ask.price + bid.price) / 2 : null)
+	if (inf && ref && INFORMAL_MARKETS.has(b.coin.tick) && inf.usd && inf.usdt)
+		out.push(
+			`<li>En el mercado informal el USD está a <b>${fmtP(inf.usd)}</b> CUP y el USDT a <b>${fmtP(inf.usdt)}</b> (elTOQUE): aquí se cotiza a <b>${pct(ref / inf.usd - 1)}</b> del USD informal y a <b>${pct(ref / inf.usdt - 1)}</b> del USDT.</li>`,
+		)
 	const outliers = [...b.ask.levels, ...b.bid.levels].filter((l) => l.outlier).length
 	if (outliers) out.push(`<li><b>${outliers}</b> oferta(s) con precio atípico (probable error de tipeo), ocultas por defecto.</li>`)
 	$('insight').innerHTML = out.length ? `<ul class="insight-list">${out.join('')}</ul>` : '<div class="empty">Sin observaciones destacables por ahora.</div>'
@@ -500,18 +520,29 @@ let historyChart = null
 let bidSeries = null
 let askSeries = null
 let opsSeries = null
+let usdSeries = null
+let usdtSeries = null
 const DAY_MS = 86_400_000
 const shortDay = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'America/Havana' })
 
-// Leyenda de las barras: el día bajo el cursor o, si no, el último día completo
-function opsLegend(day) {
+const showInformal = () => INFORMAL_MARKETS.has(state.coin) && (state.history?.informal?.length ?? 0) > 0
+
+// Leyenda: operaciones y tasa informal del día bajo el cursor o, si no, del último día
+function opsLegend(ms) {
 	const el = $('opsLegend')
 	const daily = state.history?.daily ?? []
-	const d = day ?? daily.filter((x) => !x.partial).at(-1) ?? daily.at(-1)
-	el.hidden = !d || state.chart !== 'history'
-	if (!d) return
-	const split = d.buy != null && d.sell != null ? ` · ${d.buy.toLocaleString('es')} compras · ${d.sell.toLocaleString('es')} ventas` : ''
-	el.innerHTML = `<b>${d.ops.toLocaleString('es')}</b> operaciones ${d.partial ? 'en las últimas 24 h' : `el ${shortDay(d.t)}`}${split}`
+	const informal = showInformal() ? state.history.informal : []
+	const near = (xs) => (ms == null ? null : xs.find((x) => Math.abs(x.t - ms) < DAY_MS / 2))
+	const d = ms == null ? (daily.filter((x) => !x.partial).at(-1) ?? daily.at(-1)) : near(daily)
+	const i = ms == null ? informal.at(-1) : near(informal)
+	const parts = []
+	if (d) {
+		const split = d.buy != null && d.sell != null ? ` · ${d.buy.toLocaleString('es')} compras · ${d.sell.toLocaleString('es')} ventas` : ''
+		parts.push(`<b>${d.ops.toLocaleString('es')}</b> operaciones ${d.partial ? 'en las últimas 24 h' : `el ${shortDay(d.t)}`}${split}`)
+	}
+	if (i && (i.usd || i.usdt)) parts.push(`informal ${i.final ? `el ${shortDay(i.t)}` : 'hoy'}: USD <b>${fmtP(i.usd)}</b> · USDT <b>${fmtP(i.usdt)}</b>`)
+	el.hidden = !parts.length || state.chart !== 'history'
+	el.innerHTML = parts.join(' · ')
 }
 function drawHistory() {
 	const el = $('history')
@@ -523,19 +554,19 @@ function drawHistory() {
 			grid: { vertLines: { color: css('--line') }, horzLines: { color: css('--line') } },
 			rightPriceScale: { borderColor: css('--line') },
 			timeScale: { borderColor: css('--line'), timeVisible: true, secondsVisible: false },
-			localization: { locale: 'es', priceFormatter: fmtP },
+			// La franja de las barras amplía la escala hacia abajo: sin etiquetas de precios negativos
+			localization: { locale: 'es', priceFormatter: (p) => (p < 0 ? '' : fmtP(p)) },
 		})
 		bidSeries = historyChart.addLineSeries({ color: css('--bid'), lineWidth: 2, title: 'compra' })
 		askSeries = historyChart.addLineSeries({ color: css('--ask'), lineWidth: 2, title: 'venta' })
 		// Operaciones por día: barras en una escala propia, en la franja de abajo
 		opsSeries = historyChart.addHistogramSeries({ priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
+		// Referencia del mercado informal (elTOQUE): una mediana por día, en líneas discontinuas
+		usdSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USD informal' })
+		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT' })
 		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.74, bottom: 0 } })
 		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.3 } })
-		historyChart.subscribeCrosshairMove((p) => {
-			if (!p.time) return opsLegend()
-			const ms = (p.time - (-new Date().getTimezoneOffset() * 60)) * 1000
-			opsLegend((state.history?.daily ?? []).find((d) => Math.abs(d.t - ms) < DAY_MS / 2))
-		})
+		historyChart.subscribeCrosshairMove((p) => opsLegend(p.time ? (p.time - -new Date().getTimezoneOffset() * 60) * 1000 : null))
 	}
 	themeHistory()
 	const tz = -new Date().getTimezoneOffset() * 60
@@ -547,14 +578,23 @@ function drawHistory() {
 	opsSeries.setData(
 		(state.history?.daily ?? []).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d.ops, color: `${accent}${d.partial ? '40' : '80'}` })),
 	)
+	const informal = showInformal() ? state.history.informal : []
+	const ref = (key) => informal.filter((d) => d[key] != null).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d[key] }))
+	usdSeries.setData(ref('usd'))
+	usdtSeries.setData(ref('usdt'))
 	opsLegend()
 	historyChart.timeScale().fitContent()
 	const first = state.history?.firstPoint
 	const step = { 600000: 'cada 10 min', 3600000: 'por hora', 86400000: 'por día' }[state.history?.bucketMs] ?? ''
+	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
 	$('chartNote').textContent = first
-		? `Mediana de lo completado (24 h), ${step} · barras: operaciones por día · desde ${new Date(first).toLocaleDateString('es')}`
-		: 'Se registra cada 10 minutos: vuelve en un rato'
-	$('chartNote').title = 'Líneas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.'
+		? `Mediana de lo completado (24 h), ${step} · barras: operaciones por día${src} · QvaPay desde ${new Date(first).toLocaleDateString('es')}`
+		: informal.length
+			? `Mercado informal según elTOQUE, por día · QvaPay se registra cada 10 minutos`
+			: 'Se registra cada 10 minutos: vuelve en un rato'
+	$('chartNote').title =
+		'Líneas continuas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.' +
+		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
 }
 
 // Los colores del gráfico histórico siguen al tema claro u oscuro
@@ -568,6 +608,8 @@ function themeHistory() {
 	})
 	bidSeries.applyOptions({ color: css('--bid') })
 	askSeries.applyOptions({ color: css('--ask') })
+	usdSeries.applyOptions({ color: css('--warn') })
+	usdtSeries.applyOptions({ color: css('--accent') })
 }
 
 function drawActive() {
@@ -750,6 +792,8 @@ function every(ms, fn) {
 every(5000, loadBook)
 every(15_000, loadOverview)
 every(60_000, loadHistory)
+loadInformal()
+every(600_000, loadInformal)
 document.addEventListener('visibilitychange', () => {
 	if (document.hidden) return
 	loadBook()

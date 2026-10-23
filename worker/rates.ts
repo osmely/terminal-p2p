@@ -74,7 +74,8 @@ export async function collect(db: D1, now = Date.now()) {
 	return rows.length
 }
 
-export const RANGES = [7, 30, 365] as const
+// 3650 = todo lo guardado (la referencia de elTOQUE llega hasta 2020)
+export const RANGES = [7, 30, 365, 3650] as const
 
 // Agregación según el rango: 10 min (7 días), 1 h (30 días), 1 día (1 año)
 export function bucketFor(days: number) {

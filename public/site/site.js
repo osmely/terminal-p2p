@@ -42,6 +42,30 @@ async function loadRates() {
 	}
 }
 
+// Mercado informal según elTOQUE: lo guarda el servidor una vez por día de Cuba (y hoy, cada 10 min)
+const INFORMAL = [
+	['usd', 'USD'],
+	['eur', 'EUR'],
+	['mlc', 'MLC'],
+	['usdt', 'USDT'],
+]
+async function loadInformal() {
+	try {
+		const r = await fetch('/data/informal', { headers: { Accept: 'application/json' } })
+		if (!r.ok) throw new Error(String(r.status))
+		const { last, prev } = await r.json()
+		if (!last) return
+		const cells = INFORMAL.filter(([k]) => last[k] > 0).map(([k, label]) => {
+			const d = prev?.[k] > 0 ? last[k] / prev[k] - 1 : 0
+			const chg = Math.abs(d) >= 0.0005 ? `<i class="${d > 0 ? 'up' : 'down'}" title="Respecto al día anterior">${d > 0 ? '+' : ''}${(d * 100).toFixed(1)}%</i>` : ''
+			return `<div class="inf"><span>${label}</span>${chg}<b>${fmt(last[k])}</b></div>`
+		})
+		if (!cells.length) return
+		$('infRow').innerHTML = cells.join('')
+		$('informal').hidden = false
+	} catch {}
+}
+
 $('themeBtn').addEventListener('click', () => {
 	const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
 	document.documentElement.dataset.theme = next
@@ -71,3 +95,4 @@ if ($('rates')) {
 	// Solo con la pestaña visible; el relé las cachea 60 s en el borde
 	setInterval(() => !document.hidden && loadRates(), 60_000)
 }
+if ($('informal')) loadInformal()

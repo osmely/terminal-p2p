@@ -24,6 +24,8 @@
 		{ "binding": "DB", "database_name": "terminal-p2p", "database_id": "<id de tu base D1>" }
 	],
 	"triggers": { "crons": ["*/10 * * * *"] },
+	// Opcional: la referencia del mercado informal de elTOQUE necesita su clave como secreto
+	// (npx wrangler secret put ELTOQUE_TOKEN). Sin ella, el cron solo guarda lo de QvaPay
 
 	"routes": [
 		{ "pattern": "example.com", "custom_domain": true },

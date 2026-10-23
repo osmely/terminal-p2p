@@ -252,6 +252,18 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .foot-in { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .foot a { color: var(--text-2); }
 
+.informal { margin-top: 32px; }
+.informal h3 { font-size: 16px; font-weight: 650; }
+.informal h3 small { margin-left: 8px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.inf-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.inf { display: flex; align-items: baseline; gap: 8px; padding: 12px 16px; border-radius: var(--r-sm); background: var(--bg); border: 1px solid var(--line); }
+.inf span { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.inf b { margin-left: auto; font: 600 16px var(--mono); font-variant-numeric: tabular-nums; }
+.inf i { font-style: normal; font-size: 12px; font-family: var(--mono); }
+.inf i.up { color: var(--bid); }
+.inf i.down { color: var(--ask); }
+.informal .src a { color: var(--accent); font-weight: 600; text-decoration: none; }
+
 /* ══ Blog ═════════════════════════════════════════════════════════════ */
 .blog-head { padding: 72px 0 8px; }
 .blog-head h1 { font-size: clamp(34px, 4.6vw, 50px); font-weight: 800; letter-spacing: -0.035em; }
@@ -317,6 +329,9 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.sec-head { flex-direction: column; align-items: flex-start; }
 	.features, .steps, .checks { grid-template-columns: 1fr; }
 	.rates { grid-template-columns: 1fr 1fr; gap: 10px; }
+	.inf-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+	.inf { padding: 10px 12px; }
+	.informal h3 small { display: block; margin: 2px 0 0; }
 	.rate { padding: 14px; }
 	.rate .px { font-size: 13.5px; gap: 2px 8px; }
 	.mock-head b { font-size: 12.5px; }
