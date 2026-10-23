@@ -19,6 +19,8 @@
 	--accent-bg: rgba(91, 140, 255, 0.14);
 	--shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
 	--glow: rgba(91, 140, 255, 0.18);
+	--s-usd: #b8841f;
+	--s-usdt: #5b8cff;
 	color-scheme: dark;
 }
 
@@ -41,6 +43,8 @@
 	--accent-bg: rgba(47, 107, 255, 0.1);
 	--shadow: 0 24px 60px rgba(16, 24, 40, 0.14);
 	--glow: rgba(47, 107, 255, 0.12);
+	--s-usd: #b7791f;
+	--s-usdt: #2f6bff;
 	color-scheme: light;
 }
 
@@ -279,6 +283,9 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .post-card .link-arrow { display: inline-block; margin-top: 14px; }
 
 .article { padding: 64px 0 88px; }
+/* Sin imagen principal, el texto empieza justo debajo */
+.article:not(:has(.article-hero)) { padding-bottom: 0; }
+.article:not(:has(.article-hero)) + .prose > h2:first-child { margin-top: 36px; }
 .crumbs { font-size: 13.5px; color: var(--muted); }
 .crumbs a { color: var(--accent); text-decoration: none; font-weight: 600; }
 .crumbs a:hover { text-decoration: underline; }
@@ -307,6 +314,40 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .article-cta p { margin-top: 8px; color: var(--text-2); }
 .article-cta .cta-row { justify-content: center; margin-top: 22px; }
 .article-cta .btn:not(.primary) { color: var(--text); }
+
+/* Gráficos y tablas de los artículos */
+.prose .chart-fig { margin: 28px 0; padding: 18px 18px 12px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
+.chart-fig .chart-title { margin: 0; text-align: left; font-size: 15px; font-weight: 650; color: var(--text); }
+.chart-fig .legend { display: flex; gap: 18px; margin: 8px 0 4px; font-size: 13px; color: var(--text-2); }
+.chart-fig .legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
+.sw.usd { background: var(--s-usd); }
+.sw.usdt { background: var(--s-usdt); }
+.tchart { display: block; width: 100%; height: auto; overflow: visible; }
+.tchart .grid { stroke: var(--line); stroke-width: 1; }
+.tchart .ax { font: 11.5px var(--mono); fill: var(--muted); }
+.tchart .end { font: 600 12px var(--mono); fill: var(--text-2); }
+.tchart .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.tchart .ln.usd { stroke: var(--s-usd); }
+.tchart .ln.usdt { stroke: var(--s-usdt); }
+.tchart .pt { stroke: var(--surface); stroke-width: 2; }
+.tchart .pt.usd { fill: var(--s-usd); }
+.tchart .pt.usdt { fill: var(--s-usdt); }
+.tchart .hit { fill: transparent; cursor: crosshair; }
+.tchart .hit:hover { fill: color-mix(in srgb, var(--text) 18%, transparent); }
+.prose .chart-fig > figcaption:last-child { margin-top: 6px; text-align: left; }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.tbl table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tbl th, .tbl td { padding: 8px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+.tbl th:first-child, .tbl td:first-child { text-align: left; }
+.tbl th { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--surface); }
+.tbl td { font-family: var(--mono); font-size: 13.5px; color: var(--text); }
+.tbl td:first-child { font-family: var(--sans); color: var(--text-2); }
+.tbl tr:last-child td { border-bottom: 0; }
+.prose details.data { border: 0; }
+.prose details.data summary { display: inline-block; padding: 0 22px 0 0; color: var(--accent); font-size: 15px; }
+.prose details.data summary::after { right: 0; font-size: 18px; color: var(--accent); }
+.prose details.data .tbl { max-height: 340px; overflow-y: auto; margin-top: 10px; }
 
 /* ══ Responsive ═══════════════════════════════════════════════════════ */
 @media (max-width: 980px) {
@@ -348,6 +389,9 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.prose h2 { margin-top: 40px; font-size: 22px; }
 	.article-cta { padding: 26px 18px; }
 	.article-cta .cta-row .btn { flex: 1 1 100%; }
+	.prose .chart-fig { padding: 14px 10px 10px; margin-left: -6px; margin-right: -6px; }
+	.tchart .ax { font-size: 21px; }
+	.tchart .end { font-size: 20px; }
 	/* Ilustración más corta: tres niveles por lado y sin el gráfico */
 	.mock-book.asks .mrow:nth-child(-n+2), .mock-book.bids .mrow:nth-child(n+4), .mock-depth { display: none; }
 	/* Tasas como lista: una fila por moneda, venta y compra a la derecha */
