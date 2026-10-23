@@ -266,6 +266,46 @@ function renderStats(b, asks, bids) {
 	$('stats').innerHTML = items
 		.map(([k, v, cls]) => `<div class="stat"><label>${k}</label><b class="${cls === 'warn' ? '' : cls}">${cls === 'warn' ? `<span class="badge warn">${v}</span>` : v}</b></div>`)
 		.join('')
+	renderIntent(mid ? within(bids, 'bid') : 0, mid ? within(asks, 'ask') : 0, mid, doneMedian)
+}
+
+// Intención del mercado (0 = más venden, 100 = más compran): un 70% sale de la profundidad a ±2%
+// del medio (USD que se quieren comprar frente a los que se quieren vender) y un 30% de dónde está
+// el medio respecto a lo completado (±2% llena la escala). Sin libro en vivo no se calcula
+function intentScore(bidUsd, askUsd, mid, doneMedian) {
+	if (!(bidUsd + askUsd > 0)) return null
+	const depth = bidUsd / (bidUsd + askUsd)
+	const drift = mid && doneMedian ? Math.max(-1, Math.min(1, (mid / doneMedian - 1) / 0.02)) : 0
+	return { score: Math.round((0.7 * depth + 0.3 * (drift + 1) / 2) * 100), depth, drift: mid && doneMedian ? mid / doneMedian - 1 : null }
+}
+function renderIntent(bidUsd, askUsd, mid, doneMedian) {
+	const el = $('intent')
+	const r = intentScore(bidUsd, askUsd, mid, doneMedian)
+	const s = r?.score ?? 50
+	const [label, cls] = !r ? ['—', ''] : s >= 60 ? ['Más compran', 'bid'] : s <= 40 ? ['Más venden', 'ask'] : ['Equilibrio', '']
+	// Semicírculo de 180°: la aguja va de la izquierda (0) a la derecha (100)
+	const a = Math.PI * (1 - s / 100)
+	const nx = (23 + 15 * Math.cos(a)).toFixed(1)
+	const ny = (23 - 15 * Math.sin(a)).toFixed(1)
+	const arc = (from, to) => {
+		const p = (t) => [(23 + 19 * Math.cos(Math.PI * (1 - t))).toFixed(1), (23 - 19 * Math.sin(Math.PI * (1 - t))).toFixed(1)]
+		const [x1, y1] = p(from)
+		const [x2, y2] = p(to)
+		return `M${x1} ${y1} A19 19 0 0 1 ${x2} ${y2}`
+	}
+	el.classList.toggle('off', !r)
+	el.dataset.side = cls
+	el.setAttribute('aria-label', r ? `Intención del mercado: ${label}, ${s} de 100` : 'Intención del mercado: sin libro en vivo')
+	el.innerHTML = `<label>Intención</label><div class="intent-body">
+		<svg class="gauge" viewBox="0 0 46 27" width="46" height="27" aria-hidden="true">
+			<path class="g-ask" d="${arc(0, 0.39)}"/><path class="g-mid" d="${arc(0.41, 0.59)}"/><path class="g-bid" d="${arc(0.61, 1)}"/>
+			<line class="g-needle" x1="23" y1="23" x2="${nx}" y2="${ny}"/><circle class="g-hub" cx="23" cy="23" r="2.6"/>
+		</svg></div>`
+	el.title = r
+		? `Intención del mercado: ${s} de 100 (0 = más venden, 100 = más compran).\n` +
+			`· Profundidad a ±2% del medio: ${fmtU(bidUsd)} USD a la compra frente a ${fmtU(askUsd)} a la venta (${Math.round(r.depth * 100)}% compra). Pesa un 70%.\n` +
+			(r.drift != null ? `· El medio está a ${pct(r.drift)} de la mediana de lo completado. Pesa un 30%.` : '· Sin mediana de lo completado para comparar el precio.')
+		: 'La intención del mercado se calcula con el libro en vivo: conecta tu cuenta de QvaPay.'
 }
 
 function levelRow(l, side, cum, maxCum) {

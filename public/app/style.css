@@ -185,6 +185,25 @@ button { cursor: pointer; }
 .stat b { font: 600 14.5px var(--mono); font-variant-numeric: tabular-nums; }
 .stat b.ask { color: var(--ask); }
 .stat b.bid { color: var(--bid); }
+.tg-icon { color: #229ed9; }
+:root:not([data-theme='light']) .tg-icon { color: #2aabee; }
+.intent { display: flex; flex-direction: column; gap: 3px; margin-left: -4px; cursor: help; }
+.intent label { font-size: 11px; color: var(--muted); font-weight: 500; }
+.intent-body { display: flex; align-items: center; gap: 8px; }
+.gauge { display: block; flex: none; overflow: visible; }
+.gauge path { fill: none; stroke-width: 5; stroke-linecap: round; }
+.gauge .g-ask { stroke: var(--ask); opacity: 0.75; }
+.gauge .g-mid { stroke: var(--line-strong); }
+.gauge .g-bid { stroke: var(--bid); opacity: 0.75; }
+.gauge .g-needle { stroke: var(--text); stroke-width: 2; stroke-linecap: round; transition: all 0.4s ease; }
+.gauge .g-hub { fill: var(--text); }
+/* La aguja toma el color de la zona: rojo si más venden, verde si más compran */
+.intent[data-side='ask'] .g-needle { stroke: var(--ask); }
+.intent[data-side='ask'] .g-hub { fill: var(--ask); }
+.intent[data-side='bid'] .g-needle { stroke: var(--bid); }
+.intent[data-side='bid'] .g-hub { fill: var(--bid); }
+.intent.off .gauge path { stroke: var(--line-strong); opacity: 1; }
+.intent.off .g-needle, .intent.off .g-hub { display: none; }
 
 /* ══ Rejilla principal ════════════════════════════════════════════════ */
 .layout {
@@ -413,6 +432,10 @@ a.icon-btn { text-decoration: none; }
 	.stat label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.stat b { font-size: 13px; }
 	.stat:nth-child(4) { display: none; } /* "Medio": seis datos caben en dos filas */
+	/* La intención va junto al par, arriba a la derecha, y las cifras debajo */
+	.ticker-pair { order: 0; flex: 1 1 0; min-width: 0; }
+	.intent { order: 1; align-self: center; margin-left: 0; align-items: center; }
+	.ticker-stats { order: 2; }
 
 	/* Una sección a la vez, elegida en las pestañas */
 	.view-tabs { display: flex; }

@@ -20,6 +20,8 @@
 	--shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
 	--glow: rgba(91, 140, 255, 0.18);
 	--s-usd: #b8841f;
+	--tg: #2aabee;
+	--tg-strong: #1a7fc0;
 	--s-usdt: #5b8cff;
 	color-scheme: dark;
 }
@@ -44,6 +46,8 @@
 	--shadow: 0 24px 60px rgba(16, 24, 40, 0.14);
 	--glow: rgba(47, 107, 255, 0.12);
 	--s-usd: #b7791f;
+	--tg: #229ed9;
+	--tg-strong: #1a7fc0;
 	--s-usdt: #2f6bff;
 	color-scheme: light;
 }
@@ -268,6 +272,33 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .inf i.down { color: var(--ask); }
 .informal .src a { color: var(--accent); font-weight: 600; text-decoration: none; }
 
+/* ══ Telegram ═════════════════════════════════════════════════════════ */
+.tg-icon { color: var(--tg); }
+.tg-icon:hover { color: #fff; background: var(--tg-strong); border-color: var(--tg-strong); }
+.btn.tg { background: var(--tg-strong); border-color: var(--tg-strong); color: #fff; }
+.btn.tg:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.tg-chip { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; padding: 7px 14px 7px 10px; border-radius: 999px; font-size: 14px; font-weight: 500; text-decoration: none; color: var(--text); background: color-mix(in srgb, var(--tg) 14%, transparent); border: 1px solid color-mix(in srgb, var(--tg) 40%, transparent); transition: background 0.15s; }
+.tg-chip svg { color: var(--tg); }
+.tg-chip b { color: var(--tg); font-weight: 650; }
+.tg-chip:hover { background: color-mix(in srgb, var(--tg) 24%, transparent); }
+.tg-band { padding: 56px 0 8px; }
+.tg-card {
+	display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 24px; padding: 28px 32px; border-radius: 20px; text-decoration: none; color: var(--text);
+	background: radial-gradient(70% 140% at 0% 0%, color-mix(in srgb, var(--tg) 26%, transparent), transparent 70%), var(--surface);
+	border: 1px solid color-mix(in srgb, var(--tg) 45%, var(--line)); box-shadow: 0 18px 50px color-mix(in srgb, var(--tg) 14%, transparent); transition: transform 0.2s, box-shadow 0.2s;
+}
+.tg-card:hover { transform: translateY(-2px); box-shadow: 0 22px 60px color-mix(in srgb, var(--tg) 22%, transparent); }
+.tg-logo { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--tg); color: #fff; }
+.tg-logo svg { margin-left: -3px; }
+.tg-copy { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tg-title { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; }
+.tg-text { color: var(--text-2); font-size: 15.5px; }
+.tg-line { margin-top: 18px; }
+.tg-line a { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); text-decoration: none; font-size: 14.5px; }
+.tg-line a svg { color: var(--tg); flex: none; }
+.tg-line a b { color: var(--tg); font-family: var(--sans); }
+.tg-line a:hover span { text-decoration: underline; }
+
 /* ══ Blog ═════════════════════════════════════════════════════════════ */
 .blog-head { padding: 72px 0 8px; }
 .blog-head h1 { font-size: clamp(34px, 4.6vw, 50px); font-weight: 800; letter-spacing: -0.035em; }
@@ -363,7 +394,10 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.wrap, .narrow { width: calc(100% - 32px); }
 	.nav-in { height: 58px; gap: 12px; }
 	.hide-sm { display: none; }
-	.nav-actions .btn { padding: 8px 12px; font-size: 13.5px; }
+	.nav-actions { gap: 6px; }
+	.nav-actions .btn { padding: 8px 10px; font-size: 13.5px; }
+	.nav-actions .icon-btn { width: 34px; height: 34px; }
+	.brand { white-space: nowrap; gap: 8px; font-size: 15px; }
 	.lead { font-size: 16.5px; }
 	.cta-row .btn { flex: 1; }
 	.sec, .final { padding: 64px 0; }
@@ -377,6 +411,14 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.rate .px { font-size: 13.5px; gap: 2px 8px; }
 	.mock-head b { font-size: 12.5px; }
 	.final-in { padding: 40px 20px; }
+	.tg-band { padding-top: 40px; }
+	.tg-card { grid-template-columns: auto 1fr; gap: 14px 16px; padding: 20px; }
+	.tg-logo { width: 48px; height: 48px; }
+	.tg-logo svg { width: 26px; height: 26px; }
+	.tg-title { font-size: 18px; }
+	.tg-text { font-size: 14.5px; }
+	.tg-card .btn.tg { grid-column: 1 / -1; width: 100%; }
+	.tg-chip { font-size: 13.5px; }
 	/* Blog */
 	.blog-head { padding-top: 48px; }
 	.posts { padding: 24px 0 64px; }
