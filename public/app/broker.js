@@ -134,6 +134,7 @@ function showConnect() {
 	openModal(`<div class="stack">
 		<h3>Conectar tu cuenta de QvaPay</h3>
 		<p class="muted">Operas con tu propia cuenta: el dinero sigue en el escrow de QvaPay, nunca pasa por aquí.</p>
+		<p class="ref-note">¿Aún no tienes cuenta? <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crea una en QvaPay</a> <small>(usuario referido)</small></p>
 		<div class="notice">
 			Crea un token en <b>qvapay.com/dev/tokens</b> con estos permisos:
 			<ul><li><b>read</b> (para ver tu usuario y saldo)</li><li><b>p2p:buy</b> para comprar USD</li><li><b>p2p:sell</b> solo si también vas a vender</li></ul>

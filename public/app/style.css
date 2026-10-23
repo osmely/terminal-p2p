@@ -321,6 +321,11 @@ button { cursor: pointer; }
 .row-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .row-btns .btn { flex: 1; }
 .hint { font-size: 12.5px; color: var(--muted); }
+/* Enlace de registro en QvaPay (referido) */
+.ref-note { margin: 0; font-size: 13px; color: var(--text-2); }
+.ref-note a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.ref-note a:hover { text-decoration: underline; }
+.ref-note small { font-size: 10.5px; color: var(--muted); }
 .hint b { color: var(--text); font-family: var(--mono); }
 .notice { font-size: 12.5px; padding: 11px 13px; border-radius: var(--r-sm); background: var(--accent-bg); color: var(--text-2); }
 .notice.warn { background: var(--warn-bg); }
