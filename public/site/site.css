@@ -199,8 +199,18 @@ code { font: 0.88em var(--mono); background: var(--surface-3); padding: 1px 6px;
 .op-shot figcaption { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
 .op-cta { text-align: center; margin-top: 36px; }
 
+/* Registro en QvaPay (enlace de referido) */
+.ref-note { margin-top: 12px; font-size: 13.5px; color: var(--muted); }
+.ref-note a, .step-link a, details p a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.ref-note a:hover, .step-link a:hover, details p a:hover { text-decoration: underline; }
+.ref-note small, .step-link small, details p small { font-size: 11px; color: var(--muted); font-weight: 400; }
+.final .ref-note { margin: 14px 0 0; }
+.steps .step-link { margin-top: 10px; font-size: 14.5px; }
+.btn-stack { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.btn-stack small { font-size: 10.5px; font-weight: 500; opacity: 0.65; margin-top: 2px; }
+
 /* Pasos */
-.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; counter-reset: step; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; counter-reset: step; }
 .steps li { position: relative; padding: 26px 26px 26px 76px; border-radius: var(--r); background: var(--bg); border: 1px solid var(--line); counter-increment: step; }
 .steps li::before {
 	content: counter(step); position: absolute; left: 24px; top: 24px; display: grid; place-items: center; width: 36px; height: 36px;
