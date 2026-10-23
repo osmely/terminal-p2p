@@ -351,7 +351,7 @@ function renderDetail(t) {
 		action = `<div class="stack tight"><p>${mine ? `Calificaste a @${esc(t.counterparty)}:` : `Operación completada. Califica a @${esc(t.counterparty)}:`}</p>
 			<div class="stars ${locked ? 'locked' : ''}" role="group" aria-label="Calificación">${stars}</div>
 			${mine ? `<p class="hint">${locked ? 'Ya no se puede cambiar.' : `Puedes cambiarla hasta el ${when}.`}</p>` : ''}
-			${t.theirRating ? `<p class="hint">@${esc(t.counterparty)} te calificó con <b>${t.theirRating.rating} ★</b>.</p>` : ''}</div>`
+</div>`
 	}
 
 	$('modalBody').innerHTML = `<div class="stack">

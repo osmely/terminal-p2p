@@ -225,12 +225,13 @@ export class Broker {
 		const ord = order ? o.Orders?.find((x) => x.uuid === order) : undefined
 		const chat = await acc.client.getChat(offer, order).catch(() => [])
 		const isOwner = o.User?.uuid === acc.me.uuid
-		const { mine, theirs } = ratingsOf(o, order)
+		// Solo tu calificación: la que te dieron no se muestra, porque las notas se pueden
+		// cambiar durante 72 h y verla invitaría a la represalia
+		const { mine } = ratingsOf(o, order)
 		return json(200, {
 			offer,
 			order: order ?? null,
 			myRating: mine,
-			theirRating: theirs,
 			coin: o.coin,
 			type: o.type,
 			status: ord?.status ?? o.status,
