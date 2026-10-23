@@ -1,4 +1,4 @@
-// Landing de Terminal P2P: tema claro/oscuro y tasas de hoy desde la API pública de QvaPay
+// Landing y blog de Terminal P2P: tema claro/oscuro y tasas de hoy desde la API pública de QvaPay
 // (vía el relé del propio dominio, cacheado en el borde: sin token y sin datos de nadie).
 const $ = (id) => document.getElementById(id)
 
@@ -65,6 +65,9 @@ for (const b of steps)
 		img.alt = b.dataset.alt
 	})
 
-loadRates()
-// Solo con la pestaña visible; el relé las cachea 60 s en el borde
-setInterval(() => !document.hidden && loadRates(), 60_000)
+// Las tasas solo están en la portada (el blog comparte este script)
+if ($('rates')) {
+	loadRates()
+	// Solo con la pestaña visible; el relé las cachea 60 s en el borde
+	setInterval(() => !document.hidden && loadRates(), 60_000)
+}

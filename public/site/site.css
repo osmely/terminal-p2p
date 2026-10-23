@@ -252,6 +252,50 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .foot-in { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .foot a { color: var(--text-2); }
 
+/* ══ Blog ═════════════════════════════════════════════════════════════ */
+.blog-head { padding: 72px 0 8px; }
+.blog-head h1 { font-size: clamp(34px, 4.6vw, 50px); font-weight: 800; letter-spacing: -0.035em; }
+.blog-head p { margin-top: 12px; color: var(--text-2); font-size: 17.5px; }
+.posts { display: grid; gap: 16px; padding: 36px 0 96px; }
+.post-card { display: grid; grid-template-columns: 300px 1fr; gap: 28px; align-items: center; padding: 18px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); text-decoration: none; transition: border-color 0.2s, transform 0.2s; }
+.post-card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+.post-card img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); }
+.post-card h2 { font-size: 23px; font-weight: 700; }
+.post-card p { margin-top: 8px; color: var(--text-2); font-size: 15.5px; }
+.post-meta { font-size: 13px; color: var(--muted); font-weight: 500; }
+.post-card .post-meta { margin-bottom: 8px; }
+.post-card .link-arrow { display: inline-block; margin-top: 14px; }
+
+.article { padding: 64px 0 88px; }
+.crumbs { font-size: 13.5px; color: var(--muted); }
+.crumbs a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.crumbs a:hover { text-decoration: underline; }
+.article h1 { margin-top: 18px; font-size: clamp(32px, 4.4vw, 48px); font-weight: 800; letter-spacing: -0.035em; }
+.article .post-meta { margin-top: 14px; }
+.article .dek { margin-top: 18px; font-size: 19px; color: var(--text-2); }
+.article-hero { width: min(1160px, 100% - 40px); margin: 40px auto 8px; }
+.article-hero img, .prose figure img { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line-strong); box-shadow: var(--shadow); }
+.article-hero figcaption, .prose figcaption { margin-top: 10px; font-size: 13px; color: var(--muted); text-align: center; }
+.prose { font-size: 17px; line-height: 1.75; color: var(--text-2); }
+.prose > * + * { margin-top: 18px; }
+.prose h2 { margin-top: 48px; font-size: 26px; font-weight: 750; color: var(--text); }
+.prose h3 { margin-top: 28px; font-size: 19px; font-weight: 650; color: var(--text); }
+.prose strong { color: var(--text); font-weight: 650; }
+.prose a:not(.btn) { color: var(--accent); font-weight: 600; text-decoration: none; }
+.prose a:not(.btn):hover { text-decoration: underline; }
+.prose ul, .prose ol { padding-left: 22px; }
+.prose li + li { margin-top: 8px; }
+.prose li::marker { color: var(--accent); }
+.prose small { font-size: 12px; color: var(--muted); }
+.prose figure { margin: 32px 0; }
+.prose figure.tall img { width: auto; max-width: 100%; max-height: 620px; margin: 0 auto; }
+.prose .note { padding: 16px 18px; border-radius: var(--r-sm); background: var(--accent-bg); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); font-size: 15.5px; }
+.article-cta { margin-top: 48px; padding: 32px; border-radius: var(--r); background: radial-gradient(70% 90% at 50% 0%, var(--glow), transparent 75%), var(--surface); border: 1px solid var(--line-strong); text-align: center; }
+.article-cta h2 { margin: 0; font-size: 24px; font-weight: 750; color: var(--text); }
+.article-cta p { margin-top: 8px; color: var(--text-2); }
+.article-cta .cta-row { justify-content: center; margin-top: 22px; }
+.article-cta .btn:not(.primary) { color: var(--text); }
+
 /* ══ Responsive ═══════════════════════════════════════════════════════ */
 @media (max-width: 980px) {
 	.nav-links { display: none; }
@@ -277,6 +321,18 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.rate .px { font-size: 13.5px; gap: 2px 8px; }
 	.mock-head b { font-size: 12.5px; }
 	.final-in { padding: 40px 20px; }
+	/* Blog */
+	.blog-head { padding-top: 48px; }
+	.posts { padding: 24px 0 64px; }
+	.post-card { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
+	.post-card h2 { font-size: 20px; }
+	.article { padding: 40px 0 64px; }
+	.article .dek { font-size: 17px; }
+	.article-hero { width: calc(100% - 32px); margin-top: 28px; }
+	.prose { font-size: 16.5px; }
+	.prose h2 { margin-top: 40px; font-size: 22px; }
+	.article-cta { padding: 26px 18px; }
+	.article-cta .cta-row .btn { flex: 1 1 100%; }
 	/* Ilustración más corta: tres niveles por lado y sin el gráfico */
 	.mock-book.asks .mrow:nth-child(-n+2), .mock-book.bids .mrow:nth-child(n+4), .mock-depth { display: none; }
 	/* Tasas como lista: una fila por moneda, venta y compra a la derecha */
