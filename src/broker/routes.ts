@@ -161,7 +161,8 @@ export class Broker {
 	}
 
 	private async disconnect({ url, sid }: Ctx) {
-		if (sid) await this.accounts.disconnect(sid)
+		// En el navegador las peticiones a /api/broker no llevan cookie: la cuenta se borra siempre
+		await this.accounts.disconnect(sid ?? '')
 		return json(200, { connected: false }, { 'Set-Cookie': cookie(url, '', 0) })
 	}
 

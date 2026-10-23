@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { Broker } from '../src/broker/routes.ts'
 import { BrowserAccounts } from '../web/accounts.ts'
 
 const memStorage = () => {
@@ -40,4 +41,19 @@ test('un token revocado se borra del navegador', async (t) => {
 	const acc = new BrowserAccounts({ storage: { session: memStorage(), local }, baseUrl: 'https://x/qp' })
 	assert.equal(await acc.reader(), null)
 	assert.equal(local.m.size, 0)
+})
+
+test('desconectar desde el terminal borra el token aunque la petición no lleve cookie', async (t) => {
+	t.after(mockQvaPay(new Set(['tok'])))
+	const local = memStorage()
+	const acc = new BrowserAccounts({ storage: { session: memStorage(), local }, baseUrl: 'https://x/qp' })
+	await acc.connect('browser', 'tok', { remember: true })
+	const broker = new Broker({ accounts: acc, market: { wake() {} }, dryRun: false })
+	// Así llama el navegador: Request construido en la página, sin cookie de sesión
+	const res = await broker.handle(new Request('https://terminalp2p.com/api/broker/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Broker': '1' }, body: '{}' }))
+	assert.equal(res!.status, 200)
+	assert.equal(local.m.size, 0)
+	assert.equal(await acc.get(), null)
+	const me = await broker.handle(new Request('https://terminalp2p.com/api/broker/me'))
+	assert.equal((await me!.json()).connected, false)
 })
