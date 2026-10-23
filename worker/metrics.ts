@@ -3,8 +3,9 @@
 // El relé anota cada acción del P2P que pasa por él (publicar, tomar, pagar, liberar,
 // cancelar, calificar) y el navegador avisa cuando ve completada una operación que empezó
 // aquí. Se guarda el tipo de acción, el resultado, el mercado, el lado y el monto. Nada
-// de usuario, token ni IP: la oferta y la orden van como huellas SHA-256, que sirven para
-// unir "publicada" con "completada" pero no para saber de qué oferta se trata.
+// de usuario, token ni IP: la oferta y la orden van como huellas HMAC-SHA-256 con una clave
+// secreta (METRICS_SALT), que sirven para unir "publicada" con "completada" pero no para saber
+// de qué oferta se trata, ni siquiera teniendo la base y una lista de ofertas.
 
 import { COINS } from '../src/terminal/market.ts'
 import { cubaDate } from './informal.ts'
@@ -37,11 +38,18 @@ export function actionOf(method: string, path: string): { event: EventKind; offe
 	return { event: ACTIONS[m[2]], offer: m[1] }
 }
 
-// Huella irreversible de un identificador de QvaPay
-export async function fingerprint(id: string | null | undefined) {
-	if (!id || !UUID.test(id)) return ''
-	const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`terminalp2p:${id}`))
-	return [...new Uint8Array(hash).slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('')
+// Huella irreversible de un identificador de QvaPay: HMAC con la clave secreta METRICS_SALT.
+// Sin la clave no se puede recalcular aunque se conozca el identificador
+const hmacKeys = new Map<string, Promise<CryptoKey>>()
+export async function fingerprint(id: string | null | undefined, salt: string) {
+	if (!id || !UUID.test(id) || !salt) return ''
+	let key = hmacKeys.get(salt)
+	if (!key) {
+		key = crypto.subtle.importKey('raw', new TextEncoder().encode(salt), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+		hmacKeys.set(salt, key)
+	}
+	const mac = await crypto.subtle.sign('HMAC', await key, new TextEncoder().encode(id))
+	return [...new Uint8Array(mac).slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 const cleanCoin = (v: unknown) => (typeof v === 'string' && TICKS.has(v) ? v : '')
@@ -66,7 +74,11 @@ const tryJson = (s: string | undefined) => {
 }
 
 // Evento de una escritura que pasó por el relé: la petición, la respuesta de QvaPay y X-TP-Meta
-export async function relayEvent(a: { method: string; path: string; query: URLSearchParams; body?: string; meta: string | null; response: Response }, now = Date.now()): Promise<MetricEvent | null> {
+export async function relayEvent(
+	a: { method: string; path: string; query: URLSearchParams; body?: string; meta: string | null; response: Response },
+	salt: string,
+	now = Date.now(),
+): Promise<MetricEvent | null> {
 	const action = actionOf(a.method, a.path)
 	if (!action) return null
 	const meta = parseMeta(a.meta)
@@ -88,8 +100,8 @@ export async function relayEvent(a: { method: string; path: string; query: URLSe
 		t: now,
 		event: action.event,
 		status: ok ? 'ok' : 'error',
-		offer: await fingerprint(offer),
-		ord: await fingerprint(a.query.get('order')),
+		offer: await fingerprint(offer, salt),
+		ord: await fingerprint(a.query.get('order'), salt),
 		coin,
 		side,
 		usd,
@@ -98,15 +110,15 @@ export async function relayEvent(a: { method: string; path: string; query: URLSe
 }
 
 // Aviso del navegador: una operación que empezó aquí se completó (la liberó la contraparte)
-export async function clientEvent(body: unknown, now = Date.now()): Promise<MetricEvent | null> {
+export async function clientEvent(body: unknown, salt: string, now = Date.now()): Promise<MetricEvent | null> {
 	const b = (body ?? {}) as Record<string, unknown>
 	if (b.event !== 'completed' || typeof b.offer !== 'string' || !UUID.test(b.offer)) return null
 	return {
 		t: now,
 		event: 'completed',
 		status: 'ok',
-		offer: await fingerprint(b.offer),
-		ord: await fingerprint(typeof b.order === 'string' ? b.order : null),
+		offer: await fingerprint(b.offer, salt),
+		ord: await fingerprint(typeof b.order === 'string' ? b.order : null, salt),
 		coin: cleanCoin(b.coin),
 		side: cleanSide(b.side),
 		usd: cleanUsd(b.usd),
@@ -217,16 +229,29 @@ export async function loadSummary(db: D1, days: number, now = Date.now()) {
 
 // ── Panel privado (HTTP Basic con la clave METRICS_KEY) ───────────────
 
-export function authorized(req: Request, key: string | undefined) {
+// Igualdad en tiempo constante: se comparan los SHA-256 de las dos cadenas byte a byte, sin
+// cortar en la primera diferencia, para que el tiempo de respuesta no dé pistas de la clave
+export async function sameSecret(a: string, b: string) {
+	const enc = new TextEncoder()
+	const [x, y] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(a)), crypto.subtle.digest('SHA-256', enc.encode(b))])
+	const u = new Uint8Array(x)
+	const v = new Uint8Array(y)
+	let diff = 0
+	for (let i = 0; i < u.length; i++) diff |= u[i] ^ v[i]
+	return diff === 0
+}
+
+export async function authorized(req: Request, key: string | undefined) {
 	if (!key) return false
 	const h = req.headers.get('authorization') ?? ''
 	if (!h.startsWith('Basic ')) return false
+	let pass = ''
 	try {
-		const [, pass] = atob(h.slice(6)).split(/:(.*)/s)
-		return pass === key
+		pass = atob(h.slice(6)).split(/:(.*)/s)[1] ?? ''
 	} catch {
 		return false
 	}
+	return sameSecret(pass, key)
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)

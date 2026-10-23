@@ -18,6 +18,22 @@ interface Env {
 	ELTOQUE_TOKEN?: string
 	// Clave del panel de métricas (secreto). Sin ella el panel no existe
 	METRICS_KEY?: string
+	// Clave de las huellas de las métricas (secreto). Sin ella no se registra ningún evento
+	METRICS_SALT?: string
+	// Topes por IP del limitador de Cloudflare (la IP es solo la llave del contador; no se guarda)
+	EVENT_LIMIT?: RateLimiter
+	PANEL_LIMIT?: RateLimiter
+}
+
+interface RateLimiter {
+	limit(opts: { key: string }): Promise<{ success: boolean }>
+}
+
+// true si la petición pasa el tope; sin limitador configurado no se limita
+async function underLimit(limiter: RateLimiter | undefined, req: Request) {
+	if (!limiter) return true
+	const { success } = await limiter.limit({ key: req.headers.get('cf-connecting-ip') ?? 'sin-ip' })
+	return success
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -47,7 +63,8 @@ export default {
 		if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`))
 			return secure(
 				await relay(req, url, ctx, async (w) => {
-					const e = await relayEvent(w)
+					if (!env.METRICS_SALT) return
+					const e = await relayEvent(w, env.METRICS_SALT)
 					if (e) await saveEvent(env.DB, e)
 				}),
 			)
@@ -103,11 +120,13 @@ async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 // Aviso anónimo del navegador: una operación que empezó aquí se completó
 async function event(req: Request, url: URL, env: Env) {
 	if (req.headers.get('origin') !== url.origin) return jsonError(403, 'Origen no permitido')
+	if (!(await underLimit(env.EVENT_LIMIT, req))) return jsonError(429, 'Demasiados avisos')
+	if (!env.METRICS_SALT) return new Response(null, { status: 204 })
 	const body = await req.text()
 	if (body.length > 2048) return jsonError(413, 'Cuerpo demasiado grande')
 	let e
 	try {
-		e = await clientEvent(JSON.parse(body))
+		e = await clientEvent(JSON.parse(body), env.METRICS_SALT)
 	} catch {
 		e = null
 	}
@@ -119,7 +138,8 @@ async function event(req: Request, url: URL, env: Env) {
 // Panel privado de métricas, con HTTP Basic (cualquier usuario y la clave METRICS_KEY)
 async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
-	if (!authorized(req, env.METRICS_KEY))
+	if (!(await underLimit(env.PANEL_LIMIT, req))) return jsonError(429, 'Demasiados intentos: espera un minuto')
+	if (!(await authorized(req, env.METRICS_KEY)))
 		return new Response('Necesitas la clave del panel', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Métricas de Terminal P2P", charset="UTF-8"', 'Cache-Control': 'no-store' } })
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
 	return new Response(panelHtml(await loadSummary(env.DB, days)), {

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { actionOf, clientEvent, fingerprint, parseMeta, relayEvent, summarize, type MetricEvent } from '../worker/metrics.ts'
+import { actionOf, authorized, clientEvent, fingerprint, parseMeta, relayEvent, sameSecret, summarize, type MetricEvent } from '../worker/metrics.ts'
 
 const OFFER = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d'
 const ORDER = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 const NOW = Date.parse('2026-10-23T16:00:00Z')
+const SALT = 'clave-de-prueba'
 
 test('métricas: qué escrituras del relé cuentan', () => {
 	assert.deepEqual(actionOf('POST', '/p2p/create'), { event: 'create', offer: '' })
@@ -16,13 +17,27 @@ test('métricas: qué escrituras del relé cuentan', () => {
 	assert.equal(actionOf('GET', `/p2p/${OFFER}`), null)
 })
 
-test('huella: estable, corta y sin el identificador', async () => {
-	const a = await fingerprint(OFFER)
-	assert.equal(a, await fingerprint(OFFER))
+test('huella: estable con la misma clave, distinta sin ella y sin el identificador', async () => {
+	const a = await fingerprint(OFFER, SALT)
+	assert.equal(a, await fingerprint(OFFER, SALT))
 	assert.equal(a.length, 24)
 	assert.ok(!a.includes(OFFER.slice(0, 8)))
-	assert.equal(await fingerprint('no-es-uuid'), '')
-	assert.equal(await fingerprint(null), '')
+	// Con otra clave sale otra huella: sin la clave secreta no se puede recalcular
+	assert.notEqual(a, await fingerprint(OFFER, 'otra-clave'))
+	assert.equal(await fingerprint(OFFER, ''), '')
+	assert.equal(await fingerprint('no-es-uuid', SALT), '')
+	assert.equal(await fingerprint(null, SALT), '')
+})
+
+test('clave del panel: comparación en tiempo constante y HTTP Basic', async () => {
+	assert.equal(await sameSecret('abc', 'abc'), true)
+	assert.equal(await sameSecret('abc', 'abd'), false)
+	assert.equal(await sameSecret('', 'abc'), false)
+	const basic = (pass: string) => new Request('https://x/admin/metrics', { headers: { Authorization: `Basic ${btoa(`yo:${pass}`)}` } })
+	assert.equal(await authorized(basic('s3creta:con:dos-puntos'), 's3creta:con:dos-puntos'), true)
+	assert.equal(await authorized(basic('mala'), 's3creta'), false)
+	assert.equal(await authorized(new Request('https://x'), 's3creta'), false)
+	assert.equal(await authorized(basic('x'), undefined), false)
 })
 
 test('X-TP-Meta: solo valores válidos', () => {
@@ -41,6 +56,7 @@ test('evento de publicar y de liberar, sin datos de usuario', async () => {
 			meta: null,
 			response: new Response(JSON.stringify({ p2p: { uuid: OFFER, User: { username: 'ana' } } })),
 		},
+		SALT,
 		NOW,
 	)
 	assert.deepEqual({ ...create, offer: create!.offer.length }, { t: NOW, event: 'create', status: 'ok', offer: 24, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 25, source: 'relay' })
@@ -48,19 +64,20 @@ test('evento de publicar y de liberar, sin datos de usuario', async () => {
 
 	const release = await relayEvent(
 		{ method: 'POST', path: `/p2p/${OFFER}/received`, query: new URLSearchParams({ order: ORDER }), meta: 'coin=BANK_CUP&side=sell&usd=10', response: new Response(JSON.stringify({ amount: 9.9, fee: 0.1, gross_amount: 10.5 })) },
+		SALT,
 		NOW,
 	)
-	assert.deepEqual([release!.event, release!.usd, release!.offer, release!.ord], ['release', 10.5, await fingerprint(OFFER), await fingerprint(ORDER)])
+	assert.deepEqual([release!.event, release!.usd, release!.offer, release!.ord], ['release', 10.5, await fingerprint(OFFER, SALT), await fingerprint(ORDER, SALT)])
 
-	const failed = await relayEvent({ method: 'POST', path: `/p2p/${OFFER}/apply`, query: new URLSearchParams(), body: '{}', meta: null, response: new Response('{}', { status: 400 }) }, NOW)
+	const failed = await relayEvent({ method: 'POST', path: `/p2p/${OFFER}/apply`, query: new URLSearchParams(), body: '{}', meta: null, response: new Response('{}', { status: 400 }) }, SALT, NOW)
 	assert.equal(failed!.status, 'error')
 })
 
 test('aviso del navegador: solo "completed" con un identificador válido', async () => {
-	const e = await clientEvent({ event: 'completed', offer: OFFER, coin: 'ZELLE', side: 'buy', usd: 30 }, NOW)
+	const e = await clientEvent({ event: 'completed', offer: OFFER, coin: 'ZELLE', side: 'buy', usd: 30 }, SALT, NOW)
 	assert.deepEqual([e!.event, e!.source, e!.coin, e!.usd], ['completed', 'client', 'ZELLE', 30])
-	assert.equal(await clientEvent({ event: 'create', offer: OFFER }), null)
-	assert.equal(await clientEvent({ event: 'completed', offer: 'x' }), null)
+	assert.equal(await clientEvent({ event: 'create', offer: OFFER }, SALT), null)
+	assert.equal(await clientEvent({ event: 'completed', offer: 'x' }, SALT), null)
 })
 
 test('embudos: publicadas, con contraparte, completadas', () => {
