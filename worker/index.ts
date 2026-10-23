@@ -21,7 +21,8 @@ const SECURITY_HEADERS: Record<string, string> = {
 	'Referrer-Policy': 'strict-origin-when-cross-origin',
 	'X-Frame-Options': 'DENY',
 }
-const RATES_TTL_S = 120
+// Los datos cambian cada 10 minutos: 5 de caché en el borde bastan y ahorran lecturas de D1
+const RATES_TTL_S = 300
 const INFORMAL_TTL_S = 600
 // La landing reutiliza estos archivos del terminal en vez de duplicarlos
 const SHARED = ['/vendor/', '/favicon.svg', '/theme.js']
@@ -71,7 +72,13 @@ async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	const hit = await caches.default.match(key)
 	if (hit) return new Response(hit.body, hit)
 
-	const data = { ...(await query(env.DB, coin, days)), informal: await informalSince(env.DB, cubaDate(Date.now() - days * 86_400_000)) }
+	let data
+	try {
+		data = { ...(await query(env.DB, coin, days)), informal: await informalSince(env.DB, cubaDate(Date.now() - days * 86_400_000)) }
+	} catch (err) {
+		console.error(`/data/rates: ${(err as Error).message}`)
+		return jsonError(503, 'El histórico no está disponible ahora mismo')
+	}
 	const empty = data.points.length === 0 && data.informal.length === 0
 	const res = new Response(JSON.stringify(data), {
 		headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': empty ? 'no-store' : `public, max-age=${RATES_TTL_S}` },
@@ -86,7 +93,13 @@ async function informal(url: URL, env: Env, ctx: ExecutionContext) {
 	const key = new Request(`${url.origin}/data/informal`)
 	const hit = await caches.default.match(key)
 	if (hit) return new Response(hit.body, hit)
-	const data = await latestInformal(env.DB)
+	let data
+	try {
+		data = await latestInformal(env.DB)
+	} catch (err) {
+		console.error(`/data/informal: ${(err as Error).message}`)
+		return jsonError(503, 'La tasa informal no está disponible ahora mismo')
+	}
 	const res = new Response(JSON.stringify(data), {
 		headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': data.last ? `public, max-age=${INFORMAL_TTL_S}` : 'no-store' },
 	})

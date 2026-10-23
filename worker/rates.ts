@@ -102,12 +102,14 @@ export async function query(db: D1, coin: string, days: number, now = Date.now()
 	// Operaciones por día: el último registro de cada día de Cuba (su conteo es el de las 24 h previas)
 	const { results: last } = await db
 		.prepare(
-			`SELECT r.t, r.count, r.count_buy, r.count_sell, r.window_h
-			   FROM rates r
-			   JOIN (SELECT MAX(t) AS t FROM rates WHERE coin = ?1 AND t >= ?2
-			          GROUP BY CAST((t + CASE WHEN (t >= ?3 AND t < ?4) OR (t >= ?5 AND t < ?6) THEN ${CDT} ELSE ${CST} END) / 86400000 AS INTEGER)) d ON d.t = r.t
-			  WHERE r.coin = ?1
-			  ORDER BY r.t`,
+			// Con "coin = ? AND t IN (...)" cada fila se busca por la clave (coin, t). Un JOIN por t
+			// hacía que SQLite recorriera la tabla por cada día y leyera decenas de miles de filas
+			`SELECT t, count, count_buy, count_sell, window_h
+			   FROM rates
+			  WHERE coin = ?1 AND t IN (
+			        SELECT MAX(t) FROM rates WHERE coin = ?1 AND t >= ?2
+			         GROUP BY CAST((t + CASE WHEN (t >= ?3 AND t < ?4) OR (t >= ?5 AND t < ?6) THEN ${CDT} ELSE ${CST} END) / 86400000 AS INTEGER))
+			  ORDER BY t`,
 		)
 		// El rango (hasta un año) toca como mucho dos veranos: el del año de inicio y el del actual
 		.bind(coin, since, ...summer(new Date(since).getUTCFullYear()), ...summer(new Date(now).getUTCFullYear()))
