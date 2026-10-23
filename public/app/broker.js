@@ -36,6 +36,11 @@ function toast(text, bad = false) {
 	setTimeout(() => el.remove(), 4200)
 }
 
+// Botón de copiar con icono de portapapeles (y una marca de hecho al copiar)
+const ICON_COPY = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V5a2 2 0 00-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2h2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+const ICON_DONE = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+const copyBtn = (value, label) => `<button class="copy" data-copy="${esc(value)}" title="Copiar ${esc(label)}" aria-label="Copiar ${esc(label)}">${ICON_COPY}</button>`
+
 const unitOf = (tick) => state.overview.find((c) => c.tick === tick)?.unit ?? state.book?.coin?.unit ?? ''
 const nameOf = (tick) => state.overview.find((c) => c.tick === tick)?.name ?? tick
 
@@ -47,11 +52,34 @@ function openModal(html, onClose) {
 	onModalClose = onClose ?? null
 }
 function closeModal() {
+	document.querySelector('.confirm-layer')?.remove()
 	$('modal').hidden = true
 	$('modalBody').innerHTML = ''
 	bk.detail = null
 	onModalClose?.()
 	onModalClose = null
+}
+
+// Confirmación encima del detalle abierto: no lo sustituye, así que al volver sigue igual.
+// Va sobre la tarjeta y no dentro de #modalBody, para que el refresco periódico no la borre
+function askConfirm(title, html, okText, cls = 'primary') {
+	return new Promise((resolve) => {
+		document.querySelector('.confirm-layer')?.remove()
+		const layer = document.createElement('div')
+		layer.className = 'confirm-layer'
+		layer.setAttribute('role', 'alertdialog')
+		layer.innerHTML = `<div class="confirm-box stack"><h3>${title}</h3><div>${html}</div>
+			<div class="row-btns"><button class="btn" data-c="no">Volver</button><button class="btn ${cls}" data-c="ok">${okText}</button></div></div>`
+		const done = (ok) => {
+			layer.remove()
+			resolve(ok)
+		}
+		layer.querySelector('[data-c="ok"]').onclick = () => done(true)
+		layer.querySelector('[data-c="no"]').onclick = () => done(false)
+		layer.addEventListener('click', (e) => e.target === layer && done(false))
+		document.querySelector('.modal-card').appendChild(layer)
+		layer.querySelector('[data-c="ok"]').focus()
+	})
 }
 
 function confirmDialog(title, html, okText, cls = 'primary') {
@@ -321,8 +349,8 @@ function renderDetail(t) {
 		${
 			payTo.length
 				? `<div><p class="hint">Datos de pago de @${esc(t.counterparty)}:</p><div class="kv">${payTo
-						.map((x) => `<span>${esc(x.name)}</span><b>${esc(x.value)}</b><button class="copy" data-copy="${esc(x.value)}">Copiar</button>`)
-						.join('')}<span>Monto</span><b>${fmtU(t.coinAmount)} ${unit}</b><button class="copy" data-copy="${t.coinAmount}">Copiar</button></div></div>`
+						.map((x) => `<span>${esc(x.name)}</span><b>${esc(x.value)}</b>${copyBtn(x.value, x.name)}`)
+						.join('')}<span>Monto</span><b>${fmtU(t.coinAmount)} ${unit}</b>${copyBtn(t.coinAmount, 'el monto')}</div></div>`
 				: ''
 		}
 		${action}
@@ -359,7 +387,12 @@ function bindDetail(t) {
 		b.onclick = (e) => {
 			e.preventDefault()
 			navigator.clipboard?.writeText(b.dataset.copy)
-			toast('Copiado')
+			b.innerHTML = ICON_DONE
+			b.classList.add('done')
+			setTimeout(() => {
+				b.innerHTML = ICON_COPY
+				b.classList.remove('done')
+			}, 1400)
 		}
 	const seen = $('seenMoney')
 	if (seen) seen.onchange = () => (body.querySelector('[data-act="release"]').disabled = !seen.checked)
@@ -374,17 +407,45 @@ function bindDetail(t) {
 	for (const b of body.querySelectorAll('[data-act]'))
 		b.onclick = async () => {
 			const a = b.dataset.act
+			const unit = unitOf(t.coin)
+			const who = `@${esc(t.counterparty ?? '—')}`
 			if (a === 'paid') {
 				const tx = $('txRef').value.trim()
 				if (tx.length < 4) return toast('Escribe la referencia de tu transferencia', true)
-				return act('paid', { txId: tx })
+				const ok = await askConfirm(
+					`¿Ya transferiste ${fmtU(t.coinAmount)} ${unit}?`,
+					`<p class="muted">Se avisará a ${who} de que le pagaste, con la referencia <b class="mono">${esc(tx)}</b>. Márcalo solo después de transferir: comprobará el dinero en su banco antes de liberar los USD.</p>`,
+					'Sí, ya pagué',
+				)
+				return ok && act('paid', { txId: tx })
 			}
 			if (a === 'release') {
-				if (!confirm(`¿Seguro? Liberar ${t.usd} USD es irreversible. Hazlo solo si viste el dinero en tu cuenta.`)) return
-				return act('release')
+				const ok = await askConfirm(
+					`¿Liberar ${fmtU(t.usd)} USD?`,
+					`<p class="muted">Es irreversible: los USD pasan a ${who}. Hazlo solo si viste los <b>${fmtU(t.coinAmount)} ${unit}</b> en tu cuenta; un comprobante o una captura no bastan.</p>`,
+					'Liberar',
+					'buy',
+				)
+				return ok && act('release')
 			}
-			if (a === 'dispute' && !confirm('Se abrirá una disputa y un moderador decidirá. ¿Continuar?')) return
-			if (a === 'cancel' && !confirm('¿Cancelar la operación? Hazlo solo si todavía no pagaste.')) return
+			if (a === 'dispute') {
+				const ok = await askConfirm(
+					'¿Abrir una disputa?',
+					`<p class="muted">Un moderador de QvaPay revisará el chat con ${who} y decidirá. Úsalo si no recibiste el pago; mientras dure, ninguno de los dos puede liberar ni cancelar.</p>`,
+					'Abrir disputa',
+					'danger',
+				)
+				return ok && act('dispute')
+			}
+			if (a === 'cancel') {
+				const ok = await askConfirm(
+					'¿Cancelar la operación?',
+					`<p class="muted">Hazlo solo si todavía no pagaste. Si ya transferiste a ${who}, no canceles: escríbele por el chat.</p>`,
+					'Cancelar operación',
+					'danger',
+				)
+				return ok && act('cancel')
+			}
 			return act(a)
 		}
 	for (const b of body.querySelectorAll('[data-rate]')) b.onclick = () => act('rate', { rating: Number(b.dataset.rate) })
@@ -706,12 +767,14 @@ function renderManage(o) {
 		<div class="row-btns">
 			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? 'Volver a publicar' : 'Pausar'}</button><button class="btn danger" id="mgCancel">Cancelar oferta</button>` : ''}
 		</div>
-		${o.status === 'open' ? `<div class="share"><p class="hint">Enlace para que alguien la tome desde el terminal${o.isPrivate ? ' (útil en ofertas privadas)' : ''}</p><div class="row-btns"><input class="input" id="mgLink" readonly value="${location.origin}/#p2p/${o.offer}" /><button class="btn" id="mgCopy">Copiar enlace</button></div></div>` : ''}
+		${o.status === 'open' ? `<div class="share"><p class="hint">Enlace para que alguien la tome desde el terminal${o.isPrivate ? ' (útil en ofertas privadas)' : ''}</p><div class="row-btns"><input class="input" id="mgLink" readonly value="${location.origin}/#p2p/${o.offer}" /><button class="btn icon-only" id="mgCopy" title="Copiar enlace" aria-label="Copiar enlace">${ICON_COPY}</button></div></div>` : ''}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${o.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
 	</div>`
 
 	$('mgCopy')?.addEventListener('click', () => {
 		navigator.clipboard?.writeText($('mgLink').value)
+		$('mgCopy').innerHTML = ICON_DONE
+		setTimeout(() => $('mgCopy') && ($('mgCopy').innerHTML = ICON_COPY), 1400)
 		toast('Enlace copiado')
 	})
 	const refresh = () => showManageOffer(o.offer)
@@ -974,7 +1037,11 @@ function bindBroker() {
 		if (e.target.id === 'modal') closeModal()
 	})
 	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && !$('modal').hidden) closeModal()
+		if (e.key !== 'Escape' || $('modal').hidden) return
+		// Escape cierra primero la confirmación abierta, y solo después la ventana
+		const layer = document.querySelector('.confirm-layer [data-c="no"]')
+		if (layer) layer.click()
+		else closeModal()
 	})
 	$('refreshTrades').onclick = loadTrades
 	$('alertsBtn').onclick = toggleAlerts

@@ -313,6 +313,10 @@ button { cursor: pointer; }
 .modal-card h3 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; }
 .modal-card p { margin: 6px 0; }
 .modal-x { position: absolute; top: 14px; right: 14px; }
+/* Confirmación sobre el detalle abierto */
+.confirm-layer { position: fixed; inset: 0; z-index: 45; display: flex; align-items: center; justify-content: center; padding: 18px; background: var(--overlay); backdrop-filter: blur(1px); }
+.confirm-box { width: 100%; max-width: 420px; padding: 20px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow); }
+.confirm-box h3 { margin: 0; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
 .row-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .row-btns .btn { flex: 1; }
@@ -324,7 +328,10 @@ button { cursor: pointer; }
 .kv { display: grid; grid-template-columns: auto 1fr auto; gap: 7px 12px; align-items: center; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 11px 13px; font-size: 13px; }
 .kv span { color: var(--muted); }
 .kv b { font-family: var(--mono); word-break: break-all; }
-.copy { border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 500; }
+.copy { display: inline-grid; place-items: center; width: 30px; height: 30px; border: 1px solid transparent; border-radius: var(--r-sm); background: none; color: var(--accent); }
+.copy:hover { background: var(--accent-bg); }
+.copy.done { color: var(--bid); }
+.btn.icon-only { padding: 8px 10px; }
 /* Alto fijo: la ventana no crece con cada mensaje; los mensajes se desplazan dentro */
 .chatbox { display: flex; flex-direction: column; gap: 6px; height: 240px; overflow-y: auto; overscroll-behavior: contain; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px; }
 .msg { max-width: 82%; padding: 7px 10px; border-radius: 10px; font-size: 12.5px; background: var(--surface-3); align-self: flex-start; }
