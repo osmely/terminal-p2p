@@ -2,8 +2,11 @@
 //
 // Existe solo porque QvaPay no permite CORS desde otros dominios: el navegador
 // no puede leer api.qvapay.com directamente. Cada petición lleva el token de
-// quien la hace, se reenvía tal cual y se devuelve la respuesta. No guarda ni
-// registra nada: ningún usuario ve datos obtenidos con el token de otro.
+// quien la hace, se reenvía tal cual y se devuelve la respuesta. No guarda el token
+// ni las respuestas: ningún usuario ve datos obtenidos con el token de otro.
+//
+// Las escrituras del P2P (publicar, tomar, pagar, liberar…) se anotan como métricas
+// anónimas, sin usuario, token ni IP (ver metrics.ts).
 //
 // Única excepción: los datos PÚBLICOS (promedios, operaciones completadas y
 // monedas, que QvaPay da sin cuenta) se cachean 60 s en el borde, y solo cuando la
@@ -44,7 +47,17 @@ const edgeCache = () => (caches as unknown as { default: Cache }).default
 export const cacheable = (req: Request, path: string) =>
 	req.method === 'GET' && PUBLIC_PATHS.has(path) && !req.headers.get('authorization')
 
-export async function relay(req: Request, url: URL, ctx?: WaitUntil): Promise<Response> {
+// Lo que ve el relé de cada escritura, para las métricas
+export interface WriteInfo {
+	method: string
+	path: string
+	query: URLSearchParams
+	body?: string
+	meta: string | null
+	response: Response
+}
+
+export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (w: WriteInfo) => Promise<void>): Promise<Response> {
 	const path = url.pathname.slice(RELAY_PREFIX.length)
 	if (!allowed(req.method, path)) return text(404, 'Ruta no permitida')
 
@@ -78,6 +91,11 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil): Promise<Re
 	})
 	const retryAfter = upstream.headers.get('retry-after')
 	if (retryAfter) out.set('Retry-After', retryAfter)
+	if (onWrite && req.method !== 'GET') {
+		const note = onWrite({ method: req.method, path, query: url.searchParams, body, meta: req.headers.get('x-tp-meta'), response: upstream.clone() }).catch(() => {})
+		if (ctx) ctx.waitUntil(note)
+		else await note
+	}
 	const res = new Response(upstream.body, { status: upstream.status, headers: out })
 	if (shared && upstream.ok) {
 		const put = edgeCache().put(cacheKey, res.clone())

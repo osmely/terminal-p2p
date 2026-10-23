@@ -37,6 +37,15 @@ interface RequestOpts {
 	// Las escrituras solo se reintentan ante 429 (no se ejecutaron), salvo `idempotent`
 	write?: boolean
 	idempotent?: boolean
+	// Mercado, lado y monto de la operación para las métricas anónimas del relé de Terminal P2P
+	// (cabecera X-TP-Meta: el relé no la reenvía a QvaPay)
+	meta?: OpMeta
+}
+
+export interface OpMeta {
+	coin?: string
+	side?: string
+	usd?: number
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -123,7 +132,7 @@ export class QvaPayClient {
 	}
 
 	// Tomar una oferta ajena (en las de rango, una parte entre el mínimo y el máximo)
-	async applyOffer(uuid: string, amount?: number) {
+	async applyOffer(uuid: string, amount?: number, meta?: OpMeta) {
 		if (this.dryRun) {
 			log.info(`[DRY] POST /p2p/${uuid}/apply`, { amount })
 			return { order: null as string | null }
@@ -132,6 +141,7 @@ export class QvaPayClient {
 			bucket: 'apply',
 			body: amount === undefined ? {} : { amount },
 			write: true,
+			meta,
 		})
 	}
 
@@ -140,7 +150,7 @@ export class QvaPayClient {
 		await this.request('POST', `/p2p/${uuid}/paid`, { bucket: 'paid', query: { order }, body: { tx_id: txId }, write: true })
 	}
 
-	async markReceived(uuid: string, order?: string) {
+	async markReceived(uuid: string, order?: string, meta?: OpMeta) {
 		if (this.dryRun) {
 			log.info(`[DRY] POST /p2p/${uuid}/received${order ? `?order=${order}` : ''}`)
 			return { amount: 0, fee: 0, gross_amount: 0 }
@@ -149,6 +159,7 @@ export class QvaPayClient {
 			bucket: 'received',
 			query: { order },
 			write: true,
+			meta,
 		})
 	}
 
@@ -199,6 +210,7 @@ export class QvaPayClient {
 							...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
 							Accept: 'application/json',
 							...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+							...(opts.meta ? { 'X-TP-Meta': new URLSearchParams(Object.entries(opts.meta).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString() } : {}),
 						},
 						body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
 						signal: AbortSignal.timeout(20_000),

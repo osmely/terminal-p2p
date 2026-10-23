@@ -3,9 +3,11 @@
 //   · relé sin estado hacia QvaPay (/qp/*)
 //   · histórico público de la tasa (/data/rates), alimentado por un cron, con la
 //     referencia del mercado informal de elTOQUE (/data/informal)
+//   · métricas anónimas de las acciones del P2P y su panel privado (/admin/metrics)
 // Todo lo que depende de la cuenta del usuario corre en su navegador.
 
 import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
+import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 
@@ -14,6 +16,8 @@ interface Env {
 	DB: D1Database
 	// Clave de la API de tasas de elTOQUE (secreto del Worker). Sin ella no hay referencia informal
 	ELTOQUE_TOKEN?: string
+	// Clave del panel de métricas (secreto). Sin ella el panel no existe
+	METRICS_KEY?: string
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -40,7 +44,15 @@ export default {
 			return Response.redirect(url.toString(), 301)
 		}
 
-		if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`)) return secure(await relay(req, url, ctx))
+		if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`))
+			return secure(
+				await relay(req, url, ctx, async (w) => {
+					const e = await relayEvent(w)
+					if (e) await saveEvent(env.DB, e)
+				}),
+			)
+		if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
+		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
 		if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
 		if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 		return assets(req, url, env)
@@ -86,6 +98,33 @@ async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	// Una respuesta vacía no se guarda: el primer punto debe verse en cuanto exista
 	if (!empty) ctx.waitUntil(caches.default.put(key, res.clone()))
 	return res
+}
+
+// Aviso anónimo del navegador: una operación que empezó aquí se completó
+async function event(req: Request, url: URL, env: Env) {
+	if (req.headers.get('origin') !== url.origin) return jsonError(403, 'Origen no permitido')
+	const body = await req.text()
+	if (body.length > 2048) return jsonError(413, 'Cuerpo demasiado grande')
+	let e
+	try {
+		e = await clientEvent(JSON.parse(body))
+	} catch {
+		e = null
+	}
+	if (!e) return jsonError(400, 'Evento no válido')
+	await saveEvent(env.DB, e)
+	return new Response(null, { status: 204 })
+}
+
+// Panel privado de métricas, con HTTP Basic (cualquier usuario y la clave METRICS_KEY)
+async function metrics(req: Request, url: URL, env: Env) {
+	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
+	if (!authorized(req, env.METRICS_KEY))
+		return new Response('Necesitas la clave del panel', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Métricas de Terminal P2P", charset="UTF-8"', 'Cache-Control': 'no-store' } })
+	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
+	return new Response(panelHtml(await loadSummary(env.DB, days)), {
+		headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' },
+	})
 }
 
 // La tasa informal más reciente (para la landing y la lectura del mercado), cacheada 10 minutos

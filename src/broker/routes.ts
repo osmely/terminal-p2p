@@ -337,7 +337,7 @@ export class Broker {
 			const max = Math.min(num(o.order_max ?? Infinity), num(o.available_amount ?? o.amount))
 			if (!(amount >= min && amount <= max)) return json(400, { error: `El monto debe estar entre ${min} y ${max} USD` })
 		}
-		const r = await acc.client.applyOffer(o.uuid, amount)
+		const r = await acc.client.applyOffer(o.uuid, amount, { coin: o.coin, side: o.type, usd: amount ?? num(o.amount) })
 		return json(200, { ok: true, offer: o.uuid, order: r.order ?? null, message: 'Tomaste la oferta' })
 	}
 
@@ -358,7 +358,8 @@ export class Broker {
 				const o = await c.getOffer(offer)
 				const status = order ? o.Orders?.find((x) => x.uuid === order)?.status : o.status
 				if (status !== 'paid') return json(400, { error: `La operación está en «${status ?? 'desconocido'}», no en pagado. No se libera.` })
-				const r = await c.markReceived(offer, order)
+				const usd = num((order ? o.Orders?.find((x) => x.uuid === order)?.amount : undefined) ?? o.amount)
+				const r = await c.markReceived(offer, order, { coin: o.coin, side: o.type, usd })
 				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${Number(r.amount).toLocaleString('es')} USD netos (comisión ${Number(r.fee ?? 0).toLocaleString('es')}).` : 'Liberado' })
 			}
 			case 'cancel':

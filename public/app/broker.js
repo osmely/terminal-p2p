@@ -712,6 +712,7 @@ async function showCreateOffer() {
 			btn.textContent = 'Publicando…'
 			try {
 				const r = await api('/offer/create', f)
+				markOrigin(r.offer)
 				if ($('ofRemember').checked) store.set(`details.${f.coin}`, Object.fromEntries(f.details.map((d) => [d.name, d.value])))
 				else store.set(`details.${f.coin}`, {})
 				toast(r.message || 'Oferta publicada')
@@ -952,6 +953,7 @@ function renderTake(uuid, side, l, coin) {
 		btn.textContent = 'Tomando…'
 		try {
 			const r = await api('/offer/apply', { offer: uuid, amount: flex ? a : undefined })
+			markOrigin(r.offer)
 			toast(r.message || 'Tomaste la oferta')
 			bk.tab = 'active'
 			await loadTrades()
@@ -1015,8 +1017,43 @@ function beep(urgent) {
 	} catch {}
 }
 
+// ── Métricas anónimas ─────────────────────────────────────────────────
+// Se recuerdan (solo en este navegador) las ofertas publicadas o tomadas desde aquí. Cuando una
+// se completa porque la liberó la contraparte, se avisa al servidor sin usuario ni token: así se
+// cuentan también las operaciones que terminan en la web de QvaPay (ver worker/metrics.ts)
+const ORIGIN_KEY = 'tp.origin'
+function origin() {
+	const o = store.get(ORIGIN_KEY, null)
+	return o && typeof o === 'object' && o.offers ? o : { offers: {}, reported: {} }
+}
+function markOrigin(uuid) {
+	if (!uuid) return
+	const o = origin()
+	o.offers[uuid] = Date.now()
+	// Las últimas 300 bastan
+	const keep = Object.entries(o.offers).sort((a, b) => b[1] - a[1]).slice(0, 300)
+	o.offers = Object.fromEntries(keep)
+	store.set(ORIGIN_KEY, o)
+}
+function reportCompleted(a) {
+	const o = origin()
+	const key = `${a.offer}:${a.order ?? ''}`
+	if (!o.offers[a.offer] || o.reported[key]) return
+	o.reported[key] = Date.now()
+	o.reported = Object.fromEntries(Object.entries(o.reported).sort((x, y) => y[1] - x[1]).slice(0, 300))
+	store.set(ORIGIN_KEY, o)
+	const t = bk.trades.find((x) => x.offerUuid === a.offer && (x.order ?? '') === (a.order ?? ''))
+	fetch('/data/event', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ event: 'completed', offer: a.offer, order: a.order ?? undefined, coin: t?.coin, side: t?.offerType, usd: t?.usd }),
+		keepalive: true,
+	}).catch(() => {})
+}
+
 function deliver(alerts) {
 	if (!alerts.length) return
+	for (const a of alerts) if (a.kind === 'released') reportCompleted(a)
 	for (const a of alerts) toast(`${a.title}. ${a.body}`)
 	if (!bk.alerts) return
 	beep(alerts.some((a) => a.urgent))
