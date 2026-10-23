@@ -328,6 +328,7 @@ function renderDetail(t) {
 	if (status === 'processing' && payer)
 		action = `<div class="stack">
 			<p>Transfiere <b>${fmtU(t.coinAmount)} ${unit}</b> y marca el pago con la referencia.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
+			${t.isOwner ? `<p class="notice">@${esc(t.counterparty)} te pasará sus datos de pago por el chat.</p>` : ''}
 			<label class="field">Referencia de tu transferencia<input class="input" id="txRef" placeholder="Nº de transacción" /></label>
 			<div class="row-btns"><button class="btn danger" data-act="cancel">Cancelar</button><button class="btn primary" data-act="paid" disabled title="Escribe antes la referencia de tu transferencia">Ya pagué</button></div></div>`
 	else if (status === 'processing')
@@ -683,7 +684,9 @@ async function showCreateOffer() {
 			<p class="notice">${
 				type === 'sell'
 					? `Se reservan <b>${fmtU(f.amount)} USD</b> de tu saldo mientras la oferta esté publicada. Cuando alguien la tome, te pagará a tus datos y liberarás los USD al ver el dinero.`
-					: `No se reserva saldo. Cuando alguien la tome, tendrás que transferirle <b>${fmtU(total)} ${unit}</b> a sus datos y marcar el pago.`
+					: f.kind === 'flexible'
+						? `No se reserva saldo. Cada vez que alguien tome una parte, tendrás que transferirle lo de esa parte a sus datos y marcar el pago (en total, hasta <b>${fmtU(total)} ${unit}</b>).`
+						: `No se reserva saldo. Cuando alguien la tome, tendrás que transferirle <b>${fmtU(total)} ${unit}</b> a sus datos y marcar el pago.`
 			}</p>
 			${$('ofWarn').innerHTML}
 			<div class="row-btns"><button class="btn" id="ofBack">Volver</button><button class="btn primary" id="ofPublish">Publicar</button></div>`

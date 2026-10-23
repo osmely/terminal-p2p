@@ -28,6 +28,8 @@ const RULES: [method: string, path: RegExp][] = [
 	['GET', new RegExp(`^/p2p/${UUID}/chat$`)],
 	['POST', /^\/p2p\/create$/],
 	['POST', new RegExp(`^/p2p/${UUID}/(paid|received|cancel|chat|rate|edit|pause|apply)$`)],
+	// Cambiar una calificación ya dada (QvaPay lo permite 72 h)
+	['PATCH', new RegExp(`^/p2p/${UUID}/rate$`)],
 ]
 
 export function allowed(method: string, path: string) {

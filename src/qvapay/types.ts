@@ -31,6 +31,8 @@ export interface P2POrder {
 	tx_id?: string | null
 	created_at?: string
 	Taker?: P2PUser
+	// En el detalle de una oferta por rango: tu valoración de esa orden (o null)
+	my_rating?: { rating: string | number; editable_until?: string | null } | null
 }
 
 export interface P2POffer {

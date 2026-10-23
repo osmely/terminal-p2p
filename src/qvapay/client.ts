@@ -164,14 +164,17 @@ export class QvaPayClient {
 		})
 	}
 
+	// Calificar; si ya calificaste, QvaPay pide PATCH para cambiarla (dentro de su plazo de 72 h)
 	async rate(uuid: string, order: string | undefined, rating: number, comment?: string) {
 		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/rate`, { order, rating })
-		await this.request('POST', `/p2p/${uuid}/rate`, {
-			bucket: 'general',
-			// Sin etiquetas automáticas: "rápido" o "confiable" no valen para una mala nota
-			body: { order, rating, comment },
-			write: true,
-		})
+		// Sin etiquetas automáticas: "rápido" o "confiable" no valen para una mala nota
+		const opts = { bucket: 'general' as const, body: { order, rating, comment }, write: true }
+		try {
+			await this.request('POST', `/p2p/${uuid}/rate`, opts)
+		} catch (err) {
+			if (!(err instanceof QvaPayError && err.code === 'ALREADY_RATED')) throw err
+			await this.request('PATCH', `/p2p/${uuid}/rate`, opts)
+		}
 	}
 
 	async sendChat(uuid: string, message: string, order?: string) {

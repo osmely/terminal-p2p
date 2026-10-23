@@ -5,7 +5,7 @@ import { allowed, relay } from '../worker/relay.ts'
 const U = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
 
 test('el relé solo deja pasar las rutas que usa la app', () => {
-	for (const [m, p] of [['GET', '/user'], ['GET', '/p2p'], ['GET', '/p2p/averages'], ['GET', `/p2p/${U}`], ['GET', `/p2p/${U}/chat`], ['POST', `/p2p/${U}/received`], ['POST', `/p2p/${U}/chat`], ['POST', '/p2p/create'], ['POST', `/p2p/${U}/apply`], ['POST', `/p2p/${U}/edit`], ['POST', `/p2p/${U}/pause`], ['GET', '/coins']])
+	for (const [m, p] of [['GET', '/user'], ['GET', '/p2p'], ['GET', '/p2p/averages'], ['GET', `/p2p/${U}`], ['GET', `/p2p/${U}/chat`], ['POST', `/p2p/${U}/received`], ['POST', `/p2p/${U}/chat`], ['POST', '/p2p/create'], ['POST', `/p2p/${U}/apply`], ['POST', `/p2p/${U}/edit`], ['POST', `/p2p/${U}/pause`], ['GET', '/coins'], ['PATCH', `/p2p/${U}/rate`]])
 		assert.ok(allowed(m, p), `${m} ${p}`)
 	for (const [m, p] of [
 		['POST', '/transaction/transfer'], // mover saldo: nunca
@@ -14,6 +14,7 @@ test('el relé solo deja pasar las rutas que usa la app', () => {
 		['GET', '/user/../withdraw'],
 		['GET', `/p2p/${U}/../../withdraw`],
 		['POST', '/user'],
+		['PATCH', `/p2p/${U}/edit`],
 	])
 		assert.ok(!allowed(m, p), `${m} ${p}`)
 })

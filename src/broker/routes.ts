@@ -359,7 +359,7 @@ export class Broker {
 				const status = order ? o.Orders?.find((x) => x.uuid === order)?.status : o.status
 				if (status !== 'paid') return json(400, { error: `La operación está en «${status ?? 'desconocido'}», no en pagado. No se libera.` })
 				const r = await c.markReceived(offer, order)
-				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${r.amount} USD netos (comisión ${r.fee ?? 0}).` : 'Liberado' })
+				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${Number(r.amount).toLocaleString('es')} USD netos (comisión ${Number(r.fee ?? 0).toLocaleString('es')}).` : 'Liberado' })
 			}
 			case 'cancel':
 			case 'dispute':
@@ -376,7 +376,7 @@ export class Broker {
 			case 'rate': {
 				const rating = Math.min(5, Math.max(1, Math.round(Number(b.rating) || 5)))
 				await c.rate(offer, order, rating)
-				return json(200, { ok: true, message: 'Calificación enviada' })
+				return json(200, { ok: true, message: 'Calificación guardada' })
 			}
 		}
 		return json(400, { error: 'Acción desconocida' })
@@ -422,6 +422,11 @@ export function offerTerms(b: Record<string, unknown>, flexible: boolean, editin
 
 // Las calificaciones de una operación (en las de rango, las de esa orden): la que diste y la que te dieron
 export function ratingsOf(o: P2POffer, order?: string) {
+	// En una oferta por rango cada orden trae tu valoración (my_rating); la lista general viene vacía
+	if (order) {
+		const r = o.Orders?.find((x) => x.uuid === order)?.my_rating
+		return { mine: r ? { rating: Number(r.rating), editableUntil: r.editable_until ?? null } : null, theirs: null }
+	}
 	const me = o.currentUserId == null ? null : String(o.currentUserId)
 	const list = (o.Ratings ?? []).filter((r) => !order || !r.order_id || r.order_id === order)
 	const view = (r?: (typeof list)[number]) => (r ? { rating: Number(r.rating), editableUntil: r.editable_until ?? null } : null)

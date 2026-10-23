@@ -94,3 +94,9 @@ test('ratingsOf: la calificación que diste y la que te dieron (ids numéricos d
 	assert.deepEqual(ratingsOf(o), { mine: { rating: 5, editableUntil: '2026-10-26T00:50:44Z' }, theirs: { rating: 4, editableUntil: '2026-10-26T00:51:10Z' } })
 	assert.deepEqual(ratingsOf({ Ratings: [] } as unknown as P2POffer), { mine: null, theirs: null })
 })
+
+test('ratingsOf en una oferta por rango: tu valoración viene en la orden', () => {
+	const o = { Ratings: [], Orders: [{ uuid: 'o1', my_rating: { rating: '4', editable_until: '2026-10-26T01:15:47Z' } }, { uuid: 'o2', my_rating: null }] } as unknown as P2POffer
+	assert.deepEqual(ratingsOf(o, 'o1').mine, { rating: 4, editableUntil: '2026-10-26T01:15:47Z' })
+	assert.equal(ratingsOf(o, 'o2').mine, null)
+})

@@ -14,3 +14,17 @@ test('el chat se ordena del más antiguo al más nuevo (QvaPay lo da al revés)'
 	assert.deepEqual(got.map((m) => m.message), ['primero', 'segundo', 'tercero'])
 	assert.equal(got.at(-1)?.id, '3') // el último es el mensaje más reciente: de ahí salen los avisos
 })
+
+test('cambiar una calificación: si QvaPay dice ALREADY_RATED, se reenvía con PATCH', async (t) => {
+	const real = globalThis.fetch
+	t.after(() => (globalThis.fetch = real))
+	const calls: string[] = []
+	globalThis.fetch = (async (_url: string, init: RequestInit) => {
+		calls.push(String(init.method))
+		if (init.method === 'POST') return new Response(JSON.stringify({ error: 'Ya calificaste', code: 'ALREADY_RATED' }), { status: 400 })
+		return new Response(JSON.stringify({ message: 'Rating updated' }), { status: 200 })
+	}) as typeof fetch
+	const c = new QvaPayClient({ token: 'x', dryRun: false, baseUrl: 'https://qp.test' })
+	await c.rate('7c9e6679-7425-40de-944b-e07fc1f90ae7', 'o1', 3)
+	assert.deepEqual(calls, ['POST', 'PATCH'])
+})
