@@ -103,17 +103,32 @@ export async function query(db: D1, coin: string, days: number, now = Date.now()
 		.prepare(
 			`SELECT r.t, r.count, r.count_buy, r.count_sell, r.window_h
 			   FROM rates r
-			   JOIN (SELECT MAX(t) AS t FROM rates WHERE coin = ?1 AND t >= ?2 GROUP BY CAST((t + ?3) / 86400000 AS INTEGER)) d ON d.t = r.t
+			   JOIN (SELECT MAX(t) AS t FROM rates WHERE coin = ?1 AND t >= ?2
+			          GROUP BY CAST((t + CASE WHEN (t >= ?3 AND t < ?4) OR (t >= ?5 AND t < ?6) THEN ${CDT} ELSE ${CST} END) / 86400000 AS INTEGER)) d ON d.t = r.t
 			  WHERE r.coin = ?1
 			  ORDER BY r.t`,
 		)
-		.bind(coin, since, CUBA_OFFSET_MS)
+		// El rango (hasta un año) toca como mucho dos veranos: el del año de inicio y el del actual
+		.bind(coin, since, ...summer(new Date(since).getUTCFullYear()), ...summer(new Date(now).getUTCFullYear()))
 		.all<DayRow>()
 	return { coin, days, bucketMs: bucket, firstPoint: first?.t ?? null, points: results, daily: dailyFrom(last, now) }
 }
 
-// Cuba: UTC-5 (en verano UTC-4; para agrupar por día basta con el horario estándar)
-const CUBA_OFFSET_MS = -5 * 3600_000
+// Cuba: UTC-5, y UTC-4 en verano. El verano va del segundo domingo de marzo al primer domingo
+// de noviembre; los dos cambios son a las 05:00 UTC (00:00 → 01:00 y 01:00 → 00:00 en Cuba)
+const CST = -5 * 3600_000
+const CDT = -4 * 3600_000
+const sunday = (year: number, month: number, nth: number) => {
+	const first = new Date(Date.UTC(year, month, 1)).getUTCDay()
+	return Date.UTC(year, month, 1 + ((7 - first) % 7) + (nth - 1) * 7, 5)
+}
+// [inicio, fin) del verano de ese año, en ms UTC
+export const summer = (year: number): [number, number] => [sunday(year, 2, 2), sunday(year, 10, 1)]
+export function cubaOffset(t: number) {
+	const [start, end] = summer(new Date(t).getUTCFullYear())
+	return t >= start && t < end ? CDT : CST
+}
+const cubaDay = (t: number) => Math.floor((t + cubaOffset(t)) / 86_400_000)
 
 interface DayRow {
 	t: number
@@ -126,14 +141,15 @@ interface DayRow {
 // De "operaciones en la ventana de QvaPay" a operaciones por día. En las monedas de poco
 // movimiento la ventana es de 7 días: se reparte para que todas las barras sean diarias
 export function dailyFrom(rows: DayRow[], now = Date.now()) {
-	const today = Math.floor((now + CUBA_OFFSET_MS) / 86_400_000)
+	const today = cubaDay(now)
 	return rows.map((r) => {
 		const perDay = (r.window_h ?? 24) / 24
 		const per = (v: number | null) => (v == null ? null : Math.round(v / perDay))
-		const day = Math.floor((r.t + CUBA_OFFSET_MS) / 86_400_000)
+		const day = cubaDay(r.t)
+		const noon = day * 86_400_000 + 12 * 3600_000
 		return {
 			// Mediodía de ese día en Cuba, para dibujar la barra
-			t: day * 86_400_000 + 12 * 3600_000 - CUBA_OFFSET_MS,
+			t: noon - cubaOffset(noon - CST),
 			day: new Date(day * 86_400_000).toISOString().slice(0, 10),
 			ops: per(r.count) ?? 0,
 			buy: per(r.count_buy),
