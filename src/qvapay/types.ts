@@ -62,6 +62,9 @@ export interface P2POffer {
 	// Con my=true, en una oferta por rango de la que tomaste una parte
 	my_order?: { uuid: string; amount: Num; receive: Num; status: string; created_at?: string; payment_window_expires_at?: string | null } | null
 	requirements_met?: boolean
+	// Solo en el detalle: calificaciones de la operación y el id numérico de quien consulta
+	Ratings?: { rater: string | number; rated: string | number; rating: string | number; editable_until?: string | null; order_id?: string | null }[]
+	currentUserId?: string | number
 }
 
 // Datos de una moneda (GET /coins): working_data son los campos de pago que pide

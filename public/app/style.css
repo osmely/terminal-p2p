@@ -342,9 +342,11 @@ button { cursor: pointer; }
 .stars { display: inline-flex; gap: 2px; }
 /* Al pasar por encima se iluminan las estrellas hasta la elegida */
 .stars button { font-size: 28px; line-height: 1; padding: 2px 3px; background: none; border: 0; color: var(--line-strong); transition: color 0.1s, transform 0.1s; }
-.stars:hover button, .stars:focus-within button { color: var(--warn); }
-.stars button:hover ~ button, .stars button:focus-visible ~ button { color: var(--line-strong); }
-.stars button:hover { transform: scale(1.12); }
+.stars button.on { color: var(--warn); }
+.stars.locked button { cursor: default; }
+.stars:not(.locked):hover button, .stars:not(.locked):focus-within button { color: var(--warn); }
+.stars:not(.locked) button:hover ~ button, .stars:not(.locked) button:focus-visible ~ button { color: var(--line-strong); }
+.stars:not(.locked) button:hover { transform: scale(1.12); }
 .chip { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--surface-3); color: var(--muted); white-space: nowrap; }
 .chip.processing { color: var(--warn); background: var(--warn-bg); }
 .chip.paid { color: var(--accent); background: var(--accent-bg); }

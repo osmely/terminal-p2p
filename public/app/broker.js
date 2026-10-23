@@ -340,8 +340,19 @@ function renderDetail(t) {
 			<div class="row-btns"><button class="btn danger" data-act="dispute">No llegó: disputar</button><button class="btn buy" data-act="release" disabled>Liberar ${fmtU(t.usd)} USD</button></div></div>`
 	else if (status === 'paid') action = `<p>Marcaste el pago. Esperando que @${esc(t.counterparty)} libere los USD.</p>`
 	else if (status === 'revision') action = '<p>En disputa: un moderador revisa el chat. Sube aquí tus comprobantes.</p>'
-	else if (status === 'completed')
-		action = `<p>Operación completada. Califica a @${esc(t.counterparty)}:</p><div class="stars" role="group" aria-label="Calificación">${[1, 2, 3, 4, 5].map((n) => `<button data-rate="${n}" title="${n} de 5" aria-label="${n} de 5 estrellas">★</button>`).join('')}</div>`
+	else if (status === 'completed') {
+		const mine = t.myRating?.rating ?? 0
+		const until = t.myRating?.editableUntil ? Date.parse(t.myRating.editableUntil) : null
+		const locked = mine > 0 && until != null && until < Date.now()
+		const when = until ? new Date(until).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+		const stars = [1, 2, 3, 4, 5]
+			.map((n) => `<button data-rate="${n}" class="${n <= mine ? 'on' : ''}" title="${n} de 5" aria-label="${n} de 5 estrellas" aria-pressed="${n === mine}" ${locked ? 'disabled' : ''}>★</button>`)
+			.join('')
+		action = `<div class="stack tight"><p>${mine ? `Calificaste a @${esc(t.counterparty)}:` : `Operación completada. Califica a @${esc(t.counterparty)}:`}</p>
+			<div class="stars ${locked ? 'locked' : ''}" role="group" aria-label="Calificación">${stars}</div>
+			${mine ? `<p class="hint">${locked ? 'Ya no se puede cambiar.' : `Puedes cambiarla hasta el ${when}.`}</p>` : ''}
+			${t.theirRating ? `<p class="hint">@${esc(t.counterparty)} te calificó con <b>${t.theirRating.rating} ★</b>.</p>` : ''}</div>`
+	}
 
 	$('modalBody').innerHTML = `<div class="stack">
 		<div><h3>${buy ? 'Compras' : 'Vendes'} ${fmtU(t.usd)} USD por ${fmtU(t.coinAmount)} ${unit}</h3>
@@ -448,7 +459,7 @@ function bindDetail(t) {
 			}
 			return act(a)
 		}
-	for (const b of body.querySelectorAll('[data-rate]')) b.onclick = () => act('rate', { rating: Number(b.dataset.rate) })
+	for (const b of body.querySelectorAll('[data-rate]')) b.onclick = () => !b.disabled && act('rate', { rating: Number(b.dataset.rate) })
 	$('chatform').onsubmit = (e) => {
 		e.preventDefault()
 		const text = $('chatInput').value.trim()

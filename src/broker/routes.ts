@@ -225,9 +225,12 @@ export class Broker {
 		const ord = order ? o.Orders?.find((x) => x.uuid === order) : undefined
 		const chat = await acc.client.getChat(offer, order).catch(() => [])
 		const isOwner = o.User?.uuid === acc.me.uuid
+		const { mine, theirs } = ratingsOf(o, order)
 		return json(200, {
 			offer,
 			order: order ?? null,
+			myRating: mine,
+			theirRating: theirs,
 			coin: o.coin,
 			type: o.type,
 			status: ord?.status ?? o.status,
@@ -355,7 +358,7 @@ export class Broker {
 				const status = order ? o.Orders?.find((x) => x.uuid === order)?.status : o.status
 				if (status !== 'paid') return json(400, { error: `La operación está en «${status ?? 'desconocido'}», no en pagado. No se libera.` })
 				const r = await c.markReceived(offer, order)
-				return json(200, { ok: true, message: r && r.amount != null ? `Liberado. Recibe ${r.amount} USD netos (comisión ${r.fee ?? 0}).` : 'Liberado' })
+				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${r.amount} USD netos (comisión ${r.fee ?? 0}).` : 'Liberado' })
 			}
 			case 'cancel':
 			case 'dispute':
@@ -414,6 +417,17 @@ export function offerTerms(b: Record<string, unknown>, flexible: boolean, editin
 		if (!Object.keys(requirements).length) requirements = undefined
 	}
 	return { amount, receive, price, kind: flexible ? ('flexible' as const) : ('fixed' as const), orderMin, orderMax, requirements }
+}
+
+// Las calificaciones de una operación (en las de rango, las de esa orden): la que diste y la que te dieron
+export function ratingsOf(o: P2POffer, order?: string) {
+	const me = o.currentUserId == null ? null : String(o.currentUserId)
+	const list = (o.Ratings ?? []).filter((r) => !order || !r.order_id || r.order_id === order)
+	const view = (r?: (typeof list)[number]) => (r ? { rating: Number(r.rating), editableUntil: r.editable_until ?? null } : null)
+	return {
+		mine: me ? view(list.find((r) => String(r.rater) === me)) : null,
+		theirs: me ? view(list.find((r) => String(r.rated) === me)) : null,
+	}
 }
 
 // Lo que muestra el terminal de una oferta (propia o ajena)

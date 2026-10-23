@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { offerTerms, offerView } from '../src/broker/routes.ts'
+import { offerTerms, offerView, ratingsOf } from '../src/broker/routes.ts'
 import { orderTrades } from '../src/broker/trades.ts'
 import type { P2POffer } from '../src/qvapay/types.ts'
 
@@ -81,4 +81,16 @@ test('offerTerms al editar: el máximo por orden puede superar lo que queda', ()
 	assert.ok('error' in offerTerms({ amount: 20, price: 1015, orderMin: 60, orderMax: 50 }, true, true))
 	// Al crear sí: el máximo no puede superar el monto
 	assert.ok('error' in offerTerms({ amount: 20, price: 1015, orderMin: 10, orderMax: 50 }, true))
+})
+
+test('ratingsOf: la calificación que diste y la que te dieron (ids numéricos de QvaPay)', () => {
+	const o = {
+		currentUserId: '202274',
+		Ratings: [
+			{ rater: '30227', rated: '202274', rating: '4', editable_until: '2026-10-26T00:51:10Z' },
+			{ rater: '202274', rated: '30227', rating: '5', editable_until: '2026-10-26T00:50:44Z' },
+		],
+	} as unknown as P2POffer
+	assert.deepEqual(ratingsOf(o), { mine: { rating: 5, editableUntil: '2026-10-26T00:50:44Z' }, theirs: { rating: 4, editableUntil: '2026-10-26T00:51:10Z' } })
+	assert.deepEqual(ratingsOf({ Ratings: [] } as unknown as P2POffer), { mine: null, theirs: null })
 })
