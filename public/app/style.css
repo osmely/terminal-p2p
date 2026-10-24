@@ -129,8 +129,9 @@ button { cursor: pointer; }
 /* ══ Barra superior ═══════════════════════════════════════════════════ */
 .nav {
 	position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px;
-	height: 56px; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+	height: calc(56px + env(safe-area-inset-top, 0px)); padding: env(safe-area-inset-top, 0px) 16px 0; background: var(--surface); border-bottom: 1px solid var(--line);
 }
+body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
 /* En el iPhone el navegador dibuja la página bajo sus controles: el fondo de la barra sube para taparla */
 .nav::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 160px; background: var(--surface); pointer-events: none; }
 .brand { display: flex; align-items: center; gap: 9px; color: var(--text); text-decoration: none; font-weight: 700; letter-spacing: -0.01em; }
@@ -167,7 +168,7 @@ button { cursor: pointer; }
 .mchip.active { border-color: var(--accent); background: var(--accent-bg); }
 .mchip.active .num { color: var(--text-2); }
 .view-tabs {
-	position: sticky; top: 56px; z-index: 15; gap: 4px; padding: 8px 12px; background: var(--bg);
+	position: sticky; top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 15; gap: 4px; padding: 8px 12px; background: var(--bg);
 	border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none;
 }
 .view-tabs::-webkit-scrollbar { display: none; }
@@ -364,7 +365,7 @@ button { cursor: pointer; }
 .countdown.over { background: var(--ask-bg); color: var(--ask); }
 
 /* ══ Modal ════════════════════════════════════════════════════════════ */
-.modal { position: fixed; inset: 0; z-index: 40; background: var(--overlay); display: flex; align-items: flex-start; justify-content: center; padding: 7vh 16px; overflow-y: auto; backdrop-filter: blur(2px); }
+.modal { position: fixed; inset: 0; z-index: 40; background: var(--overlay); display: flex; align-items: flex-start; justify-content: center; padding: calc(7vh + env(safe-area-inset-top, 0px)) 16px calc(7vh + env(safe-area-inset-bottom, 0px)); overflow-y: auto; backdrop-filter: blur(2px); }
 .modal-card { position: relative; width: min(560px, 100%); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 22px; box-shadow: var(--shadow); }
 .modal-card h3 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; }
 .modal-card p { margin: 6px 0; }
@@ -432,7 +433,7 @@ details.opts[open] summary { margin-bottom: 10px; }
 .share .row-btns .btn { flex: none; }
 .lvl .who .you { font: 700 10px var(--sans); color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 0 4px; margin-right: 4px; }
 
-.toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 50; background: var(--surface); border: 1px solid var(--line-strong); padding: 10px 16px; border-radius: var(--r-sm); font-size: 13px; box-shadow: var(--shadow); }
+.toast { position: fixed; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 50; background: var(--surface); border: 1px solid var(--line-strong); padding: 10px 16px; border-radius: var(--r-sm); font-size: 13px; box-shadow: var(--shadow); }
 .toast.bad { border-color: var(--ask); color: var(--ask); }
 .tip { position: fixed; z-index: 30; pointer-events: none; max-width: 290px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 10px 12px; font-size: 12px; box-shadow: var(--shadow); }
 .tip b { font-family: var(--mono); }
@@ -499,7 +500,7 @@ a.icon-btn { text-decoration: none; }
 
 	/* Abajo cuando cabe; si es más alto que la pantalla, desde arriba y con scroll
 	   (con align-items: flex-end la parte de arriba quedaría fuera de alcance) */
-	.modal { padding: 12px; align-items: flex-start; }
+	.modal { padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)); align-items: flex-start; }
 	.modal-card { padding: 18px; border-radius: 14px; margin-top: auto; }
 	/* 16 px evita que el iPhone amplíe la página al tocar un campo */
 	.modal .input { font-size: 16px; padding: 9px 11px; }
