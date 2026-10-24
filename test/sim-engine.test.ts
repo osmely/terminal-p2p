@@ -75,3 +75,28 @@ test('cortos: se gana si baja y se cancela devolviendo la garantía', () => {
 	assert.equal(e.state.shorts.DOGE.free, short.qty)
 	assert.throws(() => e.cancelOrder(cover.id), /ya no está abierta/)
 })
+
+test('editar una orden abierta: nuevo precio con la misma cantidad, y si no vale, todo queda igual', () => {
+	const e = new Engine(freshState(T0))
+	const o = e.placeOrder({ symbol: 'ETH', side: 'BUY', type: 'LIMIT', price: 90, quoteAmount: 900 }, q(100), T0)
+	const locked = e.state.balances.USDT.locked
+	const moved = e.modifyOrder(o.id, { price: 80 }, q(100), T0 + 1000)
+	assert.deepEqual([moved.price, moved.qty, moved.status, o.status], [80, o.qty, 'OPEN', 'CANCELED'])
+	assert.ok(e.state.balances.USDT.locked < locked) // a 80 se reserva menos
+	// Un stop de venta por encima del precio no vale: la orden sigue como estaba
+	e.placeOrder({ symbol: 'SOL', side: 'BUY', quoteAmount: 500 }, q(100), T0)
+	const stop = e.placeOrder({ symbol: 'SOL', side: 'SELL', type: 'STOP', stopPrice: 90, quantity: 4 }, q(100), T0)
+	assert.throws(() => e.modifyOrder(stop.id, { stopPrice: 110 }, q(100)), /por debajo/)
+	assert.deepEqual([e.openOrders().find((x) => x.id === stop.id)?.stopPrice, e.state.balances.SOL.locked], [90, 4])
+})
+
+test('cancelar todas, o solo las de un mercado', () => {
+	const e = new Engine(freshState(T0))
+	e.placeOrder({ symbol: 'ETH', side: 'BUY', type: 'LIMIT', price: 90, quoteAmount: 300 }, q(100), T0)
+	e.placeOrder({ symbol: 'ETH', side: 'BUY', type: 'LIMIT', price: 80, quoteAmount: 300 }, q(100), T0)
+	e.placeOrder({ symbol: 'BTC', side: 'BUY', type: 'LIMIT', price: 90, quoteAmount: 300 }, q(100), T0)
+	assert.equal(e.cancelAll('ETHUSDT'), 2)
+	assert.deepEqual(e.openOrders().map((o) => o.symbol), ['BTCUSDT'])
+	assert.equal(e.cancelAll(), 1)
+	assert.equal(e.state.balances.USDT.locked, 0)
+})

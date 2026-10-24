@@ -71,27 +71,71 @@
 			<div id="chart" class="chart"></div>
 		</section>
 
+		<section class="panel book-panel">
+			<div class="panel-head">
+				<div class="seg-tabs" id="bookTabs" role="tablist">
+					<button class="seg-tab" data-book="book">Libro</button>
+					<button class="seg-tab" data-book="trades">Últimas operaciones</button>
+				</div>
+			</div>
+			<div id="bookBody" class="book-body"></div>
+		</section>
+
 		<section class="panel order-panel">
 			<div class="seg-tabs sides" role="radiogroup" aria-label="Lado">
 				<button class="seg-tab buy" data-side="BUY" role="radio">Comprar</button>
 				<button class="seg-tab sell" data-side="SELL" role="radio">Vender</button>
 			</div>
-			<div class="seg-tabs types" role="radiogroup" aria-label="Tipo de orden">
-				<button class="seg-tab" data-type="MARKET" role="radio">Mercado</button>
-				<button class="seg-tab" data-type="LIMIT" role="radio">Límite</button>
-				<button class="seg-tab" data-type="STOP" role="radio">Stop</button>
+			<div class="type-tabs" role="radiogroup" aria-label="Tipo de orden">
+				<button data-type="LIMIT" role="radio">Límite</button>
+				<button data-type="MARKET" role="radio">Mercado</button>
+				<button data-type="STOP" role="radio" title="Se ejecuta a mercado cuando el precio llega a la activación">Stop</button>
 			</div>
-			<label class="field" id="fPriceBox">Precio límite <span class="unit">USDT</span><input class="input mono" id="fPrice" type="number" step="any" inputmode="decimal" /></label>
-			<label class="field" id="fStopBox">Precio de activación <span class="unit">USDT</span><input class="input mono" id="fStop" type="number" step="any" inputmode="decimal" /></label>
-			<label class="field"><span id="fAmountLabel">Importe</span> <span class="unit" id="fAmountUnit">USDT</span><input class="input mono" id="fAmount" type="number" step="any" min="0" inputmode="decimal" /></label>
-			<div class="pcts" id="pcts"><button data-pct="25">25%</button><button data-pct="50">50%</button><button data-pct="75">75%</button><button data-pct="100">Todo</button></div>
-			<div id="exits" class="exits">
-				<label class="field">Stop loss <span class="unit">opcional</span><input class="input mono" id="fSl" type="number" step="any" inputmode="decimal" placeholder="Si baja a…" /></label>
-				<label class="field">Take profit <span class="unit">opcional</span><input class="input mono" id="fTp" type="number" step="any" inputmode="decimal" placeholder="Si sube a…" /></label>
+			<div class="ofield" id="fStopBox">
+				<span class="olabel">Activación</span>
+				<button type="button" class="step" data-step="-1" data-for="fStop" aria-label="Bajar">−</button>
+				<input class="oinput mono" id="fStop" type="number" step="any" inputmode="decimal" />
+				<button type="button" class="step" data-step="1" data-for="fStop" aria-label="Subir">+</button>
+				<span class="ounit">USDT</span>
 			</div>
-			<p class="hint" id="fHint"></p>
+			<div class="ofield" id="fPriceBox">
+				<span class="olabel">Precio</span>
+				<button type="button" class="step" data-step="-1" data-for="fPrice" aria-label="Bajar">−</button>
+				<input class="oinput mono" id="fPrice" type="number" step="any" inputmode="decimal" />
+				<button type="button" class="step" data-step="1" data-for="fPrice" aria-label="Subir">+</button>
+				<span class="ounit">USDT</span>
+			</div>
+			<div class="ofield market-price" id="fMarketBox"><span class="olabel">Precio</span><span class="mono" id="fMarketPrice">Al mejor precio del mercado</span></div>
+			<div class="quick" id="fQuick"><button type="button" data-fill="best">Mejor precio</button><button type="button" data-fill="last">Último</button></div>
+			<div class="ofield">
+				<span class="olabel">Cantidad</span>
+				<input class="oinput mono" id="fAmount" type="number" step="any" min="0" inputmode="decimal" placeholder="0" />
+				<button type="button" class="unit-toggle" id="fUnit" title="Cambiar entre monedas y USDT">BTC</button>
+			</div>
+			<div class="slider">
+				<input type="range" id="fSlider" min="0" max="100" step="1" value="0" aria-label="Porcentaje de lo disponible" />
+				<div class="marks" id="fMarks"><button type="button" data-pct="0">0%</button><button type="button" data-pct="25">25%</button><button type="button" data-pct="50">50%</button><button type="button" data-pct="75">75%</button><button type="button" data-pct="100">100%</button></div>
+			</div>
+			<div class="olines">
+				<span>Disponible</span><b id="fAvail">—</b>
+				<span id="fTotalLabel">Total</span><b id="fTotal">—</b>
+				<span>Comisión (0,1%)</span><b id="fFee">—</b>
+			</div>
+			<label class="check" id="fTpslBox"><input type="checkbox" id="fTpsl" /> Take profit / stop loss</label>
+			<div id="exits" class="exits" hidden>
+				<div class="exit">
+					<div class="ofield"><span class="olabel up">Take profit</span><input class="oinput mono" id="fTp" type="number" step="any" inputmode="decimal" placeholder="Vender si sube a…" /><span class="ounit">USDT</span></div>
+					<div class="chips" data-exit="fTp"><button type="button" data-pct="2">+2%</button><button type="button" data-pct="5">+5%</button><button type="button" data-pct="10">+10%</button><button type="button" data-pct="20">+20%</button></div>
+					<p class="est" id="fTpEst"></p>
+				</div>
+				<div class="exit">
+					<div class="ofield"><span class="olabel down">Stop loss</span><input class="oinput mono" id="fSl" type="number" step="any" inputmode="decimal" placeholder="Vender si baja a…" /><span class="ounit">USDT</span></div>
+					<div class="chips" data-exit="fSl"><button type="button" data-pct="-2">−2%</button><button type="button" data-pct="-5">−5%</button><button type="button" data-pct="-10">−10%</button><button type="button" data-pct="-20">−20%</button></div>
+					<p class="est" id="fSlEst"></p>
+				</div>
+			</div>
 			<button class="btn block go" id="fGo">Comprar</button>
-			<p class="fine" id="fAvail"></p>
+			<p class="fine" id="fHint"></p>
 		</section>
 
 		<section class="panel bottom">
@@ -109,8 +153,7 @@
 	</main>
 
 	<footer class="foot">
-		Simulador con dinero ficticio: no se opera con dinero real ni es consejo financiero. Precios de <a href="https://www.mexc.com" target="_blank" rel="noopener">MEXC</a>, que sigue al de los grandes exchanges,
-		servidos desde terminalp2p.com: funciona sin VPN. Las órdenes pendientes se revisan minuto a minuto, aunque cierres la página.
+		Simulador con dinero ficticio: no se opera con dinero real ni es consejo financiero. Precios de <a href="https://www.mexc.com" target="_blank" rel="noopener">MEXC</a>.
 		· <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>
 	</footer>
 

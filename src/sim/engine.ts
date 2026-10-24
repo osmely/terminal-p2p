@@ -265,6 +265,32 @@ export class Engine {
 		return o
 	}
 
+	// Cambia el precio (límite u objetivo) o el stop de una orden abierta: se cancela y se vuelve a poner con
+	// los mismos datos y precios nuevos. Si la nueva no es válida, la cuenta queda como estaba
+	modifyOrder(id: number, change: { price?: number | null; stopPrice?: number | null }, q: Quote, now = Date.now()) {
+		const o = this.state.orders.find((x) => x.id === +id)
+		if (!o) throw new SimError(`No existe la orden ${id}`)
+		if (o.status !== 'OPEN') throw new SimError('Esa orden ya no está abierta')
+		const before = structuredClone(this.state)
+		try {
+			this.cancelOrder(o.id)
+			return this.placeOrder(
+				{ symbol: o.symbol, side: o.side, type: o.type, quantity: o.qty, price: change.price ?? o.price, stopPrice: change.stopPrice ?? o.stopPrice, stopLoss: o.stopLoss, takeProfit: o.takeProfit, note: o.note },
+				q,
+				now,
+			)
+		} catch (err) {
+			this.state = before
+			throw err
+		}
+	}
+
+	cancelAll(symbol?: Symbol) {
+		const open = this.openOrders().filter((o) => !symbol || o.symbol === symbol)
+		for (const o of open) this.cancelOrder(o.id)
+		return open.length
+	}
+
 	private release(o: Order) {
 		const bal = this.state.balances
 		const base = MARKETS[o.symbol].base

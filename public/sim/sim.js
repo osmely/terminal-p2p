@@ -2,6 +2,7 @@
 // Binance; la cuenta, las órdenes y el ranking los lleva el servidor (/api/*, worker/sim.ts).
 
 const $ = (id) => document.getElementById(id)
+const $$ = (sel) => [...document.querySelectorAll(sel)]
 const store = {
 	get(k, d) {
 		try {
@@ -36,7 +37,12 @@ const S = {
 	symbol: store.get('sim.symbol', 'BTCUSDT'),
 	interval: store.get('sim.interval', '15m'),
 	side: 'BUY',
-	type: 'MARKET',
+	type: store.get('sim.type', 'LIMIT'),
+	// Unidad de la cantidad: 'base' (monedas) o 'quote' (USDT)
+	unit: store.get('sim.unit', 'quote'),
+	book: null, // { bids, asks } del mercado que se mira
+	trades: null,
+	bookTab: store.get('sim.bookTab', 'book'),
 	tab: store.get('sim.tab', 'positions'),
 	tradesSeen: null,
 	busy: false,
@@ -47,6 +53,8 @@ const decimalsOf = (step) => Math.max(0, Math.min(8, Math.round(-Math.log10(step
 const fmtPrice = (p, sym = S.symbol) => (p == null || !isFinite(p) ? '—' : p.toLocaleString('es', { minimumFractionDigits: decimalsOf(S.markets[sym]?.tick ?? 0.01), maximumFractionDigits: decimalsOf(S.markets[sym]?.tick ?? 0.01) }))
 const fmtQty = (q, sym = S.symbol) => (q == null ? '—' : q.toLocaleString('es', { maximumFractionDigits: decimalsOf(S.markets[sym]?.qtyStep ?? 0.0001) }))
 const fmtUsd = (n) => (n == null || !isFinite(n) ? '—' : n.toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+// 45.373 → 45,4K; 1.250.000 → 1,25M
+const fmtCompact = (n) => (n >= 1e6 ? `${(n / 1e6).toLocaleString('es', { maximumFractionDigits: 2 })}M` : n >= 1e4 ? `${(n / 1e3).toLocaleString('es', { maximumFractionDigits: 1 })}K` : fmtUsd(n))
 const fmtPct = (x) => (x == null || !isFinite(x) ? '—' : `${x >= 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')}%`)
 const cls = (x) => (x > 0 ? 'up' : x < 0 ? 'down' : '')
 const base = (sym) => S.markets[sym]?.base ?? sym.replace('USDT', '')
@@ -103,6 +111,7 @@ async function loadTickers() {
 		for (const [sym, t] of Object.entries(tickers)) S.live[sym] = { last: t.last, open: t.open }
 		tickFails = 0
 		feed(true)
+		prefillPrices()
 		updateLiveCandle()
 		scheduleRender()
 	} catch {
@@ -279,6 +288,34 @@ function renderUser() {
 function holding(sym = S.symbol) {
 	return S.view?.account.positions.find((p) => p.symbol === sym && p.side === 'LONG')?.qty ?? 0
 }
+const mk = () => S.markets[S.symbol]
+const tickOf = () => mk()?.tick ?? 0.01
+const roundTick = (p) => Number((Math.round(p / tickOf()) * tickOf()).toFixed(decimalsOf(tickOf())))
+const floorStep = (q) => Number((Math.floor(q / mk().qtyStep + 1e-9) * mk().qtyStep).toFixed(decimalsOf(mk().qtyStep)))
+// Mejor precio para ejecutar ya: el ask al comprar, el bid al vender (del libro si está, si no el último)
+function bestPrice(side = S.side) {
+	const b = S.book
+	const top = side === 'BUY' ? b?.asks?.[0]?.[0] : b?.bids?.[0]?.[0]
+	return top ?? S.live[S.symbol]?.last ?? null
+}
+// Precio de referencia de la orden según su tipo
+function refPrice() {
+	if (S.type === 'LIMIT') return Number($('fPrice').value) || null
+	if (S.type === 'STOP') return Number($('fStop').value) || null
+	return bestPrice()
+}
+// Cantidad en monedas que representa lo que hay escrito
+function formQty() {
+	const v = Number($('fAmount').value)
+	const px = refPrice()
+	if (!(v > 0)) return 0
+	if (S.unit === 'base') return v
+	return px ? v / px / (S.side === 'BUY' ? 1.001 : 1) : 0
+}
+function available() {
+	if (!S.view) return 0
+	return S.side === 'BUY' ? S.view.account.cash.free : holding()
+}
 
 function renderForm() {
 	for (const b of document.querySelectorAll('[data-side]')) b.classList.toggle('active', b.dataset.side === S.side)
@@ -286,41 +323,77 @@ function renderForm() {
 	const buy = S.side === 'BUY'
 	$('fPriceBox').hidden = S.type !== 'LIMIT'
 	$('fStopBox').hidden = S.type !== 'STOP'
-	$('exits').hidden = !buy
-	$('fAmountLabel').textContent = buy ? 'Importe' : 'Cantidad'
-	$('fAmountUnit').textContent = buy ? 'USDT' : base(S.symbol)
+	$('fMarketBox').hidden = S.type !== 'MARKET'
+	$('fQuick').hidden = S.type === 'MARKET'
+	$('fUnit').textContent = S.unit === 'base' ? base(S.symbol) : 'USDT'
+	$('fTpslBox').hidden = !buy
+	$('exits').hidden = !buy || !$('fTpsl').checked
 	const go = $('fGo')
 	go.className = `btn block go ${buy ? 'buy' : 'sell'}`
-	go.textContent = !S.user ? 'Entra con Telegram para operar' : `${buy ? 'Comprar' : 'Vender'} ${base(S.symbol)}`
 	go.disabled = !S.user || S.busy
-	$('fAvail').textContent = !S.view ? '' : buy ? `Disponible: ${fmtUsd(S.view.account.cash.free)} USDT` : `Disponible: ${fmtQty(holding())} ${base(S.symbol)}`
+	go.textContent = !S.user ? 'Entra con Telegram para operar' : S.busy ? 'Enviando…' : `${buy ? 'Comprar' : 'Vender'} ${base(S.symbol)}`
 	renderHint()
 }
 
+// Totales, comisión, porcentaje del deslizador y resultado estimado del take profit y el stop loss
 function renderHint() {
-	const l = S.live[S.symbol]
-	const amount = Number($('fAmount').value)
-	if (!l || !(amount > 0)) return ($('fHint').innerHTML = '')
-	const px = S.type === 'LIMIT' ? Number($('fPrice').value) || l.last : S.type === 'STOP' ? Number($('fStop').value) || l.last : l.last
-	if (S.side === 'BUY') {
-		const qty = amount / px / 1.001
-		$('fHint').innerHTML = `≈ <b>${fmtQty(qty)}</b> ${esc(base(S.symbol))} a ${fmtPrice(px)} · comisión ${fmtUsd(amount - amount / 1.001)} USDT`
-	} else {
-		const total = amount * px
-		$('fHint').innerHTML = `≈ <b>${fmtUsd(total * 0.999)}</b> USDT a ${fmtPrice(px)} · comisión ${fmtUsd(total * 0.001)} USDT`
+	const buy = S.side === 'BUY'
+	const px = refPrice()
+	const qty = formQty()
+	const total = qty * (px ?? 0)
+	const fee = total * 0.001
+	$('fAvail').textContent = !S.view ? '—' : buy ? `${fmtUsd(available())} USDT` : `${fmtQty(available())} ${base(S.symbol)}`
+	$('fTotalLabel').textContent = buy ? 'Total con comisión' : 'Recibes'
+	$('fTotal').textContent = qty > 0 && px ? `${fmtUsd(buy ? total + fee : total - fee)} USDT` : '—'
+	$('fFee').textContent = qty > 0 && px ? `${fmtUsd(fee)} USDT` : '—'
+	$('fMarketPrice').textContent = bestPrice() ? `≈ ${fmtPrice(bestPrice())} (mejor ${buy ? 'venta' : 'compra'} del libro)` : 'Al mejor precio del mercado'
+	// El deslizador refleja qué parte de lo disponible se usa
+	const avail = available()
+	if (document.activeElement !== $('fSlider')) {
+		const used = buy ? total + fee : qty
+		$('fSlider').value = String(avail > 0 ? Math.min(100, Math.round((used / avail) * 100)) : 0)
 	}
+	const est = (target, el) => {
+		const t = Number($(target).value)
+		if (!(t > 0 && px && qty > 0)) return ($(el).textContent = '')
+		const pnl = (t - px) * qty - (px + t) * qty * 0.001
+		$(el).textContent = `${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)} USDT (${fmtPct((t / px - 1) * 100)})`
+		$(el).className = `est ${cls(pnl)}`
+	}
+	est('fTp', 'fTpEst')
+	est('fSl', 'fSlEst')
+	$('fHint').textContent = S.type === 'MARKET' ? 'Se ejecuta al momento al mejor precio disponible.' : S.type === 'LIMIT' ? 'Se ejecuta cuando el mercado llegue a tu precio, aunque cierres la página.' : 'Al llegar a la activación se ejecuta a mercado.'
+}
+
+// Los precios de la orden se rellenan con el actual si están vacíos
+function prefillPrices() {
+	const l = S.live[S.symbol]
+	if (!l || !mk()) return
+	if (S.type === 'LIMIT' && !$('fPrice').value) $('fPrice').value = String(roundTick(bestPrice() ?? l.last))
+	if (S.type === 'STOP' && !$('fStop').value) $('fStop').value = String(roundTick(l.last))
+}
+
+function setAmountFromPct(pct) {
+	const avail = available()
+	const px = refPrice()
+	if (!(avail > 0)) return ($('fAmount').value = '')
+	let v
+	if (S.side === 'BUY') v = S.unit === 'quote' ? Math.floor(avail * pct) / 100 : px ? floorStep((avail * pct) / 100 / px / 1.001) : 0
+	else v = S.unit === 'base' ? floorStep((avail * pct) / 100) : px ? Math.floor(((avail * pct) / 100) * px * 100) / 100 : 0
+	$('fAmount').value = v > 0 ? String(v) : ''
+	renderHint()
 }
 
 async function submitOrder() {
 	if (!S.user || S.busy) return
-	const amount = Number($('fAmount').value)
-	if (!(amount > 0)) return toast('Pon el importe o la cantidad', 'bad')
+	const qty = formQty()
+	if (!(qty > 0)) return toast('Pon la cantidad', 'bad')
 	const body = { symbol: S.symbol, side: S.side, type: S.type }
-	if (S.side === 'BUY') body.quoteAmount = amount
-	else body.quantity = amount
+	if (S.side === 'BUY' && S.unit === 'quote') body.quoteAmount = Number($('fAmount').value)
+	else body.quantity = floorStep(qty)
 	if (S.type === 'LIMIT') body.price = $('fPrice').value
 	if (S.type === 'STOP') body.stopPrice = $('fStop').value
-	if (S.side === 'BUY') {
+	if (S.side === 'BUY' && $('fTpsl').checked) {
 		body.stopLoss = $('fSl').value || undefined
 		body.takeProfit = $('fTp').value || undefined
 	}
@@ -343,6 +416,53 @@ async function submitOrder() {
 	}
 }
 
+// ── Libro de órdenes y últimas operaciones ────────────────────────────
+async function loadBook() {
+	const sym = S.symbol
+	const tab = S.bookTab
+	try {
+		const r = await fetch(`/api/${tab === 'book' ? 'depth' : 'trades'}?symbol=${sym}`)
+		if (!r.ok) throw new Error(String(r.status))
+		const data = await r.json()
+		if (sym !== S.symbol) return
+		if (tab === 'book') S.book = data
+		else S.trades = data
+		renderBook()
+		if (tab === 'book') renderHint()
+	} catch {}
+}
+
+function renderBook() {
+	for (const b of document.querySelectorAll('[data-book]')) b.classList.toggle('active', b.dataset.book === S.bookTab)
+	const body = $('bookBody')
+	const u = esc(base(S.symbol))
+	if (S.bookTab === 'trades') {
+		const ts = S.trades ?? []
+		body.innerHTML = `<div class="bk-cols"><span>Precio</span><span>Cantidad (${u})</span><span>Hora</span></div>${ts
+			.map((t) => `<div class="bk trade ${t.sell ? 'ask' : 'bid'}"><span class="p">${fmtPrice(t.p)}</span><span>${fmtQty(t.q)}</span><span>${new Date(t.t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span></div>`)
+			.join('')}`
+		return
+	}
+	const b = S.book
+	if (!b) return (body.innerHTML = '<p class="empty">Cargando el libro…</p>')
+	const N = 10
+	const asks = b.asks.slice(0, N)
+	const bids = b.bids.slice(0, N)
+	const max = Math.max(...asks.map((x) => x[1] * x[0]), ...bids.map((x) => x[1] * x[0]), 1)
+	const row = ([p, q], side) => {
+		const w = Math.round(((p * q) / max) * 100)
+		const color = side === 'ask' ? 'var(--ask-bg)' : 'var(--bid-bg)'
+		return `<button class="bk ${side}" data-price="${p}" style="background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)" title="Usar este precio"><span class="p">${fmtPrice(p)}</span><span>${fmtQty(q)}</span><span>${fmtCompact(p * q)}</span></button>`
+	}
+	const last = S.live[S.symbol]
+	const ch = last ? last.last - last.open : 0
+	const spread = asks[0] && bids[0] ? ((asks[0][0] / bids[0][0] - 1) * 100).toFixed(3).replace('.', ',') : null
+	body.innerHTML = `<div class="bk-cols"><span>Precio</span><span>Cantidad (${u})</span><span>Total</span></div>
+		${[...asks].reverse().map((x) => row(x, 'ask')).join('')}
+		<div class="bk-mid"><b class="${cls(ch)}">${last ? fmtPrice(last.last) : '—'}</b>${spread ? `<small>diferencial ${spread}%</small>` : ''}</div>
+		${bids.map((x) => row(x, 'bid')).join('')}`
+}
+
 // ── Pestañas de abajo ─────────────────────────────────────────────────
 function renderTab() {
 	for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === S.tab)
@@ -363,13 +483,23 @@ function renderTab() {
 		return
 	}
 	if (S.tab === 'open') {
+		// No se repinta mientras se edita un precio (la lectura periódica borraría lo escrito)
+		if (S.editing && document.activeElement?.classList.contains('edit-price')) return
 		const os = S.view.openOrders
+		const cell = (o, key) =>
+			S.editing === o.id && o[key] != null
+				? `<input class="input mono edit-price" data-edit-key="${key}" value="${o[key]}" type="number" step="any" inputmode="decimal" />`
+				: fmtPrice(o[key], o.symbol)
 		body.innerHTML = os.length
-			? `<table><thead><tr><th>Mercado</th><th>Lado</th><th>Tipo</th><th>Cantidad</th><th>Precio</th><th>Stop</th><th>Puesta</th><th></th></tr></thead><tbody>${os
+			? `<table><thead><tr><th>Mercado</th><th>Lado</th><th>Tipo</th><th>Cantidad</th><th>Precio</th><th>Stop</th><th>Puesta</th><th class="txt"><button class="link small" data-cancel-all>Cancelar todas</button></th></tr></thead><tbody>${os
 					.map(
-						(o) => `<tr><td class="txt"><b>${esc(base(o.symbol))}</b></td><td class="txt"><span class="tag ${o.side === 'BUY' || o.side === 'COVER' ? 'buy' : 'sell'}">${o.side === 'BUY' ? 'Compra' : 'Venta'}</span></td>
-						<td class="txt">${{ LIMIT: 'Límite', STOP: 'Stop', OCO: 'Objetivo + stop', MARKET: 'Mercado' }[o.type]}${o.note ? ' <span class="tag neutral">auto</span>' : ''}</td><td>${fmtQty(o.qty, o.symbol)}</td><td>${fmtPrice(o.price, o.symbol)}</td><td>${fmtPrice(o.stopPrice, o.symbol)}</td><td class="txt">${when(o.createdAt)}</td>
-						<td class="txt"><button class="link small" data-cancel="${o.id}">Cancelar</button></td></tr>`,
+						(o) => `<tr data-row="${o.id}"><td class="txt"><b>${esc(base(o.symbol))}</b></td><td class="txt"><span class="tag ${o.side === 'BUY' || o.side === 'COVER' ? 'buy' : 'sell'}">${o.side === 'BUY' ? 'Compra' : 'Venta'}</span></td>
+						<td class="txt">${{ LIMIT: 'Límite', STOP: 'Stop', OCO: 'Objetivo + stop', MARKET: 'Mercado' }[o.type]}${o.note ? ' <span class="tag neutral">auto</span>' : ''}</td><td>${fmtQty(o.qty, o.symbol)}</td><td>${cell(o, 'price')}</td><td>${cell(o, 'stopPrice')}</td><td class="txt">${when(o.createdAt)}</td>
+						<td class="txt">${
+							S.editing === o.id
+								? `<button class="link small" data-save="${o.id}">Guardar</button> · <button class="link small" data-edit-cancel>✕</button>`
+								: `<button class="link small" data-edit="${o.id}">Editar</button> · <button class="link small" data-cancel="${o.id}">Cancelar</button>`
+						}</td></tr>`,
 					)
 					.join('')}</tbody></table>`
 			: '<p class="empty">No tienes órdenes abiertas.</p>'
@@ -486,8 +616,13 @@ function bind() {
 		S.symbol = b.dataset.sym
 		store.set('sim.symbol', S.symbol)
 		$('fAmount').value = ''
+		$('fPrice').value = ''
+		$('fStop').value = ''
 		liveCandle = null
+		S.book = null
+		S.trades = null
 		loadCandles()
+		loadBook()
 		render()
 	})
 	for (const b of document.querySelectorAll('[data-iv]')) {
@@ -509,20 +644,67 @@ function bind() {
 	for (const b of document.querySelectorAll('[data-type]'))
 		b.onclick = () => {
 			S.type = b.dataset.type
-			const l = S.live[S.symbol]
-			if (l && S.type === 'LIMIT' && !$('fPrice').value) $('fPrice').value = String(l.last)
-			if (l && S.type === 'STOP' && !$('fStop').value) $('fStop').value = String(l.last)
+			store.set('sim.type', S.type)
+			prefillPrices()
 			renderForm()
 		}
-	for (const id of ['fAmount', 'fPrice', 'fStop']) $(id).addEventListener('input', renderHint)
-	$('pcts').addEventListener('click', (e) => {
-		const b = e.target.closest('[data-pct]')
-		if (!b || !S.view) return
-		const pct = Number(b.dataset.pct) / 100
-		const step = S.markets[S.symbol].qtyStep
-		const v = S.side === 'BUY' ? Math.floor(S.view.account.cash.free * pct * 100) / 100 : Math.floor((holding() * pct) / step) * step
-		$('fAmount').value = String(Number(v.toFixed(decimalsOf(step))))
+	for (const id of ['fAmount', 'fPrice', 'fStop', 'fTp', 'fSl']) $(id).addEventListener('input', renderHint)
+	// Enter envía la orden desde cualquier campo del formulario
+	$$('.order-panel input').forEach((i) => i.addEventListener('keydown', (e) => e.key === 'Enter' && !e.isComposing && submitOrder()))
+	for (const b of document.querySelectorAll('.step'))
+		b.onclick = () => {
+			const input = $(b.dataset.for)
+			const cur = Number(input.value) || S.live[S.symbol]?.last || 0
+			input.value = String(roundTick(cur + Number(b.dataset.step) * tickOf()))
+			renderHint()
+		}
+	$('fQuick').addEventListener('click', (e) => {
+		const b = e.target.closest('[data-fill]')
+		if (!b) return
+		const p = b.dataset.fill === 'best' ? bestPrice() : S.live[S.symbol]?.last
+		if (p) $(S.type === 'STOP' ? 'fStop' : 'fPrice').value = String(roundTick(p))
 		renderHint()
+	})
+	$('fUnit').onclick = () => {
+		// Se convierte lo escrito a la otra unidad para no perderlo
+		const qty = formQty()
+		const px = refPrice()
+		S.unit = S.unit === 'base' ? 'quote' : 'base'
+		store.set('sim.unit', S.unit)
+		if (qty > 0 && px) $('fAmount').value = String(S.unit === 'base' ? floorStep(qty) : Math.floor(qty * px * (S.side === 'BUY' ? 1.001 : 1) * 100) / 100)
+		renderForm()
+	}
+	$('fSlider').addEventListener('input', () => setAmountFromPct(Number($('fSlider').value)))
+	$('fMarks').addEventListener('click', (e) => {
+		const b = e.target.closest('[data-pct]')
+		if (b) setAmountFromPct(Number(b.dataset.pct))
+	})
+	$('fTpsl').onchange = renderForm
+	for (const c of document.querySelectorAll('.chips'))
+		c.addEventListener('click', (e) => {
+			const b = e.target.closest('[data-pct]')
+			const px = refPrice()
+			if (!b || !px) return
+			$(c.dataset.exit).value = String(roundTick(px * (1 + Number(b.dataset.pct) / 100)))
+			renderHint()
+		})
+	for (const b of document.querySelectorAll('[data-book]'))
+		b.onclick = () => {
+			S.bookTab = b.dataset.book
+			store.set('sim.bookTab', S.bookTab)
+			renderBook()
+			loadBook()
+		}
+	// Tocar un precio del libro lo pone en la orden (y pasa a límite si estaba a mercado)
+	$('bookBody').addEventListener('click', (e) => {
+		const r = e.target.closest('[data-price]')
+		if (!r) return
+		if (S.type === 'MARKET') {
+			S.type = 'LIMIT'
+			store.set('sim.type', S.type)
+		}
+		$(S.type === 'STOP' ? 'fStop' : 'fPrice').value = String(roundTick(Number(r.dataset.price)))
+		renderForm()
 	})
 	$('fGo').onclick = submitOrder
 	for (const b of document.querySelectorAll('[data-tab]'))
@@ -551,6 +733,43 @@ function bind() {
 				if (S.user) S.user.compete = r.compete ? 1 : 0
 				toast(!on ? 'Ya no compites: juegas en privado' : r.startsMonday ? 'Apuntado: compites desde el lunes' : '¡Apuntado! Ya compites en esta temporada', 'ok')
 				renderRanking()
+			} catch (err) {
+				toast(err.message, 'bad')
+			}
+			return
+		}
+		const edit = e.target.closest('[data-edit]')
+		if (edit) {
+			S.editing = Number(edit.dataset.edit)
+			renderTab()
+			$('tabBody').querySelector('.edit-price')?.focus()
+			return
+		}
+		if (e.target.closest('[data-edit-cancel]')) {
+			S.editing = null
+			return renderTab()
+		}
+		const save = e.target.closest('[data-save]')
+		if (save) {
+			const row = save.closest('tr')
+			const change = Object.fromEntries([...row.querySelectorAll('[data-edit-key]')].map((i) => [i.dataset.editKey, i.value]))
+			try {
+				const r = await api(`/orders/${save.dataset.save}`, { method: 'PATCH', body: JSON.stringify(change) })
+				S.editing = null
+				S.tradesSeen = r.account.trades
+				applyView(r)
+				toast(r.order.status === 'FILLED' ? `Al nuevo precio se ejecutó al momento a ${fmtPrice(r.order.avgPrice, r.order.symbol)}` : 'Orden actualizada', 'ok')
+			} catch (err) {
+				toast(err.message, 'bad')
+			}
+			return
+		}
+		if (e.target.closest('[data-cancel-all]')) {
+			if (!confirm('¿Cancelar todas tus órdenes abiertas, incluidas las salidas automáticas (stop loss y take profit)?')) return
+			try {
+				const r = await api('/orders', { method: 'DELETE' })
+				applyView(r)
+				toast(`${r.canceled} ${r.canceled === 1 ? 'orden cancelada' : 'órdenes canceladas'}`)
 			} catch (err) {
 				toast(err.message, 'bad')
 			}
@@ -616,6 +835,8 @@ async function start() {
 	loadTickers()
 	loadCandles()
 	setInterval(() => !document.hidden && loadTickers(), TICK_MS)
+	loadBook()
+	setInterval(() => !document.hidden && loadBook(), TICK_MS)
 	setInterval(() => !document.hidden && loadCandles(true), CANDLES_MS)
 	loadRanking()
 	await loadState()

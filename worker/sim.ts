@@ -127,6 +127,18 @@ async function chartKlines(symbol: Symbol, interval: string) {
 	return rows.map((r) => [r[0], +r[1], +r[2], +r[3], +r[4]])
 }
 
+// Libro de órdenes (20 niveles por lado) y últimas operaciones del mercado que se mira
+async function depth(symbol: Symbol) {
+	const d = await market<{ bids: [string, string][]; asks: [string, string][] }>(sourceOf(symbol), `/depth?symbol=${symbol}&limit=20`)
+	return { t: Date.now(), bids: d.bids.map(([p, q]) => [+p, +q]), asks: d.asks.map(([p, q]) => [+p, +q]) }
+}
+
+async function recentTrades(symbol: Symbol) {
+	const rows = await market<{ price: string; qty: string; time: number; isBuyerMaker: boolean }[]>(sourceOf(symbol), `/trades?symbol=${symbol}&limit=30`)
+	// isBuyerMaker: el comprador esperaba en el libro, así que quien ejecutó vendía
+	return rows.map((r) => ({ p: +r.price, q: +r.qty, t: r.time, sell: r.isBuyerMaker }))
+}
+
 // Velas de 1 minuto que empiezan entre from y to
 export async function candles(symbol: Symbol, from: number, to: number): Promise<Candle[]> {
 	const out: Candle[] = []
@@ -433,6 +445,11 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 			if (!INTERVALS[interval]) return json(400, { error: 'Intervalo no válido' })
 			return await cached(new URL(`/api/klines?symbol=${symbol}&interval=${interval}`, url.origin), INTERVALS[interval].ttl, () => chartKlines(symbol, interval))
 		}
+		if (route === 'GET /api/depth' || route === 'GET /api/trades') {
+			const symbol = normSymbol(url.searchParams.get('symbol'))
+			const path = url.pathname
+			return await cached(new URL(`${path}?symbol=${symbol}`, url.origin), TICKERS_TTL_S, () => (path === '/api/depth' ? depth(symbol) : recentTrades(symbol)))
+		}
 		if (route === 'GET /api/ranking') return json(200, await ranking(env.DB, await readSession(req.headers.get('cookie'), env.SIM_SESSION_KEY)))
 		if (route === 'GET /api/auth/telegram') {
 			if (!env.TELEGRAM_BOT_TOKEN) return json(503, { error: 'Falta configurar el bot de Telegram' })
@@ -475,6 +492,29 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 				)
 			}, symbol)
 			return json(200, { order: result, ...view(engine, prices) })
+		}
+		const edit = /^PATCH \/api\/orders\/(\d+)$/.exec(route)
+		if (edit) {
+			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
+			const acc = await loadAccount(env.DB, tgId)
+			const o = acc?.engine.openOrders().find((x) => x.id === Number(edit[1]))
+			if (!o) throw new SimError('Esa orden ya no está abierta')
+			const { result, engine, prices } = await withAccount(
+				env.DB,
+				tgId,
+				(e, qs) => {
+					const q = qs[o.symbol]
+					if (!q) throw new SimError('Aún no hay precio para este mercado')
+					return e.modifyOrder(Number(edit[1]), { price: num(body.price), stopPrice: num(body.stopPrice) }, q)
+				},
+				o.symbol,
+			)
+			return json(200, { order: result, ...view(engine, prices) })
+		}
+		if (route === 'DELETE /api/orders') {
+			const symbol = url.searchParams.get('symbol') ? normSymbol(url.searchParams.get('symbol')) : undefined
+			const { result, engine, prices } = await withAccount(env.DB, tgId, (e) => e.cancelAll(symbol))
+			return json(200, { canceled: result, ...view(engine, prices) })
 		}
 		const cancel = /^DELETE \/api\/orders\/(\d+)$/.exec(route)
 		if (cancel) {
