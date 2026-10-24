@@ -39,7 +39,14 @@ async function start() {
 	$('login').addEventListener('click', async () => {
 		$('login').disabled = true
 		try {
-			const res = await Q.auth.requestLogin({ scopes: ['profile', 'kyc'] })
+			// KYC solo si la mini-app lo tiene marcado en su configuración; si no, basta el perfil
+			let res
+			try {
+				res = await Q.auth.requestLogin({ scopes: ['profile', 'kyc'] })
+			} catch (e) {
+				if (e?.code !== 'NOT_ALLOWED') throw e
+				res = await Q.auth.requestLogin({ scopes: ['profile'] })
+			}
 			const data = new URLSearchParams(res.init_data)
 			let user = {}
 			try {
