@@ -188,6 +188,26 @@ tr.me td { background: var(--accent-bg); }
 .tag.neutral { background: var(--surface-3); color: var(--muted); }
 .edit-price { width: 110px; padding: 4px 6px; font-size: 13px; text-align: right; }
 
+/* ══ Ranking a la vista ═══════════════════════════════════════════════ */
+.rank-btn { padding: 7px 12px; border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-bg); color: var(--warn); }
+.rank-btn:hover { background: var(--warn-bg); filter: brightness(1.15); }
+.sum-rank { border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.sum-rank b { color: var(--warn); }
+.sum-rank:hover b { text-decoration: underline; }
+.top5 { border-top: 1px solid var(--line); padding: 10px 12px 12px; }
+.top5 h3 { margin: 0 0 8px; font-size: 13px; }
+.top5 h3 small { display: block; margin-top: 2px; font-weight: 400; color: var(--muted); font-size: 11px; }
+.top5 ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+.top5 li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.top5 li span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top5 li.me { color: var(--accent); font-weight: 600; }
+.top5 .empty { padding: 4px 0; text-align: left; font-size: 12px; }
+.top5 .btn { width: 100%; margin-top: 10px; padding: 6px; font-size: 12.5px; }
+.overlay { position: fixed; inset: 0; z-index: 40; background: rgba(4, 6, 10, 0.7); display: flex; align-items: flex-start; justify-content: center; padding: calc(6vh + env(safe-area-inset-top, 0px)) 16px 6vh; overflow-y: auto; backdrop-filter: blur(2px); }
+.modal-card { position: relative; width: min(760px, 100%); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 18px 0 8px; box-shadow: var(--shadow); }
+.modal-card h2 { margin: 0 0 10px; padding: 0 18px; font-size: 18px; }
+.modal-x { position: absolute; top: 12px; right: 12px; }
+
 .foot { padding: 4px 16px 24px; font-size: 11.5px; color: var(--muted); }
 .foot a { color: var(--text-2); }
 .toasts { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 50; display: flex; flex-direction: column; gap: 8px; max-width: min(380px, calc(100vw - 32px)); }
@@ -202,7 +222,7 @@ tr.me td { background: var(--accent-bg); }
 	.markets .mk-cols { display: none; }
 	.markets .mk { display: block; width: auto; flex: none; min-width: 120px; border-bottom: 0; border-right: 1px solid var(--line); }
 	.markets .mk span { display: block; text-align: left !important; }
-	.markets .panel-head { display: none; }
+	.markets .panel-head, .top5 { display: none; }
 }
 @media (max-width: 1060px) {
 	.layout { grid-template-columns: minmax(0, 1fr) 300px; grid-template-areas: 'markets markets' 'chart order' 'book order' 'bottom bottom'; }
@@ -210,7 +230,7 @@ tr.me td { background: var(--accent-bg); }
 }
 @media (max-width: 760px) {
 	.nav { gap: 8px; padding: env(safe-area-inset-top, 0px) 12px 0; }
-	.brand-name, .feed span, .uname { display: none; }
+	.brand-name, .feed span, .uname, .rank-label { display: none; }
 	.layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'markets' 'chart' 'order' 'book' 'bottom'; padding: 10px 12px; }
 	.oinput { font-size: 16px; }
 	.chart { height: 320px; }

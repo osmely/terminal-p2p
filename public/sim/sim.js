@@ -112,6 +112,7 @@ async function loadTickers() {
 		tickFails = 0
 		feed(true)
 		prefillPrices()
+		drawOrderLines()
 		updateLiveCandle()
 		scheduleRender()
 	} catch {
@@ -149,7 +150,21 @@ function makeChart() {
 		timeScale: { borderColor: css('--line'), timeVisible: true, secondsVisible: false },
 		localization: { locale: 'es' },
 	})
-	candleSeries = chart.addCandlestickSeries({ upColor: css('--bid'), downColor: css('--ask'), borderVisible: false, wickUpColor: css('--bid'), wickDownColor: css('--ask') })
+	candleSeries = chart.addCandlestickSeries({
+		upColor: css('--bid'),
+		downColor: css('--ask'),
+		borderVisible: false,
+		wickUpColor: css('--bid'),
+		wickDownColor: css('--ask'),
+		// La escala incluye tus órdenes y tu posición aunque estén lejos del precio
+		autoscaleInfoProvider: (original) => {
+			const r = original()
+			if (!r || !chartLevels.length) return r
+			const lo = Math.min(r.priceRange.minValue, ...chartLevels)
+			const hi = Math.max(r.priceRange.maxValue, ...chartLevels)
+			return { ...r, priceRange: { minValue: lo, maxValue: hi } }
+		},
+	})
 }
 
 function themeChart() {
@@ -197,20 +212,46 @@ function updateLiveCandle() {
 	candleSeries.update({ time: Math.floor(liveCandle.t / 1000) + tzOffset(), open: liveCandle.o, high: liveCandle.h, low: liveCandle.l, close: liveCandle.c })
 }
 
-// Las órdenes abiertas y el precio medio de tu posición, como líneas en el gráfico
+// Tus operaciones en el gráfico: la posición abierta (con su resultado), las órdenes activas con su nombre
+// y flechas donde se ejecutaron tus compras y ventas. La escala se amplía para que se vean todas
+let chartLevels = []
 function drawOrderLines() {
 	if (!candleSeries) return
 	for (const l of priceLines) candleSeries.removePriceLine(l)
 	priceLines = []
-	if (!S.view) return
-	for (const o of S.view.openOrders.filter((o) => o.symbol === S.symbol)) {
-		const buy = o.side === 'BUY' || o.side === 'COVER'
-		const color = buy ? css('--bid') : css('--ask')
-		if (o.price) priceLines.push(candleSeries.createPriceLine({ price: o.price, color, lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: o.type === 'OCO' ? 'objetivo' : o.type === 'LIMIT' ? 'límite' : '' }))
-		if (o.stopPrice) priceLines.push(candleSeries.createPriceLine({ price: o.stopPrice, color: css('--warn'), lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: 'stop' }))
+	chartLevels = []
+	if (!S.view) return candleSeries.setMarkers([])
+	const u = base(S.symbol)
+	const line = (price, color, title, style = 2) => {
+		priceLines.push(candleSeries.createPriceLine({ price, color, lineStyle: style, lineWidth: style === 0 ? 2 : 1, axisLabelVisible: true, title }))
+		chartLevels.push(price)
 	}
-	const pos = S.view.account.positions.find((p) => p.symbol === S.symbol && p.side === 'LONG')
-	if (pos?.avgCost) priceLines.push(candleSeries.createPriceLine({ price: pos.avgCost, color: css('--accent'), lineStyle: 0, lineWidth: 1, axisLabelVisible: true, title: 'tu precio medio' }))
+	const pos = liveAccount().positions.find((p) => p.symbol === S.symbol)
+	if (pos?.avgCost) {
+		const pnl = pos.pnl ?? 0
+		const pct = pos.side === 'LONG' ? pos.pnlPct : (pnl / (pos.avgCost * pos.qty)) * 100
+		line(pos.avgCost, pnl >= 0 ? css('--bid') : css('--ask'), `${pos.side === 'LONG' ? 'Posición' : 'Corto'} ${fmtQty(pos.qty)} ${u}  ${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)} (${fmtPct(pct)})`, 0)
+	}
+	for (const o of S.view.openOrders.filter((x) => x.symbol === S.symbol)) {
+		const buy = o.side === 'BUY' || o.side === 'COVER'
+		const qty = `${fmtQty(o.qty)} ${u}`
+		if (o.type === 'OCO') {
+			line(o.price, css('--bid'), `Take profit ${qty}`)
+			line(o.stopPrice, css('--ask'), `Stop loss ${qty}`)
+		} else if (o.type === 'LIMIT') line(o.price, buy ? css('--bid') : css('--ask'), `${o.note ? 'Take profit' : buy ? 'Compra límite' : 'Venta límite'} ${qty}`)
+		else if (o.type === 'STOP') line(o.stopPrice, css('--warn'), `${o.note ? 'Stop loss' : buy ? 'Compra stop' : 'Venta stop'} ${qty}`)
+	}
+	// Flechas en las velas donde se ejecutaron tus operaciones de este mercado
+	const span = IV_MS[S.interval]
+	const tz = tzOffset()
+	const markers = S.view.trades
+		.filter((t) => t.symbol === S.symbol)
+		.map((t) => {
+			const buy = t.side === 'BUY' || t.side === 'COVER'
+			return { time: Math.floor(t.time / span) * (span / 1000) + tz, position: buy ? 'belowBar' : 'aboveBar', color: buy ? css('--bid') : css('--ask'), shape: buy ? 'arrowUp' : 'arrowDown', text: `${buy ? 'C' : 'V'} ${fmtPrice(t.price)}` }
+		})
+		.sort((a, b) => a.time - b.time)
+	candleSeries.setMarkers(markers)
 }
 
 // ── Pintado ───────────────────────────────────────────────────────────
@@ -519,7 +560,7 @@ function renderTab() {
 async function loadRanking() {
 	try {
 		S.ranking = await api('/ranking')
-		if (S.tab === 'ranking') renderRanking()
+		renderRanking()
 	} catch {}
 }
 
@@ -531,10 +572,18 @@ function leftText(ms) {
 	return d ? `${d} d ${h} h` : `${h} h ${Math.floor((ms % 3600_000) / 60_000)} min`
 }
 
+// El ranking se ve en la pestaña de abajo, en su ventana (botón 🏆), en el top 5 de la izquierda y en el resumen
 function renderRanking() {
+	renderRankWidgets()
+	const targets = [S.tab === 'ranking' && $('tabBody'), !$('rankModal').hidden && $('rankModalBody')].filter(Boolean)
+	if (!targets.length) return
+	const html = rankingHtml()
+	for (const t of targets) t.innerHTML = html
+}
+
+function rankingHtml() {
 	const r = S.ranking
-	const body = $('tabBody')
-	if (!r) return (body.innerHTML = '<p class="empty">Cargando el ranking…</p>')
+	if (!r) return '<p class="empty">Cargando el ranking…</p>'
 	const view = S.rankView ?? 'week'
 	const sub = [
 		['week', 'Esta semana'],
@@ -576,8 +625,61 @@ function renderRanking() {
 					.join('')}</tbody></table>`
 			: '<p class="empty">El salón de la fama se estrena cuando termine la primera temporada.</p>'
 	}
-	body.innerHTML = `${head}${content}
+	return `${head}${content}
 		<p class="fine" style="padding: 8px 12px">Competir es opcional. Cada lunes a las 00:00 (hora de Cuba) empieza una temporada: todos vuelven a 10.000 USDT. Cuenta la rentabilidad a precio de mercado de quien compite y lleva al menos ${r.minTrades} operaciones. Si te apuntas o reinicias después de operar, compites desde el lunes. El top 10 de cada semana se anuncia en el grupo de Telegram @terminalp2p.</p>`
+}
+
+function renderRankWidgets() {
+	const r = S.ranking
+	const m = r?.mine
+	// Tu puesto en la barra de resumen
+	$('sRank').textContent = !r || !m ? '—' : !m.compete ? 'Participar' : m.benched ? 'Desde el lunes' : m.rank ? `${m.rank}.º` : `${m.trades}/${r.minTrades} ops.`
+	// Top 5 de la semana, debajo de los mercados
+	if (!r) return ($('top5').innerHTML = '')
+	const rows = r.rows.slice(0, 5)
+	const medal = ['🥇', '🥈', '🥉']
+	$('top5').innerHTML = `<h3>🏆 Top 5 de la semana <small>termina en ${leftText(r.season.end - Date.now())}</small></h3>${
+		rows.length
+			? `<ol>${rows.map((x, i) => `<li class="${x.me ? 'me' : ''}"><span>${medal[i] ?? `${i + 1}.`}</span><span>${esc(x.name)}</span><span class="mono ${cls(x.pnlPct)}">${fmtPct(x.pnlPct)}</span></li>`).join('')}</ol>`
+			: `<p class="empty">Aún nadie lleva ${r.minTrades} operaciones esta semana.</p>`
+	}<button class="btn" data-open-ranking>Ver ranking completo</button>`
+}
+
+function openRanking() {
+	$('rankModal').hidden = false
+	renderRanking()
+	loadRanking()
+}
+
+// Clics del ranking (pestañas de semana y botones de competir), en la pestaña y en la ventana
+async function rankClick(e) {
+	const rv = e.target.closest('[data-rank-view]')
+	if (rv) {
+		S.rankView = rv.dataset.rankView
+		renderRanking()
+		return true
+	}
+	const comp = e.target.closest('[data-compete]')
+	if (!comp) return false
+	const on = comp.dataset.compete === '1'
+	if (on && !S.user) {
+		toast('Entra con Telegram para competir', 'bad')
+		return true
+	}
+	const ask = on
+		? 'Al competir, tu @usuario de Telegram aparece en el ranking y, si quedas entre los 10 primeros de la semana, en el grupo @terminalp2p. Puedes dejarlo cuando quieras. ¿Participar?'
+		: 'Dejarás de aparecer en el ranking y en los anuncios. Puedes volver cuando quieras (si ya operaste esa semana, compites desde el lunes). ¿Dejar de competir?'
+	if (!confirm(ask)) return true
+	try {
+		const r = await api('/compete', { method: 'POST', body: JSON.stringify({ on }) })
+		S.ranking = r.ranking
+		if (S.user) S.user.compete = r.compete ? 1 : 0
+		toast(!on ? 'Ya no compites: juegas en privado' : r.startsMonday ? 'Apuntado: compites desde el lunes' : '¡Apuntado! Ya compites en esta temporada', 'ok')
+		renderRanking()
+	} catch (err) {
+		toast(err.message, 'bad')
+	}
+	return true
 }
 
 // ── Sesión ────────────────────────────────────────────────────────────
@@ -714,30 +816,17 @@ function bind() {
 			if (S.tab === 'ranking') loadRanking()
 			renderTab()
 		}
+	$('rankBtn').onclick = openRanking
+	$('sRankBox').onclick = openRanking
+	$('top5').addEventListener('click', (e) => e.target.closest('[data-open-ranking]') && openRanking())
+	$('rankClose').onclick = () => ($('rankModal').hidden = true)
+	$('rankModal').addEventListener('click', (e) => {
+		if (e.target.id === 'rankModal') $('rankModal').hidden = true
+		else rankClick(e)
+	})
+	document.addEventListener('keydown', (e) => e.key === 'Escape' && ($('rankModal').hidden = true))
 	$('tabBody').addEventListener('click', async (e) => {
-		const rv = e.target.closest('[data-rank-view]')
-		if (rv) {
-			S.rankView = rv.dataset.rankView
-			return renderRanking()
-		}
-		const comp = e.target.closest('[data-compete]')
-		if (comp) {
-			const on = comp.dataset.compete === '1'
-			const ask = on
-				? 'Al competir, tu @usuario de Telegram aparece en el ranking y, si quedas entre los 10 primeros de la semana, en el grupo @terminalp2p. Puedes dejarlo cuando quieras. ¿Participar?'
-				: 'Dejarás de aparecer en el ranking y en los anuncios. Puedes volver cuando quieras (si ya operaste esa semana, compites desde el lunes). ¿Dejar de competir?'
-			if (!confirm(ask)) return
-			try {
-				const r = await api('/compete', { method: 'POST', body: JSON.stringify({ on }) })
-				S.ranking = r.ranking
-				if (S.user) S.user.compete = r.compete ? 1 : 0
-				toast(!on ? 'Ya no compites: juegas en privado' : r.startsMonday ? 'Apuntado: compites desde el lunes' : '¡Apuntado! Ya compites en esta temporada', 'ok')
-				renderRanking()
-			} catch (err) {
-				toast(err.message, 'bad')
-			}
-			return
-		}
+		if (await rankClick(e)) return
 		const edit = e.target.closest('[data-edit]')
 		if (edit) {
 			S.editing = Number(edit.dataset.edit)
@@ -841,7 +930,7 @@ async function start() {
 	loadRanking()
 	await loadState()
 	setInterval(() => !document.hidden && loadState(), POLL_MS)
-	setInterval(() => !document.hidden && S.tab === 'ranking' && loadRanking(), 60_000)
+	setInterval(() => !document.hidden && loadRanking(), 60_000)
 	document.addEventListener('visibilitychange', () => !document.hidden && loadState())
 }
 
