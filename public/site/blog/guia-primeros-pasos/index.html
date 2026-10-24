@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>Primeros pasos en Terminal P2P: guía para nuevos usuarios · Terminal P2P</title>
+	<meta name="description" content="Guía para empezar en Terminal P2P: qué es cada parte de la pantalla, cómo leer el libro de órdenes, comprar y vender USD en el P2P de QvaPay, publicar ofertas y operar seguro." />
+	<meta property="og:title" content="Primeros pasos en Terminal P2P: guía para nuevos usuarios · Terminal P2P" />
+	<meta property="og:description" content="Guía para empezar en Terminal P2P: qué es cada parte de la pantalla, cómo leer el libro de órdenes, comprar y vender USD en el P2P de QvaPay, publicar ofertas y operar seguro." />
+	<meta property="og:url" content="https://terminalp2p.com/blog/guia-primeros-pasos/" />
+	<meta property="og:type" content="article" />
+	<meta property="og:image" content="https://terminalp2p.com/img/terminal-escritorio.jpg" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta property="article:published_time" content="2026-10-24" />
+	<link rel="canonical" href="https://terminalp2p.com/blog/guia-primeros-pasos/" />
+	<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)" />
+	<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)" />
+	<script src="/theme.js"></script>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	<link rel="stylesheet" href="/vendor/fonts.css" />
+	<link rel="stylesheet" href="/site.css" />
+	<script src="/site.js" defer></script>
+</head>
+<body>
+	<header class="nav">
+		<div class="wrap nav-in">
+			<a class="brand" href="/" aria-label="Terminal P2P">
+				<span class="brand-mark" aria-hidden="true">
+					<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16l4.5-5 3.5 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</span>
+				<span>Terminal P2P</span>
+			</a>
+			<nav class="nav-links" aria-label="Secciones">
+				<a href="/#tasas">Tasas</a>
+				<a href="/#operar">Operar</a>
+				<a href="/#funciones">Funciones</a>
+				<a href="/#privacidad">Privacidad</a>
+				<a href="/#preguntas">Preguntas</a>
+				<a href="/blog/" aria-current="page">Blog</a>
+			</nav>
+			<div class="nav-actions">
+				<a class="icon-btn tg-icon" href="https://t.me/terminalp2p" target="_blank" rel="noopener" title="Grupo de Telegram @terminalp2p" aria-label="Grupo de Telegram @terminalp2p">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+				</a>
+				<a class="icon-btn hide-sm" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener" title="Código fuente en GitHub" aria-label="Código fuente en GitHub">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.38-3.37-1.38-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 015 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.26 10.26 0 0022 12.25C22 6.58 17.52 2 12 2z"/></svg>
+				</a>
+				<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+					<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+					<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+				</button>
+				<a class="btn primary" href="https://app.terminalp2p.com">Abrir terminal</a>
+			</div>
+		</div>
+	</header>
+
+	<main>
+		<article>
+			<header class="article">
+				<div class="wrap narrow">
+					<p class="crumbs"><a href="/blog/">Blog</a></p>
+					<h1>Primeros pasos en Terminal P2P: guía para nuevos usuarios</h1>
+					<p class="post-meta">Guía de Terminal P2P · <time datetime="2026-10-24">24 de octubre de 2026</time> · 8 min de lectura</p>
+					<p class="dek">Terminal P2P muestra el mercado P2P de QvaPay como un exchange: precios, libro de órdenes, gráficos y tus operaciones en una sola pantalla. En esta guía te explicamos qué es cada parte, cómo comprar y vender USD y las reglas que te mantienen seguro.</p>
+				</div>
+			</header>
+
+			<div class="wrap narrow prose">
+				<figure>
+					<img src="/img/tutorial/pantalla-escritorio.webp" width="1400" height="875" alt="Terminal P2P en el escritorio con la cuenta conectada: mercados, cifras del par, gráficos, libro de órdenes, lectura del mercado y mis operaciones" loading="lazy" />
+					<figcaption>El terminal en el escritorio. En el móvil es lo mismo, una sección a la vez.</figcaption>
+				</figure>
+
+				<h2>1 · Lo que necesitas</h2>
+				<ul>
+					<li><strong>Una cuenta de QvaPay con el P2P activo.</strong> QvaPay pide verificar tu identidad (KYC), tu teléfono y vincular Telegram. Si aún no tienes cuenta: <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">crea una en QvaPay</a> <small>(usuario referido)</small>.</li>
+					<li><strong>Un token de QvaPay</strong> con los permisos justos. Se crea en un minuto: sigue la <a href="/blog/conectar-qvapay-token/">guía para conectar tu cuenta</a>, con capturas de cada paso.</li>
+				</ul>
+				<p>Sin conectar nada ya puedes ver las tasas, las operaciones completadas y el histórico de precios. Con la cuenta conectada se suman el libro de órdenes en vivo y todas las operaciones.</p>
+
+				<h2>2 · Elige un mercado</h2>
+				<p>Cada mercado es una forma de pago contra el saldo en USD de QvaPay: <strong>CUP Transferencia</strong>, <strong>CUP Efectivo</strong>, <strong>Tarjeta Clásica</strong>, <strong>MLC</strong>, <strong>Zelle</strong>, <strong>Saldo ETECSA</strong> y otros. Están en la columna de la izquierda (en el móvil, en la tira de arriba), con el precio de cada uno. El precio siempre es <strong>cuánto de esa moneda se paga por 1 USD de saldo</strong>.</p>
+
+				<h2>3 · Las cifras del par</h2>
+				<p>Arriba, junto al nombre del mercado, tienes el resumen del momento:</p>
+				<div class="tbl text"><table>
+					<thead><tr><th>Cifra</th><th>Qué te dice</th></tr></thead>
+					<tbody>
+						<tr><td>Mejor venta</td><td>El precio más barato al que alguien vende USD ahora. Es lo que pagarías si compras ya.</td></tr>
+						<tr><td>Mejor compra</td><td>El precio más alto al que alguien compra USD ahora. Es lo que recibirías si vendes ya.</td></tr>
+						<tr><td>Diferencial</td><td>La distancia entre las dos. Cuanto más pequeña, más líquido está el mercado.</td></tr>
+						<tr><td>Medio</td><td>El punto medio entre la mejor venta y la mejor compra.</td></tr>
+						<tr><td>Mediana completadas</td><td>El precio típico de las operaciones que de verdad se cerraron. La mejor referencia del precio real.</td></tr>
+						<tr><td>Operaciones 48 h</td><td>Cuántas operaciones se completaron en ese mercado en las últimas 48 horas.</td></tr>
+						<tr><td>Profundidad ±2%</td><td>Cuántos USD se quieren comprar y vender cerca del precio medio.</td></tr>
+						<tr><td>Intención</td><td>La aguja: hacia la derecha (verde) hay más gente queriendo comprar USD; hacia la izquierda (rojo), más queriendo vender.</td></tr>
+					</tbody>
+				</table></div>
+
+				<h2>4 · El libro de órdenes</h2>
+				<p>Es la lista de ofertas abiertas. <strong>En rojo, quienes venden USD</strong> (arriba, de más barata a más cara). <strong>En verde, quienes compran USD</strong> (abajo, de la que más paga a la que menos). En medio, el diferencial.</p>
+				<figure class="phone">
+					<img src="/img/guia/7-conectado-libro.webp" width="590" height="1278" alt="Libro de órdenes en el móvil con ventas en rojo y compras en verde, nombres ocultos" loading="lazy" />
+					<figcaption>El libro en el móvil. Nombres y saldo ocultos en la captura.</figcaption>
+				</figure>
+				<ul>
+					<li><strong>Cada fila</strong> trae el precio, los USD, el acumulado y quién la publica, con su número de operaciones y su valoración. Una medalla marca a los tres usuarios con más experiencia o mejor reputación.</li>
+					<li><strong>Filtros:</strong> oculta las ofertas solo para VIP y los precios atípicos (casi siempre errores de tipeo), y filtra por reputación mínima, actividad reciente o monto.</li>
+					<li><strong>Toca una oferta</strong> para tomarla: ves todos sus datos antes de confirmar nada.</li>
+				</ul>
+
+				<h2>5 · Gráficos, lectura y ranking</h2>
+				<ul>
+					<li><strong>Profundidad:</strong> cuánto dinero espera a cada precio, a los dos lados.</li>
+					<li><strong>Operaciones 48 h:</strong> los precios de lo que se completó en los dos últimos días.</li>
+					<li><strong>Histórico:</strong> la evolución del precio desde 7 días hasta varios años, con la referencia del mercado informal de elTOQUE (USD y USDT) para comparar.</li>
+					<li><strong>Lectura del mercado:</strong> un resumen en palabras de lo que pasa: si el precio sube o baja, cómo está frente al informal, si hay más compradores o vendedores.</li>
+					<li><strong>Actividad:</strong> las ofertas que aparecen y desaparecen en tiempo real.</li>
+					<li><strong>Ranking:</strong> los usuarios con más liquidez, más experiencia, mejor reputación o mejor precio ahora.</li>
+				</ul>
+
+				<h2>6 · Comprar USD</h2>
+				<p>Para comprar saldo, toma una oferta <strong>roja</strong> (alguien que vende USD):</p>
+				<ol>
+					<li>Toca la oferta, elige cuántos USD compras (si es por partes) y pulsa <strong>«Tomar»</strong>.</li>
+					<li>Te aparecen los <strong>datos de pago del vendedor</strong>, con botones para copiarlos, y la cuenta atrás del plazo.</li>
+					<li><strong>Transfiere el monto exacto</strong> desde tu banco, escribe la referencia de la transferencia y pulsa <strong>«Ya pagué»</strong>.</li>
+					<li>El vendedor comprueba el pago y libera: los USD entran en tu saldo de QvaPay.</li>
+				</ol>
+				<figure class="tall">
+					<img src="/img/operar-3-tomar.jpg" width="900" height="771" alt="Tomar una oferta del libro eligiendo cuántos USD comprar" loading="lazy" />
+					<figcaption>Tomar una oferta: eliges el monto y ves cuánto pagas.</figcaption>
+				</figure>
+				<figure class="tall">
+					<img src="/img/operar-4-cerrar.jpg" width="900" height="1211" alt="Detalle de una operación con los datos de pago para copiar, la cuenta atrás del plazo y el chat" loading="lazy" />
+					<figcaption>La operación: datos de pago para copiar, plazo y chat con la contraparte.</figcaption>
+				</figure>
+
+				<h2>7 · Vender USD en un paso</h2>
+				<p>Para pasar tu saldo a CUP u otra moneda, lo más rápido es el botón verde <strong>«Vender»</strong> (⇅) de arriba:</p>
+				<ol>
+					<li>Pones cuántos USD vendes.</li>
+					<li>Eliges dónde recibes: CUP Transferencia, Efectivo, Clásica, MLC…</li>
+					<li>Ves al momento cuánto te llega. El terminal elige la oferta de compra que mejor paga para tu monto.</li>
+					<li>La primera vez escribes tus datos de cobro (puedes guardarlos), confirmas y listo: se los enviamos al comprador por el chat de la operación.</li>
+				</ol>
+				<figure class="phone">
+					<img src="/img/tutorial/vender.webp" width="750" height="1240" alt="Ventana Vender: vendes 100 USD de saldo QvaPay y recibes 101.603 CUP por transferencia" loading="lazy" />
+					<figcaption>Vender: cuánto vendes, dónde lo recibes y cuánto te llega.</figcaption>
+				</figure>
+				<p>Tus USD quedan en el escrow de QvaPay hasta que te pagan, como en cualquier operación P2P. También puedes vender tomando tú una oferta <strong>verde</strong> del libro; en ese caso, cuando el comprador marque el pago, <strong>liberas solo después de ver el dinero en tu banco</strong>.</p>
+
+				<h2>8 · Publicar tu propia oferta</h2>
+				<p>Si prefieres poner tu precio y esperar, pulsa <strong>«+ Publicar»</strong>. Eliges si compras o vendes, el mercado, el monto y el precio; el terminal te muestra las referencias del mercado y el puesto que tendrías en el libro. Puedes publicarla <strong>por partes</strong> (con mínimo y máximo por orden) y poner requisitos a quien la tome.</p>
+				<figure class="tall">
+					<img src="/img/operar-1-publicar.jpg" width="900" height="1404" alt="Formulario para publicar una oferta de venta por partes, con referencias del mercado y el puesto que tendría en el libro" loading="lazy" />
+					<figcaption>Publicar: referencias del mercado y tu puesto en el libro antes de confirmar.</figcaption>
+				</figure>
+
+				<h2>9 · Mis operaciones y avisos</h2>
+				<p>En <strong>«Mis operaciones»</strong> ves lo que tienes en curso, tus ofertas publicadas y lo completado. Cada operación dice cuál es el <strong>siguiente paso</strong> (pagar, esperar, liberar, calificar) y cuánto queda de plazo. Activa la <strong>campana</strong> para recibir aviso con sonido y notificación cuando alguien tome tu oferta, te pague o te escriba, aunque estés en otra pestaña.</p>
+				<figure class="phone">
+					<img src="/img/operar-5-operaciones.jpg" width="700" height="1268" alt="Mis operaciones en el móvil: cada operación con su siguiente paso y la cuenta atrás del plazo" loading="lazy" />
+					<figcaption>Mis operaciones en el móvil.</figcaption>
+				</figure>
+
+				<h2>Reglas de oro</h2>
+				<ul>
+					<li><strong>Libera solo cuando veas el dinero en tu banco.</strong> No te fíes de capturas ni de mensajes: comprueba tu cuenta. El terminal te pide marcar «Vi el dinero en mi cuenta» antes de liberar.</li>
+					<li><strong>Paga el monto exacto y dentro del plazo,</strong> y guarda la referencia de la transferencia.</li>
+					<li><strong>Habla por el chat de la operación,</strong> no por fuera. Si algo sale mal, abre una disputa: un moderador de QvaPay revisa el chat y los comprobantes.</li>
+					<li><strong>Fíjate en la reputación:</strong> número de operaciones, valoración y, si quieres, filtra por reputación mínima.</li>
+					<li><strong>Califica</strong> a tu contraparte al terminar: ayuda a todos a elegir bien.</li>
+					<li><strong>Tu token, solo tuyo:</strong> vive en tu navegador, sin permisos para transferir ni retirar. Puedes desconectarlo o revocarlo cuando quieras.</li>
+				</ul>
+				<p>¿Dudas? Pregunta en el grupo de Telegram <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.</p>
+
+				<aside class="article-cta">
+					<h2>Empieza ahora</h2>
+					<p>Abre el terminal, conecta tu cuenta y haz tu primera operación.</p>
+					<div class="cta-row">
+						<a class="btn primary lg" href="https://app.terminalp2p.com">Abrir terminal</a>
+						<a class="btn lg" href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener"><span class="btn-stack">Crear cuenta en QvaPay<small>(usuario referido)</small></span></a>
+					</div>
+					<p class="tg-line"><a href="https://t.me/terminalp2p" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg><span>¿Preguntas o ideas? Únete al grupo de Telegram <b>@terminalp2p</b></span></a></p>
+				</aside>
+			</div>
+		</article>
+	</main>
+
+	<footer class="foot">
+		<div class="wrap foot-in">
+			<span>© 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a> · <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener">Licencia Apache 2.0</a> · <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a> · <a href="/blog/">Blog</a> · <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">Telegram</a></span>
+			<span>Proyecto independiente que usa la API pública de QvaPay.</span>
+		</div>
+	</footer>
+</body>
+</html>
