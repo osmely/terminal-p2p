@@ -616,6 +616,10 @@ let askSeries = null
 let opsSeries = null
 let usdSeries = null
 let usdtSeries = null
+// Los datos ya dibujados y el mercado y rango del último encuadre: el libro se refresca cada pocos
+// segundos y redibujar o reencuadrar el histórico en cada refresco deshacía el zoom del usuario
+let historyDrawn = null
+let historyKey = ''
 const DAY_MS = 86_400_000
 const shortDay = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'America/Havana' })
 
@@ -661,8 +665,10 @@ function drawHistory() {
 		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.74, bottom: 0 } })
 		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.3 } })
 		historyChart.subscribeCrosshairMove((p) => opsLegend(p.time ? (p.time - -new Date().getTimezoneOffset() * 60) * 1000 : null))
+		themeHistory()
 	}
-	themeHistory()
+	if (state.history === historyDrawn) return
+	historyDrawn = state.history
 	const tz = -new Date().getTimezoneOffset() * 60
 	const points = state.history?.points ?? []
 	const series = (key) => points.filter((p) => p[key] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[key] }))
@@ -677,7 +683,12 @@ function drawHistory() {
 	usdSeries.setData(ref('usd'))
 	usdtSeries.setData(ref('usdt'))
 	opsLegend()
-	historyChart.timeScale().fitContent()
+	// Se encuadra al abrir un mercado o un rango; con datos nuevos del mismo, se respeta el zoom
+	const key = `${state.coin}:${state.range}`
+	if (state.history && key !== historyKey) {
+		historyChart.timeScale().fitContent()
+		historyKey = key
+	}
 	const first = state.history?.firstPoint
 	const step = { 600000: 'cada 10 min', 3600000: 'por hora', 86400000: 'por día' }[state.history?.bucketMs] ?? ''
 	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
