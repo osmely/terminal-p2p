@@ -9,6 +9,7 @@ interface D1Stmt {
 	bind(...values: unknown[]): D1Stmt
 	all<T>(): Promise<{ results: T[] }>
 	first<T>(): Promise<T | null>
+	run(): Promise<{ meta?: { changes?: number } }>
 }
 export interface D1 {
 	prepare(sql: string): D1Stmt

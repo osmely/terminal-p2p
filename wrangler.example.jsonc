@@ -26,9 +26,10 @@
 	// Topes por IP (la IP es solo la llave del contador; no se guarda): avisos de métricas y panel
 	"ratelimits": [
 		{ "name": "EVENT_LIMIT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
-		{ "name": "PANEL_LIMIT", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } }
+		{ "name": "PANEL_LIMIT", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } },
+		{ "name": "SIM_LIMIT", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } }
 	],
-	"triggers": { "crons": ["*/10 * * * *"] },
+	"triggers": { "crons": ["* * * * *"] },
 	// Opcional: la referencia del mercado informal de elTOQUE necesita su clave como secreto
 	// (npx wrangler secret put ELTOQUE_TOKEN). Sin ella, el cron solo guarda lo de QvaPay.
 	// Opcional: métricas anónimas con METRICS_SALT (clave de las huellas) y METRICS_KEY (panel)
@@ -36,7 +37,8 @@
 	"routes": [
 		{ "pattern": "example.com", "custom_domain": true },
 		{ "pattern": "www.example.com", "custom_domain": true },
-		{ "pattern": "app.example.com", "custom_domain": true }
+		{ "pattern": "app.example.com", "custom_domain": true },
+		{ "pattern": "sim.example.com", "custom_domain": true }
 	],
 
 	// Solo errores de la app; sin registro por petición (URLs, IPs, cabeceras)

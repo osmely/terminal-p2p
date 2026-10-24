@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>Simulador de trading · Terminal P2P</title>
+	<meta name="description" content="Practica trading con 10.000 USDT ficticios y precios reales de Binance: órdenes a mercado, límite, stop loss y take profit, y ranking de jugadores. Entra con Telegram." />
+	<meta property="og:title" content="Simulador de trading · Terminal P2P" />
+	<meta property="og:description" content="10.000 USDT ficticios, precios reales de Binance, stop loss, take profit y ranking. Entra con Telegram." />
+	<meta property="og:url" content="https://sim.terminalp2p.com/" />
+	<meta property="og:image" content="https://terminalp2p.com/img/terminal-escritorio.jpg" />
+	<meta name="theme-color" content="#10151c" media="(prefers-color-scheme: dark)" />
+	<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+	<script src="/theme.js"></script>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	<link rel="stylesheet" href="/vendor/fonts.css" />
+	<link rel="stylesheet" href="/sim.css" />
+	<script src="/vendor/lightweight-charts.js" defer></script>
+	<script src="/sim.js" defer></script>
+</head>
+<body>
+	<header class="nav">
+		<a class="brand" href="https://terminalp2p.com" title="Ir a la portada de Terminal P2P">
+			<span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16l4.5-5 3.5 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
+			<span class="brand-name">Terminal P2P</span>
+			<span class="badge sim">Simulador</span>
+		</a>
+		<div class="nav-spacer"></div>
+		<span class="feed" id="feed" title="Precios en vivo de Binance"><i class="dot"></i><span>Conectando…</span></span>
+		<a class="icon-btn" href="https://t.me/terminalp2p" target="_blank" rel="noopener" title="Grupo de Telegram @terminalp2p" aria-label="Grupo de Telegram @terminalp2p">
+			<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+		</a>
+		<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+			<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+			<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+		</button>
+		<div id="user" class="user"></div>
+	</header>
+
+	<section class="hero" id="hero" hidden>
+		<div>
+			<h1>Practica trading con <span class="grad">10.000 USDT ficticios</span> y precios reales</h1>
+			<p>Compra y vende Bitcoin, Ethereum, oro y más con los precios en vivo de Binance. Pon órdenes límite, stop loss y take profit: se ejecutan aunque cierres la página. Compite en el ranking.</p>
+			<div class="hero-login"><div id="tgLogin"></div><button class="btn" id="devLogin" hidden>Entrar (desarrollo)</button></div>
+			<p class="fine">Sin dinero real. Al entrar con Telegram solo guardamos tu nombre y usuario de Telegram y tu cuenta del juego.</p>
+		</div>
+	</section>
+
+	<div class="summary" id="summary" hidden>
+		<div class="sum"><label>Patrimonio</label><b id="sEquity">—</b></div>
+		<div class="sum"><label>Resultado</label><b id="sPnl">—</b></div>
+		<div class="sum"><label>USDT libres</label><b id="sCash">—</b></div>
+		<div class="sum"><label>En órdenes</label><b id="sLocked">—</b></div>
+		<div class="sum"><label>Operaciones</label><b id="sTrades">—</b></div>
+	</div>
+
+	<main class="layout">
+		<aside class="panel markets">
+			<div class="panel-head"><h2>Mercados</h2></div>
+			<div class="mk-cols"><span>Mercado</span><span>Precio</span><span>24 h</span></div>
+			<div id="markets"></div>
+		</aside>
+
+		<section class="panel chart-panel">
+			<div class="panel-head">
+				<div class="pair"><h2 id="pairName">BTC / USDT</h2><span id="pairPrice" class="mono">—</span><span id="pairChange" class="chg"></span></div>
+				<div class="seg-tabs" id="intervals" role="tablist">
+					<button class="seg-tab" data-iv="1m">1m</button><button class="seg-tab" data-iv="5m">5m</button><button class="seg-tab" data-iv="15m">15m</button><button class="seg-tab" data-iv="1h">1h</button><button class="seg-tab" data-iv="4h">4h</button><button class="seg-tab" data-iv="1d">1d</button>
+				</div>
+			</div>
+			<div id="chart" class="chart"></div>
+		</section>
+
+		<section class="panel order-panel">
+			<div class="seg-tabs sides" role="radiogroup" aria-label="Lado">
+				<button class="seg-tab buy" data-side="BUY" role="radio">Comprar</button>
+				<button class="seg-tab sell" data-side="SELL" role="radio">Vender</button>
+			</div>
+			<div class="seg-tabs types" role="radiogroup" aria-label="Tipo de orden">
+				<button class="seg-tab" data-type="MARKET" role="radio">Mercado</button>
+				<button class="seg-tab" data-type="LIMIT" role="radio">Límite</button>
+				<button class="seg-tab" data-type="STOP" role="radio">Stop</button>
+			</div>
+			<label class="field" id="fPriceBox">Precio límite <span class="unit">USDT</span><input class="input mono" id="fPrice" type="number" step="any" inputmode="decimal" /></label>
+			<label class="field" id="fStopBox">Precio de activación <span class="unit">USDT</span><input class="input mono" id="fStop" type="number" step="any" inputmode="decimal" /></label>
+			<label class="field"><span id="fAmountLabel">Importe</span> <span class="unit" id="fAmountUnit">USDT</span><input class="input mono" id="fAmount" type="number" step="any" min="0" inputmode="decimal" /></label>
+			<div class="pcts" id="pcts"><button data-pct="25">25%</button><button data-pct="50">50%</button><button data-pct="75">75%</button><button data-pct="100">Todo</button></div>
+			<div id="exits" class="exits">
+				<label class="field">Stop loss <span class="unit">opcional</span><input class="input mono" id="fSl" type="number" step="any" inputmode="decimal" placeholder="Si baja a…" /></label>
+				<label class="field">Take profit <span class="unit">opcional</span><input class="input mono" id="fTp" type="number" step="any" inputmode="decimal" placeholder="Si sube a…" /></label>
+			</div>
+			<p class="hint" id="fHint"></p>
+			<button class="btn block go" id="fGo">Comprar</button>
+			<p class="fine" id="fAvail"></p>
+		</section>
+
+		<section class="panel bottom">
+			<div class="panel-head">
+				<div class="seg-tabs" id="tabs" role="tablist">
+					<button class="seg-tab" data-tab="positions">Posiciones</button>
+					<button class="seg-tab" data-tab="open">Órdenes abiertas <span class="count" id="cntOpen" hidden></span></button>
+					<button class="seg-tab" data-tab="history">Historial</button>
+					<button class="seg-tab" data-tab="ranking">Ranking</button>
+				</div>
+				<button class="link small" id="resetBtn" hidden>Reiniciar cuenta</button>
+			</div>
+			<div id="tabBody" class="tab-body"></div>
+		</section>
+	</main>
+
+	<footer class="foot">
+		Simulador con dinero ficticio: no se opera con dinero real ni es consejo financiero. Precios de <a href="https://www.binance.com" target="_blank" rel="noopener">Binance</a>.
+		Las órdenes pendientes se revisan con las velas de 1 segundo de Binance, aunque cierres la página.
+		· <a href="https://app.terminalp2p.com">Terminal P2P de QvaPay</a> · <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>
+	</footer>
+
+	<div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p worker && tsc --noEmit -p web",
     "test": "node --test test/",
     "dev": "wrangler dev --port 5177 --local-upstream app.localhost:5177 --upstream-protocol http --test-scheduled",
+    "dev:sim": "wrangler dev --port 5180 --local-upstream sim.localhost:5180 --upstream-protocol http --test-scheduled",
     "dev:site": "wrangler dev --port 5179 --local-upstream localhost:5179 --upstream-protocol http --persist-to .wrangler/state-site",
     "deploy": "wrangler deploy",
     "vendor": "node scripts/vendor.mjs",

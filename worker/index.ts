@@ -4,14 +4,16 @@
 //   · histórico público de la tasa (/data/rates), alimentado por un cron, con la
 //     referencia del mercado informal de elTOQUE (/data/informal)
 //   · métricas anónimas de las acciones del P2P y su panel privado (/admin/metrics)
+//   · simulador de trading con dinero ficticio en sim.terminalp2p.com (public/sim y worker/sim.ts)
 // Todo lo que depende de la cuenta del usuario corre en su navegador.
 
 import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
 import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
+import { simApi, simCron, type SimEnv } from './sim.ts'
 
-interface Env {
+interface Env extends Omit<SimEnv, 'DB'> {
 	ASSETS: Fetcher
 	DB: D1Database
 	// Clave de la API de tasas de elTOQUE (secreto del Worker). Sin ella no hay referencia informal
@@ -23,6 +25,7 @@ interface Env {
 	// Topes por IP del limitador de Cloudflare (la IP es solo la llave del contador; no se guarda)
 	EVENT_LIMIT?: RateLimiter
 	PANEL_LIMIT?: RateLimiter
+	SIM_LIMIT?: RateLimiter
 }
 
 interface RateLimiter {
@@ -44,11 +47,14 @@ const SECURITY_HEADERS: Record<string, string> = {
 // Los datos cambian cada 10 minutos: 5 de caché en el borde bastan y ahorran lecturas de D1
 const RATES_TTL_S = 300
 const INFORMAL_TTL_S = 600
-// La landing reutiliza estos archivos del terminal en vez de duplicarlos
+// La landing y el simulador reutilizan estos archivos del terminal en vez de duplicarlos
 const SHARED = ['/vendor/', '/favicon.svg', '/theme.js']
 
-// app.terminalp2p.com (app.localhost en desarrollo) → terminal; el resto → landing
-const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : 'site')
+// app.terminalp2p.com (app.localhost en desarrollo) → terminal; sim.* → simulador; el resto → landing
+const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : host.startsWith('sim.') ? 'sim' : 'site')
+// El simulador pide precios a Binance desde el navegador y usa el botón de Telegram
+const SIM_CSP =
+	"default-src 'self'; script-src 'self' https://telegram.org; frame-src https://oauth.telegram.org; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.me https://*.telegram.org; connect-src 'self' https://data-api.binance.vision wss://data-stream.binance.vision; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
 export default {
 	async fetch(req, env, ctx) {
@@ -72,11 +78,24 @@ export default {
 		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
 		if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
 		if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
+		if (folderFor(url.hostname) === 'sim' && url.pathname.startsWith('/api/')) {
+			if (req.method !== 'GET' && !(await underLimit(env.SIM_LIMIT, req))) return secure(jsonError(429, 'Demasiadas órdenes seguidas: espera unos segundos'))
+			return secure(await simApi(req, url, env as unknown as SimEnv))
+		}
 		return assets(req, url, env)
 	},
 
-	// Cada 10 minutos: guarda los agregados públicos de QvaPay y la tasa informal de elTOQUE
-	async scheduled(_event, env) {
+	// Cada minuto: las órdenes pendientes del simulador. Cada 10: los agregados públicos de QvaPay,
+	// la tasa informal de elTOQUE y el patrimonio del ranking del simulador
+	async scheduled(event, env) {
+		const tenth = new Date(event.scheduledTime).getUTCMinutes() % 10 === 0
+		if (env.SIM_SESSION_KEY)
+			try {
+				await simCron(env.DB, event.scheduledTime, tenth)
+			} catch (err) {
+				console.error(`simulador: ${(err as Error).message}`)
+			}
+		if (!tenth) return
 		try {
 			await collect(env.DB)
 		} catch (err) {
@@ -169,13 +188,18 @@ async function informal(url: URL, env: Env, ctx: ExecutionContext) {
 // Sirve el archivo de la carpeta que toca según el dominio
 async function assets(req: Request, url: URL, env: Env) {
 	let folder = folderFor(url.hostname)
-	if (folder === 'site' && SHARED.some((p) => (p.endsWith('/') ? url.pathname.startsWith(p) : url.pathname === p))) folder = 'app'
+	if (folder !== 'app' && SHARED.some((p) => (p.endsWith('/') ? url.pathname.startsWith(p) : url.pathname === p))) folder = 'app'
 	const target = new URL(url)
 	target.pathname = `/${folder}${url.pathname}`
 	const res = await env.ASSETS.fetch(new Request(target, req))
 	// Las redirecciones de los assets (p. ej. /index.html → /) no deben mostrar la carpeta
 	const loc = res.headers.get('Location')
-	if (!loc) return res
+	if (!loc) {
+		if (folder !== 'sim') return res
+		const out = new Response(res.body, res)
+		out.headers.set('Content-Security-Policy', SIM_CSP)
+		return out
+	}
 	const to = new URL(loc, target)
 	if (to.origin === url.origin && to.pathname.startsWith(`/${folder}/`)) to.pathname = to.pathname.slice(folder.length + 1)
 	const out = new Response(res.body, res)

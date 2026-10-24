@@ -11,5 +11,5 @@
 		"skipLibCheck": true,
 		"types": ["@cloudflare/workers-types"]
 	},
-	"include": ["./*.ts", "../src/terminal/market.ts", "../src/qvapay/*.ts", "../src/broker/*.ts", "../src/ratelimit.ts", "../src/log.ts"]
+	"include": ["./*.ts", "../src/terminal/market.ts", "../src/qvapay/*.ts", "../src/broker/*.ts", "../src/sim/*.ts", "../src/ratelimit.ts", "../src/log.ts"]
 }

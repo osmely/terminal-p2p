@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { Engine, freshState, SimError, type Candle } from '../src/sim/engine.ts'
+
+const T0 = Date.parse('2026-10-24T12:00:00Z')
+const q = (p: number) => ({ bid: p - 0.5, ask: p + 0.5 })
+const candle = (t: number, o: number, h: number, l: number, c: number): Candle => ({ t, o, h, l, c })
+
+test('compra a mercado al ask, con comisión, y venta con ganancia realizada', () => {
+	const e = new Engine(freshState(T0))
+	const buy = e.placeOrder({ symbol: 'btc', side: 'BUY', type: 'MARKET', quoteAmount: 1001 }, q(100), T0)
+	assert.equal(buy.status, 'FILLED')
+	assert.equal(buy.avgPrice, 100.5)
+	assert.equal(buy.qty, 9.95024)
+	const acc = e.account({ BTCUSDT: 110 })
+	assert.ok(Math.abs(acc.cash.free - (10_000 - 9.95024 * 100.5 * 1.001)) < 1e-6)
+	const sell = e.placeOrder({ symbol: 'BTCUSDT', side: 'SELL', type: 'MARKET', quantity: 9.95024 }, q(110), T0 + 1000)
+	assert.equal(sell.avgPrice, 109.5)
+	assert.ok(e.state.trades[1].realizedPnl! > 85)
+	assert.equal(e.account({}).positions.length, 0)
+})
+
+test('validaciones: saldo, mínimo, stops del lado correcto', () => {
+	const e = new Engine(freshState(T0))
+	assert.throws(() => e.placeOrder({ symbol: 'BTC', side: 'BUY', quoteAmount: 20_000 }, q(100)), SimError)
+	assert.throws(() => e.placeOrder({ symbol: 'BTC', side: 'BUY', quoteAmount: 2 }, q(100)), /mínima/)
+	assert.throws(() => e.placeOrder({ symbol: 'BTC', side: 'SELL', quantity: 1 }, q(100)), /No tienes/)
+	assert.throws(() => e.placeOrder({ symbol: 'BTC', side: 'BUY', type: 'STOP', stopPrice: 90, quoteAmount: 100 }, q(100)), /por encima/)
+	assert.throws(() => e.placeOrder({ symbol: 'NADA', side: 'BUY', quoteAmount: 100 }, q(100)), /no disponible/)
+})
+
+test('límite y stop con velas de 1 s: nunca con un precio anterior, y el hueco lo paga el stop', () => {
+	const e = new Engine(freshState(T0))
+	const limit = e.placeOrder({ symbol: 'ETH', side: 'BUY', type: 'LIMIT', price: 95, quoteAmount: 500 }, q(100), T0 + 500)
+	assert.equal(limit.status, 'OPEN')
+	assert.ok(e.state.balances.USDT.locked > 0)
+	// Una vela que empezó antes de poner la orden no cuenta
+	e.replay('ETHUSDT', [candle(T0, 100, 100, 90, 95)])
+	assert.equal(limit.status, 'OPEN')
+	e.replay('ETHUSDT', [candle(T0 + 1000, 99, 99, 96, 97), candle(T0 + 2000, 96, 96, 94, 95)])
+	assert.equal(limit.status, 'FILLED')
+	assert.equal(limit.avgPrice, 95)
+	assert.equal(e.state.balances.USDT.locked, 0)
+	// Stop de venta: la vela abre por debajo del stop (hueco) y se ejecuta a la apertura
+	const stop = e.placeOrder({ symbol: 'ETH', side: 'SELL', type: 'STOP', stopPrice: 90, quantity: limit.qty }, q(96), T0 + 3000)
+	e.replay('ETHUSDT', [candle(T0 + 4000, 88, 89, 87, 88)])
+	assert.equal(stop.status, 'FILLED')
+	assert.equal(stop.avgPrice, 88)
+	assert.equal(stop.trigger, 'stop')
+})
+
+test('compra con stop loss y take profit: crea la OCO y, si se tocan los dos, gana el stop', () => {
+	const e = new Engine(freshState(T0))
+	const buy = e.placeOrder({ symbol: 'SOL', side: 'BUY', quoteAmount: 1000, stopLoss: 90, takeProfit: 120 }, q(100), T0)
+	const oco = e.openOrders()[0]
+	assert.deepEqual([oco.type, oco.side, oco.price, oco.stopPrice, oco.qty], ['OCO', 'SELL', 120, 90, buy.qty])
+	e.replay('SOLUSDT', [candle(T0 + 1000, 100, 121, 89, 100)])
+	assert.equal(oco.status, 'FILLED')
+	assert.deepEqual([oco.avgPrice, oco.trigger], [90, 'stop'])
+	// Otra entrada: ahora solo toca el objetivo
+	e.placeOrder({ symbol: 'SOL', side: 'BUY', quoteAmount: 1000, stopLoss: 90, takeProfit: 120 }, q(100), T0 + 2000)
+	const oco2 = e.openOrders()[0]
+	e.replay('SOLUSDT', [candle(T0 + 3000, 105, 125, 104, 122)])
+	assert.deepEqual([oco2.status, oco2.avgPrice, oco2.trigger], ['FILLED', 120, 'objetivo'])
+})
+
+test('cortos: se gana si baja y se cancela devolviendo la garantía', () => {
+	const e = new Engine(freshState(T0))
+	const short = e.placeOrder({ symbol: 'DOGE', side: 'SHORT', quoteAmount: 1000 }, { bid: 0.2, ask: 0.2001 }, T0)
+	assert.equal(short.status, 'FILLED')
+	const acc = e.account({ DOGEUSDT: 0.18 })
+	assert.ok(acc.pnl > 90 && acc.pnl < 100)
+	const cover = e.placeOrder({ symbol: 'DOGE', side: 'COVER', type: 'LIMIT', price: 0.15, quantity: short.qty }, { bid: 0.18, ask: 0.1801 }, T0 + 1000)
+	e.cancelOrder(cover.id)
+	assert.equal(e.state.shorts.DOGE.free, short.qty)
+	assert.throws(() => e.cancelOrder(cover.id), /ya no está abierta/)
+})
