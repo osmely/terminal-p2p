@@ -394,6 +394,25 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .prose details.data summary::after { right: 0; font-size: 18px; color: var(--accent); }
 .prose details.data .tbl { max-height: 340px; overflow-y: auto; margin-top: 10px; }
 
+/* ══ Menú de ayuda ════════════════════════════════════════════════════ */
+.help { position: relative; border: 0 !important; }
+.help-btn {
+	display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 12px 0 9px; border-radius: var(--r-sm); list-style: none; cursor: pointer;
+	border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2); font-size: 13.5px; font-weight: 600; user-select: none;
+}
+.help-btn::-webkit-details-marker { display: none; }
+.help-btn::after { content: none; }
+.help-btn:hover, .help[open] .help-btn { color: var(--text); background: var(--surface-3); }
+.help-menu {
+	position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; width: min(300px, calc(100vw - 24px)); display: flex; flex-direction: column; gap: 2px;
+	padding: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow);
+}
+.help-menu a { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; color: var(--text); text-decoration: none; white-space: normal; }
+.help-menu a:hover { background: var(--surface-2); }
+.help-menu a b { font-size: 14px; font-weight: 600; }
+.help-menu a span { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.help-menu .help-tg { border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; margin-top: 4px; padding-top: 12px; font-size: 13px; color: var(--accent); }
+
 /* ══ Responsive ═══════════════════════════════════════════════════════ */
 @media (max-width: 980px) {
 	/* Barra sólida en el móvil: en el iPhone el contenido se transparentaba por detrás. Su fondo
@@ -505,4 +524,13 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 @media (prefers-reduced-motion: reduce) {
 	* { animation: none !important; transition: none !important; }
 	html { scroll-behavior: auto; }
+}
+
+@media (max-width: 640px) {
+	/* Solo el icono en el móvil */
+	.help-btn { height: 34px; width: 34px; padding: 0; justify-content: center; }
+	.help-label { display: none; }
+	/* El botón no está en el borde: la lista va de lado a lado bajo la barra */
+	.help { position: static; }
+	.help-menu { left: 12px; right: 12px; width: auto; top: calc(100% + 6px); }
 }

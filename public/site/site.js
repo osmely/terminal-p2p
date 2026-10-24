@@ -96,3 +96,11 @@ if ($('rates')) {
 	setInterval(() => !document.hidden && loadRates(), 60_000)
 }
 if ($('informal')) loadInformal()
+
+// El menú de ayuda se cierra al tocar fuera o con Escape
+document.addEventListener('click', (e) => {
+	for (const d of document.querySelectorAll('details.help[open]')) if (!d.contains(e.target)) d.open = false
+})
+document.addEventListener('keydown', (e) => {
+	if (e.key === 'Escape') for (const d of document.querySelectorAll('details.help[open]')) d.open = false
+})

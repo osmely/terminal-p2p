@@ -858,9 +858,11 @@ function toggleMenu(menuId, btnId, onOpen) {
 	onOpen?.()
 }
 
-function closeMenus() {
+function closeMenus(e) {
 	$('filterMenu').hidden = true
 	$('filterBtn').setAttribute('aria-expanded', 'false')
+	// El menú de ayuda, salvo que el clic sea dentro de él
+	for (const d of document.querySelectorAll('details.help[open]')) if (!d.contains(e?.target)) d.open = false
 }
 
 // Cuántos filtros se apartan de los valores por defecto
