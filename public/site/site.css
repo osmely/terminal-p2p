@@ -394,7 +394,13 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 
 /* ══ Responsive ═══════════════════════════════════════════════════════ */
 @media (max-width: 980px) {
-	.nav-links { display: none; }
+	/* Secciones en una segunda fila que se desliza de lado */
+	html { scroll-padding-top: 112px; }
+	.nav-in { flex-wrap: wrap; height: auto; min-height: 64px; row-gap: 0; padding-top: 10px; }
+	.nav-links { order: 3; width: 100%; gap: 20px; overflow-x: auto; scrollbar-width: none; padding: 4px 24px 10px 0; -webkit-mask-image: linear-gradient(to right, #000 88%, transparent); mask-image: linear-gradient(to right, #000 88%, transparent); }
+	.nav-links::-webkit-scrollbar { display: none; }
+	.nav-links a { white-space: nowrap; font-size: 14px; }
+	.nav-links a[aria-current] { color: var(--text); }
 	.hero { padding: 56px 0 72px; }
 	.hero-in, .priv, .op { grid-template-columns: 1fr; gap: 44px; }
 	.op { gap: 20px; }
@@ -404,7 +410,7 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 }
 @media (max-width: 640px) {
 	.wrap, .narrow { width: calc(100% - 32px); }
-	.nav-in { height: 58px; gap: 12px; }
+	.nav-in { min-height: 58px; column-gap: 12px; padding-top: 8px; }
 	.hide-sm { display: none; }
 	.nav-actions { gap: 6px; }
 	.nav-actions .btn { padding: 8px 10px; font-size: 13.5px; }
