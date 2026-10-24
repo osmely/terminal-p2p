@@ -387,6 +387,10 @@ export class Broker {
 			.filter((d: { label: string; value: string }) => d.label && d.value)
 			.slice(0, 10)
 		if (!details.length) return json(400, { error: 'Pon tus datos para recibir el pago' })
+		// Saldo fresco: no se vende más de lo que tienes
+		const me = await acc.client.me()
+		acc.me = me
+		if (amount > num(me.balance)) return json(400, { error: `No tienes saldo suficiente: tienes ${num(me.balance).toLocaleString('es')} USD` })
 		const r = await acc.client.applyOffer(o.uuid, q.kind === 'flexible' ? amount : undefined, { coin: o.coin, side: o.type, usd: amount, via: 'swap' })
 		this.swapQuotes.delete(o.coin)
 		const order = r.order ?? undefined

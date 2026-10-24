@@ -20,7 +20,7 @@ function fakeQvaPay() {
 		v6: { uuid: 'v6', type: 'buy', coin: 'BANK_CUP', amount: '100', receive: '1010000', status: 'open', User: vip('typo') },
 	}
 	const client = {
-		me: async () => ({ uuid: 'me', username: 'yo', balance: 100, kyc: true, golden_check: false, p2p_enabled: true }),
+		me: async () => ({ uuid: 'me', username: 'yo', balance: 300, kyc: true, golden_check: false, p2p_enabled: true }),
 		listOffers: async (p: ListParams) => (lists.push(p), { current_page: 1, per_page: 30, total: 6, data: Object.values(offers).map((o) => structuredClone(o)) }),
 		getOffer: async (uuid: string) => structuredClone(offers[uuid]),
 		applyOffer: async (uuid: string, amount?: number, meta?: unknown) => (calls.push(`apply:${uuid}:${amount}:${JSON.stringify(meta)}`), { order: 'o1' }),
@@ -107,6 +107,10 @@ test('Vender ya: no vende si el precio bajó, si no cabe el monto o si no es VIP
 	// La fija se toma entera
 	assert.equal((await post('/swap', { offer: 'v3', amount: 20, minPrice: 990, details })).status, 409)
 	assert.equal((await post('/swap', { offer: 'v2', amount: 100, minPrice: 1015, details: [] })).status, 400)
+	// Más de lo que tienes (300 USD)
+	const over = await post('/swap', { offer: 'v1', amount: 400, minPrice: 1000, details })
+	assert.equal(over.status, 400)
+	assert.match(over.body.error, /saldo/)
 	fake.offers.v2.User = { ...vip('azi'), vip: false }
 	assert.equal((await post('/swap', { offer: 'v2', amount: 100, minPrice: 1015, details })).status, 400)
 	fake.offers.v3.status = 'processing'

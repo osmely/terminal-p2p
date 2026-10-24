@@ -1016,6 +1016,11 @@ async function showSwap() {
 
 	const fields = bk.acct.connected ? await loadCoinFields() : {}
 	const amount = () => num2($('swAmount')?.value)
+	// No se puede vender más saldo del que tienes
+	const maxUsd = () => (bk.acct.connected ? Math.floor((bk.acct.balance ?? 0) * 100) / 100 : Infinity)
+	const clamp = () => {
+		if (amount() > maxUsd()) $('swAmount').value = String(maxUsd())
+	}
 	const unit = () => unitOf(sw.coin)
 
 	const renderDetails = () => {
@@ -1053,11 +1058,13 @@ async function showSwap() {
 	const details = () => [...document.querySelectorAll('[data-sw-detail]')].map((i) => ({ name: i.dataset.swDetail, label: i.dataset.label, value: i.value.trim() }))
 
 	// Montos que sí caben, para cuando ninguna oferta acepta el que pusiste
+	// Solo las que tu saldo alcanza
+	const reachable = (offers) => offers.filter((o) => (o.kind === 'flexible' ? (o.orderMin ?? 0) : o.usd) <= maxUsd())
 	const options = (offers) =>
-		offers
+		reachable(offers)
 			.slice(0, 4)
 			.map((o) => {
-				const target = o.kind === 'flexible' ? Math.min(Math.max(amount() || 0, o.orderMin ?? 0), o.orderMax ?? o.usd) : o.usd
+				const target = o.kind === 'flexible' ? Math.min(Math.max(amount() || 0, o.orderMin ?? 0), o.orderMax ?? o.usd, maxUsd()) : o.usd
 				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtU(o.orderMin) : '0'}–${fmtU(o.orderMax ?? o.usd)} USD` : `${fmtU(o.usd)} USD exactos`
 				return `<button type="button" class="chip-btn" data-sw-pick="${target}">${range} a <b class="mono">${fmtP(o.price)}</b></button>`
 			})
@@ -1076,6 +1083,8 @@ async function showSwap() {
 		else if (sw.error) html = `<p class="notice warn">${esc(sw.error)}</p>`
 		else if (!q) html = '<p class="hint">Buscando ofertas VIP…</p>'
 		else if (!q.offers.length) html = `<p class="notice warn">Ahora mismo ningún VIP compra USD en ${esc(nameOf(sw.coin))}. Prueba otro mercado o vuelve en un rato.</p>`
+		else if (!best && !reachable(q.offers).length)
+			html = `<p class="notice warn">${maxUsd() > 0 ? `Con tu saldo (${fmtU(maxUsd())} USD) no llegas al mínimo de ningún VIP en este mercado.` : 'No tienes saldo en QvaPay para vender.'}</p>`
 		else if (!best)
 			html = `<p class="notice warn">${a > 0 ? `Ningún VIP compra ${fmtU(a)} USD de una vez en este mercado.` : 'Pon cuántos USD vendes.'} Montos posibles:</p><div class="swap-picks">${options(q.offers)}</div>`
 		else {
@@ -1089,9 +1098,9 @@ async function showSwap() {
 		const go = $('swGo')
 		if (go) {
 			const missing = details().some((d) => !d.value)
-			const over = a > (bk.acct.balance ?? 0)
+			const over = a > maxUsd()
 			go.disabled = !best || !(a > 0) || missing || over || sw.loading
-			go.textContent = !best ? 'Vender' : over ? 'No tienes saldo suficiente' : missing ? 'Completa dónde recibes el pago' : `Vender ${fmtU(a)} USD por ${fmtU(a * best.price)} ${unit()}`
+			go.textContent = maxUsd() <= 0 ? 'No tienes saldo en QvaPay' : !best ? 'Vender' : over ? 'No tienes saldo suficiente' : missing ? 'Completa dónde recibes el pago' : `Vender ${fmtU(a)} USD por ${fmtU(a * best.price)} ${unit()}`
 		}
 	}
 
@@ -1121,6 +1130,7 @@ async function showSwap() {
 
 	let typing = null
 	$('swAmount').addEventListener('input', () => {
+		clamp()
 		store.set('swap.amount', amount())
 		render()
 		clearTimeout(typing)
@@ -1184,6 +1194,7 @@ async function showSwap() {
 		}
 	})
 
+	clamp()
 	renderDetails()
 	// Cada segundo la edad del precio; cada SWAP_REFRESH_MS, precio nuevo
 	sw.timer = setInterval(() => {
