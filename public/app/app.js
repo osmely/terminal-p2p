@@ -85,7 +85,7 @@ async function loadBook() {
 		state.book = await getJSON(`/api/book?coin=${state.coin}`)
 		render()
 	} catch (e) {
-		$('updated').textContent = 'Sin conexión con el servidor'
+		setStatus('Sin conexión con el servidor')
 		$('dot').className = 'dot stale'
 	}
 }
@@ -214,7 +214,7 @@ function render() {
 		$('bids').innerHTML = ''
 		$('spread').className = 'spread'
 		$('spread').textContent = 'Sin libro en vivo'
-		$('updated').textContent = 'Conecta tu cuenta para ver el libro en vivo'
+		setStatus('Conecta tu cuenta para ver el libro en vivo')
 		$('dot').className = 'dot stale'
 		renderStats(b, asks, bids)
 		renderInsight(b, asks, bids)
@@ -230,21 +230,27 @@ function render() {
 	drawActive()
 }
 
+// Solo se ve el punto; el texto queda al pasar el ratón y para lectores de pantalla
+function setStatus(text) {
+	$('updated').textContent = text
+	$('statusPill').title = text
+}
+
 function renderStatus(b) {
 	// Si QvaPay rechaza la lectura de los dos lados, no es "actualizado": no hay libro
 	if (b.ask.error && b.bid.error) {
-		$('updated').textContent = 'Sin acceso al libro con esta cuenta'
+		setStatus('Sin acceso al libro con esta cuenta')
 		$('dot').className = 'dot stale'
 		return
 	}
 	const times = [b.ask.updatedAt, b.bid.updatedAt].filter(Boolean)
 	if (!times.length) {
-		$('updated').textContent = 'Leyendo el libro…'
+		setStatus('Leyendo el libro…')
 		$('dot').className = 'dot'
 		return
 	}
 	const age = b.serverTime - Math.min(...times)
-	$('updated').textContent = `Actualizado hace ${ago(age)}`
+	setStatus(`Actualizado hace ${ago(age)}`)
 	$('dot').className = `dot ${age < 30_000 ? 'live' : 'stale'}`
 }
 

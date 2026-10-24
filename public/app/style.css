@@ -141,6 +141,9 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 	display: flex; align-items: center; gap: 8px; padding: 5px 11px; border-radius: 999px;
 	background: var(--surface-2); border: 1px solid var(--line); font-size: 12px; color: var(--text-2); white-space: nowrap;
 }
+/* Solo el punto: el texto queda en el title y para lectores de pantalla */
+.status-pill { padding: 8px; }
+#updated { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
 .dot.live { background: var(--bid); box-shadow: 0 0 0 3px var(--bid-bg); }
 .dot.stale { background: var(--warn); }
@@ -492,8 +495,6 @@ a.icon-btn { text-decoration: none; }
 @media (max-width: 900px) {
 	/* Barra superior compacta: el estado queda como un punto */
 	.nav { gap: 8px; padding: 0 12px; }
-	.status-pill { padding: 8px; }
-	.status-pill span:last-child { display: none; }
 	.account .btn { padding: 8px 12px; }
 	.swap-btn { padding: 8px 10px; }
 	.swap-input, .swap-out { font-size: 24px; }

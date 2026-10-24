@@ -5,7 +5,7 @@
 import type { Account, AccountStore } from '../src/broker/routes.ts'
 import { QvaPayClient, QvaPayError } from '../src/qvapay/client.ts'
 
-const KEY = 'tp.token'
+export const TOKEN_KEY = 'tp.token'
 const SID = 'browser'
 
 export interface TokenStorage {
@@ -33,7 +33,7 @@ export class BrowserAccounts implements AccountStore {
 		const client = new QvaPayClient({ token, dryRun: false, baseUrl: this.baseUrl })
 		const me = await client.me()
 		this.clear()
-		safe(() => (opts.remember ? this.storage.local : this.storage.session).setItem(KEY, token))
+		safe(() => (opts.remember ? this.storage.local : this.storage.session).setItem(TOKEN_KEY, token))
 		this.acc = { sid: SID, me, client }
 		return this.acc
 	}
@@ -56,7 +56,7 @@ export class BrowserAccounts implements AccountStore {
 	}
 
 	private async load(): Promise<Account | null> {
-		const token = safe(() => this.storage.session.getItem(KEY) ?? this.storage.local.getItem(KEY))
+		const token = safe(() => this.storage.session.getItem(TOKEN_KEY) ?? this.storage.local.getItem(TOKEN_KEY))
 		if (!token) return null
 		const client = new QvaPayClient({ token, dryRun: false, baseUrl: this.baseUrl })
 		try {
@@ -70,8 +70,8 @@ export class BrowserAccounts implements AccountStore {
 	}
 
 	private clear() {
-		safe(() => this.storage.session.removeItem(KEY))
-		safe(() => this.storage.local.removeItem(KEY))
+		safe(() => this.storage.session.removeItem(TOKEN_KEY))
+		safe(() => this.storage.local.removeItem(TOKEN_KEY))
 	}
 }
 

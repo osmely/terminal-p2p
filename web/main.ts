@@ -9,7 +9,7 @@ import { Broker, json } from '../src/broker/routes.ts'
 import { QvaPayClient } from '../src/qvapay/client.ts'
 import { COINS, Market, type Tick } from '../src/terminal/market.ts'
 import { CRITERIA, positions, rank, userStats } from '../src/terminal/ranking.ts'
-import { BrowserAccounts } from './accounts.ts'
+import { BrowserAccounts, TOKEN_KEY } from './accounts.ts'
 
 const RELAY = `${location.origin}/qp`
 // Si la próxima lectura está lejos (nadie miraba), se adelanta al abrir un mercado
@@ -46,6 +46,8 @@ function wake() {
 	timer = setTimeout(loop, 50)
 }
 document.addEventListener('visibilitychange', () => !document.hidden && wake())
+// Otra pestaña conectó o desconectó una cuenta recordada: esta se recarga para no seguir con la anterior
+window.addEventListener('storage', (e) => e.key === TOKEN_KEY && location.reload())
 void loop()
 
 const isTick = (v: string | null): v is Tick => COINS.some((c) => c.tick === v)
