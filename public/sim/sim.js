@@ -21,8 +21,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim()
 
 const POLL_MS = 15_000
-// Precios cada 2 s y velas completas cada minuto, de este mismo dominio (que los trae de MEXC)
-const TICK_MS = 2000
+// Precios cada 3 s y velas completas cada minuto, de este mismo dominio (que los trae de MEXC)
+const TICK_MS = 3000
 const CANDLES_MS = 60_000
 const IV_MS = { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 }
 

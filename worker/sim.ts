@@ -89,7 +89,7 @@ const mids = (qs: Partial<Record<Symbol, Quote>>) => Object.fromEntries(Object.e
 // precios y las velas, que salen de MEXC, la misma fuente con la que se ejecutan las órdenes. Se cachean unos
 // segundos en el borde para que todos los jugadores compartan la misma consulta
 
-const TICKERS_TTL_S = 2
+const TICKERS_TTL_S = 3
 // Intervalos del gráfico y su nombre en MEXC, con lo que se cachea cada uno
 const INTERVALS: Record<string, { mexc: string; ttl: number }> = {
 	'1m': { mexc: '1m', ttl: 5 },
