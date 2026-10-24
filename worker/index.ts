@@ -11,7 +11,7 @@ import { cubaDate, informalSince, latestInformal, syncInformal } from './informa
 import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
-import { simApi, simCron, type SimEnv } from './sim.ts'
+import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 
 interface Env extends Omit<SimEnv, 'DB'> {
 	ASSETS: Fetcher
@@ -78,6 +78,10 @@ export default {
 		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
 		if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
 		if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
+		if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/'))) {
+			if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
+			return secure(await simAdmin(req, url, env as unknown as SimEnv))
+		}
 		if (folderFor(url.hostname) === 'sim' && url.pathname.startsWith('/api/')) {
 			if (req.method !== 'GET' && !(await underLimit(env.SIM_LIMIT, req))) return secure(jsonError(429, 'Demasiadas órdenes seguidas: espera unos segundos'))
 			return secure(await simApi(req, url, env as unknown as SimEnv))

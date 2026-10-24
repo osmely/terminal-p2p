@@ -103,6 +103,9 @@ export interface SimState {
 	checkedAt: number
 	// Último precio conocido de cada mercado, por si la fuente no responde al valorar la cuenta
 	marks?: Partial<Record<string, number>>
+	// Temporada semanal (lunes YYYY-MM-DD) y si reinició a mitad de semana (no compite hasta la siguiente)
+	season?: string
+	benched?: boolean
 }
 
 export interface OrderRequest {
@@ -135,7 +138,7 @@ export function normSymbol(s: unknown): Symbol {
 	return sym as Symbol
 }
 
-export function freshState(now = Date.now(), balance = START_BALANCE): SimState {
+export function freshState(now = Date.now(), balance = START_BALANCE, season?: string, benched = false): SimState {
 	const balances: SimState['balances'] = { USDT: { free: balance, locked: 0 } }
 	const basis: SimState['basis'] = {}
 	const shorts: SimState['shorts'] = {}
@@ -144,7 +147,7 @@ export function freshState(now = Date.now(), balance = START_BALANCE): SimState 
 		basis[m.base] = { qty: 0, cost: 0 }
 		shorts[m.base] = emptyShort()
 	}
-	return { createdAt: now, startBalance: balance, balances, basis, shorts, orders: [], trades: [], nextId: 1, tradeCount: 0, checkedAt: now }
+	return { createdAt: now, startBalance: balance, balances, basis, shorts, orders: [], trades: [], nextId: 1, tradeCount: 0, checkedAt: now, season, benched }
 }
 
 export class Engine {

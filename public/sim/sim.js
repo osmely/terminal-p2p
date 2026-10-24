@@ -386,15 +386,61 @@ async function loadRanking() {
 	} catch {}
 }
 
+const dayShort = (t) => new Date(t).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'America/Havana' })
+function leftText(ms) {
+	if (ms <= 0) return 'terminando'
+	const d = Math.floor(ms / 86_400_000)
+	const h = Math.floor((ms % 86_400_000) / 3600_000)
+	return d ? `${d} d ${h} h` : `${h} h ${Math.floor((ms % 3600_000) / 60_000)} min`
+}
+
 function renderRanking() {
 	const r = S.ranking
 	const body = $('tabBody')
 	if (!r) return (body.innerHTML = '<p class="empty">Cargando el ranking…</p>')
-	if (!r.rows.length) return (body.innerHTML = '<p class="empty">Aún no hay nadie en el ranking. ¡Haz tu primera operación y estrena el primer puesto!</p>')
-	const row = (x) => `<tr class="${x.me ? 'me' : ''}"><td>${x.rank}</td><td class="txt">${esc(x.name)}${x.me ? ' <span class="tag neutral">tú</span>' : ''}</td><td class="${cls(x.pnlPct)}">${fmtPct(x.pnlPct)}</td><td>${fmtUsd(x.equity)}</td><td>${x.trades}</td></tr>`
-	const mineOutside = r.mine && !r.rows.some((x) => x.me)
-	body.innerHTML = `<table><thead><tr><th>#</th><th>Jugador</th><th>Rentabilidad</th><th>Patrimonio (USDT)</th><th>Operaciones</th></tr></thead><tbody>${r.rows.map(row).join('')}${mineOutside ? row(r.mine) : ''}</tbody></table>
-		<p class="fine" style="padding: 8px 12px">Rentabilidad desde que se creó o reinició la cuenta, a precio de mercado. Solo cuentan quienes han hecho al menos una operación.</p>`
+	const view = S.rankView ?? 'week'
+	const sub = [
+		['week', 'Esta semana'],
+		['last', 'Semana pasada'],
+		['fame', 'Salón de la fama'],
+	]
+		.map(([k, label]) => `<button class="seg-tab ${k === view ? 'active' : ''}" data-rank-view="${k}">${label}</button>`)
+		.join('')
+	const head = `<div class="rank-head"><div class="seg-tabs">${sub}</div>
+		<span class="fine">Temporada del ${dayShort(r.season.start)} al ${dayShort(r.season.end - 1)} · termina en ${leftText(r.season.end - Date.now())}</span></div>`
+	const pctRow = (x) => `<tr class="${x.me ? 'me' : ''}"><td>${x.rank}</td><td class="txt">${esc(x.name)}${x.me ? ' <span class="tag neutral">tú</span>' : ''}</td><td class="${cls(x.pnlPct)}">${fmtPct(x.pnlPct)}</td>${x.equity != null ? `<td>${fmtUsd(x.equity)}</td>` : ''}<td>${x.trades}</td></tr>`
+	let content = ''
+	if (view === 'week') {
+		const m = r.mine
+		const status = !S.user
+			? 'Entra con Telegram para jugar y, si quieres, competir.'
+			: !m
+				? ''
+				: !m.compete
+					? `Juegas en privado: nadie ve tu nombre. <button class="btn small join" data-compete="1">Participar en la temporada</button>`
+					: m.benched
+						? `Compites desde el lunes (ya habías operado o reiniciado esta semana). <button class="link small" data-compete="0">Dejar de competir</button>`
+						: m.trades < r.minTrades
+							? `Compites esta semana: llevas ${m.trades} de ${r.minTrades} operaciones, con ${r.minTrades - m.trades} más entras en la clasificación. <button class="link small" data-compete="0">Dejar de competir</button>`
+							: `Vas ${m.rank}.º con ${fmtPct(m.pnlPct)}. <button class="link small" data-compete="0">Dejar de competir</button>`
+		content = `${status ? `<p class="rank-status">${status}</p>` : ''}${
+			r.rows.length
+				? `<table><thead><tr><th>#</th><th>Jugador</th><th>Rentabilidad</th><th>Patrimonio (USDT)</th><th>Operaciones</th></tr></thead><tbody>${r.rows.map(pctRow).join('')}</tbody></table>`
+				: `<p class="empty">Aún nadie lleva ${r.minTrades} operaciones esta semana. ¡Estrena el primer puesto!</p>`
+		}`
+	} else if (view === 'last') {
+		content = r.last?.rows.length
+			? `<p class="rank-status">Temporada que empezó el ${dayShort(Date.parse(`${r.last.season}T12:00:00Z`))}</p><table><thead><tr><th>#</th><th>Jugador</th><th>Rentabilidad</th><th>Operaciones</th></tr></thead><tbody>${r.last.rows.map(pctRow).join('')}</tbody></table>`
+			: '<p class="empty">Todavía no ha terminado ninguna temporada.</p>'
+	} else {
+		content = r.fame.length
+			? `<table><thead><tr><th>Jugador</th><th>Semanas ganadas</th><th>Podios</th></tr></thead><tbody>${r.fame
+					.map((f) => `<tr class="${f.me ? 'me' : ''}"><td class="txt">${esc(f.name)}${f.me ? ' <span class="tag neutral">tú</span>' : ''}</td><td>${f.wins}</td><td>${f.podiums}</td></tr>`)
+					.join('')}</tbody></table>`
+			: '<p class="empty">El salón de la fama se estrena cuando termine la primera temporada.</p>'
+	}
+	body.innerHTML = `${head}${content}
+		<p class="fine" style="padding: 8px 12px">Competir es opcional. Cada lunes a las 00:00 (hora de Cuba) empieza una temporada: todos vuelven a 10.000 USDT. Cuenta la rentabilidad a precio de mercado de quien compite y lleva al menos ${r.minTrades} operaciones. Si te apuntas o reinicias después de operar, compites desde el lunes. El top 10 de cada semana se anuncia en el grupo de Telegram @terminalp2p.</p>`
 }
 
 // ── Sesión ────────────────────────────────────────────────────────────
@@ -480,6 +526,29 @@ function bind() {
 			renderTab()
 		}
 	$('tabBody').addEventListener('click', async (e) => {
+		const rv = e.target.closest('[data-rank-view]')
+		if (rv) {
+			S.rankView = rv.dataset.rankView
+			return renderRanking()
+		}
+		const comp = e.target.closest('[data-compete]')
+		if (comp) {
+			const on = comp.dataset.compete === '1'
+			const ask = on
+				? 'Al competir, tu @usuario de Telegram aparece en el ranking y, si quedas entre los 10 primeros de la semana, en el grupo @terminalp2p. Puedes dejarlo cuando quieras. ¿Participar?'
+				: 'Dejarás de aparecer en el ranking y en los anuncios. Puedes volver cuando quieras (si ya operaste esa semana, compites desde el lunes). ¿Dejar de competir?'
+			if (!confirm(ask)) return
+			try {
+				const r = await api('/compete', { method: 'POST', body: JSON.stringify({ on }) })
+				S.ranking = r.ranking
+				if (S.user) S.user.compete = r.compete ? 1 : 0
+				toast(!on ? 'Ya no compites: juegas en privado' : r.startsMonday ? 'Apuntado: compites desde el lunes' : '¡Apuntado! Ya compites en esta temporada', 'ok')
+				renderRanking()
+			} catch (err) {
+				toast(err.message, 'bad')
+			}
+			return
+		}
 		const cancel = e.target.closest('[data-cancel]')
 		const close = e.target.closest('[data-close]')
 		try {
@@ -500,11 +569,13 @@ function bind() {
 		}
 	})
 	$('resetBtn').onclick = async () => {
-		if (!confirm('¿Reiniciar tu cuenta? Vuelves a 10.000 USDT, se borran tus posiciones y órdenes y empiezas de cero en el ranking.')) return
+		const competing = S.view?.account.trades > 0
+		if (!confirm(`¿Reiniciar tu cuenta? Vuelves a 10.000 USDT y se borran tus posiciones y órdenes.${competing ? ' Como ya operaste esta semana, sales de la clasificación hasta el lunes.' : ''}`)) return
 		try {
 			S.tradesSeen = 0
 			applyView(await api('/reset', { method: 'POST' }))
 			toast('Cuenta reiniciada: 10.000 USDT')
+			loadRanking()
 		} catch (e) {
 			toast(e.message, 'bad')
 		}

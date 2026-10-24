@@ -8,7 +8,8 @@
 //     cuenta. Así se ejecutan aunque nadie tenga la pantalla abierta. Precios: ver «Precios» abajo.
 
 import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle, type Quote, type SimState, type Symbol } from '../src/sim/engine.ts'
-import type { D1 } from './rates.ts'
+import { authorized } from './metrics.ts'
+import { cubaOffset, type D1 } from './rates.ts'
 
 export interface SimEnv {
 	DB: D1
@@ -18,6 +19,10 @@ export interface SimEnv {
 	SIM_BOT?: string
 	// Solo en desarrollo (.dev.vars): entrar sin Telegram, que no funciona en localhost
 	SIM_DEV_LOGIN?: string
+	// Clave del panel de métricas: también abre la página privada del resumen semanal (/admin)
+	METRICS_KEY?: string
+	// Grupo donde se publica el resumen semanal
+	SIM_CHANNEL?: string
 }
 
 // Binance no responde a las peticiones que salen de Cloudflare (bloquea su región: 451 y 403), así que
@@ -36,6 +41,23 @@ const KLINE_LIMIT = 1000
 // Se espera un poco tras el cierre de cada vela para que la fuente la tenga completa
 const CLOSE_DELAY_MS = 1500
 const RANKING_SIZE = 50
+// Operaciones de la temporada para aparecer en el ranking, y puestos del resumen semanal
+export const MIN_TRADES = 3
+const SUMMARY_SIZE = 10
+
+// ── Temporadas: de lunes 00:00 a domingo 23:59, hora de Cuba ──────────
+
+const DAY_MS = 86_400_000
+const isoDay = (t: number) => new Date(t).toISOString().slice(0, 10)
+// Medianoche (hora de Cuba) del día local que empieza en localMidnight, en ms UTC
+const toUtc = (localMidnight: number) => localMidnight - cubaOffset(localMidnight + 4 * 3600_000)
+
+export function season(now = Date.now()) {
+	const local = now + cubaOffset(now)
+	const d = new Date(local)
+	const monday = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - ((d.getUTCDay() + 6) % 7) * DAY_MS
+	return { id: isoDay(monday), start: toUtc(monday), end: toUtc(monday + 7 * DAY_MS) }
+}
 
 // ── Precios ───────────────────────────────────────────────────────────
 
@@ -90,20 +112,88 @@ export async function loadAccount(db: D1, tgId: number) {
 // Guarda solo si nadie la cambió entretanto (false si hay que recargar y repetir)
 async function saveAccount(db: D1, tgId: number, engine: Engine, version: number, prices: Partial<Record<Symbol, number>>, now: number) {
 	if (Object.keys(prices).length) engine.state.marks = { ...engine.state.marks, ...prices }
+	engine.state.season ??= season(now).id
 	const acc = engine.account(prices)
 	const r = await db
-		.prepare('UPDATE sim_accounts SET state = ?, equity = ?, pnl_pct = ?, trades = ?, open_orders = ?, checked_at = ?, updated_at = ?, version = version + 1 WHERE tg_id = ? AND version = ?')
-		.bind(JSON.stringify(engine.state), acc.equity, acc.pnlPct, engine.state.tradeCount, engine.openOrders().length, engine.state.checkedAt, now, tgId, version)
+		.prepare('UPDATE sim_accounts SET state = ?, equity = ?, pnl_pct = ?, trades = ?, open_orders = ?, checked_at = ?, updated_at = ?, season = ?, benched = ?, version = version + 1 WHERE tg_id = ? AND version = ?')
+		.bind(JSON.stringify(engine.state), acc.equity, acc.pnlPct, engine.state.tradeCount, engine.openOrders().length, engine.state.checkedAt, now, engine.state.season ?? '', engine.state.benched ? 1 : 0, tgId, version)
 		.run()
 	return (r.meta?.changes ?? 0) > 0
 }
 
 async function createAccount(db: D1, tgId: number, now: number) {
-	const s = freshState(now)
+	const s = freshState(now, undefined, season(now).id)
 	await db
-		.prepare('INSERT OR IGNORE INTO sim_accounts (tg_id, state, equity, pnl_pct, trades, open_orders, checked_at, updated_at, version) VALUES (?, ?, ?, 0, 0, 0, ?, ?, 0)')
-		.bind(tgId, JSON.stringify(s), s.startBalance, now, now)
+		.prepare('INSERT OR IGNORE INTO sim_accounts (tg_id, state, equity, pnl_pct, trades, open_orders, checked_at, updated_at, version, season, benched) VALUES (?, ?, ?, 0, 0, 0, ?, ?, 0, ?, 0)')
+		.bind(tgId, JSON.stringify(s), s.startBalance, now, now, s.season)
 		.run()
+}
+
+const displayName = (u: { first_name: string; username: string | null }) => (u.username ? `@${u.username}` : u.first_name)
+const escHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+const pctEs = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')}%`
+const dayEs = (t: number) => new Date(t + cubaOffset(t)).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+
+// Al empezar una temporada: guarda la clasificación final de la anterior (con precios del momento),
+// deja el borrador del resumen para Telegram y vuelve a poner a todos a 10.000 USDT. Lo hace una sola
+// vez aunque lo llamen varias peticiones a la vez (cambio condicionado de sim_meta.season)
+export async function rollover(db: D1, now: number, getPrices: () => Promise<Partial<Record<Symbol, number>>> = async () => mids(await quotes())) {
+	const cur = season(now)
+	const meta = await db.prepare("SELECT value FROM sim_meta WHERE key = 'season'").first<{ value: string }>()
+	if (meta?.value === cur.id) return false
+	if (!meta) {
+		// Primera vez: las cuentas que ya había entran en la temporada en curso tal como están
+		await db.prepare("INSERT OR IGNORE INTO sim_meta (key, value) VALUES ('season', ?)").bind(cur.id).run()
+		await db.prepare("UPDATE sim_accounts SET season = ? WHERE season = ''").bind(cur.id).run()
+		const { results } = await db.prepare('SELECT tg_id, state FROM sim_accounts WHERE season = ?').bind(cur.id).all<{ tg_id: number; state: string }>()
+		const stmt = db.prepare('UPDATE sim_accounts SET state = ? WHERE tg_id = ?')
+		const fixes = results.map((r) => stmt.bind(JSON.stringify({ ...(JSON.parse(r.state) as SimState), season: cur.id }), r.tg_id))
+		for (let i = 0; i < fixes.length; i += 50) await db.batch(fixes.slice(i, i + 50))
+		return false
+	}
+	const claim = await db.prepare("UPDATE sim_meta SET value = ? WHERE key = 'season' AND value = ?").bind(cur.id, meta.value).run()
+	if (!claim.meta?.changes) return false
+	const prev = meta.value
+	const prices = await getPrices().catch(() => ({}))
+	const { results } = await db
+		.prepare(
+			`SELECT a.tg_id, a.state, a.trades, u.first_name, u.username FROM sim_accounts a JOIN sim_users u ON u.tg_id = a.tg_id
+			  WHERE a.season = ? AND a.benched = 0 AND a.trades >= ? AND u.compete = 1`,
+		)
+		.bind(prev, MIN_TRADES)
+		.all<{ tg_id: number; state: string; trades: number; first_name: string; username: string | null }>()
+	const standings = results
+		.map((r) => ({ ...new Engine(JSON.parse(r.state) as SimState).account(prices), tg_id: r.tg_id, name: displayName(r) }))
+		.sort((a, b) => b.pnlPct - a.pnlPct)
+	const ins = db.prepare('INSERT OR REPLACE INTO sim_results (season, rank, tg_id, name, pnl_pct, equity, trades) VALUES (?, ?, ?, ?, ?, ?, ?)')
+	const rows = standings.map((x, i) => ins.bind(prev, i + 1, x.tg_id, x.name, x.pnlPct, x.equity, x.trades))
+	for (let i = 0; i < rows.length; i += 50) await db.batch(rows.slice(i, i + 50))
+	const text = summaryText(prev, standings)
+	await db.prepare("INSERT OR REPLACE INTO sim_meta (key, value) VALUES ('draft', ?)").bind(JSON.stringify({ season: prev, text, createdAt: now, posted: false })).run()
+	// Todos a 10.000 USDT en la temporada nueva
+	const fresh = freshState(now, undefined, cur.id)
+	await db
+		.prepare('UPDATE sim_accounts SET state = ?, equity = ?, pnl_pct = 0, trades = 0, open_orders = 0, checked_at = ?, updated_at = ?, season = ?, benched = 0, version = version + 1')
+		.bind(JSON.stringify(fresh), fresh.startBalance, now, now, cur.id)
+		.run()
+	return true
+}
+
+// Resumen de una temporada para el grupo de Telegram (HTML de Telegram)
+export function summaryText(seasonId: string, standings: { name: string; pnlPct: number }[]) {
+	const start = Date.parse(`${seasonId}T12:00:00Z`)
+	const medal = ['🥇', '🥈', '🥉']
+	const top = standings.slice(0, SUMMARY_SIZE).map((x, i) => `${medal[i] ?? `${i + 1}.`} ${escHtml(x.name)} <b>${pctEs(x.pnlPct)}</b>`)
+	return [
+		`🏆 <b>Simulador de trading: temporada del ${dayEs(start)} al ${dayEs(start + 6 * DAY_MS)}</b>`,
+		'',
+		...(top.length ? top : ['Esta semana nadie llegó a las 3 operaciones. ¡La próxima puede ser tuya!']),
+		'',
+		standings.length === 1 ? `Compitió 1 jugador con al menos ${MIN_TRADES} operaciones.` : standings.length ? `Compitieron ${standings.length} jugadores con al menos ${MIN_TRADES} operaciones.` : '',
+		'Ya empezó la nueva temporada: todos arrancan con 10.000 USDT ficticios 👉 https://sim.terminalp2p.com',
+	]
+		.filter((l, i, a) => l !== '' || a[i - 1] !== '')
+		.join('\n')
 }
 
 // Revisa las órdenes pendientes con las velas cerradas desde la última revisión. checkedAt queda en el
@@ -137,6 +227,11 @@ async function withAccount<T>(db: D1, tgId: number, fn: (e: Engine, prices: Part
 	for (let attempt = 0; attempt < 3; attempt++) {
 		const now = Date.now()
 		let acc = await loadAccount(db, tgId)
+		// Si empezó una temporada y el cron aún no la abrió, se abre ahora (y se lee la cuenta ya al día)
+		if (acc && acc.engine.state.season !== season(now).id) {
+			await rollover(db, now)
+			acc = await loadAccount(db, tgId)
+		}
 		if (!acc) {
 			await createAccount(db, tgId, now)
 			acc = await loadAccount(db, tgId)
@@ -163,6 +258,7 @@ function view(engine: Engine, prices: Partial<Record<Symbol, Quote>>) {
 // ── Cron: cada minuto, las cuentas con órdenes abiertas; cada 10, el patrimonio del ranking ──
 
 export async function simCron(db: D1, now: number, refreshAll: boolean) {
+	await rollover(db, now)
 	const { results } = await db.prepare('SELECT tg_id, state, version FROM sim_accounts WHERE open_orders > 0 LIMIT 500').all<Row & { tg_id: number }>()
 	const cache = new Map<string, Candle[]>()
 	const engines = results.map((r) => ({ id: r.tg_id, version: r.version, engine: new Engine(JSON.parse(r.state) as SimState) }))
@@ -299,7 +395,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 
 		const tgId = await readSession(req.headers.get('cookie'), env.SIM_SESSION_KEY)
 		if (route === 'GET /api/me') {
-			const user = tgId ? await env.DB.prepare('SELECT tg_id AS id, first_name, username, photo_url FROM sim_users WHERE tg_id = ?').bind(tgId).first() : null
+			const user = tgId ? await env.DB.prepare('SELECT tg_id AS id, first_name, username, photo_url, compete FROM sim_users WHERE tg_id = ?').bind(tgId).first() : null
 			return json(200, { user })
 		}
 		if (!tgId) return json(401, { error: 'Entra con Telegram para jugar' })
@@ -335,11 +431,29 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 			const { engine, prices } = await withAccount(env.DB, tgId, (e) => e.cancelOrder(Number(cancel[1])))
 			return json(200, view(engine, prices))
 		}
+		if (route === 'POST /api/compete') {
+			// Apuntarse cuando ya operaste esta semana cuenta desde el lunes: nadie juega oculto y se apunta
+			// solo cuando le va bien. Salir es inmediato
+			const on = ((await req.json().catch(() => ({}))) as { on?: unknown }).on === true
+			let startsMonday = false
+			if (on) {
+				const { engine } = await withAccount(env.DB, tgId, (e) => {
+					if (e.state.tradeCount > 0 && !e.state.benched) e.state.benched = true
+				})
+				startsMonday = !!engine.state.benched
+			}
+			await env.DB.prepare('UPDATE sim_users SET compete = ? WHERE tg_id = ?').bind(on ? 1 : 0, tgId).run()
+			return json(200, { compete: on, startsMonday, ranking: await ranking(env.DB, tgId) })
+		}
 		if (route === 'POST /api/reset') {
-			// Una cuenta nueva no tiene posiciones ni órdenes: no hace falta ningún precio
+			// Una cuenta nueva no tiene posiciones ni órdenes: no hace falta ningún precio. Quien reinicia
+			// después de operar en la temporada no compite hasta la siguiente
 			const now = Date.now()
-			const engine = new Engine(freshState(now))
 			const acc = await loadAccount(env.DB, tgId)
+			const prev = acc?.engine.state
+			const cur = season(now).id
+			const benched = prev?.season === cur && (prev.benched || prev.tradeCount > 0)
+			const engine = new Engine(freshState(now, undefined, cur, !!benched))
 			if (!acc) await createAccount(env.DB, tgId, now)
 			else if (!(await saveAccount(env.DB, tgId, engine, acc.version, {}, now))) throw new SimError('La cuenta está ocupada; inténtalo de nuevo')
 			return json(200, view(engine, {}))
@@ -354,23 +468,129 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 
 const num = (v: unknown) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null)
 
-// Ranking por rentabilidad de quien ha operado al menos una vez, y tu puesto
+// Ranking de la temporada (quien lleva al menos 3 operaciones y no reinició), tu situación,
+// el podio de la temporada pasada y el salón de la fama
 async function ranking(db: D1, me: number | null) {
+	const cur = season()
 	const { results } = await db
 		.prepare(
 			`SELECT a.tg_id, a.equity, a.pnl_pct, a.trades, u.first_name, u.username FROM sim_accounts a JOIN sim_users u ON u.tg_id = a.tg_id
-			  WHERE a.trades > 0 ORDER BY a.pnl_pct DESC LIMIT ?`,
+			  WHERE a.season = ? AND a.benched = 0 AND a.trades >= ? AND u.compete = 1 ORDER BY a.pnl_pct DESC LIMIT ?`,
 		)
-		.bind(RANKING_SIZE)
+		.bind(cur.id, MIN_TRADES, RANKING_SIZE)
 		.all<{ tg_id: number; equity: number; pnl_pct: number; trades: number; first_name: string; username: string | null }>()
-	const rows = results.map((r, i) => ({ rank: i + 1, name: r.username ? `@${r.username}` : r.first_name, equity: r.equity, pnlPct: r.pnl_pct, trades: r.trades, me: r.tg_id === me }))
-	let mine = rows.find((r) => r.me) ?? null
-	if (!mine && me) {
-		const a = await db.prepare('SELECT pnl_pct, equity, trades FROM sim_accounts WHERE tg_id = ?').bind(me).first<{ pnl_pct: number; equity: number; trades: number }>()
-		if (a && a.trades > 0) {
-			const above = await db.prepare('SELECT COUNT(*) AS n FROM sim_accounts WHERE trades > 0 AND pnl_pct > ?').bind(a.pnl_pct).first<{ n: number }>()
-			mine = { rank: (above?.n ?? 0) + 1, name: 'Tú', equity: a.equity, pnlPct: a.pnl_pct, trades: a.trades, me: true }
+	const rows = results.map((r, i) => ({ rank: i + 1, name: displayName(r), equity: r.equity, pnlPct: r.pnl_pct, trades: r.trades, me: r.tg_id === me }))
+	let mine: { rank: number | null; equity: number; pnlPct: number; trades: number; benched: boolean; compete: boolean } | null = null
+	if (me) {
+		const a = await db
+			.prepare('SELECT a.pnl_pct, a.equity, a.trades, a.benched, a.season, u.compete FROM sim_accounts a JOIN sim_users u ON u.tg_id = a.tg_id WHERE a.tg_id = ?')
+			.bind(me)
+			.first<{ pnl_pct: number; equity: number; trades: number; benched: number; season: string; compete: number }>()
+		if (a && a.season === cur.id) {
+			const eligible = !!a.compete && !a.benched && a.trades >= MIN_TRADES
+			const above = eligible
+				? await db
+						.prepare('SELECT COUNT(*) AS n FROM sim_accounts a JOIN sim_users u ON u.tg_id = a.tg_id WHERE a.season = ? AND a.benched = 0 AND a.trades >= ? AND u.compete = 1 AND a.pnl_pct > ?')
+						.bind(cur.id, MIN_TRADES, a.pnl_pct)
+						.first<{ n: number }>()
+				: null
+			mine = { rank: eligible ? (above?.n ?? 0) + 1 : null, equity: a.equity, pnlPct: a.pnl_pct, trades: a.trades, benched: !!a.benched, compete: !!a.compete }
 		}
 	}
-	return { rows, mine }
+	const last = await db.prepare("SELECT season FROM sim_results WHERE season < ? ORDER BY season DESC LIMIT 1").bind(cur.id).first<{ season: string }>()
+	const podium = last
+		? (await db.prepare('SELECT rank, tg_id, name, pnl_pct, trades FROM sim_results WHERE season = ? ORDER BY rank LIMIT ?').bind(last.season, SUMMARY_SIZE).all<{ rank: number; tg_id: number; name: string; pnl_pct: number; trades: number }>()).results
+		: []
+	const { results: fame } = await db
+		.prepare(
+			`SELECT tg_id, SUM(rank = 1) AS wins, SUM(rank <= 3) AS podiums, (SELECT name FROM sim_results r2 WHERE r2.tg_id = r.tg_id ORDER BY season DESC LIMIT 1) AS name
+			   FROM sim_results r WHERE rank <= 3 GROUP BY tg_id ORDER BY wins DESC, podiums DESC LIMIT 20`,
+		)
+		.all<{ tg_id: number; wins: number; podiums: number; name: string }>()
+	return {
+		season: cur,
+		minTrades: MIN_TRADES,
+		rows,
+		mine,
+		last: last ? { season: last.season, rows: podium.map((r) => ({ rank: r.rank, name: r.name, pnlPct: r.pnl_pct, trades: r.trades, me: r.tg_id === me })) } : null,
+		fame: fame.map((f) => ({ name: f.name, wins: f.wins, podiums: f.podiums, me: f.tg_id === me })),
+	}
+}
+
+// ── Página privada del resumen semanal (/admin, con la clave del panel de métricas) ──
+
+interface Draft {
+	season: string
+	text: string
+	createdAt: number
+	posted: boolean
+	postedAt?: number
+}
+
+const seasonDay = (id: string) => dayEs(Date.parse(`${id}T12:00:00Z`))
+
+const html = (body: string, status = 200) =>
+	new Response(
+		`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Resumen semanal · Simulador</title>
+<style>:root{color-scheme:dark;--bg:#0a0d12;--s:#10151c;--l:#1e2733;--t:#e7ecf3;--m:#7a8799;--a:#5b8cff;--g:#1fc28b}body{margin:0;background:var(--bg);color:var(--t);font:15px/1.5 system-ui,sans-serif}main{width:min(760px,100% - 32px);margin:28px auto 60px}h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:28px 0 10px}.m{color:var(--m);font-size:13px}textarea{width:100%;min-height:260px;box-sizing:border-box;background:var(--s);color:var(--t);border:1px solid var(--l);border-radius:10px;padding:12px;font:14px/1.5 ui-monospace,Menlo,monospace}button{margin-top:10px;padding:10px 16px;border:0;border-radius:8px;background:var(--a);color:#fff;font-weight:600;font-size:14px;cursor:pointer}.ok{padding:10px 14px;border-radius:8px;background:rgba(31,194,139,.12);color:var(--g)}table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:7px 10px;border-bottom:1px solid var(--l);text-align:left}th{color:var(--m);font-size:12px}</style></head><body><main>${body}</main></body></html>`,
+		{ status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } },
+	)
+
+async function sendTelegram(token: string, chat: string, text: string) {
+	const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', link_preview_options: { is_disabled: true } }),
+	})
+	const data = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string }
+	if (!data.ok) throw new SimError(`Telegram no aceptó el mensaje: ${data.description ?? res.status}`)
+}
+
+export async function simAdmin(req: Request, url: URL, env: SimEnv): Promise<Response> {
+	if (!env.METRICS_KEY) return new Response('no encontrado', { status: 404 })
+	if (!(await authorized(req, env.METRICS_KEY)))
+		return new Response('Necesitas la clave del panel', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Terminal P2P metrics", charset="UTF-8"', 'Cache-Control': 'no-store' } })
+	const row = await env.DB.prepare("SELECT value FROM sim_meta WHERE key = 'draft'").first<{ value: string }>()
+	const draft = row ? (JSON.parse(row.value) as Draft) : null
+
+	if (req.method === 'POST' && url.pathname === '/admin/publish') {
+		if (req.headers.get('origin') !== url.origin) return new Response('Origen no permitido', { status: 403 })
+		if (!draft) return html('<p>No hay ningún resumen pendiente.</p>', 400)
+		if (draft.posted) return Response.redirect(`${url.origin}/admin?ya=1`, 303)
+		if (!env.TELEGRAM_BOT_TOKEN) return html('<p>Falta el token del bot.</p>', 503)
+		const text = String((await req.formData()).get('text') ?? '').trim().slice(0, 4000) || draft.text
+		try {
+			await sendTelegram(env.TELEGRAM_BOT_TOKEN, env.SIM_CHANNEL ?? '@terminalp2p', text)
+		} catch (e) {
+			return html(`<h1>No se publicó</h1><p>${escHtml((e as Error).message)}</p><p><a href="/admin" style="color:#5b8cff">Volver</a></p>`, 502)
+		}
+		await env.DB.prepare("UPDATE sim_meta SET value = ? WHERE key = 'draft'").bind(JSON.stringify({ ...draft, text, posted: true, postedAt: Date.now() })).run()
+		return Response.redirect(`${url.origin}/admin?ok=1`, 303)
+	}
+	if (url.pathname !== '/admin') return new Response('no encontrado', { status: 404 })
+
+	// Clasificación provisional de la temporada en curso
+	const cur = season()
+	const { results } = await env.DB.prepare(
+		`SELECT a.pnl_pct, a.trades, u.first_name, u.username FROM sim_accounts a JOIN sim_users u ON u.tg_id = a.tg_id
+		  WHERE a.season = ? AND a.benched = 0 AND a.trades >= ? AND u.compete = 1 ORDER BY a.pnl_pct DESC LIMIT 10`,
+	)
+		.bind(cur.id, MIN_TRADES)
+		.all<{ pnl_pct: number; trades: number; first_name: string; username: string | null }>()
+	const notice = url.searchParams.has('ok') ? '<p class="ok">Publicado en el grupo de Telegram.</p>' : url.searchParams.has('ya') ? '<p class="ok">Ese resumen ya estaba publicado.</p>' : ''
+	const draftBlock = !draft
+		? '<p class="m">Aún no ha terminado ninguna temporada. El borrador aparece aquí el lunes a las 00:00 (hora de Cuba).</p>'
+		: draft.posted
+			? `<p class="m">El resumen de la temporada del ${seasonDay(draft.season)} se publicó el ${new Date(draft.postedAt ?? 0).toLocaleString('es')}.</p><textarea readonly>${escHtml(draft.text)}</textarea>`
+			: `<p class="m">Temporada del ${seasonDay(draft.season)}. Puedes editar el texto (HTML de Telegram: &lt;b&gt;, &lt;i&gt;) antes de publicarlo.</p>
+				<form method="post" action="/admin/publish"><textarea name="text">${escHtml(draft.text)}</textarea><button type="submit">Publicar en ${escHtml(env.SIM_CHANNEL ?? '@terminalp2p')}</button></form>`
+	return html(`<h1>Resumen semanal del simulador</h1><p class="m">Temporada en curso: ${dayEs(cur.start)} – ${dayEs(cur.end - 1)} (termina el lunes a las 00:00, hora de Cuba)</p>${notice}
+		<h2>Resumen pendiente</h2>${draftBlock}
+		<h2>Clasificación provisional de esta semana</h2>${
+			results.length
+				? `<table><thead><tr><th>#</th><th>Jugador</th><th>Rentabilidad</th><th>Operaciones</th></tr></thead><tbody>${results
+						.map((r, i) => `<tr><td>${i + 1}</td><td>${escHtml(displayName(r))}</td><td>${pctEs(r.pnl_pct)}</td><td>${r.trades}</td></tr>`)
+						.join('')}</tbody></table>`
+				: `<p class="m">Nadie lleva aún ${MIN_TRADES} operaciones esta semana.</p>`
+		}`)
 }
