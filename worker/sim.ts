@@ -100,26 +100,60 @@ const INTERVALS: Record<string, { mexc: string; ttl: number }> = {
 	'1d': { mexc: '1d', ttl: 300 },
 }
 
-async function cached(url: URL, ttl: number, load: () => Promise<unknown>) {
-	const cache = (caches as unknown as { default: Cache }).default
-	const key = new Request(url.toString())
-	const hit = await cache.match(key)
-	if (hit) return hit
-	const res = new Response(JSON.stringify(await load()), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${ttl}` } })
-	await cache.put(key, res.clone())
+const edgeCache = () => (caches as unknown as { default: Cache }).default
+// Última respuesta buena de cada ruta, para cuando MEXC falla (se guarda una hora)
+const GOOD_TTL_S = 3600
+const goodKey = (url: URL) => new Request(`${url.origin}/__good${url.pathname}${url.search}`)
+
+async function putJson(key: Request, body: unknown, ttl: number) {
+	const res = new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${ttl}` } })
+	await edgeCache().put(key, res.clone())
 	return res
 }
 
-// Último precio, apertura de 24 h y bid/ask de cada mercado
-async function tickers() {
+// Respuesta cacheada unos segundos. Si MEXC falla, se sirve la última buena: lleva su hora (t), así la
+// página sabe que es antigua y no la toma por un precio actual
+async function cached(url: URL, ttl: number, load: () => Promise<unknown>) {
+	const key = new Request(url.toString())
+	const hit = await edgeCache().match(key)
+	if (hit) return hit
+	try {
+		const body = await load()
+		await putJson(goodKey(url), body, GOOD_TTL_S)
+		return await putJson(key, body, ttl)
+	} catch (err) {
+		const good = await edgeCache().match(goodKey(url))
+		if (good) return new Response(good.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } })
+		throw err
+	}
+}
+
+interface Ticker {
+	last: number
+	open: number
+	bid: number
+	ask: number
+	t: number
+}
+
+// Último precio, apertura de 24 h y bid/ask de cada mercado, cada uno con la hora en que se leyó. Un mercado
+// que falla se completa con su último precio bueno (con su hora antigua); si fallan todos, es un error
+async function tickers(url: URL) {
+	const now = Date.now()
 	const rows = await Promise.all(
 		SYMBOLS.map((s) =>
 			market<{ lastPrice: string; openPrice: string; bidPrice: string; askPrice: string }>(sourceOf(s), `/ticker/24hr?symbol=${s}`)
-				.then((r) => [s, { last: +r.lastPrice, open: +r.openPrice, bid: +r.bidPrice, ask: +r.askPrice }] as const)
+				.then((r) => [s, { last: +r.lastPrice, open: +r.openPrice, bid: +r.bidPrice, ask: +r.askPrice, t: now }] as const)
 				.catch(() => null),
 		),
 	)
-	return { t: Date.now(), tickers: Object.fromEntries(rows.filter(Boolean) as [Symbol, unknown][]) }
+	const fresh = Object.fromEntries(rows.filter(Boolean) as [Symbol, Ticker][])
+	if (!Object.keys(fresh).length) throw new SimError('La fuente de precios no responde ahora mismo')
+	if (Object.keys(fresh).length < SYMBOLS.length) {
+		const good = (await (await edgeCache().match(goodKey(url)))?.json().catch(() => null)) as { tickers?: Record<string, Ticker> } | null
+		for (const s of SYMBOLS) if (!fresh[s] && good?.tickers?.[s]) fresh[s] = good.tickers[s]
+	}
+	return { t: now, tickers: fresh }
 }
 
 async function chartKlines(symbol: Symbol, interval: string) {
@@ -438,7 +472,10 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 	if (req.method !== 'GET' && req.headers.get('origin') !== url.origin) return json(403, { error: 'Origen no permitido' })
 	try {
 		if (route === 'GET /api/config') return json(200, { bot: env.SIM_BOT ?? 'terminalp2p_bot', dev: isDev(env, url), markets: SYMBOLS.map((s) => ({ symbol: s, ...MARKETS[s] })) })
-		if (route === 'GET /api/tickers') return await cached(new URL('/api/tickers', url.origin), TICKERS_TTL_S, tickers)
+		if (route === 'GET /api/tickers') {
+			const u = new URL('/api/tickers', url.origin)
+			return await cached(u, TICKERS_TTL_S, () => tickers(u))
+		}
 		if (route === 'GET /api/klines') {
 			const symbol = normSymbol(url.searchParams.get('symbol'))
 			const interval = url.searchParams.get('interval') ?? ''

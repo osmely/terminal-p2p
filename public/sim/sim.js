@@ -102,26 +102,33 @@ function applyView(v) {
 
 // ── Precios en vivo ───────────────────────────────────────────────────
 // Los pide a este dominio: el navegador no habla con ningún exchange, así funciona desde Cuba sin VPN
-let tickFails = 0
+// Cada precio trae la hora en que se leyó. Si la fuente falla, el servidor da el último bueno con su hora
+// antigua: se muestra «con retraso» y nunca se usa para la vela en curso (pintaría una vela falsa)
+const STALE_MS = 20_000
+let serverT = 0 // hora del servidor de la última respuesta nueva
+let freshAt = 0 // cuándo llegó (reloj de este navegador)
 async function loadTickers() {
 	try {
 		const r = await fetch('/api/tickers')
 		if (!r.ok) throw new Error(String(r.status))
-		const { tickers } = await r.json()
-		for (const [sym, t] of Object.entries(tickers)) S.live[sym] = { last: t.last, open: t.open }
-		tickFails = 0
-		feed(true)
-		prefillPrices()
-		drawOrderLines()
-		updateLiveCandle()
-		scheduleRender()
-	} catch {
-		if (++tickFails >= 3) feed(false)
-	}
+		const data = await r.json()
+		if (data.t > serverT) {
+			serverT = data.t
+			freshAt = Date.now()
+		}
+		for (const [sym, t] of Object.entries(data.tickers)) if (!S.live[sym] || t.t > (S.live[sym].t ?? 0)) S.live[sym] = { last: t.last, open: t.open, t: t.t }
+	} catch {}
+	const fresh = Date.now() - freshAt < STALE_MS
+	feed(fresh)
+	if (!fresh) return
+	prefillPrices()
+	drawOrderLines()
+	updateLiveCandle()
+	scheduleRender()
 }
 function feed(ok) {
 	$('feed').classList.toggle('live', ok)
-	$('feed').querySelector('span').textContent = ok ? 'Precios en vivo' : 'Reconectando…'
+	$('feed').querySelector('span').textContent = ok ? 'Precios en vivo' : 'Precios con retraso'
 }
 // Repinta como mucho 4 veces por segundo aunque lleguen muchos precios
 let renderQueued = false
@@ -203,10 +210,13 @@ async function loadCandles(refresh = false) {
 }
 
 function updateLiveCandle() {
-	const price = S.live[S.symbol]?.last
-	if (!candleSeries || !liveCandle || !price) return
+	const tk = S.live[S.symbol]
+	const price = tk?.last
+	// Solo con un precio reciente de este mercado, y en la vela de la hora en que se leyó
+	if (!candleSeries || !liveCandle || !price || !tk.t || serverT - tk.t > STALE_MS) return
 	const span = IV_MS[S.interval]
-	const bucket = Math.floor(Date.now() / span) * span
+	const bucket = Math.floor(tk.t / span) * span
+	if (bucket < liveCandle.t) return
 	if (bucket > liveCandle.t) liveCandle = { t: bucket, o: price, h: price, l: price, c: price }
 	else liveCandle = { ...liveCandle, h: Math.max(liveCandle.h, price), l: Math.min(liveCandle.l, price), c: price }
 	candleSeries.update({ time: Math.floor(liveCandle.t / 1000) + tzOffset(), open: liveCandle.o, high: liveCandle.h, low: liveCandle.l, close: liveCandle.c })
@@ -605,7 +615,7 @@ function rankingHtml() {
 				: !m.compete
 					? `Juegas en privado: nadie ve tu nombre. <button class="btn small join" data-compete="1">Participar en la temporada</button>`
 					: m.benched
-						? `Compites desde el lunes (ya habías operado o reiniciado esta semana). <button class="link small" data-compete="0">Dejar de competir</button>`
+						? `Estás apuntado, pero entras en la clasificación el lunes ${dayShort(r.season.end)}: ya habías operado o reiniciado tu cuenta esta semana. Mientras tanto puedes seguir jugando. <button class="link small" data-compete="0">Dejar de competir</button>`
 						: m.trades < r.minTrades
 							? `Compites esta semana: llevas ${m.trades} de ${r.minTrades} operaciones, con ${r.minTrades - m.trades} más entras en la clasificación. <button class="link small" data-compete="0">Dejar de competir</button>`
 							: `Vas ${m.rank}.º con ${fmtPct(m.pnlPct)}. <button class="link small" data-compete="0">Dejar de competir</button>`
@@ -626,7 +636,16 @@ function rankingHtml() {
 			: '<p class="empty">El salón de la fama se estrena cuando termine la primera temporada.</p>'
 	}
 	return `${head}${content}
-		<p class="fine" style="padding: 8px 12px">Competir es opcional. Cada lunes a las 00:00 (hora de Cuba) empieza una temporada: todos vuelven a 10.000 USDT. Cuenta la rentabilidad a precio de mercado de quien compite y lleva al menos ${r.minTrades} operaciones. Si te apuntas o reinicias después de operar, compites desde el lunes. El top 10 de cada semana se anuncia en el grupo de Telegram @terminalp2p.</p>`
+		<div class="rules"><b>Cómo funciona el ranking</b><ul>
+			<li><b>Competir es opcional.</b> Si no te apuntas, juegas en privado y nadie ve tu nombre.</li>
+			<li>Cada <b>lunes a las 00:00</b> (hora de Cuba) empieza una temporada y todos vuelven a <b>10.000 USDT</b>.</li>
+			<li>Para aparecer en la clasificación tienes que competir y hacer <b>al menos ${r.minTrades} operaciones</b> en la semana.</li>
+			<li><b>Te apuntas sin haber operado esta semana:</b> compites desde ese momento.</li>
+			<li><b>Te apuntas cuando ya operaste esta semana:</b> sigues jugando, pero entras en la clasificación el lunes siguiente.</li>
+			<li><b>Reinicias tu cuenta después de operar:</b> sales de la clasificación hasta el lunes siguiente.</li>
+			<li><b>Dejas de competir:</b> desapareces de la clasificación al momento.</li>
+			<li>Gana la mayor rentabilidad, contando tus posiciones a precio de mercado. El top 10 de cada semana se anuncia en el grupo de Telegram @terminalp2p.</li>
+		</ul></div>`
 }
 
 function renderRankWidgets() {
@@ -666,9 +685,10 @@ async function rankClick(e) {
 		toast('Entra con Telegram para competir', 'bad')
 		return true
 	}
+	const traded = (S.ranking?.mine?.trades ?? 0) > 0
 	const ask = on
-		? 'Al competir, tu @usuario de Telegram aparece en el ranking y, si quedas entre los 10 primeros de la semana, en el grupo @terminalp2p. Puedes dejarlo cuando quieras. ¿Participar?'
-		: 'Dejarás de aparecer en el ranking y en los anuncios. Puedes volver cuando quieras (si ya operaste esa semana, compites desde el lunes). ¿Dejar de competir?'
+		? `Al competir, tu @usuario de Telegram aparece en el ranking y, si quedas entre los 10 primeros de la semana, en el grupo @terminalp2p. Puedes dejarlo cuando quieras.${traded ? '\n\nComo ya operaste esta semana, entrarás en la clasificación el lunes siguiente.' : '\n\nCompites desde ya.'}\n\n¿Participar?`
+		: `Dejarás de aparecer en el ranking y en los anuncios.${traded ? ' Si vuelves a apuntarte esta semana, entrarás en la clasificación el lunes siguiente.' : ''}\n\n¿Dejar de competir?`
 	if (!confirm(ask)) return true
 	try {
 		const r = await api('/compete', { method: 'POST', body: JSON.stringify({ on }) })
@@ -884,8 +904,9 @@ function bind() {
 		}
 	})
 	$('resetBtn').onclick = async () => {
-		const competing = S.view?.account.trades > 0
-		if (!confirm(`¿Reiniciar tu cuenta? Vuelves a 10.000 USDT y se borran tus posiciones y órdenes.${competing ? ' Como ya operaste esta semana, sales de la clasificación hasta el lunes.' : ''}`)) return
+		const traded = S.view?.account.trades > 0
+		const competing = !!S.ranking?.mine?.compete
+		if (!confirm(`¿Reiniciar tu cuenta? Vuelves a 10.000 USDT y se borran tus posiciones y órdenes.${traded && competing ? '\n\nComo ya operaste esta semana, sales de la clasificación hasta el lunes siguiente.' : ''}`)) return
 		try {
 			S.tradesSeen = 0
 			applyView(await api('/reset', { method: 'POST' }))
@@ -931,7 +952,13 @@ async function start() {
 	await loadState()
 	setInterval(() => !document.hidden && loadState(), POLL_MS)
 	setInterval(() => !document.hidden && loadRanking(), 60_000)
-	document.addEventListener('visibilitychange', () => !document.hidden && loadState())
+	document.addEventListener('visibilitychange', () => {
+		if (document.hidden) return
+		loadState()
+		loadTickers()
+		loadCandles(true)
+		loadBook()
+	})
 }
 
 start()

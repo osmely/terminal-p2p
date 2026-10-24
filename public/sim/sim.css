@@ -181,6 +181,9 @@ tr.me td { background: var(--accent-bg); }
 .rank-status { margin: 0; padding: 10px 12px; font-size: 13px; color: var(--text-2); border-bottom: 1px solid var(--line); }
 .rank-status .join { margin-left: 8px; padding: 5px 12px; font-size: 12.5px; background: var(--accent); border-color: var(--accent); color: #fff; }
 .rank-status .link { margin-left: 6px; }
+.rules { padding: 12px 14px; font-size: 12.5px; color: var(--text-2); border-top: 1px solid var(--line); }
+.rules ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.rules b { color: var(--text); }
 .empty { padding: 22px 12px; text-align: center; color: var(--muted); }
 .tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font: 600 11px var(--sans); }
 .tag.buy { background: var(--bid-bg); color: var(--bid); }
