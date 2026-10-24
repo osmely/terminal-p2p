@@ -38,12 +38,27 @@ export function rowsFromTasas(tasas: unknown, day: string): InformalRow[] {
 	return rows
 }
 
+// Medianoche de un día de Cuba, en ms UTC. A las 04:00 UTC aún es la medianoche anterior o
+// la propia, también los días de cambio de hora (que cambian a las 05:00 UTC)
+const cubaMidnight = (day: string) => {
+	const t = Date.parse(`${day}T00:00:00Z`)
+	return t - cubaOffset(t + 4 * 3600_000)
+}
+export const dayHours = (day: string) => (cubaMidnight(addDays(day, 1)) - cubaMidnight(day)) / 3600_000
+
+// elTOQUE no acepta intervalos de 24 h o más. El día que se atrasa la hora tiene 25: se pide
+// hasta las 22:59:59, que en tiempo real son 23 h 59 min
+export function dayRange(day: string) {
+	return { from: `${day} 00:00:01`, to: `${day} ${dayHours(day) > 24 ? '22:59:59' : '23:59:59'}` }
+}
+
 // Sin día: las últimas 24 h. Con día: ese día completo, en hora de Cuba (como responde elTOQUE)
 async function fetchTasas(token: string, day?: string) {
 	const url = new URL(UPSTREAM)
 	if (day) {
-		url.searchParams.set('date_from', `${day} 00:00:01`)
-		url.searchParams.set('date_to', `${day} 23:59:59`)
+		const { from, to } = dayRange(day)
+		url.searchParams.set('date_from', from)
+		url.searchParams.set('date_to', to)
 	}
 	const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } })
 	if (!res.ok) throw Object.assign(new Error(`elTOQUE respondió ${res.status}`), { status: res.status })
@@ -73,9 +88,13 @@ export async function syncInformal(db: D1, token: string, now = Date.now(), gapM
 		try {
 			tasas = await fetchTasas(token, day)
 		} catch (err) {
+			const status = (err as { status?: number }).status
 			// Con el límite superado se sigue en la próxima pasada
-			if ((err as { status?: number }).status === 429) break
-			throw err
+			if (status === 429) break
+			if (status === 401 || status === 403) throw err
+			// Un día que elTOQUE rechaza no frena el resto: se reintenta en la próxima pasada
+			console.warn(`elTOQUE ${day}: ${(err as Error).message}`)
+			continue
 		}
 		const rows = rowsFromTasas(tasas, day)
 		// Un día sin datos se marca igual para no volver a pedirlo

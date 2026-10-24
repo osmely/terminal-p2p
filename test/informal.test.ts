@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { cubaDate, noonCuba, rowsFromTasas, syncInformal } from '../worker/informal.ts'
+import { cubaDate, dayHours, dayRange, noonCuba, rowsFromTasas, syncInformal } from '../worker/informal.ts'
 import type { D1 } from '../worker/rates.ts'
 
 test('elTOQUE: solo las divisas que se muestran, tal cual vienen', () => {
@@ -88,6 +88,33 @@ test('el cron guarda hoy y rellena primero los días recientes que faltan', asyn
 		globalThis.fetch = (async () => (++calls > 2 ? new Response('{}', { status: 429 }) : new Response(JSON.stringify({ tasas: { USD: 830 } })))) as typeof fetch
 		const again = fakeDb(closed.filter((d) => d < '2026-10-10'))
 		assert.equal(await syncInformal(again.db, 'token', Date.parse('2026-10-23T14:00:00Z'), 0), 1)
+	} finally {
+		globalThis.fetch = real
+	}
+})
+
+test('días con cambio de hora: elTOQUE no acepta intervalos de 24 h o más', () => {
+	assert.deepEqual([dayHours('2025-11-02'), dayHours('2026-03-08'), dayHours('2026-10-23'), dayHours('2026-11-01')], [25, 23, 24, 25])
+	assert.deepEqual(dayRange('2025-11-02'), { from: '2025-11-02 00:00:01', to: '2025-11-02 22:59:59' })
+	assert.deepEqual(dayRange('2026-10-23'), { from: '2026-10-23 00:00:01', to: '2026-10-23 23:59:59' })
+})
+
+test('un día rechazado no frena el relleno del resto', async () => {
+	const asked: string[] = []
+	const real = globalThis.fetch
+	globalThis.fetch = (async (input: string | URL) => {
+		const from = new URL(String(input)).searchParams.get('date_from')
+		if (from) asked.push(from.slice(0, 10))
+		if (from?.startsWith('2026-10-21')) return new Response('El intervalo de tiempo debe ser menor a 24 horas', { status: 400 })
+		return new Response(JSON.stringify({ tasas: { USD: 830 } }))
+	}) as typeof fetch
+	try {
+		const closed: string[] = []
+		for (let t = Date.parse('2020-12-01T00:00:00Z'); t <= Date.parse('2026-10-18T00:00:00Z'); t += 86_400_000) closed.push(new Date(t).toISOString().slice(0, 10))
+		const { db, rows } = fakeDb(closed)
+		assert.equal(await syncInformal(db, 'token', Date.parse('2026-10-23T14:00:00Z'), 0), 3)
+		assert.deepEqual(asked, ['2026-10-22', '2026-10-21', '2026-10-20', '2026-10-19'])
+		assert.equal(rows.get('2026-10-21:USD'), undefined)
 	} finally {
 		globalThis.fetch = real
 	}
