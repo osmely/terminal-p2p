@@ -394,6 +394,10 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 
 /* ══ Responsive ═══════════════════════════════════════════════════════ */
 @media (max-width: 980px) {
+	/* Barra sólida en el móvil: en el iPhone el contenido se transparentaba por detrás. Su fondo
+	   se prolonga hacia arriba para tapar lo que el navegador dibuja bajo sus propios controles */
+	.nav { background: var(--bg); backdrop-filter: none; -webkit-backdrop-filter: none; }
+	.nav::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: 160px; background: var(--bg); pointer-events: none; }
 	/* Secciones en una segunda fila que se desliza de lado */
 	html { scroll-padding-top: 112px; }
 	.nav-in { flex-wrap: wrap; height: auto; min-height: 64px; row-gap: 0; padding-top: 10px; }
