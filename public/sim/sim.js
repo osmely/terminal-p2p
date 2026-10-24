@@ -109,7 +109,7 @@ let serverT = 0 // hora del servidor de la última respuesta nueva
 let freshAt = 0 // cuándo llegó (reloj de este navegador)
 async function loadTickers() {
 	try {
-		const r = await fetch('/api/tickers')
+		const r = await fetch('/api/tickers', { cache: 'no-store' })
 		if (!r.ok) throw new Error(String(r.status))
 		const data = await r.json()
 		if (data.t > serverT) {
@@ -190,7 +190,7 @@ async function loadCandles(refresh = false) {
 	const sym = S.symbol
 	const iv = S.interval
 	try {
-		const r = await fetch(`/api/klines?symbol=${sym}&interval=${iv}`)
+		const r = await fetch(`/api/klines?symbol=${sym}&interval=${iv}`, { cache: 'no-store' })
 		if (!r.ok) throw new Error(String(r.status))
 		const rows = await r.json()
 		if (sym !== S.symbol || iv !== S.interval) return
@@ -472,7 +472,7 @@ async function loadBook() {
 	const sym = S.symbol
 	const tab = S.bookTab
 	try {
-		const r = await fetch(`/api/${tab === 'book' ? 'depth' : 'trades'}?symbol=${sym}`)
+		const r = await fetch(`/api/${tab === 'book' ? 'depth' : 'trades'}?symbol=${sym}`, { cache: 'no-store' })
 		if (!r.ok) throw new Error(String(r.status))
 		const data = await r.json()
 		if (sym !== S.symbol) return

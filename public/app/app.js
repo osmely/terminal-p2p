@@ -103,7 +103,7 @@ async function loadOverview() {
 // Histórico público de la tasa: lo guarda el servidor (solo agregados de QvaPay)
 async function loadHistory() {
 	try {
-		const r = await fetch(`/data/rates?coin=${state.coin}&days=${state.range}`)
+		const r = await fetch(`/data/rates?coin=${state.coin}&days=${state.range}`, { cache: 'no-cache' })
 		if (!r.ok) throw new Error(String(r.status))
 		state.history = await r.json()
 		if (state.chart === 'history') drawHistory()
@@ -113,7 +113,7 @@ async function loadHistory() {
 // Tasa del mercado informal de hoy según elTOQUE (la guarda el servidor, es pública)
 async function loadInformal() {
 	try {
-		const r = await fetch('/data/informal')
+		const r = await fetch('/data/informal', { cache: 'no-cache' })
 		if (!r.ok) throw new Error(String(r.status))
 		state.informal = await r.json()
 		if (state.book) render()

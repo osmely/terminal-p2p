@@ -21,7 +21,7 @@ const period = (h) => (h >= 48 && h % 24 === 0 ? `${h / 24} días` : `${h} h`)
 
 async function loadRates() {
 	try {
-		const r = await fetch('/qp/p2p/averages', { headers: { Accept: 'application/json' } })
+		const r = await fetch('/qp/p2p/averages', { headers: { Accept: 'application/json' }, cache: 'no-cache' })
 		if (!r.ok) throw new Error(String(r.status))
 		const data = await r.json()
 		const cards = MARKETS.filter(([tick]) => data[tick]?.count > 0).map(([tick, name, unit]) => {
@@ -51,7 +51,7 @@ const INFORMAL = [
 ]
 async function loadInformal() {
 	try {
-		const r = await fetch('/data/informal', { headers: { Accept: 'application/json' } })
+		const r = await fetch('/data/informal', { headers: { Accept: 'application/json' }, cache: 'no-cache' })
 		if (!r.ok) throw new Error(String(r.status))
 		const { last, prev } = await r.json()
 		if (!last) return

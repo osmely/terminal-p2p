@@ -125,7 +125,7 @@ async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 
 	const key = new Request(`${url.origin}/data/rates?coin=${coin}&days=${days}`)
 	const hit = await caches.default.match(key)
-	if (hit) return new Response(hit.body, hit)
+	if (hit) return fromCache(hit, `public, max-age=${RATES_TTL_S}`)
 
 	let data
 	try {
@@ -177,7 +177,7 @@ async function metrics(req: Request, url: URL, env: Env) {
 async function informal(url: URL, env: Env, ctx: ExecutionContext) {
 	const key = new Request(`${url.origin}/data/informal`)
 	const hit = await caches.default.match(key)
-	if (hit) return new Response(hit.body, hit)
+	if (hit) return fromCache(hit, `public, max-age=${INFORMAL_TTL_S}`)
 	let data
 	try {
 		data = await latestInformal(env.DB)
@@ -212,6 +212,12 @@ async function assets(req: Request, url: URL, env: Env) {
 	const out = new Response(res.body, res)
 	out.headers.set('Location', to.pathname + to.search)
 	return out
+}
+
+// Lo que sale de la caché del borde llega con la caché del navegador de la zona (4 h) en vez de la nuestra:
+// el navegador guardaría el histórico o la tasa durante horas. Se rehace la respuesta con nuestra cabecera
+function fromCache(hit: Response, cacheControl: string) {
+	return new Response(hit.body, { status: hit.status, headers: { 'Content-Type': hit.headers.get('Content-Type') ?? 'application/json; charset=utf-8', 'Cache-Control': cacheControl } })
 }
 
 function secure(res: Response) {

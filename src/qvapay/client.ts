@@ -208,6 +208,8 @@ export class QvaPayClient {
 				res = await this.limiter.run(opts.bucket, () =>
 					fetch(url, {
 						method,
+						// Las lecturas siempre preguntan al servidor: una copia vieja del navegador congelaría precios
+						cache: method === 'GET' ? 'no-cache' : undefined,
 						headers: {
 							...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
 							Accept: 'application/json',

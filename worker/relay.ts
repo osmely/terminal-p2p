@@ -80,7 +80,8 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 	const cacheKey = new Request(UPSTREAM + path + url.search)
 	if (shared) {
 		const hit = await edgeCache().match(cacheKey)
-		if (hit) return hit
+		// Con nuestra cabecera: lo que sale de la caché llega con la del navegador de la zona (4 h)
+		if (hit) return new Response(hit.body, { status: hit.status, headers: { 'Content-Type': hit.headers.get('Content-Type') ?? 'application/json', 'Cache-Control': `public, max-age=${PUBLIC_TTL_S}` } })
 	}
 
 	const upstream = await fetch(UPSTREAM + path + url.search, { method: req.method, headers, body })

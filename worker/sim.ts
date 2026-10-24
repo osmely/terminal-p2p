@@ -105,10 +105,14 @@ const edgeCache = () => (caches as unknown as { default: Cache }).default
 const GOOD_TTL_S = 3600
 const goodKey = (url: URL) => new Request(`${url.origin}/__good${url.pathname}${url.search}`)
 
+// Lo que se guarda en la caché del borde lleva su duración; al navegador se le dice que no guarde nada (los
+// precios cambian cada pocos segundos, y la zona alarga a 4 h la caché del navegador de lo que sale de la caché)
+const toBrowser = (body: string | ReadableStream | null) => new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } })
+
 async function putJson(key: Request, body: unknown, ttl: number) {
-	const res = new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${ttl}` } })
-	await edgeCache().put(key, res.clone())
-	return res
+	const text = JSON.stringify(body)
+	await edgeCache().put(key, new Response(text, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${ttl}` } }))
+	return toBrowser(text)
 }
 
 // Respuesta cacheada unos segundos. Si MEXC falla, se sirve la última buena: lleva su hora (t), así la
@@ -116,14 +120,14 @@ async function putJson(key: Request, body: unknown, ttl: number) {
 async function cached(url: URL, ttl: number, load: () => Promise<unknown>) {
 	const key = new Request(url.toString())
 	const hit = await edgeCache().match(key)
-	if (hit) return hit
+	if (hit) return toBrowser(hit.body)
 	try {
 		const body = await load()
 		await putJson(goodKey(url), body, GOOD_TTL_S)
 		return await putJson(key, body, ttl)
 	} catch (err) {
 		const good = await edgeCache().match(goodKey(url))
-		if (good) return new Response(good.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } })
+		if (good) return toBrowser(good.body)
 		throw err
 	}
 }
