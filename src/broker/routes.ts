@@ -4,8 +4,9 @@
 
 import { logger } from '../log.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
-import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type PaymentField, type Requirements } from '../qvapay/types.ts'
+import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
 import { COINS, type Market } from '../terminal/market.ts'
+import { reputationScore } from '../terminal/ranking.ts'
 import { pendingCount, tradeAlerts } from './alerts.ts'
 import { orderTrades, paymentDetails, toTrades, type Trade } from './trades.ts'
 
@@ -110,6 +111,8 @@ export class Broker {
 					return await this.pauseOffer(ctx, acc)
 				case 'POST /offer/apply':
 					return await this.applyOffer(ctx, acc)
+				case 'GET /peer':
+					return await this.peer(ctx, acc)
 				case 'GET /swap/quote':
 					return await this.swapQuote(ctx, acc)
 				case 'POST /swap':
@@ -347,6 +350,19 @@ export class Broker {
 		return json(200, { ok: true, offer: o.uuid, order: r.order ?? null, message: 'Tomaste la oferta' })
 	}
 
+	// ── Ficha de un usuario ─────────────────────────────────────────────
+
+	// Su perfil y sus ofertas abiertas en todos los mercados. QvaPay no da el historial de otro
+	// usuario: solo lo que tiene publicado ahora. El perfil llega con sus ofertas; sin ninguna
+	// abierta, profile es null y el terminal usa lo que ya sabe de él
+	private async peer({ url }: Ctx, acc: Account) {
+		const user = (url.searchParams.get('user') ?? '').replace(/^@/, '')
+		if (!/^[A-Za-z0-9._-]{1,40}$/.test(user)) return json(400, { error: 'Usuario no válido' })
+		const res = await acc.client.listOffers({ peer: user, take: PEER_TAKE })
+		const mine = res.data.filter((o) => o.User?.username?.toLowerCase() === user.toLowerCase() && o.status === 'open')
+		return json(200, { user, profile: peerProfile(mine[0]?.User), offers: mine.map(peerOffer), total: res.total })
+	}
+
 	// ── Vender ya: vender saldo a la mejor oferta de compra de una cuenta VIP ──
 
 	// Ofertas de compra de cuentas VIP en un mercado, de mejor a peor precio, y la mejor en la que cabe
@@ -443,6 +459,51 @@ export class Broker {
 			}
 		}
 		return json(400, { error: 'Acción desconocida' })
+	}
+}
+
+// ── Ficha de un usuario ────────────────────────────────────────────────
+
+const PEER_TAKE = 100
+
+export function peerProfile(u: P2PUser | undefined | null) {
+	if (!u) return null
+	const owner = u._count?.P2P ?? 0
+	const taker = u._count?.P2P_Peer ?? 0
+	return {
+		username: u.username,
+		kyc: !!u.kyc,
+		vip: !!u.vip,
+		gold: !!u.golden_check,
+		phone: u.phone_verified ?? null,
+		telegram: u.telegram_verified ?? null,
+		// Operaciones completadas: publicando él la oferta y tomando las de otros
+		opsOwner: owner,
+		opsTaker: taker,
+		rating: u.rating_count ? (u.rating_avg ?? null) : null,
+		ratings: u.rating_count ?? 0,
+		score: reputationScore(u.rating_count ? (u.rating_avg ?? null) : null, owner + taker),
+	}
+}
+
+export function peerOffer(o: P2POffer) {
+	const amount = num(o.amount)
+	const flexible = o.offer_kind === 'flexible'
+	const usd = flexible ? num(o.available_amount ?? o.amount) : amount
+	return {
+		offer: o.uuid,
+		coin: o.coin,
+		type: o.type,
+		price: amount > 0 ? num(o.receive) / amount : 0,
+		usd,
+		kind: flexible ? ('flexible' as const) : ('fixed' as const),
+		orderMin: flexible && o.order_min != null ? num(o.order_min) : null,
+		orderMax: flexible ? Math.min(o.order_max != null ? num(o.order_max) : usd, usd) : null,
+		vipOnly: !!o.only_vip,
+		requirements: o.requirements ?? null,
+		paused: !!o.pause,
+		createdAt: o.created_at ?? null,
+		updatedAt: o.updated_at ?? null,
 	}
 }
 

@@ -12,6 +12,8 @@ export interface P2PUser {
 	kyc?: boolean
 	vip?: boolean
 	golden_check?: boolean
+	phone_verified?: boolean
+	telegram_verified?: boolean
 	rating_avg?: number
 	rating_count?: number
 	_count?: { P2P?: number; P2P_Peer?: number }
@@ -140,6 +142,8 @@ export interface ListParams {
 	offer_kind?: 'fixed' | 'flexible'
 	// Solo ofertas publicadas por cuentas VIP
 	vip_maker?: 1
+	// Solo las ofertas abiertas de ese usuario (UUID o username)
+	peer?: string
 }
 
 export interface ChatMessage {

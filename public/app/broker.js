@@ -367,7 +367,7 @@ function renderDetail(t) {
 
 	$('modalBody').innerHTML = `<div class="stack">
 		<div><h3>${buy ? 'Compras' : 'Vendes'} ${fmtU(t.usd)} USD por ${fmtU(t.coinAmount)} ${unit}</h3>
-			<p class="muted">${esc(nameOf(t.coin))} · @${esc(t.counterparty ?? '—')} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
+			<p class="muted">${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button>` : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
 		${
 			payTo.length
 				? `<div><p class="hint">Datos de pago de @${esc(t.counterparty)}:</p><div class="kv">${payTo
@@ -395,6 +395,7 @@ function renderDetail(t) {
 
 function bindDetail(t) {
 	const body = $('modalBody')
+	body.querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer))
 	const act = async (action, extra = {}) => {
 		try {
 			const r = await api('/trade/action', { offer: t.offer, order: t.order, action, ...extra })
@@ -915,7 +916,7 @@ function renderTake(uuid, side, l, coin) {
 	const req = reqText(l.requirements)
 	openModal(`<div class="stack">
 		<div><h3>${youBuy ? 'Comprar' : 'Vender'} USD a ${fmtP(l.price)} ${unit}</h3>
-			<p class="muted">${esc(nameOf(coin))} · @${esc(l.user)}${l.ops != null ? ` · ${l.ops} operaciones` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ' · sin valoraciones' : ''}${l.kyc ? ' · KYC' : ''}</p>
+			<p class="muted">${esc(nameOf(coin))} · <button type="button" class="link peer-link" data-peer="${esc(l.user)}">@${esc(l.user)}</button>${l.ops != null ? ` · ${l.ops} operaciones` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ' · sin valoraciones' : ''}${l.kyc ? ' · KYC' : ''}</p>
 			${typeof rankText === 'function' && rankText(l.user) ? `<p class="rank-line">🏆 Ranking: ${esc(rankText(l.user))}</p>` : ''}</div>
 		<div class="kv">
 			<span>${youBuy ? 'Vende' : 'Compra'}</span><b>${fmtU(l.usd)} USD</b><span></span>
@@ -945,6 +946,7 @@ function renderTake(uuid, side, l, coin) {
 		if ($('tkGo')) $('tkGo').textContent = `Tomar: ${youBuy ? 'comprar' : 'vender'} ${fmtU(a)} USD`
 	}
 	$('tkAmount')?.addEventListener('input', upd)
+	$('modalBody').querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer))
 	upd()
 	$('tkGo')?.addEventListener('click', async () => {
 		const a = amount()
@@ -966,6 +968,141 @@ function renderTake(uuid, side, l, coin) {
 			toast(e.message, true)
 		}
 	})
+}
+
+// ── Ficha de un usuario ───────────────────────────────────────────────
+// Perfil, señales de confianza, sus ofertas abiertas y lo que has hecho con él. QvaPay no da el
+// historial de otro usuario: solo lo que tiene publicado ahora y lo que ha pasado entre los dos
+const PEER_OUTLIER_PCT = 0.35
+
+// Lo que ya se sabe de un usuario por el libro o por tus operaciones (si no tiene ofertas abiertas)
+function knownPeer(user) {
+	const u = user.toLowerCase()
+	const b = state.book
+	const l = b && [...b.ask.levels, ...b.bid.levels].find((x) => x.user.toLowerCase() === u)
+	if (l) return { ops: l.ops, rating: l.rating, kyc: l.kyc, vip: l.vip, gold: l.gold }
+	const t = bk.trades.find((x) => x.counterparty?.username?.toLowerCase() === u)
+	return t ? { ops: t.counterparty.ops, rating: t.counterparty.rating } : null
+}
+
+function peerSignals(p, known, offers) {
+	const out = []
+	const ops = p ? p.opsOwner + p.opsTaker : (known?.ops ?? null)
+	const rating = p ? p.rating : (known?.rating ?? null)
+	if (p) {
+		const missing = [!p.kyc && 'identidad (KYC)', p.phone === false && 'teléfono', p.telegram === false && 'Telegram'].filter(Boolean)
+		out.push(missing.length ? ['warn', `Sin verificar: ${missing.join(', ')}`] : ['ok', 'Identidad, teléfono y Telegram verificados'])
+	}
+	if ((p?.vip ?? known?.vip) === true) out.push(['ok', 'Cuenta VIP de QvaPay'])
+	if (ops != null) {
+		if (ops >= 200) out.push(['ok', `Mucha experiencia: ${ops.toLocaleString('es')} operaciones completadas`])
+		else if (ops < 10) out.push(['warn', `Pocas operaciones (${ops}): cuenta nueva o poco usada`])
+		else out.push(['info', `${ops.toLocaleString('es')} operaciones completadas`])
+	}
+	if (rating == null) out.push(['warn', 'Sin valoraciones todavía'])
+	else if (rating < 4.5) out.push(['warn', `Valoración baja: ${rating.toFixed(2).replace('.', ',')} de 5`])
+	else if (rating >= 4.8 && (p?.ratings ?? 10) >= 10) out.push(['ok', `Muy bien valorado: ${rating.toFixed(2).replace('.', ',')} de 5${p ? ` (${p.ratings.toLocaleString('es')} valoraciones)` : ''}`])
+	if (p && p.opsOwner + p.opsTaker >= 20) {
+		const taker = p.opsTaker / (p.opsOwner + p.opsTaker)
+		if (taker >= 0.75) out.push(['info', `Suele tomar ofertas de otros (${Math.round(taker * 100)}% de sus operaciones)`])
+		else if (taker <= 0.25) out.push(['info', `Suele publicar sus propias ofertas (${Math.round((1 - taker) * 100)}% de sus operaciones)`])
+	}
+	// Precio muy lejos del mercado: casi siempre un error de tipeo, a veces un intento de engaño
+	const far = offers.filter((o) => {
+		const m = state.overview.find((c) => c.tick === o.coin)
+		const mid = m?.ask && m?.bid ? (m.ask + m.bid) / 2 : (m?.ask ?? m?.bid)
+		return mid && Math.abs(o.price / mid - 1) > PEER_OUTLIER_PCT
+	})
+	if (far.length) out.push(['warn', `${far.length === 1 ? 'Una oferta' : `${far.length} ofertas`} con el precio muy lejos del mercado`])
+	return out
+}
+
+async function showPeer(user) {
+	user = String(user ?? '').replace(/^@/, '')
+	if (!user) return
+	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para ver la ficha', true)
+	openModal(`<div class="stack"><h3>@${esc(user)}</h3><p class="muted">Cargando ficha…</p></div>`)
+	let d
+	try {
+		d = await api(`/peer?user=${encodeURIComponent(user)}`)
+	} catch (e) {
+		$('modalBody').innerHTML = `<div class="stack"><h3>@${esc(user)}</h3><p class="empty">${esc(e.message)}</p></div>`
+		return
+	}
+	if (!$('modalBody').textContent.includes('Cargando ficha')) return // la cerraron mientras cargaba
+	const p = d.profile
+	const known = p ? null : knownPeer(user)
+	const name = p?.username ?? user
+	const me = myUsername()
+	const isMe = me && name.toLowerCase() === me.toLowerCase()
+	const badges = [
+		(p?.kyc ?? known?.kyc) && '<span class="badge ok">KYC</span>',
+		(p?.vip ?? known?.vip) && '<span class="badge ok">VIP</span>',
+		(p?.gold ?? known?.gold) && '<span class="badge warn">GOLD</span>',
+		p?.phone && '<span class="badge neutral">Teléfono</span>',
+		p?.telegram && '<span class="badge neutral">Telegram</span>',
+	]
+		.filter(Boolean)
+		.join(' ')
+	const ops = p ? p.opsOwner + p.opsTaker : known?.ops
+	const rating = p ? p.rating : known?.rating
+	const stat = (label, value, sub = '') => `<div class="peer-stat"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
+	const signals = peerSignals(p, known, d.offers)
+	const rank = typeof rankText === 'function' ? rankText(name) : ''
+	const now = Date.now()
+	const offers = d.offers
+		.map((o) => {
+			const unit = unitOf(o.coin)
+			const range = o.kind === 'flexible' ? `${o.orderMin ? fmtU(o.orderMin) : '0'}–${fmtU(o.orderMax ?? o.usd)}` : fmtU(o.usd)
+			const t = Date.parse(o.updatedAt ?? o.createdAt ?? '')
+			return `<button type="button" class="peer-offer" data-peer-offer="${esc(o.offer)}">
+				<span class="po-side ${o.type === 'sell' ? 'ask' : 'bid'}">${o.type === 'sell' ? 'Vende' : 'Compra'}</span>
+				<span class="po-mkt">${esc(nameOf(o.coin))}${o.vipOnly ? ' · solo VIP' : ''}${o.paused ? ' · pausada' : ''}</span>
+				<span class="po-price mono">${fmtP(o.price)} <small>${esc(unit)}</small></span>
+				<span class="po-usd mono">${range} USD</span>
+				<span class="po-age">${t ? `hace ${ago(now - t)}` : ''}</span>
+			</button>`
+		})
+		.join('')
+	// Lo que habéis hecho juntos, de tus últimas operaciones
+	const together = bk.trades.filter((t) => t.counterparty?.username?.toLowerCase() === name.toLowerCase())
+	const done = together.filter((t) => t.status === 'completed')
+	const vol = done.reduce((s, t) => s + t.usd, 0)
+	const history = together
+		.slice(0, 6)
+		.map(
+			(t) => `<button type="button" class="peer-trade" data-peer-trade="${esc(t.offerUuid)}" data-order="${esc(t.order ?? '')}">
+				<span>${t.side === 'buy' ? 'Le compraste' : 'Le vendiste'} <b class="mono">${fmtU(t.usd)} USD</b> · ${esc(nameOf(t.coin))}${t.updatedAt ? ` <small class="muted">· ${new Date(t.updatedAt).toLocaleDateString('es', { day: 'numeric', month: 'short' })}</small>` : ''}</span>
+				<span class="chip ${t.status}">${STATUS[t.status] ?? t.status}</span></button>`,
+		)
+		.join('')
+
+	$('modalBody').innerHTML = `<div class="stack peer">
+		<div class="peer-head">
+			<span class="avatar lg" aria-hidden="true">${esc(name.slice(0, 2))}</span>
+			<div><h3>@${esc(name)}${isMe ? ' <span class="badge info">tú</span>' : ''}</h3><div class="peer-badges">${badges || '<span class="muted small">Sin datos de verificación</span>'}</div></div>
+		</div>
+		<div class="peer-stats">
+			${stat('Operaciones', ops != null ? ops.toLocaleString('es') : '—', p ? `${p.opsOwner.toLocaleString('es')} publicando · ${p.opsTaker.toLocaleString('es')} tomando` : '')}
+			${stat('Valoración', rating != null ? `⭐ ${rating.toFixed(2).replace('.', ',')}` : '—', p ? `${p.ratings.toLocaleString('es')} valoraciones` : '')}
+			${stat('Ofertas abiertas', String(d.offers.length), d.offers.length ? `${fmtU(d.offers.reduce((s, o) => s + o.usd, 0))} USD en total` : '')}
+		</div>
+		${rank ? `<p class="rank-line">🏆 Ranking: ${esc(rank)}</p>` : ''}
+		${signals.length ? `<ul class="peer-signals">${signals.map(([k, t]) => `<li class="${k}">${esc(t)}</li>`).join('')}</ul>` : ''}
+		<div><p class="hint">Ofertas abiertas ahora</p>${offers ? `<div class="peer-offers">${offers}</div>` : '<p class="muted small">No tiene ofertas publicadas ahora.</p>'}</div>
+		${
+			isMe
+				? ''
+				: `<div><p class="hint">Tu historial con @${esc(name)}</p>${
+						together.length
+							? `<p class="small">${together.length} ${together.length === 1 ? 'operación' : 'operaciones'} entre tus últimas · ${done.length} completadas${vol ? ` · ${fmtU(vol)} USD` : ''}</p><div class="peer-trades">${history}</div>`
+							: '<p class="muted small">No has operado con este usuario (en tus últimas operaciones).</p>'
+					}</div>`
+		}
+		<p class="hint">QvaPay no publica el historial de operaciones de otros usuarios: aquí ves su perfil, lo que tiene publicado ahora y lo que habéis hecho juntos.</p>
+	</div>`
+	for (const b of $('modalBody').querySelectorAll('[data-peer-offer]')) b.onclick = () => showTakeOfferById(b.dataset.peerOffer)
+	for (const b of $('modalBody').querySelectorAll('[data-peer-trade]')) b.onclick = () => openTrade(b.dataset.peerTrade, b.dataset.order || null)
 }
 
 // ── Vender ya: vender saldo a la mejor oferta de compra de una cuenta VIP ──

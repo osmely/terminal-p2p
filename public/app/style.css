@@ -445,6 +445,43 @@ details.opts[open] summary { margin-bottom: 10px; }
 .foot a { color: var(--text-2); }
 a.icon-btn { text-decoration: none; }
 
+/* ══ Ficha de un usuario ══════════════════════════════════════════════ */
+.peer { gap: 14px; }
+.peer-head { display: flex; align-items: center; gap: 12px; padding-right: 40px; }
+.peer-head h3 { margin: 0 0 4px; }
+.avatar.lg { width: 44px; height: 44px; font-size: 15px; flex: none; }
+.peer-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+.peer-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.peer-stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); min-width: 0; }
+.peer-stat span { font-size: 11.5px; color: var(--muted); }
+.peer-stat b { font: 600 17px var(--mono); }
+.peer-stat small { font-size: 11px; color: var(--muted); }
+.peer-signals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.peer-signals li { display: flex; gap: 8px; align-items: baseline; }
+.peer-signals li::before { flex: none; width: 16px; text-align: center; font-weight: 700; }
+.peer-signals li.ok::before { content: '✓'; color: var(--bid); }
+.peer-signals li.warn::before { content: '!'; color: var(--warn); }
+.peer-signals li.info::before { content: '·'; color: var(--muted); }
+.peer-offers, .peer-trades { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; margin-top: 6px; }
+.peer-offer, .peer-trade { display: grid; align-items: center; gap: 4px 10px; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--line); background: var(--surface-2); text-align: left; font-size: 13px; color: var(--text); }
+.peer-offer:last-child, .peer-trade:last-child { border-bottom: 0; }
+.peer-offer:hover, .peer-trade:hover { background: var(--surface-3); }
+.peer-offer { grid-template-columns: 62px minmax(0, 1fr) auto; grid-template-areas: 'side mkt price' 'side age usd'; }
+.po-side { grid-area: side; font-weight: 600; font-size: 12px; }
+.po-side.ask { color: var(--ask); }
+.po-side.bid { color: var(--bid); }
+.po-mkt { grid-area: mkt; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.po-price { grid-area: price; text-align: right; font-weight: 600; }
+.po-price small { color: var(--muted); font-weight: 400; }
+.po-usd { grid-area: usd; text-align: right; color: var(--text-2); font-size: 12px; }
+.po-age { grid-area: age; color: var(--muted); font-size: 11.5px; }
+.peer-trade { grid-template-columns: minmax(0, 1fr) auto; }
+.peer-link { font-size: inherit; }
+.lvl .who em { cursor: pointer; }
+.lvl .who em:hover { text-decoration: underline; }
+.rank-list li[data-user] { cursor: pointer; }
+.rank-list li[data-user]:hover { background: var(--surface-2); border-radius: 6px; }
+
 /* ══ Vender ya (swap) ══════════════════════════════════════════════════ */
 .swap-btn { white-space: nowrap; }
 .swap { gap: 12px; }

@@ -330,7 +330,7 @@ function levelRow(l, side, cum, maxCum) {
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em title="Ver la ficha de ${esc(l.user)}">${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 function renderBook(b, asks, bids) {
@@ -808,7 +808,7 @@ function renderRanking() {
 					const [main, sub] = rankValue(state.rank.crit, u)
 					// KYC no se muestra: QvaPay lo exige a todos para el P2P
 					const badges = [u.gold ? 'GOLD' : '', u.vip ? 'VIP' : ''].filter(Boolean).map((b) => `<span class="chip">${b}</span>`).join('')
-					return `<li class="${rank <= 3 ? `top top${rank}` : ''} ${u.user === me ? 'mine' : ''}">
+					return `<li class="${rank <= 3 ? `top top${rank}` : ''} ${u.user === me ? 'mine' : ''}" data-user="${esc(u.user)}" title="Ver la ficha de ${esc(u.user)}">
 						<span class="rk">${rank}</span>
 						<span class="ru"><b>${u.user === me ? '<em class="you">tú</em> ' : ''}${esc(u.user)}</b>${badges}</span>
 						<span class="rv"><b>${main}</b><small>${esc(sub)}</small></span></li>`
@@ -897,6 +897,10 @@ function bind() {
 			store.set('rankCrit', state.rank.crit)
 			renderRanking()
 		})
+	$('rankList').addEventListener('click', (e) => {
+		const li = e.target.closest('li[data-user]')
+		if (li && typeof showPeer === 'function') showPeer(li.dataset.user)
+	})
 	$('rankScope').addEventListener('change', (e) => {
 		state.rank.scope = e.target.value
 		store.set('rankScope', state.rank.scope)
@@ -978,6 +982,9 @@ function bind() {
 			const row = e.target.closest('.lvl')
 			if (!row) return
 			tip.hidden = true
+			// El nombre abre su ficha; el resto de la fila, la oferta
+			const who = e.target.closest('.who em')
+			if (who && typeof showPeer === 'function') return showPeer(who.textContent)
 			// broker.js abre la oferta para tomarla; sin él, se abre en QvaPay
 			if (typeof showTakeOffer === 'function') showTakeOffer(row.dataset.uuid, row.dataset.side)
 			else window.open(`https://www.qvapay.com/p2p/${row.dataset.uuid}`, '_blank', 'noopener')
