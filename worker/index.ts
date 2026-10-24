@@ -52,9 +52,9 @@ const SHARED = ['/vendor/', '/favicon.svg', '/theme.js']
 
 // app.terminalp2p.com (app.localhost en desarrollo) → terminal; sim.* → simulador; el resto → landing
 const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : host.startsWith('sim.') ? 'sim' : 'site')
-// El simulador pide precios a Binance desde el navegador y usa el botón de Telegram
+// El simulador usa el botón de Telegram; los precios los pide a este mismo dominio
 const SIM_CSP =
-	"default-src 'self'; script-src 'self' https://telegram.org; frame-src https://oauth.telegram.org; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.me https://*.telegram.org; connect-src 'self' https://data-api.binance.vision wss://data-stream.binance.vision; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+	"default-src 'self'; script-src 'self' https://telegram.org; frame-src https://oauth.telegram.org; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.me https://*.telegram.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
 export default {
 	async fetch(req, env, ctx) {

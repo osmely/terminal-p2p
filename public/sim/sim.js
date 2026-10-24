@@ -20,9 +20,11 @@ const store = {
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim()
 
-const BINANCE = 'https://data-api.binance.vision/api/v3'
-const STREAM = 'wss://data-stream.binance.vision/stream?streams='
 const POLL_MS = 15_000
+// Precios cada 2 s y velas completas cada minuto, de este mismo dominio (que los trae de MEXC)
+const TICK_MS = 2000
+const CANDLES_MS = 60_000
+const IV_MS = { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 }
 
 const S = {
 	config: null,
@@ -90,41 +92,26 @@ function applyView(v) {
 	render()
 }
 
-// ── Precios en vivo (Binance) ─────────────────────────────────────────
-// Precio y apertura de 24 h de todos los mercados al abrir: el WebSocket solo avisa cuando cambian
+// ── Precios en vivo ───────────────────────────────────────────────────
+// Los pide a este dominio: el navegador no habla con ningún exchange, así funciona desde Cuba sin VPN
+let tickFails = 0
 async function loadTickers() {
 	try {
-		const rows = await (await fetch(`${BINANCE}/ticker/24hr?type=MINI&symbols=${encodeURIComponent(JSON.stringify(Object.keys(S.markets)))}`)).json()
-		for (const r of rows) S.live[r.symbol] ??= { last: +r.lastPrice, open: +r.openPrice }
-		renderLive()
-	} catch {}
-}
-
-let ws = null
-function connect() {
-	ws?.close()
-	const streams = [...Object.keys(S.markets).map((s) => `${s.toLowerCase()}@miniTicker`), `${S.symbol.toLowerCase()}@kline_${S.interval}`]
-	const sock = new WebSocket(STREAM + streams.join('/'))
-	ws = sock
-	sock.onopen = () => feed(true)
-	sock.onclose = () => {
-		feed(false)
-		if (ws === sock) setTimeout(connect, 3000)
-	}
-	sock.onmessage = (e) => {
-		const { data: d } = JSON.parse(e.data)
-		if (d.e === '24hrMiniTicker') {
-			S.live[d.s] = { last: +d.c, open: +d.o }
-			scheduleRender()
-		} else if (d.e === 'kline' && d.s === S.symbol && d.k.i === S.interval) {
-			const k = d.k
-			candleSeries?.update({ time: Math.floor(k.t / 1000) + tzOffset(), open: +k.o, high: +k.h, low: +k.l, close: +k.c })
-		}
+		const r = await fetch('/api/tickers')
+		if (!r.ok) throw new Error(String(r.status))
+		const { tickers } = await r.json()
+		for (const [sym, t] of Object.entries(tickers)) S.live[sym] = { last: t.last, open: t.open }
+		tickFails = 0
+		feed(true)
+		updateLiveCandle()
+		scheduleRender()
+	} catch {
+		if (++tickFails >= 3) feed(false)
 	}
 }
 function feed(ok) {
 	$('feed').classList.toggle('live', ok)
-	$('feed').querySelector('span').textContent = ok ? 'Binance en vivo' : 'Reconectando…'
+	$('feed').querySelector('span').textContent = ok ? 'Precios en vivo' : 'Reconectando…'
 }
 // Repinta como mucho 4 veces por segundo aunque lleguen muchos precios
 let renderQueued = false
@@ -162,23 +149,43 @@ function themeChart() {
 	candleSeries.applyOptions({ upColor: css('--bid'), downColor: css('--ask'), wickUpColor: css('--bid'), wickDownColor: css('--ask') })
 }
 
-async function loadCandles() {
+// La última vela, que se va completando con cada precio nuevo
+let liveCandle = null
+let candlesKey = ''
+
+async function loadCandles(refresh = false) {
 	makeChart()
 	if (!chart) return
 	const sym = S.symbol
 	const iv = S.interval
 	try {
-		const rows = await (await fetch(`${BINANCE}/klines?symbol=${sym}&interval=${iv}&limit=500`)).json()
+		const r = await fetch(`/api/klines?symbol=${sym}&interval=${iv}`)
+		if (!r.ok) throw new Error(String(r.status))
+		const rows = await r.json()
 		if (sym !== S.symbol || iv !== S.interval) return
 		const tz = tzOffset()
-		candleSeries.setData(rows.map((r) => ({ time: Math.floor(r[0] / 1000) + tz, open: +r[1], high: +r[2], low: +r[3], close: +r[4] })))
+		candleSeries.setData(rows.map(([t, o, h, l, c]) => ({ time: Math.floor(t / 1000) + tz, open: o, high: h, low: l, close: c })))
+		const last = rows.at(-1)
+		liveCandle = last ? { t: last[0], o: last[1], h: last[2], l: last[3], c: last[4] } : null
 		const tick = S.markets[sym].tick
 		candleSeries.applyOptions({ priceFormat: { type: 'price', precision: decimalsOf(tick), minMove: tick } })
-		chart.timeScale().fitContent()
+		// Se encuadra al cambiar de mercado o de intervalo; al refrescar se respeta el zoom
+		if (!refresh || candlesKey !== `${sym}:${iv}`) chart.timeScale().fitContent()
+		candlesKey = `${sym}:${iv}`
 		drawOrderLines()
 	} catch {
-		toast('No se pudo cargar el gráfico de Binance', 'bad')
+		if (!refresh) toast('No se pudo cargar el gráfico; inténtalo en unos segundos', 'bad')
 	}
+}
+
+function updateLiveCandle() {
+	const price = S.live[S.symbol]?.last
+	if (!candleSeries || !liveCandle || !price) return
+	const span = IV_MS[S.interval]
+	const bucket = Math.floor(Date.now() / span) * span
+	if (bucket > liveCandle.t) liveCandle = { t: bucket, o: price, h: price, l: price, c: price }
+	else liveCandle = { ...liveCandle, h: Math.max(liveCandle.h, price), l: Math.min(liveCandle.l, price), c: price }
+	candleSeries.update({ time: Math.floor(liveCandle.t / 1000) + tzOffset(), open: liveCandle.o, high: liveCandle.h, low: liveCandle.l, close: liveCandle.c })
 }
 
 // Las órdenes abiertas y el precio medio de tu posición, como líneas en el gráfico
@@ -479,7 +486,7 @@ function bind() {
 		S.symbol = b.dataset.sym
 		store.set('sim.symbol', S.symbol)
 		$('fAmount').value = ''
-		connect()
+		liveCandle = null
 		loadCandles()
 		render()
 	})
@@ -489,7 +496,7 @@ function bind() {
 			S.interval = b.dataset.iv
 			store.set('sim.interval', S.interval)
 			for (const x of document.querySelectorAll('[data-iv]')) x.classList.toggle('active', x === b)
-			connect()
+			liveCandle = null
 			loadCandles()
 		}
 	}
@@ -607,8 +614,9 @@ async function start() {
 	if (!S.user) showLogin()
 	render()
 	loadTickers()
-	connect()
 	loadCandles()
+	setInterval(() => !document.hidden && loadTickers(), TICK_MS)
+	setInterval(() => !document.hidden && loadCandles(true), CANDLES_MS)
 	loadRanking()
 	await loadState()
 	setInterval(() => !document.hidden && loadState(), POLL_MS)

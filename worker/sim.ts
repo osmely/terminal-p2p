@@ -1,4 +1,4 @@
-// Simulador de trading en sim.terminalp2p.com: dinero ficticio, precios reales de Binance.
+// Simulador de trading en sim.terminalp2p.com: dinero ficticio, precios reales (de MEXC).
 //
 //   · Se entra con el botón oficial de Telegram: se comprueba su firma con el token del bot y se
 //     guarda una cookie firmada. De cada jugador solo se guarda lo que da Telegram al entrar.
@@ -27,7 +27,7 @@ export interface SimEnv {
 
 // Binance no responde a las peticiones que salen de Cloudflare (bloquea su región: 451 y 403), así que
 // el servidor toma los precios de MEXC, que usa la misma API que Binance y sigue su precio casi al
-// céntimo. En pantalla los precios llegan de Binance. (Binance.US sí responde, pero sus mercados pequeños
+// céntimo. La pantalla también los pide aquí (ver «Precios para la pantalla»). (Binance.US sí responde, pero sus mercados pequeños
 // casi no tienen actividad: el oro, PAXG, estaba un 10 % desfasado)
 const MEXC = 'https://api.mexc.com/api/v3'
 const sourceOf = (_symbol: Symbol) => MEXC
@@ -83,6 +83,49 @@ export async function quotes(symbols: Iterable<Symbol> = SYMBOLS): Promise<Parti
 }
 
 const mids = (qs: Partial<Record<Symbol, Quote>>) => Object.fromEntries(Object.entries(qs).map(([s, q]) => [s, (q!.bid + q!.ask) / 2])) as Partial<Record<Symbol, number>>
+
+// ── Precios para la pantalla ──────────────────────────────────────────
+// El navegador no habla con ningún exchange (Binance y MEXC no responden desde Cuba sin VPN): pide aquí los
+// precios y las velas, que salen de MEXC, la misma fuente con la que se ejecutan las órdenes. Se cachean unos
+// segundos en el borde para que todos los jugadores compartan la misma consulta
+
+const TICKERS_TTL_S = 2
+// Intervalos del gráfico y su nombre en MEXC, con lo que se cachea cada uno
+const INTERVALS: Record<string, { mexc: string; ttl: number }> = {
+	'1m': { mexc: '1m', ttl: 5 },
+	'5m': { mexc: '5m', ttl: 15 },
+	'15m': { mexc: '15m', ttl: 30 },
+	'1h': { mexc: '60m', ttl: 60 },
+	'4h': { mexc: '4h', ttl: 120 },
+	'1d': { mexc: '1d', ttl: 300 },
+}
+
+async function cached(url: URL, ttl: number, load: () => Promise<unknown>) {
+	const cache = (caches as unknown as { default: Cache }).default
+	const key = new Request(url.toString())
+	const hit = await cache.match(key)
+	if (hit) return hit
+	const res = new Response(JSON.stringify(await load()), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${ttl}` } })
+	await cache.put(key, res.clone())
+	return res
+}
+
+// Último precio, apertura de 24 h y bid/ask de cada mercado
+async function tickers() {
+	const rows = await Promise.all(
+		SYMBOLS.map((s) =>
+			market<{ lastPrice: string; openPrice: string; bidPrice: string; askPrice: string }>(sourceOf(s), `/ticker/24hr?symbol=${s}`)
+				.then((r) => [s, { last: +r.lastPrice, open: +r.openPrice, bid: +r.bidPrice, ask: +r.askPrice }] as const)
+				.catch(() => null),
+		),
+	)
+	return { t: Date.now(), tickers: Object.fromEntries(rows.filter(Boolean) as [Symbol, unknown][]) }
+}
+
+async function chartKlines(symbol: Symbol, interval: string) {
+	const rows = await market<[number, string, string, string, string][]>(sourceOf(symbol), `/klines?symbol=${symbol}&interval=${INTERVALS[interval].mexc}&limit=500`)
+	return rows.map((r) => [r[0], +r[1], +r[2], +r[3], +r[4]])
+}
 
 // Velas de 1 minuto que empiezan entre from y to
 export async function candles(symbol: Symbol, from: number, to: number): Promise<Candle[]> {
@@ -383,6 +426,13 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 	if (req.method !== 'GET' && req.headers.get('origin') !== url.origin) return json(403, { error: 'Origen no permitido' })
 	try {
 		if (route === 'GET /api/config') return json(200, { bot: env.SIM_BOT ?? 'terminalp2p_bot', dev: isDev(env, url), markets: SYMBOLS.map((s) => ({ symbol: s, ...MARKETS[s] })) })
+		if (route === 'GET /api/tickers') return await cached(new URL('/api/tickers', url.origin), TICKERS_TTL_S, tickers)
+		if (route === 'GET /api/klines') {
+			const symbol = normSymbol(url.searchParams.get('symbol'))
+			const interval = url.searchParams.get('interval') ?? ''
+			if (!INTERVALS[interval]) return json(400, { error: 'Intervalo no válido' })
+			return await cached(new URL(`/api/klines?symbol=${symbol}&interval=${interval}`, url.origin), INTERVALS[interval].ttl, () => chartKlines(symbol, interval))
+		}
 		if (route === 'GET /api/ranking') return json(200, await ranking(env.DB, await readSession(req.headers.get('cookie'), env.SIM_SESSION_KEY)))
 		if (route === 'GET /api/auth/telegram') {
 			if (!env.TELEGRAM_BOT_TOKEN) return json(503, { error: 'Falta configurar el bot de Telegram' })
