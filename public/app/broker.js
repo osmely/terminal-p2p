@@ -973,7 +973,6 @@ function renderTake(uuid, side, l, coin) {
 // oferta VIP que más paga en la que cabe ese monto. Por dentro es una operación P2P normal:
 // tus USD quedan en el escrow de QvaPay y el VIP te transfiere a los datos que le pasas por el chat
 const SWAP_REFRESH_MS = 15_000
-const ICON_SWAP = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4v14M7 18l-3-3M7 18l3-3M17 20V6M17 6l-3 3M17 6l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
 async function showSwap() {
 	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin) }]
