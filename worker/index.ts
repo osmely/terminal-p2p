@@ -72,8 +72,6 @@ export default {
 		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
 		if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
 		if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
-		// Mini App de QvaPay: su propia política de seguridad (ver miniapp())
-		if (url.pathname === '/miniapp' || url.pathname.startsWith('/miniapp/')) return miniapp(secure(await assets(req, url, env)))
 		return assets(req, url, env)
 	},
 
@@ -182,18 +180,6 @@ async function assets(req: Request, url: URL, env: Env) {
 	if (to.origin === url.origin && to.pathname.startsWith(`/${folder}/`)) to.pathname = to.pathname.slice(folder.length + 1)
 	const out = new Response(res.body, res)
 	out.headers.set('Location', to.pathname + to.search)
-	return out
-}
-
-// La Mini App se abre dentro de la app de QvaPay y, para probarla, en el simulador de su panel (un
-// iframe en www.qvapay.com) con el puente sdk-sim.js. Solo en esta ruta se permite ese script y
-// que qvapay.com la incruste; el resto del sitio sigue sin scripts externos ni marcos
-const MINIAPP_CSP =
-	"default-src 'self'; script-src 'self' https://www.qvapay.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' https://www.qvapay.com; base-uri 'none'; form-action 'self'"
-function miniapp(res: Response) {
-	const out = new Response(res.body, res)
-	out.headers.set('Content-Security-Policy', MINIAPP_CSP)
-	out.headers.delete('X-Frame-Options')
 	return out
 }
 
