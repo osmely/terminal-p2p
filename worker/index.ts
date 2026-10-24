@@ -88,22 +88,25 @@ export default {
 	// Cada minuto: las órdenes pendientes del simulador. Cada 10: los agregados públicos de QvaPay,
 	// la tasa informal de elTOQUE y el patrimonio del ranking del simulador
 	async scheduled(event, env) {
-		const tenth = new Date(event.scheduledTime).getUTCMinutes() % 10 === 0
+		// Cloudflare lanza el cron unos segundos antes de su minuto: se redondea al minuto más cercano
+		// (si no, a las 19:49:56 se tomaría por el minuto 49 y se guardaría en la franja de las 19:40)
+		const at = Math.round(event.scheduledTime / 60_000) * 60_000
+		const tenth = (at / 60_000) % 10 === 0
 		if (env.SIM_SESSION_KEY)
 			try {
-				await simCron(env.DB, event.scheduledTime, tenth)
+				await simCron(env.DB, Date.now(), tenth)
 			} catch (err) {
 				console.error(`simulador: ${(err as Error).message}`)
 			}
 		if (!tenth) return
 		try {
-			await collect(env.DB)
+			await collect(env.DB, at)
 		} catch (err) {
 			console.error(`histórico: ${(err as Error).message}`)
 		}
 		if (!env.ELTOQUE_TOKEN) return
 		try {
-			await syncInformal(env.DB, env.ELTOQUE_TOKEN)
+			await syncInformal(env.DB, env.ELTOQUE_TOKEN, at)
 		} catch (err) {
 			console.error(`elTOQUE: ${(err as Error).message}`)
 		}
@@ -159,7 +162,7 @@ async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
 	if (!(await underLimit(env.PANEL_LIMIT, req))) return jsonError(429, 'Demasiados intentos: espera un minuto')
 	if (!(await authorized(req, env.METRICS_KEY)))
-		return new Response('Necesitas la clave del panel', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Métricas de Terminal P2P", charset="UTF-8"', 'Cache-Control': 'no-store' } })
+		return new Response('Necesitas la clave del panel', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Terminal P2P metrics", charset="UTF-8"', 'Cache-Control': 'no-store' } })
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
 	return new Response(panelHtml(await loadSummary(env.DB, days)), {
 		headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' },

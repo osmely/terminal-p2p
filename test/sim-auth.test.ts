@@ -38,22 +38,23 @@ test('sesión: cookie firmada, que caduca y no se puede falsificar', async () =>
 	assert.equal(await readSession(null, 'clave'), null)
 })
 
-test('revisión: pide las velas desde la última revisión y solo las ya cerradas', async () => {
+test('revisión: velas de 1 minuto desde la última revisión, solo las ya cerradas', async () => {
 	const t0 = Date.parse('2026-10-24T12:00:00Z')
 	const e = new Engine(freshState(t0))
-	e.placeOrder({ symbol: 'BTC', side: 'BUY', type: 'LIMIT', price: 99, quoteAmount: 500 }, { bid: 100, ask: 100.1 }, t0 + 200)
+	e.placeOrder({ symbol: 'BTC', side: 'BUY', type: 'LIMIT', price: 99, quoteAmount: 500 }, { bid: 100, ask: 100.1 }, t0 + 20_000)
 	const asked: [string, number, number][] = []
 	const fake = async (s: string, from: number, to: number): Promise<Candle[]> => {
 		asked.push([s, from, to])
 		return [
-			{ t: t0, o: 100, h: 100, l: 98, c: 99 }, // empezó antes de la orden: no cuenta
-			{ t: t0 + 5000, o: 100, h: 100, l: 98.5, c: 99 },
-			{ t: t0 + 9000, o: 97, h: 97, l: 96, c: 96 }, // aún sin cerrar a t0 + 9500
+			{ t: t0, o: 100, h: 100, l: 98, c: 99 }, // el minuto en que se puso la orden: no cuenta
+			{ t: t0 + 60_000, o: 100, h: 100, l: 98.5, c: 99 },
+			{ t: t0 + 120_000, o: 97, h: 97, l: 96, c: 96 }, // aún sin cerrar a t0 + 150 s
 		]
 	}
-	await catchUp(e, t0 + 9500, fake)
-	assert.deepEqual(asked, [['BTCUSDT', t0, t0 + 8000]])
+	await catchUp(e, t0 + 150_000, fake)
+	assert.deepEqual(asked, [['BTCUSDT', t0, t0 + 150_000]])
 	const [order] = e.state.orders
-	assert.deepEqual([order.status, order.avgPrice], ['FILLED', 99])
-	assert.equal(e.state.checkedAt, t0 + 8000)
+	assert.deepEqual([order.status, order.avgPrice, order.filledAt], ['FILLED', 99, t0 + 120_000])
+	// Queda revisado hasta el inicio del minuto en curso
+	assert.equal(e.state.checkedAt, t0 + 120_000)
 })

@@ -9,7 +9,6 @@ export const MARKETS = {
 	SOLUSDT: { base: 'SOL', name: 'Solana', qtyStep: 0.001, tick: 0.01 },
 	XRPUSDT: { base: 'XRP', name: 'XRP', qtyStep: 0.1, tick: 0.0001 },
 	BNBUSDT: { base: 'BNB', name: 'BNB', qtyStep: 0.001, tick: 0.01 },
-	PAXGUSDT: { base: 'PAXG', name: 'Oro (PAXG)', qtyStep: 0.0001, tick: 0.01 },
 	// Más volátiles (rango 24 h típico 5-14 %)
 	DOGEUSDT: { base: 'DOGE', name: 'Dogecoin', qtyStep: 1, tick: 0.00001 },
 	SUIUSDT: { base: 'SUI', name: 'Sui', qtyStep: 0.1, tick: 0.0001 },
@@ -102,6 +101,8 @@ export interface SimState {
 	tradeCount: number
 	// Hasta dónde se revisaron las órdenes pendientes con las velas
 	checkedAt: number
+	// Último precio conocido de cada mercado, por si la fuente no responde al valorar la cuenta
+	marks?: Partial<Record<string, number>>
 }
 
 export interface OrderRequest {
@@ -272,16 +273,16 @@ export class Engine {
 	}
 
 	// ── Revisión con velas ───────────────────────────────────────────────
-	// Recorre las velas de un mercado en orden y ejecuta las órdenes pendientes que tocan. Cada orden solo
+	// Recorre en orden las velas de un mercado (de spanMs cada una) y ejecuta las órdenes pendientes que tocan. Cada orden solo
 	// mira velas que empiezan después de crearse (nunca un precio que ya se conocía al ponerla). Si en una
 	// misma vela se tocan objetivo y stop, se asume el stop; si la vela abre más allá del stop, se ejecuta
 	// al precio de apertura (el hueco lo paga quien tenía el stop, como en un mercado real)
-	replay(symbol: Symbol, candles: Candle[]) {
+	replay(symbol: Symbol, candles: Candle[], spanMs = 60_000) {
 		for (const c of candles) {
 			for (const o of this.state.orders) {
 				if (o.status !== 'OPEN' || o.symbol !== symbol || c.t < o.createdAt) continue
 				const buy = buyish(o.side)
-				const at = c.t + 1000
+				const at = c.t + spanMs
 				if (o.type === 'LIMIT') {
 					if (buy && c.l <= o.price!) this.fill(o, Math.min(o.price!, c.o), null, at)
 					else if (!buy && c.h >= o.price!) this.fill(o, Math.max(o.price!, c.o), null, at)
@@ -408,7 +409,7 @@ export class Engine {
 			const m = MARKETS[sym]
 			const b = bal[m.base]
 			const qty = b.free + b.locked
-			const px = mids[sym] ?? 0
+			const px = mids[sym] ?? s.marks?.[sym] ?? 0
 			if (qty > 0) {
 				equity += qty * px
 				const basis = s.basis[m.base]

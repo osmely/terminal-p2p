@@ -3,9 +3,9 @@
 //   · Se entra con el botón oficial de Telegram: se comprueba su firma con el token del bot y se
 //     guarda una cookie firmada. De cada jugador solo se guarda lo que da Telegram al entrar.
 //   · La cuenta de cada jugador (src/sim/engine.ts) vive en D1 como un JSON con control de versión.
-//   · Las órdenes a mercado se ejecutan con el bid/ask de Binance del momento. Las pendientes
-//     (límite, stop, OCO) se revisan con las velas de 1 s de Binance: cada minuto en el cron y
-//     cada vez que el jugador abre su cuenta. Así se ejecutan aunque nadie tenga la pantalla abierta.
+//   · Las órdenes a mercado se ejecutan con el bid/ask del momento. Las pendientes (límite, stop, OCO)
+//     se revisan con las velas de 1 minuto: cada minuto en el cron y cada vez que el jugador abre su
+//     cuenta. Así se ejecutan aunque nadie tenga la pantalla abierta. Precios: ver «Precios» abajo.
 
 import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle, type Quote, type SimState, type Symbol } from '../src/sim/engine.ts'
 import type { D1 } from './rates.ts'
@@ -20,53 +20,59 @@ export interface SimEnv {
 	SIM_DEV_LOGIN?: string
 }
 
-const BINANCE = 'https://data-api.binance.vision/api/v3'
+// Binance no responde a las peticiones que salen de Cloudflare (bloquea su región: 451 y 403), así que
+// el servidor toma los precios de MEXC, que usa la misma API que Binance y sigue su precio casi al
+// céntimo. En pantalla los precios llegan de Binance. (Binance.US sí responde, pero sus mercados pequeños
+// casi no tienen actividad: el oro, PAXG, estaba un 10 % desfasado)
+const MEXC = 'https://api.mexc.com/api/v3'
+const sourceOf = (_symbol: Symbol) => MEXC
 const COOKIE = 'tps'
 const SESSION_DAYS = 30
 // La firma del botón de Telegram vale un día
 const AUTH_MAX_AGE_S = 86_400
-// Velas de 1 s por petición (Binance da hasta 1000) y cuánto se pide al segundo antes de usar velas de 1 min
+// Velas de 1 minuto (las más finas que dan esas fuentes) y cuántas por petición
+export const CANDLE_MS = 60_000
 const KLINE_LIMIT = 1000
-const FINE_WINDOW_MS = 15 * 60_000
-// Las velas se cierran al terminar su segundo: se espera un poco para que estén completas
+// Se espera un poco tras el cierre de cada vela para que la fuente la tenga completa
 const CLOSE_DELAY_MS = 1500
 const RANKING_SIZE = 50
 
-// ── Binance ───────────────────────────────────────────────────────────
+// ── Precios ───────────────────────────────────────────────────────────
 
-async function binance<T>(path: string): Promise<T> {
-	const res = await fetch(`${BINANCE}${path}`, { headers: { Accept: 'application/json' } })
-	if (!res.ok) throw new SimError(`Binance no responde ahora mismo (${res.status}); inténtalo en unos segundos`)
+async function market<T>(base: string, path: string): Promise<T> {
+	const res = await fetch(`${base}${path}`, { headers: { Accept: 'application/json' } })
+	if (!res.ok) {
+		console.error(`precios ${res.status} ${base}${path.split('?')[0]}: ${(await res.text().catch(() => '')).slice(0, 200)}`)
+		throw new SimError(`La fuente de precios no responde ahora mismo (${res.status}); inténtalo en unos segundos`)
+	}
 	return res.json() as Promise<T>
 }
 
-export async function quotes(symbols: readonly Symbol[] = SYMBOLS): Promise<Partial<Record<Symbol, Quote>>> {
-	const rows = await binance<{ symbol: string; bidPrice: string; askPrice: string }[]>(`/ticker/bookTicker?symbols=${encodeURIComponent(JSON.stringify(symbols))}`)
-	return Object.fromEntries(rows.map((r) => [r.symbol, { bid: +r.bidPrice, ask: +r.askPrice }]))
+// Bid/ask de cada mercado pedido. Si alguno falla, se omite: quien lo necesite lo dirá
+export async function quotes(symbols: Iterable<Symbol> = SYMBOLS): Promise<Partial<Record<Symbol, Quote>>> {
+	const rows = await Promise.all(
+		[...new Set(symbols)].map((s) =>
+			market<{ bidPrice: string; askPrice: string }>(sourceOf(s), `/ticker/bookTicker?symbol=${s}`)
+				.then((r) => [s, { bid: +r.bidPrice, ask: +r.askPrice }] as const)
+				.catch(() => null),
+		),
+	)
+	return Object.fromEntries(rows.filter((r) => r && r[1].bid > 0 && r[1].ask > 0) as [Symbol, Quote][])
 }
 
 const mids = (qs: Partial<Record<Symbol, Quote>>) => Object.fromEntries(Object.entries(qs).map(([s, q]) => [s, (q!.bid + q!.ask) / 2])) as Partial<Record<Symbol, number>>
 
-async function klines(symbol: Symbol, interval: '1s' | '1m', from: number, to: number): Promise<Candle[]> {
+// Velas de 1 minuto que empiezan entre from y to
+export async function candles(symbol: Symbol, from: number, to: number): Promise<Candle[]> {
 	const out: Candle[] = []
-	const step = interval === '1s' ? 1000 : 60_000
-	let start = from
+	let start = Math.floor(from / CANDLE_MS) * CANDLE_MS
 	while (start <= to) {
-		const rows = await binance<[number, string, string, string, string][]>(`/klines?symbol=${symbol}&interval=${interval}&startTime=${start}&endTime=${to}&limit=${KLINE_LIMIT}`)
+		const rows = await market<[number, string, string, string, string][]>(sourceOf(symbol), `/klines?symbol=${symbol}&interval=1m&startTime=${start}&endTime=${to}&limit=${KLINE_LIMIT}`)
 		for (const r of rows) out.push({ t: r[0], o: +r[1], h: +r[2], l: +r[3], c: +r[4] })
 		if (rows.length < KLINE_LIMIT) break
-		start = rows[rows.length - 1][0] + step
+		start = rows[rows.length - 1][0] + CANDLE_MS
 	}
 	return out
-}
-
-// Velas cerradas entre from y to: al segundo los últimos 15 min y, si el hueco es mayor, al minuto antes
-export async function candles(symbol: Symbol, from: number, to: number): Promise<Candle[]> {
-	if (to < from) return []
-	const fineFrom = Math.max(from, to - FINE_WINDOW_MS)
-	const coarse = fineFrom > from ? await klines(symbol, '1m', from, fineFrom - 1) : []
-	// Un minuto que empieza antes de fineFrom y termina después se queda fuera: lo cubren las de 1 s
-	return [...coarse.filter((c) => c.t + 60_000 <= fineFrom), ...(await klines(symbol, '1s', fineFrom, to))]
 }
 
 // ── Cuentas ───────────────────────────────────────────────────────────
@@ -83,6 +89,7 @@ export async function loadAccount(db: D1, tgId: number) {
 
 // Guarda solo si nadie la cambió entretanto (false si hay que recargar y repetir)
 async function saveAccount(db: D1, tgId: number, engine: Engine, version: number, prices: Partial<Record<Symbol, number>>, now: number) {
+	if (Object.keys(prices).length) engine.state.marks = { ...engine.state.marks, ...prices }
 	const acc = engine.account(prices)
 	const r = await db
 		.prepare('UPDATE sim_accounts SET state = ?, equity = ?, pnl_pct = ?, trades = ?, open_orders = ?, checked_at = ?, updated_at = ?, version = version + 1 WHERE tg_id = ? AND version = ?')
@@ -99,21 +106,34 @@ async function createAccount(db: D1, tgId: number, now: number) {
 		.run()
 }
 
-// Revisa las órdenes pendientes con las velas cerradas desde la última revisión
+// Revisa las órdenes pendientes con las velas cerradas desde la última revisión. checkedAt queda en el
+// inicio del minuto en curso: todas las velas anteriores ya se revisaron
 export async function catchUp(engine: Engine, now: number, fetchCandles: (s: Symbol, from: number, to: number) => Promise<Candle[]> = candles) {
-	const to = now - CLOSE_DELAY_MS
+	const closed = (c: Candle) => c.t + CANDLE_MS + CLOSE_DELAY_MS <= now
 	const open = engine.openOrders()
 	for (const symbol of new Set(open.map((o) => o.symbol))) {
 		const first = Math.min(...open.filter((o) => o.symbol === symbol).map((o) => o.createdAt))
-		const from = Math.floor(Math.max(engine.state.checkedAt, first) / 1000) * 1000
-		const cs = (await fetchCandles(symbol, from, to)).filter((c) => c.t >= from && c.t + 1000 <= now)
-		engine.replay(symbol, cs)
+		const from = Math.floor(Math.max(engine.state.checkedAt, first) / CANDLE_MS) * CANDLE_MS
+		const cs = (await fetchCandles(symbol, from, now)).filter((c) => c.t >= from && closed(c))
+		engine.replay(symbol, cs, CANDLE_MS)
 	}
-	engine.state.checkedAt = Math.max(engine.state.checkedAt, to)
+	engine.state.checkedAt = Math.max(engine.state.checkedAt, Math.floor((now - CLOSE_DELAY_MS) / CANDLE_MS) * CANDLE_MS)
+}
+
+// Mercados de los que hace falta precio: posiciones, órdenes abiertas y el de la orden nueva
+function needed(engine: Engine, extra?: Symbol) {
+	const s = engine.state
+	const out = new Set<Symbol>(extra ? [extra] : [])
+	for (const sym of SYMBOLS) {
+		const b = MARKETS[sym].base
+		if (s.balances[b]?.free || s.balances[b]?.locked || s.shorts[b]?.qty) out.add(sym)
+	}
+	for (const o of engine.openOrders()) out.add(o.symbol)
+	return out
 }
 
 // Carga, aplica un cambio y guarda; si otra petición la cambió a la vez, lo repite con la versión nueva
-async function withAccount<T>(db: D1, tgId: number, fn: (e: Engine, prices: Partial<Record<Symbol, Quote>>) => T | Promise<T>): Promise<{ result: T; engine: Engine; prices: Partial<Record<Symbol, Quote>> }> {
+async function withAccount<T>(db: D1, tgId: number, fn: (e: Engine, prices: Partial<Record<Symbol, Quote>>) => T | Promise<T>, symbol?: Symbol): Promise<{ result: T; engine: Engine; prices: Partial<Record<Symbol, Quote>> }> {
 	for (let attempt = 0; attempt < 3; attempt++) {
 		const now = Date.now()
 		let acc = await loadAccount(db, tgId)
@@ -121,7 +141,7 @@ async function withAccount<T>(db: D1, tgId: number, fn: (e: Engine, prices: Part
 			await createAccount(db, tgId, now)
 			acc = await loadAccount(db, tgId)
 		}
-		const prices = await quotes()
+		const prices = await quotes(needed(acc!.engine, symbol))
 		await catchUp(acc!.engine, now)
 		const result = await fn(acc!.engine, prices)
 		if (await saveAccount(db, tgId, acc!.engine, acc!.version, mids(prices), now)) return { result, engine: acc!.engine, prices }
@@ -150,10 +170,10 @@ export async function simCron(db: D1, now: number, refreshAll: boolean) {
 	const ranges = new Map<Symbol, number>()
 	for (const { engine } of engines)
 		for (const o of engine.openOrders()) {
-			const from = Math.floor(Math.max(engine.state.checkedAt, o.createdAt) / 1000) * 1000
+			const from = Math.floor(Math.max(engine.state.checkedAt, o.createdAt) / CANDLE_MS) * CANDLE_MS
 			ranges.set(o.symbol, Math.min(ranges.get(o.symbol) ?? Infinity, from))
 		}
-	for (const [symbol, from] of ranges) cache.set(symbol, await candles(symbol, from, now - CLOSE_DELAY_MS).catch(() => []))
+	for (const [symbol, from] of ranges) cache.set(symbol, await candles(symbol, from, now).catch(() => []))
 	const prices = engines.length || refreshAll ? mids(await quotes()) : {}
 	for (const { id, version, engine } of engines) {
 		await catchUp(engine, now, async (s) => cache.get(s) ?? [])
@@ -307,7 +327,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 					},
 					q,
 				)
-			})
+			}, symbol)
 			return json(200, { order: result, ...view(engine, prices) })
 		}
 		const cancel = /^DELETE \/api\/orders\/(\d+)$/.exec(route)
@@ -316,10 +336,13 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 			return json(200, view(engine, prices))
 		}
 		if (route === 'POST /api/reset') {
-			const { engine, prices } = await withAccount(env.DB, tgId, (e) => {
-				e.state = freshState(Date.now())
-			})
-			return json(200, view(engine, prices))
+			// Una cuenta nueva no tiene posiciones ni órdenes: no hace falta ningún precio
+			const now = Date.now()
+			const engine = new Engine(freshState(now))
+			const acc = await loadAccount(env.DB, tgId)
+			if (!acc) await createAccount(env.DB, tgId, now)
+			else if (!(await saveAccount(env.DB, tgId, engine, acc.version, {}, now))) throw new SimError('La cuenta está ocupada; inténtalo de nuevo')
+			return json(200, view(engine, {}))
 		}
 		return json(404, { error: 'Ruta desconocida' })
 	} catch (err) {
