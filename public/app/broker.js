@@ -980,7 +980,7 @@ async function showSwap() {
 	if (!markets.some((m) => m.tick === sw.coin)) sw.coin = markets[0].tick
 	openModal(
 		`<div class="stack swap">
-		<div class="swap-head"><h3>Vender ya</h3></div>
+		<div class="swap-head"><h3>Vender</h3></div>
 		<p class="muted swap-sub">Vende tu saldo de QvaPay y recibe el dinero en tu cuenta.</p>
 		<div class="swap-box">
 			<div class="swap-row"><span>Vendes</span>${bk.acct.connected ? `<button type="button" class="link small" id="swMax">Saldo: <b class="mono">${fmtU(bk.acct.balance ?? 0)}</b> USD</button>` : ''}</div>
