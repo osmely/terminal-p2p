@@ -1099,7 +1099,6 @@ async function showPeer(user) {
 							: '<p class="muted small">No has operado con este usuario (en tus últimas operaciones).</p>'
 					}</div>`
 		}
-		<p class="hint">QvaPay no publica el historial de operaciones de otros usuarios: aquí ves su perfil, lo que tiene publicado ahora y lo que habéis hecho juntos.</p>
 	</div>`
 	for (const b of $('modalBody').querySelectorAll('[data-peer-offer]')) b.onclick = () => showTakeOfferById(b.dataset.peerOffer)
 	for (const b of $('modalBody').querySelectorAll('[data-peer-trade]')) b.onclick = () => openTrade(b.dataset.peerTrade, b.dataset.order || null)
