@@ -442,6 +442,44 @@ details.opts[open] summary { margin-bottom: 10px; }
 .foot a { color: var(--text-2); }
 a.icon-btn { text-decoration: none; }
 
+/* ══ Vender ya (swap) ══════════════════════════════════════════════════ */
+.swap-btn { white-space: nowrap; }
+.swap { gap: 12px; }
+.swap-head { display: flex; align-items: center; gap: 10px; padding-right: 40px; }
+.swap-head h3 { margin: 0; }
+.swap-sub { margin: -4px 0 0 !important; font-size: 13px; }
+.swap-box { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; transition: border-color 0.15s; }
+.swap-box:focus-within { border-color: var(--accent); }
+.swap-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); font-weight: 500; }
+.swap-row .link b { color: var(--text-2); font-family: var(--mono); }
+.swap-main { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.swap-input { flex: 1; min-width: 0; background: none; border: 0; padding: 0; font-size: 28px; font-weight: 600; color: var(--text); -moz-appearance: textfield; }
+.swap-input:focus { outline: none; }
+.swap-input::-webkit-outer-spin-button, .swap-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.swap-out { flex: 1; min-width: 0; font-size: 28px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bid); }
+.swap-out.dim { color: var(--muted); }
+.swap-asset, .swap-select {
+	flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px;
+	background: var(--surface); border: 1px solid var(--line-strong); font-size: 13px; font-weight: 600; color: var(--text);
+}
+.swap-select { max-width: 52%; cursor: pointer; appearance: none; -webkit-appearance: none; padding-right: 30px;
+	background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+	background-position: calc(100% - 16px) 52%, calc(100% - 11px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+.swap-select:focus { outline: none; border-color: var(--accent); }
+.swap-coin { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--bid-bg); color: var(--bid); font-size: 12px; font-weight: 700; }
+.swap-arrow { display: grid; place-items: center; width: 36px; height: 36px; margin: -20px auto; position: relative; z-index: 1; border-radius: 10px; background: var(--surface); border: 1px solid var(--line-strong); color: var(--text-2); }
+.swap-age { font-variant-numeric: tabular-nums; }
+.swap-quote:empty { display: none; }
+.swap-quote .notice, .swap-quote .hint { margin: 0; }
+.swap-kv { grid-template-columns: auto 1fr; }
+.swap-kv b { word-break: normal; }
+.swap-kv > span:empty { display: none; }
+.swap-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.swap-saved { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); padding: 10px 13px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); }
+.swap-saved b { color: var(--text); font-family: var(--mono); font-weight: 500; }
+.swap-go { padding: 12px 14px; font-size: 14px; }
+.swap-foot { margin: 0 !important; }
+
 /* ══ Responsive ═══════════════════════════════════════════════════════ */
 @media (max-width: 1280px) {
 	.layout {
@@ -456,7 +494,8 @@ a.icon-btn { text-decoration: none; }
 	.nav { gap: 8px; padding: 0 12px; }
 	.status-pill { padding: 8px; }
 	.status-pill span:last-child { display: none; }
-	.account .btn { padding: 8px 12px; }
+	.account .btn, .swap-btn { padding: 8px 12px; }
+	.swap-input, .swap-out { font-size: 24px; }
 	.hide-sm, .acct > div, .account > .badge { display: none; }
 
 	.market-strip { padding: 10px 12px; }
@@ -526,4 +565,11 @@ a.icon-btn { text-decoration: none; }
 	.c-usd { grid-area: usd; } .c-price { grid-area: price; } .c-total { grid-area: total; text-align: right !important; }
 	.c-who { grid-area: who; } .c-date { grid-area: date; text-align: right; } .c-next { grid-area: next; } .c-act { grid-area: act; }
 	.foot { padding: 6px 12px 22px; }
+}
+@media (max-width: 520px) {
+	/* Con «Vender» en la barra no cabe el nombre: queda el logo, que también lleva a la portada */
+	.brand-name { display: none; }
+	.nav { gap: 6px; }
+	.swap-select { max-width: 62%; font-size: 13px !important; padding: 7px 28px 7px 11px !important; }
+	.swap-out, .swap-input { font-size: 22px; }
 }

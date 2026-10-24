@@ -23,6 +23,8 @@ export interface MetricEvent {
 	side: string
 	usd: number
 	source: 'relay' | 'client'
+	// Parte del terminal desde la que se hizo: 'swap' para «Vender ya», '' para el resto
+	via: string
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -62,7 +64,7 @@ const cleanUsd = (v: unknown) => {
 // Datos que el navegador añade a sus escrituras para el relé (X-TP-Meta). No se reenvían a QvaPay
 export function parseMeta(header: string | null) {
 	const p = new URLSearchParams(header ?? '')
-	return { coin: cleanCoin(p.get('coin')), side: cleanSide(p.get('side')), usd: cleanUsd(p.get('usd')) }
+	return { coin: cleanCoin(p.get('coin')), side: cleanSide(p.get('side')), usd: cleanUsd(p.get('usd')), via: p.get('via') === 'swap' ? 'swap' : '' }
 }
 
 const tryJson = (s: string | undefined) => {
@@ -106,6 +108,7 @@ export async function relayEvent(
 		side,
 		usd,
 		source: 'relay',
+		via: meta.via,
 	}
 }
 
@@ -123,13 +126,14 @@ export async function clientEvent(body: unknown, salt: string, now = Date.now())
 		side: cleanSide(b.side),
 		usd: cleanUsd(b.usd),
 		source: 'client',
+		via: '',
 	}
 }
 
 export async function saveEvent(db: D1, e: MetricEvent) {
 	await db
-		.prepare('INSERT INTO events (t, event, status, offer, ord, coin, side, usd, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-		.bind(e.t, e.event, e.status, e.offer, e.ord, e.coin, e.side, e.usd, e.source)
+		.prepare('INSERT INTO events (t, event, status, offer, ord, coin, side, usd, source, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+		.bind(e.t, e.event, e.status, e.offer, e.ord, e.coin, e.side, e.usd, e.source, e.via)
 		.all()
 }
 
@@ -145,6 +149,10 @@ export interface Summary {
 	takenCompleted: number
 	completed: number
 	volume: number
+	// «Vender ya»: ventas empezadas, cuántas se completaron y su volumen
+	swaps: number
+	swapsCompleted: number
+	swapVolume: number
 	errors: Record<string, number>
 	byCoin: { coin: string; created: number; taken: number; completed: number; volume: number }[]
 	byDay: { day: string; created: number; taken: number; paid: number; completed: number; volume: number }[]
@@ -170,7 +178,12 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 	const offerOfKey = (k: string) => k.slice(0, k.indexOf(':'))
 	// Una oferta publicada aquí tuvo contraparte si después hubo pago o liberación sobre ella
 	const engaged = offersWith('paid', 'release', 'completed', 'take')
-	const volume = [...doneKeys].reduce((s, k) => s + (usdOf.get(k) ?? usdOf.get(`${offerOfKey(k)}:`) ?? 0), 0)
+	const usdDone = (k: string) => usdOf.get(k) ?? usdOf.get(`${offerOfKey(k)}:`) ?? 0
+	const volume = [...doneKeys].reduce((s, k) => s + usdDone(k), 0)
+	// Las ofertas de los VIP suelen ser por partes y las toman otros también, pero aquí solo llegan
+	// las operaciones de quien usa el terminal: lo completado sobre una oferta vendida con «Vender ya» es suyo
+	const swapOffers = new Set(ok.filter((e) => e.event === 'take' && e.via === 'swap').map((e) => e.offer))
+	const swapDone = [...doneKeys].filter((k) => swapOffers.has(offerOfKey(k)))
 
 	const errors: Record<string, number> = {}
 	for (const e of rows) if (e.status === 'error') errors[e.event] = (errors[e.event] ?? 0) + 1
@@ -213,6 +226,9 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 		takenCompleted: [...taken].filter((o) => done.has(o)).length,
 		completed: doneKeys.size,
 		volume: Math.round(volume * 100) / 100,
+		swaps: ok.filter((e) => e.event === 'take' && e.via === 'swap').length,
+		swapsCompleted: swapDone.length,
+		swapVolume: Math.round(swapDone.reduce((s, k) => s + usdDone(k), 0) * 100) / 100,
 		errors,
 		byCoin: [...coins.values()].sort((a, b) => b.completed - a.completed || b.created - a.created),
 		byDay: [...byDayMap.values()].sort((a, b) => (a.day < b.day ? 1 : -1)),
@@ -221,7 +237,7 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 
 export async function loadSummary(db: D1, days: number, now = Date.now()) {
 	const { results } = await db
-		.prepare('SELECT t, event, status, offer, ord, coin, side, usd, source FROM events WHERE t >= ? ORDER BY t LIMIT 100000')
+		.prepare('SELECT t, event, status, offer, ord, coin, side, usd, source, via FROM events WHERE t >= ? ORDER BY t LIMIT 100000')
 		.bind(now - days * 86_400_000)
 		.all<MetricEvent>()
 	return summarize(results, days)
@@ -290,6 +306,7 @@ ${card('Ofertas publicadas aquí', n(s.created))}
 ${card('Operaciones tomadas aquí', n(s.taken))}
 ${card('Operaciones completadas', n(s.completed), 'liberadas aquí o vistas completadas por quien las empezó aquí')}
 ${card('Volumen completado', `${n(s.volume)} USD`)}
+${card('Vender ya', n(s.swaps), `${n(s.swapsCompleted)} completadas · ${n(s.swapVolume)} USD`)}
 </div>
 <h2>Embudos</h2>
 <div class="funnels">
@@ -297,6 +314,8 @@ ${card('Volumen completado', `${n(s.volume)} USD`)}
 ${step('publicadas', s.created, null)}${step('con contraparte', s.createdTaken, s.created)}${step('con al menos una operación completada', s.createdCompleted, s.created)}</ol></div>
 <div class="funnel"><h3>Ofertas tomadas desde el terminal</h3><p>De las ofertas que alguien tomó aquí, cuántas se pagaron y cuántas se completaron.</p><ol>
 ${step('tomadas', s.taken, null)}${step('pagadas', s.takenPaid, s.taken)}${step('completadas', s.takenCompleted, s.taken)}</ol></div>
+<div class="funnel"><h3>Vender ya</h3><p>Ventas de saldo a ofertas VIP hechas con «Vender ya», y cuántas se completaron.</p><ol>
+${step('ventas empezadas', s.swaps, null)}${step('completadas', s.swapsCompleted, s.swaps)}</ol></div>
 </div>
 <h2>Por mercado</h2>
 <div class="wrap">${

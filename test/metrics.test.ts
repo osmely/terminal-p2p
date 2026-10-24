@@ -41,9 +41,10 @@ test('clave del panel: comparación en tiempo constante y HTTP Basic', async () 
 })
 
 test('X-TP-Meta: solo valores válidos', () => {
-	assert.deepEqual(parseMeta('coin=BANK_CUP&side=sell&usd=50.555'), { coin: 'BANK_CUP', side: 'sell', usd: 50.56 })
-	assert.deepEqual(parseMeta('coin=<script>&side=x&usd=9999999'), { coin: '', side: '', usd: 0 })
-	assert.deepEqual(parseMeta(null), { coin: '', side: '', usd: 0 })
+	assert.deepEqual(parseMeta('coin=BANK_CUP&side=sell&usd=50.555'), { coin: 'BANK_CUP', side: 'sell', usd: 50.56, via: '' })
+	assert.deepEqual(parseMeta('coin=BANK_CUP&side=buy&usd=20&via=swap'), { coin: 'BANK_CUP', side: 'buy', usd: 20, via: 'swap' })
+	assert.deepEqual(parseMeta('coin=<script>&side=x&usd=9999999&via=<b>'), { coin: '', side: '', usd: 0, via: '' })
+	assert.deepEqual(parseMeta(null), { coin: '', side: '', usd: 0, via: '' })
 })
 
 test('evento de publicar y de liberar, sin datos de usuario', async () => {
@@ -59,7 +60,7 @@ test('evento de publicar y de liberar, sin datos de usuario', async () => {
 		SALT,
 		NOW,
 	)
-	assert.deepEqual({ ...create, offer: create!.offer.length }, { t: NOW, event: 'create', status: 'ok', offer: 24, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 25, source: 'relay' })
+	assert.deepEqual({ ...create, offer: create!.offer.length }, { t: NOW, event: 'create', status: 'ok', offer: 24, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 25, source: 'relay', via: '' })
 	assert.ok(!JSON.stringify(create).includes('9200') && !JSON.stringify(create).includes('ana'))
 
 	const release = await relayEvent(
@@ -81,7 +82,7 @@ test('aviso del navegador: solo "completed" con un identificador válido', async
 })
 
 test('embudos: publicadas, con contraparte, completadas', () => {
-	const ev = (event: MetricEvent['event'], offer: string, o: Partial<MetricEvent> = {}): MetricEvent => ({ t: NOW, event, status: 'ok', offer, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 0, source: 'relay', ...o })
+	const ev = (event: MetricEvent['event'], offer: string, o: Partial<MetricEvent> = {}): MetricEvent => ({ t: NOW, event, status: 'ok', offer, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 0, source: 'relay', via: '', ...o })
 	const s = summarize(
 		[
 			ev('create', 'a', { usd: 50 }),
@@ -109,4 +110,22 @@ test('embudos: publicadas, con contraparte, completadas', () => {
 		],
 	)
 	assert.deepEqual(s.byDay.map((d) => [d.day, d.created, d.taken, d.paid, d.completed]), [['2026-10-23', 2, 2, 1, 2]])
+	assert.deepEqual([s.swaps, s.swapsCompleted, s.swapVolume], [0, 0, 0])
+})
+
+test('Vender ya: ventas empezadas y completadas, también en ofertas por partes', () => {
+	const ev = (event: MetricEvent['event'], offer: string, o: Partial<MetricEvent> = {}): MetricEvent => ({ t: NOW, event, status: 'ok', offer, ord: '', coin: 'BANK_CUP', side: 'buy', usd: 0, source: 'relay', via: '', ...o })
+	const s = summarize(
+		[
+			ev('take', 'v', { usd: 40, via: 'swap' }),
+			// El navegador la ve completada (la liberó el VIP) con la huella de la orden
+			ev('completed', 'v', { ord: 'o1', usd: 40, source: 'client' }),
+			ev('take', 'w', { usd: 15, via: 'swap' }),
+			ev('take', 'z', { usd: 10 }),
+			ev('completed', 'z', { usd: 10, source: 'client' }),
+		],
+		30,
+	)
+	assert.deepEqual([s.swaps, s.swapsCompleted, s.swapVolume], [2, 1, 40])
+	assert.deepEqual([s.taken, s.completed, s.volume], [3, 2, 50])
 })

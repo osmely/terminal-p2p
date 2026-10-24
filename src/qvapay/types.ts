@@ -138,6 +138,8 @@ export interface ListParams {
 	my?: boolean
 	status?: OfferStatus
 	offer_kind?: 'fixed' | 'flexible'
+	// Solo ofertas publicadas por cuentas VIP
+	vip_maker?: 1
 }
 
 export interface ChatMessage {

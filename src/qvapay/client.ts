@@ -46,6 +46,8 @@ export interface OpMeta {
 	coin?: string
 	side?: string
 	usd?: number
+	// Desde qué parte del terminal se hizo (p. ej. 'swap' para «Vender ya»)
+	via?: string
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
