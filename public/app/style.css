@@ -723,7 +723,8 @@ a.icon-btn { text-decoration: none; }
 .pro-code-box .copy { align-self: flex-start; }
 .pro-code { font-size: 18px; font-weight: 600; letter-spacing: 1px; }
 .pro-code.big { font-size: 34px; letter-spacing: 4px; text-align: center; padding: 8px 0; }
+/* En el móvil la barra no da para más: solo la estrella (dorada si eres Pro) */
 @media (max-width: 520px) {
-	.pro-chip { padding: 0 9px; }
-	.pro-chip:not(.on) .pro-label { display: none; }
+	.pro-chip { width: 32px; padding: 0; justify-content: center; }
+	.pro-chip .pro-label { display: none; }
 }

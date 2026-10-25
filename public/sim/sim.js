@@ -580,7 +580,8 @@ function openPro(html) {
 				<button class="btn block go pro" id="proTrial">Probar 1 mes gratis</button>
 				<div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>
 				<p class="muted small">Pagas con tu saldo en QvaPay. Una sola licencia para el simulador y el terminal. Sin renovación automática: cada pago lo haces tú. Si no te convence, te devolvemos el dinero en los 7 días siguientes al primer pago: escríbenos a <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.</p>
-				<div class="pro-claim"><input class="input mono" id="proCode" placeholder="¿Ya eres Pro? Código: 482 913 o TP-XXXX-…" autocomplete="off" /><button class="btn" id="proClaim">Vincular</button></div>
+				<label class="pro-claim-title" for="proCode">¿Ya eres Pro?</label>
+				<div class="pro-claim"><input class="input mono" id="proCode" placeholder="482 913 o TP-XXXX-…" autocomplete="off" /><button class="btn" id="proClaim">Vincular</button></div>
 				<p class="muted small">El código de 6 cifras sale en el terminal, en <b>Pro › Vincular simulador</b>.</p>`)
 	$('proModal').hidden = false
 }
