@@ -447,14 +447,24 @@ function informalInsight(tick, ref) {
 	return out
 }
 
+// Ofertas que entran y salen del libro. De una que sale no se sabe si la tomaron o la retiró su dueño:
+// QvaPay no lo dice
+const ACT_ICON = {
+	new: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 6v12M6 12h12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
+	gone: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M14 5h4a1 1 0 011 1v12a1 1 0 01-1 1h-4M9 16l-4-4 4-4M5 12h10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+}
 function renderActivity(b) {
 	const items = b.activity.slice(0, 40)
+	const note = '<li class="act-note">Ofertas que entran y salen del libro. Las que salen las tomó alguien o las retiró su dueño: QvaPay no indica cuál.</li>'
 	$('activity').innerHTML = items.length
-		? items
+		? note +
+			items
 				.map((a) => {
 					const t = new Date(a.t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })
-					const what = a.kind === 'new' ? (a.side === 'ask' ? 'Nueva venta' : 'Nueva compra') : a.side === 'ask' ? 'Venta retirada' : 'Compra retirada'
-					return `<li><time>${t}</time><span>${what} · ${fmtU(a.usd)} USD · @${esc(a.user)}</span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
+					const sideName = a.side === 'ask' ? 'una venta' : 'una compra'
+					const what = a.kind === 'new' ? `Entra ${sideName}` : `Sale ${sideName}`
+					const tip = a.kind === 'new' ? 'Oferta nueva o que volvió al libro' : 'La tomó alguien o la retiró su dueño; QvaPay no indica cuál'
+					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${a.kind} ${a.side}">${ACT_ICON[a.kind]}</i><span>${what} · ${fmtU(a.usd)} USD · @${esc(a.user)}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
 				})
 				.join('')
 		: '<li><span></span><span class="muted">Esperando cambios en el libro…</span><span></span></li>'
