@@ -74,6 +74,9 @@ function renderProChip() {
 }
 
 // ── Ventana Pro ──────────────────────────────────────────────────────
+// Siendo Pro solo se paga en los últimos días del plan (el servidor también lo exige); en el mes gratis, siempre
+const canRenew = () => !pro.active || pro.plan === 'trial' || pro.expiresAt - Date.now() <= RENEW_SOON_MS
+
 function showPro() {
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para hacerte Pro', true)
 	const feats = PRO_FEATURES.map(([i, t, d]) => `<li><span class="pro-ic">${i}</span><div><b>${t}</b><p class="muted">${d}</p></div></li>`).join('')
@@ -84,8 +87,11 @@ function showPro() {
 				<p class="muted">@${esc(pro.username)} · ${{ trial: 'prueba gratis', year: 'plan anual', gift: 'plan regalado' }[pro.plan] ?? 'plan mensual'} · hasta el <b>${proDate(pro.expiresAt)}</b>${pro.plan === 'trial' ? '. Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
 				<ul class="pro-feats">${feats}</ul>
 				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proSim">Vincular simulador</button><button class="btn" id="proBackup">Código de respaldo</button></div>
-				<p class="hint">Hasta 2 dispositivos a la vez. No se renueva solo: renovar suma el periodo a lo que te queda:</p>
-				<div class="pro-plans">${plans}</div></div>`
+				${
+					canRenew()
+						? `<p class="hint">Hasta 2 dispositivos a la vez. No se renueva solo: renovar suma el periodo a lo que te queda:</p><div class="pro-plans">${plans}</div>`
+						: `<p class="hint">Hasta 2 dispositivos a la vez. No se renueva solo: podrás renovar desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>.</p>`
+				}</div>`
 			: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
 				<button class="btn primary block" id="proTrial">Probar 1 mes gratis</button>

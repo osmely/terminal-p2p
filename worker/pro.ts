@@ -39,6 +39,11 @@ const DAY_MS = 86_400_000
 const LICENSE_MS = DAY_MS // la licencia firmada vale un día y el terminal la renueva sola
 const PAIR_MS = 5 * 60_000
 const CHECKOUT_MS = 60 * 60_000
+// Siendo Pro (de pago o regalado) solo se puede pagar en los últimos días del plan; en el mes gratis, siempre
+export const RENEW_DAYS = 5
+// Una factura pendiente se reutiliza si aún le queda margen para pagarla
+const REUSE_MS = 45 * 60_000
+const PAY_URL = 'https://www.qvapay.com/pay/'
 const QVAPAY = 'https://api.qvapay.com'
 const PRINT = /^[0-9a-f]{64}$/
 // Sin caracteres que se confundan al copiarlos a mano (0/O, 1/I/L)
@@ -225,6 +230,16 @@ export async function linkSim(db: D1, tg: number, license: string) {
 // simulador (con la cuenta de Telegram). El aviso de pago va siempre al dominio del terminal
 export async function createCheckout(env: ProEnv, who: { print?: string; tg?: number }, plan: Plan, origin: string, now: number, fetcher: typeof fetch = fetch) {
 	if (!(plan in PLANS)) throw new ProError(400, 'Plan no válido')
+	const db = env.DB
+	const l = who.print ? await licenseOfPrint(db, who.print, now) : who.tg ? await simLicense(db, who.tg, now) : null
+	if (l && l.plan !== 'trial' && l.expires_at - now > RENEW_DAYS * DAY_MS) throw new ProError(409, `Ya eres Pro. Podrás renovar en los últimos ${RENEW_DAYS} días de tu plan.`)
+	// Si ya tiene una factura pendiente del mismo plan, la misma: así no se pagan dos por error
+	const [col, owner] = who.print ? ['print', who.print] : ['tg', who.tg ?? null]
+	const open = await db
+		.prepare(`SELECT id, invoice FROM pro_checkouts WHERE status = 'pending' AND created_at > ? AND plan = ? AND ${col} = ? AND invoice IS NOT NULL ORDER BY created_at DESC LIMIT 1`)
+		.bind(now - REUSE_MS, plan, owner)
+		.first<{ id: string; invoice: string }>()
+	if (open) return { id: open.id, url: `${PAY_URL}${open.invoice}` }
 	const id = `pro-${crypto.randomUUID()}`
 	const p = PLANS[plan]
 	const inv = await qvapay<{ transaction_uuid?: string; url?: string }>(
@@ -240,7 +255,7 @@ export async function createCheckout(env: ProEnv, who: { print?: string; tg?: nu
 		fetcher,
 	)
 	if (!inv.transaction_uuid || !inv.url) throw new ProError(502, 'QvaPay no devolvió la factura')
-	await env.DB.prepare("INSERT INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)")
+	await db.prepare("INSERT INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)")
 		.bind(id, who.print ?? '', who.tg ?? null, plan, p.usd, inv.transaction_uuid, now)
 		.run()
 	return { id, url: inv.url }

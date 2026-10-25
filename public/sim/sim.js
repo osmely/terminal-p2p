@@ -545,6 +545,8 @@ async function submitOrder() {
 // comprando aquí con QvaPay: quién paga lo confirma QvaPay, y el código de respaldo activa también el terminal
 const locked = (sym) => !S.pro && !S.markets[sym]?.free
 const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
+// Siendo Pro solo se paga en los últimos días del plan (el servidor también lo exige); en el mes gratis, siempre
+const RENEW_SOON_MS = 5 * 86_400_000
 const PRO_PLANS = [
 	['month', 'Mensual', '1,99 USD', 'al mes'],
 	['year', 'Anual', '20 USD', 'al año · 2 meses gratis'],
@@ -571,7 +573,11 @@ function openPro(html) {
 		html ??
 		(S.pro
 			? `<h2>★ ${S.pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h2><p class="muted">${{ trial: 'Prueba gratis', year: 'Plan anual', gift: 'Plan regalado' }[S.pro.plan] ?? 'Plan mensual'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.${S.pro.plan === 'trial' ? ' Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
-				<p class="muted">No se renueva solo. Para renovar, desde aquí o desde el terminal:</p><div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>`
+				${
+					S.pro.plan === 'trial' || S.pro.expiresAt - Date.now() <= RENEW_SOON_MS
+						? `<p class="muted">No se renueva solo. Para renovar, desde aquí o desde el terminal:</p><div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>`
+						: `<p class="muted">No se renueva solo: podrás renovar desde el <b>${proDate(S.pro.expiresAt - RENEW_SOON_MS)}</b>.</p>`
+				}`
 			: `<h2>★ Terminal P2P Pro</h2>
 				<ul class="pro-feats">
 					<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>

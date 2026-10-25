@@ -104,10 +104,29 @@ test('comprar: factura de QvaPay, quién pagó lo confirma QvaPay y el código d
 test('renovar suma el periodo y no cambia el código de respaldo', async () => {
 	const s = setup()
 	await buy(s)
-	s.tick(10 * 86_400_000)
+	s.tick(26 * 86_400_000)
 	const { result } = await buy(s, P1, 'year')
 	assert.equal(result.expiresAt, T0 + (30 + 365) * 86_400_000)
 	assert.equal(result.backupCode, null)
+})
+
+test('siendo Pro no se puede pagar hasta los últimos 5 días; una factura pendiente del mismo plan se reutiliza', async () => {
+	const s = setup()
+	// Dos clics en «Mensual»: la misma factura, no dos
+	const a = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	assert.deepEqual((await s.post('/pro/checkout', { print: P1, plan: 'month' })).body, a)
+	assert.equal(s.q.invoices.size, 1)
+	// Otro plan sí es otra factura
+	assert.notEqual((await s.post('/pro/checkout', { print: P1, plan: 'year' })).body.id, a.id)
+	s.q.pay('inv-1', 'ana')
+	assert.equal((await s.status(a.id)).body.status, 'paid')
+	// Ya es Pro con 30 días: no puede pagar otra vez
+	const r = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	assert.equal(r.status, 409)
+	assert.match(r.body.error, /últimos 5 días/)
+	// En los últimos 5 días, sí
+	s.tick(26 * 86_400_000)
+	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'month' })).status, 200)
 })
 
 test('no se da por pagada si QvaPay no lo confirma, si paga menos o si el aviso es falso', async () => {
@@ -325,17 +344,17 @@ test('pide una factura, luego otra, y paga la primera: la pantalla que espera la
 	const s = setup()
 	const first = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
 	s.tick(60_000)
-	const second = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	const second = (await s.post('/pro/checkout', { print: P1, plan: 'year' })).body
 	s.tick(60_000)
 	s.q.pay('inv-1', 'ana')
 	const r = (await s.status(second.id)).body
 	assert.deepEqual([r.status, r.pro], ['paid', true])
 	assert.match(r.backupCode, /^TP-/)
-	// Una factura pagada antes de pedir esta no cuenta como pago de esta
-	s.tick(60_000)
-	const third = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
-	assert.equal((await s.status(third.id)).body.status, 'pending')
 	assert.equal((await s.status(first.id)).body.backupCode, null)
+	// Al renovar, el pago anterior (de antes de pedir esta) no cuenta como pago de esta
+	s.tick(26 * 86_400_000)
+	const renewal = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	assert.equal((await s.status(renewal.id)).body.status, 'pending')
 })
 
 test('el estado de una factura solo se lo da a quien la pidió: otro no se lleva el código de respaldo', async () => {
