@@ -507,10 +507,10 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 					notice = `<p class="note">No se pudo consultar: ${escHtml((err as Error).message)}</p>`
 				}
 		}
+		// Revocar suspende la licencia sin soltar sus dispositivos: al restaurarla, siguen siendo Pro
 		if (action === 'revoke' || action === 'restore') {
 			await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ?').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
-			if (action === 'revoke') await db.prepare('DELETE FROM pro_prints WHERE license = ?').bind(uuid).run()
-			notice = `<p class="ok">${action === 'revoke' ? 'Licencia revocada y sus dispositivos fuera' : 'Licencia restaurada'}.</p>`
+			notice = `<p class="ok">${action === 'revoke' ? 'Licencia revocada: sus dispositivos dejan de ser Pro' : 'Licencia restaurada: sus dispositivos vuelven a ser Pro'}.</p>`
 		}
 	}
 	const url = new URL(req.url)

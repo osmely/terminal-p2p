@@ -213,7 +213,7 @@ test('el módulo Pro sale firmado con el usuario, y nunca sin licencia válida o
 	assert.equal((await s.get(`/pro/module.js?l=${encodeURIComponent(result.license)}`)).status, 403)
 })
 
-test('panel: regalar una licencia (con código para activarla) y revocarla', async () => {
+test('panel: regalar una licencia (con código para activarla), revocarla y restaurarla', async () => {
 	const s = setup()
 	const form = (fields: Record<string, string>, auth = 'panel') =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa(`x:${auth}`)}` }, body: new URLSearchParams(fields) }), s.env, T0)
@@ -223,6 +223,9 @@ test('panel: regalar una licencia (con código para activarla) y revocarla', asy
 	assert.equal((await s.post('/pro/claim', { print: P1, code })).body.pro, true)
 	await form({ action: 'revoke', uuid: 'gift:leo' })
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
+	// Restaurar la deja como estaba: el mismo dispositivo vuelve a ser Pro sin hacer nada
+	await form({ action: 'restore', uuid: 'gift:leo' })
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
 })
 
 test('sin credenciales de QvaPay no se puede comprar, y una huella mal formada se rechaza', async () => {
