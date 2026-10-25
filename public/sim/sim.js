@@ -487,35 +487,114 @@ async function loadBook() {
 	} catch {}
 }
 
+// El libro se actualiza fila a fila: cada precio conserva su fila, solo cambia lo que cambió y eso destella
+// (verde si la cantidad en ese precio sube o aparece, rojo si baja). Lo mismo con las últimas operaciones
+let bookDom = null // { key, asks: Map<precio, fila>, bids: Map<precio, fila>, mid } del mercado y pestaña pintados
+let midPrice = null
+
+function flash(el, kind) {
+	el.classList.remove('flash-up', 'flash-down')
+	void el.offsetWidth // reinicia la animación
+	el.classList.add(kind === 'down' ? 'flash-down' : 'flash-up')
+	clearTimeout(el._flash)
+	el._flash = setTimeout(() => el.classList.remove('flash-up', 'flash-down'), 1000)
+}
+
+function bookRow(side) {
+	const el = document.createElement('button')
+	el.className = `bk ${side}`
+	el.title = 'Usar este precio'
+	el.innerHTML = '<span class="p"></span><span class="q"></span><span class="tt"></span>'
+	return el
+}
+
 function renderBook() {
 	for (const b of document.querySelectorAll('[data-book]')) b.classList.toggle('active', b.dataset.book === S.bookTab)
 	const body = $('bookBody')
 	const u = esc(base(S.symbol))
-	if (S.bookTab === 'trades') {
-		const ts = S.trades ?? []
-		body.innerHTML = `<div class="bk-cols"><span>Precio</span><span>Cantidad (${u})</span><span>Hora</span></div>${ts
-			.map((t) => `<div class="bk trade ${t.sell ? 'ask' : 'bid'}"><span class="p">${fmtPrice(t.p)}</span><span>${fmtQty(t.q)}</span><span>${new Date(t.t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span></div>`)
-			.join('')}`
-		return
-	}
+	const key = `${S.symbol}:${S.bookTab}`
+	if (S.bookTab === 'trades') return renderTrades(body, u, key)
 	const b = S.book
-	if (!b) return (body.innerHTML = '<p class="empty">Cargando el libro…</p>')
+	if (!b) {
+		bookDom = null
+		return (body.innerHTML = '<p class="empty">Cargando el libro…</p>')
+	}
+	// Estructura nueva al cambiar de mercado o de pestaña; si no, se reutiliza
+	if (bookDom?.key !== key) {
+		body.innerHTML = `<div class="bk-cols"><span>Precio</span><span>Cantidad (${u})</span><span>Total</span></div><div class="bk-side" id="bkAsks"></div><div class="bk-mid"><b></b><small></small></div><div class="bk-side" id="bkBids"></div>`
+		bookDom = { key, asks: new Map(), bids: new Map(), first: true }
+		midPrice = null
+	}
 	const N = 10
 	const asks = b.asks.slice(0, N)
 	const bids = b.bids.slice(0, N)
 	const max = Math.max(...asks.map((x) => x[1] * x[0]), ...bids.map((x) => x[1] * x[0]), 1)
-	const row = ([p, q], side) => {
-		const w = Math.round(((p * q) / max) * 100)
-		const color = side === 'ask' ? 'var(--ask-bg)' : 'var(--bid-bg)'
-		return `<button class="bk ${side}" data-price="${p}" style="background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)" title="Usar este precio"><span class="p">${fmtPrice(p)}</span><span>${fmtQty(q)}</span><span>${fmtCompact(p * q)}</span></button>`
+	const side = (levels, which, container) => {
+		const map = bookDom[which]
+		const next = new Map()
+		// Las ventas se ven de mayor a menor precio (la mejor, abajo, junto al centro)
+		const ordered = which === 'asks' ? [...levels].reverse() : levels
+		for (const [p, q] of ordered) {
+			let el = map.get(p)
+			const isNew = !el
+			if (isNew) {
+				el = bookRow(which === 'asks' ? 'ask' : 'bid')
+				el.dataset.price = String(p)
+				el.querySelector('.p').textContent = fmtPrice(p)
+			}
+			const prevQ = Number(el.dataset.q ?? 0)
+			if (isNew || prevQ !== q) {
+				el.dataset.q = String(q)
+				el.querySelector('.q').textContent = fmtQty(q)
+				el.querySelector('.tt').textContent = fmtCompact(p * q)
+				if (!bookDom.first) flash(el, isNew || q > prevQ ? 'up' : 'down')
+			}
+			const w = Math.round(((p * q) / max) * 100)
+			el.style.backgroundImage = `linear-gradient(to left, ${which === 'asks' ? 'var(--ask-bg)' : 'var(--bid-bg)'} ${w}%, transparent ${w}%)`
+			container.appendChild(el) // la mueve a su sitio sin rehacerla
+			next.set(p, el)
+		}
+		for (const [p, el] of map) if (!next.has(p)) el.remove()
+		bookDom[which] = next
 	}
+	side(asks, 'asks', $('bkAsks'))
+	side(bids, 'bids', $('bkBids'))
+	// Centro: precio actual (destella si cambia) y diferencial
 	const last = S.live[S.symbol]
+	const mid = body.querySelector('.bk-mid')
 	const ch = last ? last.last - last.open : 0
+	const midB = mid.querySelector('b')
+	midB.className = cls(ch)
+	midB.textContent = last ? fmtPrice(last.last) : '—'
+	if (last && midPrice != null && last.last !== midPrice) flash(mid, last.last > midPrice ? 'up' : 'down')
+	midPrice = last?.last ?? null
 	const spread = asks[0] && bids[0] ? ((asks[0][0] / bids[0][0] - 1) * 100).toFixed(3).replace('.', ',') : null
-	body.innerHTML = `<div class="bk-cols"><span>Precio</span><span>Cantidad (${u})</span><span>Total</span></div>
-		${[...asks].reverse().map((x) => row(x, 'ask')).join('')}
-		<div class="bk-mid"><b class="${cls(ch)}">${last ? fmtPrice(last.last) : '—'}</b>${spread ? `<small>diferencial ${spread}%</small>` : ''}</div>
-		${bids.map((x) => row(x, 'bid')).join('')}`
+	mid.querySelector('small').textContent = spread ? `diferencial ${spread}%` : ''
+	bookDom.first = false
+}
+
+// Últimas operaciones: las nuevas entran arriba con un destello del color de su lado
+function renderTrades(body, u, key) {
+	const ts = S.trades ?? []
+	if (bookDom?.key !== key) {
+		body.innerHTML = `<div class="bk-cols"><span>Precio</span><span>Cantidad (${u})</span><span>Hora</span></div><div class="bk-side" id="bkTrades"></div>`
+		bookDom = { key, seen: new Set(), first: true }
+	}
+	const list = $('bkTrades')
+	const id = (t) => `${t.t}:${t.p}:${t.q}:${t.sell ? 1 : 0}`
+	const fresh = ts.filter((t) => !bookDom.seen.has(id(t)))
+	// De la más antigua a la más reciente, para que la última quede arriba
+	for (const t of [...fresh].reverse()) {
+		bookDom.seen.add(id(t))
+		const el = document.createElement('div')
+		el.className = `bk trade ${t.sell ? 'ask' : 'bid'}`
+		el.innerHTML = `<span class="p">${fmtPrice(t.p)}</span><span>${fmtQty(t.q)}</span><span>${new Date(t.t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>`
+		list.prepend(el)
+		if (!bookDom.first) flash(el, t.sell ? 'down' : 'up')
+	}
+	while (list.children.length > 30) list.lastChild.remove()
+	// La primera carga no destella (con la lista aún vacía, todo contaría como nuevo)
+	if (ts.length) bookDom.first = false
 }
 
 // ── Pestañas de abajo ─────────────────────────────────────────────────

@@ -154,7 +154,7 @@ a { color: var(--accent); }
 .bk span { overflow: hidden; text-overflow: ellipsis; }
 .bk-cols { font: 500 11px var(--sans); color: var(--muted); padding-top: 6px; padding-bottom: 4px; }
 .bk-cols span:not(:first-child), .bk span:not(:first-child) { text-align: right; }
-.bk { border: 0; width: 100%; background-color: transparent; background-repeat: no-repeat; background-position: right; text-align: left; color: var(--text-2); font: inherit; cursor: pointer; white-space: nowrap; }
+.bk { position: relative; border: 0; width: 100%; background-color: transparent; background-repeat: no-repeat; background-position: right; text-align: left; color: var(--text-2); font: inherit; cursor: pointer; white-space: nowrap; }
 .bk:hover { background-color: var(--surface-3); }
 .bk .p { font-weight: 500; }
 .bk.ask .p { color: var(--ask); }
@@ -162,6 +162,13 @@ a { color: var(--accent); }
 .bk.trade { cursor: default; }
 .bk-mid { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 2px 0; }
 .bk-mid b { font-size: 16px; }
+.bk-mid { position: relative; }
+/* Destello de lo que cambió en el libro y en las últimas operaciones */
+.flash-up::after, .flash-down::after { content: ''; position: absolute; inset: 0; pointer-events: none; animation: bk-flash 0.9s ease-out; }
+.flash-up::after { background: color-mix(in srgb, var(--bid) 32%, transparent); }
+.flash-down::after { background: color-mix(in srgb, var(--ask) 32%, transparent); }
+@keyframes bk-flash { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .flash-up::after, .flash-down::after { animation: none; } }
 .bk-mid small { color: var(--muted); font-size: 11px; }
 .go { padding: 11px; font-size: 14.5px; color: #fff; border: 0; }
 .go.buy { background: var(--bid); }
