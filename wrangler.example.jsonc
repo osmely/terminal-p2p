@@ -47,6 +47,30 @@
 		{ "pattern": "sim.example.com", "custom_domain": true }
 	],
 
+	// Opcional: staging (npx wrangler deploy --env staging), otro Worker con su base, KV y dominios.
+	// Los secretos se ponen aparte con --env staging
+	"env": {
+		"staging": {
+			"name": "terminal-p2p-staging",
+			"d1_databases": [
+				{ "binding": "DB", "database_name": "terminal-p2p-staging", "database_id": "<id de la base D1 de staging>" }
+			],
+			"kv_namespaces": [{ "binding": "PRO", "id": "<id del KV de staging>" }],
+			"ratelimits": [
+				{ "name": "EVENT_LIMIT", "namespace_id": "2001", "simple": { "limit": 30, "period": 60 } },
+				{ "name": "PANEL_LIMIT", "namespace_id": "2002", "simple": { "limit": 10, "period": 60 } },
+				{ "name": "SIM_LIMIT", "namespace_id": "2003", "simple": { "limit": 60, "period": 60 } },
+				{ "name": "PRO_LIMIT", "namespace_id": "2004", "simple": { "limit": 10, "period": 60 } }
+			],
+			"vars": { "STAGING": "1", "QVAPAY_APP_ID": "<app-id de la app de comerciante de staging>" },
+			"routes": [
+				{ "pattern": "staging.example.com", "custom_domain": true },
+				{ "pattern": "app.staging.example.com", "custom_domain": true },
+				{ "pattern": "sim.staging.example.com", "custom_domain": true }
+			]
+		}
+	},
+
 	// Solo errores de la app; sin registro por petición (URLs, IPs, cabeceras)
 	"observability": { "enabled": true, "logs": { "invocation_logs": false } }
 }

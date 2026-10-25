@@ -14,6 +14,7 @@
     "dev:sim": "wrangler dev --port 5180 --local-upstream sim.localhost:5180 --upstream-protocol http --test-scheduled",
     "dev:site": "wrangler dev --port 5179 --local-upstream localhost:5179 --upstream-protocol http --persist-to .wrangler/state-site",
     "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
     "vendor": "node scripts/vendor.mjs",
     "build:web": "esbuild web/main.ts --bundle --format=iife --target=es2022 --minify --sourcemap --outfile=public/app/data.js"
   },

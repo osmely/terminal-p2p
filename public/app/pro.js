@@ -6,6 +6,9 @@
 const pro = { active: false, username: null, plan: null, expiresAt: null, license: null, print: null, loaded: false }
 window.TPPro = pro
 
+// El simulador del mismo entorno (sim.staging… desde app.staging…); en desarrollo, el de producción
+const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname) ? location.origin.replace('://app.', '://sim.') : 'https://sim.terminalp2p.com'
+
 const PRO_PLANS = [
 	['month', 'Mensual', '1,99 USD', 'al mes'],
 	['year', 'Anual', '20 USD', 'al año · 2 meses gratis'],
@@ -196,7 +199,7 @@ async function showPair(sim = false) {
 		openModal(`<div class="stack pro-box"><h3>${sim ? 'Vincular simulador' : 'Añadir dispositivo'}</h3>
 			<p class="muted">${
 				sim
-					? 'En <a class="link" href="https://sim.terminalp2p.com" target="_blank" rel="noopener">sim.terminalp2p.com</a>, entra con Telegram, pulsa <b>★ Hazte Pro</b> y escribe este código en «¿Ya eres Pro?»:'
+					? `En <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">${new URL(SIM_URL).host}</a>, entra con Telegram, pulsa <b>★ Hazte Pro</b> y escribe este código en «¿Ya eres Pro?»:`
 					: 'En el otro móvil u ordenador, conecta tu cuenta, pulsa <b>Hazte Pro</b> y luego <b>Ya soy Pro en otro dispositivo</b>. Escribe este código:'
 			}</p>
 			<div class="pro-code mono big">${code.slice(0, 3)} ${code.slice(3)}</div>

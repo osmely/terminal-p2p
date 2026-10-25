@@ -29,6 +29,8 @@ interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	PANEL_LIMIT?: RateLimiter
 	SIM_LIMIT?: RateLimiter
 	PRO_LIMIT?: RateLimiter
+	// «1» en el entorno de staging (wrangler deploy --env staging)
+	STAGING?: string
 }
 
 interface RateLimiter {
@@ -59,50 +61,68 @@ const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : host.star
 const SIM_CSP =
 	"default-src 'self'; script-src 'self' https://telegram.org; frame-src https://oauth.telegram.org; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.me https://*.telegram.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
+async function handle(req: Request, env: Env, ctx: ExecutionContext) {
+	const url = new URL(req.url)
+
+	// www.terminalp2p.com → terminalp2p.com
+	if (url.hostname.startsWith('www.')) {
+		url.hostname = url.hostname.slice(4)
+		return Response.redirect(url.toString(), 301)
+	}
+
+	if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`))
+		return secure(
+			await relay(req, url, ctx, async (w) => {
+				if (!env.METRICS_SALT) return
+				const e = await relayEvent(w, env.METRICS_SALT)
+				if (e) await saveEvent(env.DB, e)
+			}),
+		)
+	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
+	// Panel único en el dominio del terminal; el antiguo del simulador lleva a su pestaña
+	if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/')))
+		return Response.redirect(`${url.origin.replace('://sim.', '://app.')}/admin/sim`, 301)
+	if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
+		if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
+		if (url.pathname === '/admin') return Response.redirect(`${url.origin}/admin/metrics`, 302)
+		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
+		if (url.pathname === '/admin/pro') return secure(await proAdmin(req, env as unknown as ProEnv))
+		if (url.pathname === '/admin/sim' || url.pathname === '/admin/sim/publish') return secure(await simAdmin(req, url, env as unknown as SimEnv))
+		return secure(jsonError(404, 'no encontrado'))
+	}
+	if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
+	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
+	// Plan Pro, en el dominio del terminal. Canjear códigos tiene tope (que nadie los pruebe a ciegas)
+	if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
+		const guarded = ['/pro/claim', '/pro/pair', '/pro/checkout', '/pro/trial'].includes(url.pathname)
+		if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
+		const r = await proApi(req, url, env as unknown as ProEnv)
+		if (r) return secure(r)
+	}
+	if (folderFor(url.hostname) === 'sim' && url.pathname.startsWith('/api/')) {
+		if (req.method !== 'GET' && !(await underLimit(env.SIM_LIMIT, req))) return secure(jsonError(429, 'Demasiadas órdenes seguidas: espera unos segundos'))
+		return secure(await simApi(req, url, env as unknown as SimEnv))
+	}
+	return assets(req, url, env)
+}
+
+// Staging: que ningún buscador lo indexe y que se vea a simple vista que no es producción
+const STAGING_BADGE =
+	'<div style="position:fixed;left:8px;bottom:8px;z-index:99999;padding:3px 8px;border-radius:6px;background:#f0b93a;color:#000;font:700 11px/1.4 system-ui,sans-serif;letter-spacing:.06em;pointer-events:none">STAGING</div>'
+
+function staged(res: Response) {
+	if (res.status === 101) return res
+	const out = new Response(res.body, res)
+	out.headers.set('X-Robots-Tag', 'noindex, nofollow')
+	if (!out.headers.get('Content-Type')?.includes('text/html')) return out
+	return new HTMLRewriter().on('body', { element: (b) => void b.append(STAGING_BADGE, { html: true }) }).transform(out)
+}
+
 export default {
 	async fetch(req, env, ctx) {
-		const url = new URL(req.url)
-
-		// www.terminalp2p.com → terminalp2p.com
-		if (url.hostname.startsWith('www.')) {
-			url.hostname = url.hostname.slice(4)
-			return Response.redirect(url.toString(), 301)
-		}
-
-		if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`))
-			return secure(
-				await relay(req, url, ctx, async (w) => {
-					if (!env.METRICS_SALT) return
-					const e = await relayEvent(w, env.METRICS_SALT)
-					if (e) await saveEvent(env.DB, e)
-				}),
-			)
-		if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
-		// Panel único en el dominio del terminal; el antiguo del simulador lleva a su pestaña
-		if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/')))
-			return Response.redirect(`${url.origin.replace('://sim.', '://app.')}/admin/sim`, 301)
-		if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
-			if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
-			if (url.pathname === '/admin') return Response.redirect(`${url.origin}/admin/metrics`, 302)
-			if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
-			if (url.pathname === '/admin/pro') return secure(await proAdmin(req, env as unknown as ProEnv))
-			if (url.pathname === '/admin/sim' || url.pathname === '/admin/sim/publish') return secure(await simAdmin(req, url, env as unknown as SimEnv))
-			return secure(jsonError(404, 'no encontrado'))
-		}
-		if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
-		if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
-		// Plan Pro, en el dominio del terminal. Canjear códigos tiene tope (que nadie los pruebe a ciegas)
-		if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
-			const guarded = ['/pro/claim', '/pro/pair', '/pro/checkout', '/pro/trial'].includes(url.pathname)
-			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
-			const r = await proApi(req, url, env as unknown as ProEnv)
-			if (r) return secure(r)
-		}
-		if (folderFor(url.hostname) === 'sim' && url.pathname.startsWith('/api/')) {
-			if (req.method !== 'GET' && !(await underLimit(env.SIM_LIMIT, req))) return secure(jsonError(429, 'Demasiadas órdenes seguidas: espera unos segundos'))
-			return secure(await simApi(req, url, env as unknown as SimEnv))
-		}
-		return assets(req, url, env)
+		if (!env.STAGING) return handle(req, env, ctx)
+		if (new URL(req.url).pathname === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: { 'Content-Type': 'text/plain' } })
+		return staged(await handle(req, env, ctx))
 	},
 
 	// Cada minuto: las órdenes pendientes del simulador. Cada 10: los agregados públicos de QvaPay,
