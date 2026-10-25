@@ -147,7 +147,13 @@ async function tickers(url: URL) {
 	const rows = await Promise.all(
 		SYMBOLS.map((s) =>
 			market<{ lastPrice: string; openPrice: string; bidPrice: string; askPrice: string }>(sourceOf(s), `/ticker/24hr?symbol=${s}`)
-				.then((r) => [s, { last: +r.lastPrice, open: +r.openPrice, bid: +r.bidPrice, ask: +r.askPrice, t: now }] as const)
+				// El «último precio» de este resumen va hasta 10 s por detrás; el bid/ask está al día: el precio en
+				// vivo es su punto medio (si falta, el último)
+				.then((r) => {
+					const bid = +r.bidPrice
+					const ask = +r.askPrice
+					return [s, { last: bid > 0 && ask > 0 ? (bid + ask) / 2 : +r.lastPrice, open: +r.openPrice, bid, ask, t: now }] as const
+				})
 				.catch(() => null),
 		),
 	)
