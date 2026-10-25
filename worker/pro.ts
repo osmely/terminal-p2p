@@ -32,6 +32,7 @@ export const PLANS = {
 export type Plan = keyof typeof PLANS
 
 export const PRO_DEVICES = 2
+export const TRIAL_DAYS = 30
 const DAY_MS = 86_400_000
 const LICENSE_MS = DAY_MS // la licencia firmada vale un día y el terminal la renueva sola
 const PAIR_MS = 5 * 60_000
@@ -150,8 +151,11 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	if (!marked.meta?.changes) return true
 	const plan = PLANS[c.plan]
 	const old = await db.prepare('SELECT uuid, expires_at, backup_hash FROM pro_licenses WHERE uuid = ?').bind(payer.uuid).first<License>()
+	// Si pagas durante el mes gratis, lo que te quedaba de él se suma
+	const trial = c.print ? await licenseOfPrint(db, c.print, now) : c.tg ? await simLicense(db, c.tg, now) : null
+	const trialLeft = trial?.plan === 'trial' ? trial.expires_at : 0
 	// Renovar suma el periodo a lo que quedaba
-	const expires = Math.max(now, old?.expires_at ?? 0) + plan.days * DAY_MS
+	const expires = Math.max(now, old?.expires_at ?? 0, trialLeft) + plan.days * DAY_MS
 	if (old) await db.prepare('UPDATE pro_licenses SET username = ?, plan = ?, expires_at = ?, updated_at = ? WHERE uuid = ?').bind(payer.username, c.plan, expires, now, payer.uuid).run()
 	else
 		await db
@@ -174,6 +178,22 @@ export async function activeLicense(db: D1, uuid: string | null | undefined, now
 	if (!uuid) return null
 	const l = await db.prepare('SELECT uuid, username, plan, expires_at, backup_hash, revoked FROM pro_licenses WHERE uuid = ?').bind(uuid).first<License>()
 	return l && !l.revoked && l.expires_at > now ? l : null
+}
+
+async function simLicense(db: D1, tg: number, now: number) {
+	const u = await db.prepare('SELECT pro_license FROM sim_users WHERE tg_id = ?').bind(tg).first<{ pro_license: string | null }>()
+	return activeLicense(db, u?.pro_license, now)
+}
+
+// Primer mes gratis. Las llaves dicen quién ya lo usó (una sola vez cada una); si alguna ya se usó, no hay otro
+export async function startTrial(db: D1, license: string, username: string, keys: string[], now: number) {
+	for (const k of keys) if (await db.prepare('SELECT 1 FROM pro_trials WHERE key = ?').bind(k).first()) throw new ProError(409, 'Ya usaste tu mes gratis. Hazte Pro para seguir.')
+	if (await activeLicense(db, license, now)) throw new ProError(409, 'Ya tienes tu mes gratis activo')
+	await db
+		.prepare("INSERT INTO pro_licenses (uuid, username, plan, expires_at, revoked, created_at, updated_at) VALUES (?, ?, 'trial', ?, 0, ?, ?) ON CONFLICT(uuid) DO UPDATE SET plan = 'trial', expires_at = excluded.expires_at, updated_at = excluded.updated_at")
+		.bind(license, username, now + TRIAL_DAYS * DAY_MS, now, now)
+		.run()
+	for (const k of keys) await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(k, license, now).run()
 }
 
 // La cuenta del simulador (Telegram) queda vinculada a la licencia: los Pro operan todos los mercados
@@ -287,6 +307,19 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			for (const inv of invoices) c ??= await db.prepare('SELECT * FROM pro_checkouts WHERE invoice = ?').bind(inv).first<Checkout>()
 			if (c) await settle(env, c, now, fetcher)
 			return json(200, { ok: true })
+		}
+
+		// Primer mes gratis en el terminal: una vez por usuario de QvaPay y por dispositivo
+		if (route === 'POST /pro/trial') {
+			const b = await readBody(req)
+			const print = printOf(b.print)
+			const username = String(b.username ?? '').replace(/^@/, '').trim()
+			if (!/^[A-Za-z0-9._-]{1,40}$/.test(username)) return json(400, { error: 'Conecta tu cuenta de QvaPay' })
+			if (await licenseOfPrint(db, print, now)) return json(409, { error: 'Este dispositivo ya es Pro' })
+			const license = `trial:qp:${username.toLowerCase()}`
+			await startTrial(db, license, username, [`qp:${username.toLowerCase()}`, `print:${print}`], now)
+			await attachPrint(db, license, print, now)
+			return json(200, await statusOf(env, await licenseOfPrint(db, print, now), now))
 		}
 
 		// Cambiaste de token en este navegador: la huella vieja autoriza a la nueva

@@ -246,3 +246,32 @@ test('simulador: hacerse Pro desde el simulador vincula esa cuenta de Telegram y
 	// Con ese código, el terminal también queda Pro
 	assert.equal((await s.post('/pro/claim', { print: P2, code: body.backupCode })).body.pro, true)
 })
+
+test('primer mes gratis: una vez por usuario de QvaPay y por dispositivo; si paga, los días que quedaban se suman', async () => {
+	const s = setup()
+	const r = await s.post('/pro/trial', { print: P1, username: 'Ana' })
+	assert.deepEqual([r.status, r.body.pro, r.body.plan, r.body.expiresAt], [200, true, 'trial', T0 + 30 * 86_400_000])
+	// Otro token (otro dispositivo) con el mismo usuario: no hay otro mes gratis
+	assert.equal((await s.post('/pro/trial', { print: P2, username: 'ana' })).status, 409)
+	// Ni otro usuario desde el mismo dispositivo
+	assert.equal((await s.post('/pro/trial', { print: P1, username: 'leo' })).status, 409)
+	// A los 10 días paga el plan mensual: le quedaban 20 días de prueba, que se suman
+	s.tick(10 * 86_400_000)
+	const c = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	s.q.pay([...s.q.invoices.keys()].at(-1)!, 'ana')
+	const paid = (await s.get(`/pro/checkout?id=${c.body.id}`)).body
+	assert.equal(paid.plan, 'month')
+	assert.equal(paid.expiresAt, T0 + 30 * 86_400_000 + 30 * 86_400_000)
+})
+
+test('primer mes gratis en el simulador: una vez por cuenta de Telegram', async () => {
+	const { startTrial, linkSim } = await import('../worker/pro.ts')
+	const { canTrade } = await import('../worker/sim.ts')
+	const s = setup()
+	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login) VALUES (5, 'Eva', 0, 0)").run()
+	await startTrial(s.env.DB, 'trial:tg:5', 'Eva', ['tg:5'], T0)
+	await linkSim(s.env.DB, 5, 'trial:tg:5')
+	assert.equal(await canTrade(s.env.DB, 5, 'SOLUSDT' as never, 'BUY', T0), true)
+	await assert.rejects(startTrial(s.env.DB, 'trial:tg:5', 'Eva', ['tg:5'], T0 + 31 * 86_400_000), /Ya usaste tu mes gratis/)
+	assert.equal(await canTrade(s.env.DB, 5, 'SOLUSDT' as never, 'BUY', T0 + 31 * 86_400_000), false)
+})

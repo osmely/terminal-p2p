@@ -11,7 +11,7 @@ import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle
 import { b64url, enc, hex, hmac, same, unb64url } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
-import { activeLicense, checkoutStatus, claimCode, createCheckout, linkSim, ProError, type Plan, type ProEnv } from './pro.ts'
+import { activeLicense, checkoutStatus, claimCode, createCheckout, linkSim, ProError, startTrial, type Plan, type ProEnv } from './pro.ts'
 import { cubaOffset, type D1 } from './rates.ts'
 
 export interface SimEnv extends Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
@@ -570,6 +570,16 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 			await linkSim(env.DB, tgId, got.license)
 			const l = await simPro(env.DB, tgId)
 			return json(200, { backupCode: got.backupCode, pro: l ? { username: l.username, plan: l.plan, expiresAt: l.expires_at } : null })
+		}
+		// Primer mes gratis en el simulador: una vez por cuenta de Telegram
+		if (route === 'POST /api/pro/trial') {
+			if (await simPro(env.DB, tgId)) return json(409, { error: 'Ya eres Pro' })
+			const u = await env.DB.prepare('SELECT first_name, username FROM sim_users WHERE tg_id = ?').bind(tgId).first<{ first_name: string; username: string | null }>()
+			const license = `trial:tg:${tgId}`
+			await startTrial(env.DB, license, u?.username ?? u?.first_name ?? `tg${tgId}`, [`tg:${tgId}`], Date.now())
+			await linkSim(env.DB, tgId, license)
+			const l = await simPro(env.DB, tgId)
+			return json(200, { pro: l ? { username: l.username, plan: l.plan, expiresAt: l.expires_at } : null })
 		}
 		if (route === 'POST /api/pro/checkout') {
 			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>

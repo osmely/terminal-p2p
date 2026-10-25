@@ -99,7 +99,9 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .nav-in { display: flex; align-items: center; gap: 28px; height: 64px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; letter-spacing: -0.01em; }
 .brand-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: #fff; }
-.nav-links { display: flex; gap: 24px; }
+.nav-links { display: flex; gap: 22px; }
+.nav-in .brand { white-space: nowrap; }
+@media (max-width: 1320px) and (min-width: 981px) { .nav-links { gap: 16px; } .nav-links a { font-size: 14px; } }
 .nav-links a { color: var(--text-2); text-decoration: none; font-size: 14.5px; font-weight: 500; }
 .nav-links a:hover { color: var(--text); }
 .nav-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -536,3 +538,29 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.help { position: static; }
 	.help-menu { left: 12px; right: 12px; width: auto; top: calc(100% + 6px); }
 }
+
+/* ══ Simulador y planes ═══════════════════════════════════════════════ */
+.sim-band { display: grid; grid-template-columns: 1.15fr 1fr; gap: 40px; align-items: center; }
+.sim-copy h2 { font-size: clamp(28px, 3.4vw, 38px); font-weight: 750; margin-top: 8px; }
+.sim-copy p { margin-top: 14px; color: var(--text-2); font-size: 17px; }
+.sim-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 24px; }
+.sim-cta .muted { color: var(--muted); font-size: 14px; }
+.sim-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.sim-points li { display: flex; flex-direction: column; gap: 4px; padding: 18px 20px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
+.sim-points span { color: var(--text-2); font-size: 14.5px; }
+.plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 860px; margin: 0 auto; }
+.plan { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 28px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
+.plan h3 { font-size: 20px; }
+.plan .price { font-size: 32px; font-weight: 750; letter-spacing: -0.5px; }
+.plan .price small { font-size: 15px; font-weight: 500; color: var(--muted); }
+.plan .price-alt { margin-top: -8px; color: var(--text-2); font-size: 14px; }
+.plan ul { list-style: none; margin: 4px 0 8px; padding: 0; display: flex; flex-direction: column; gap: 9px; flex: 1; }
+.plan li { position: relative; padding-left: 24px; color: var(--text-2); font-size: 14.5px; }
+.plan li::before { content: '✓'; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+.plan.pro { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 18px 50px color-mix(in srgb, var(--accent) 16%, transparent); }
+.plan-tag { position: absolute; top: -12px; right: 20px; padding: 4px 12px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; }
+.plan-note { color: var(--muted); font-size: 13px; }
+@media (max-width: 860px) {
+	.sim-band, .plans { grid-template-columns: 1fr; }
+}
+.plan .btn.block { display: flex; width: 100%; justify-content: center; }

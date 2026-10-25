@@ -555,7 +555,7 @@ function renderProChip() {
 	const b = $('proBtn')
 	b.hidden = !S.user
 	b.classList.toggle('on', !!S.pro)
-	b.innerHTML = `★ <span class="pro-label">${S.pro ? 'Pro' : 'Hazte Pro'}</span>`
+	b.innerHTML = `★ <span class="pro-label">${S.pro ? 'Pro' : 'Pro gratis'}</span>`
 	b.title = S.pro ? `Pro hasta el ${proDate(S.pro.expiresAt)}` : 'Terminal P2P Pro'
 }
 
@@ -570,13 +570,14 @@ function openPro(html) {
 	$('proBody').innerHTML =
 		html ??
 		(S.pro
-			? `<h2>★ Eres Pro</h2><p class="muted">Plan ${S.pro.plan === 'year' ? 'anual' : S.pro.plan === 'gift' ? 'regalado' : 'mensual'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.</p>
+			? `<h2>★ ${S.pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h2><p class="muted">${{ trial: 'Prueba gratis', year: 'Plan anual', gift: 'Plan regalado' }[S.pro.plan] ?? 'Plan mensual'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.${S.pro.plan === 'trial' ? ' Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
 				<p class="muted">Para renovar, desde aquí o desde el terminal:</p><div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>`
 			: `<h2>★ Terminal P2P Pro</h2>
 				<ul class="pro-feats">
 					<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>
 					<li><b>⚡ Orden inteligente en el terminal P2P</b><span class="muted">Si tu precio cruza el libro, toma lo que hay a mejor precio y publica el resto.</span></li>
 				</ul>
+				<button class="btn block go pro" id="proTrial">Probar 1 mes gratis</button>
 				<div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>
 				<p class="muted small">Pagas con tu saldo en QvaPay. Una sola licencia para el simulador y el terminal.</p>
 				<div class="pro-claim"><input class="input mono" id="proCode" placeholder="¿Ya eres Pro? Código: 482 913 o TP-XXXX-…" autocomplete="off" /><button class="btn" id="proClaim">Vincular</button></div>
@@ -606,6 +607,17 @@ async function proCheckout(plan) {
 			proPoll = setTimeout(tick, 4000)
 		}
 		proPoll = setTimeout(tick, 4000)
+	} catch (e) {
+		toast(e.message, 'bad')
+	}
+}
+
+// Primer mes gratis: una vez por cuenta de Telegram (el servidor lo comprueba)
+async function proTrial() {
+	try {
+		const r = await api('/pro/trial', { method: 'POST', body: '{}' })
+		setPro(r.pro)
+		openPro(`<h2>★ Tienes un mes de Pro gratis</h2><p class="muted">Hasta el <b>${proDate(r.pro.expiresAt)}</b>. Ya puedes operar todos los mercados.</p>`)
 	} catch (e) {
 		toast(e.message, 'bad')
 	}
@@ -1099,6 +1111,7 @@ function bind() {
 		const plan = e.target.closest('[data-plan]')
 		if (plan) proCheckout(plan.dataset.plan)
 		if (e.target.closest('#proClaim')) proClaim()
+		if (e.target.closest('#proTrial')) proTrial()
 	})
 	$('rankClose').onclick = () => ($('rankModal').hidden = true)
 	$('rankModal').addEventListener('click', (e) => {

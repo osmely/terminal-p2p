@@ -93,7 +93,7 @@ export default {
 		if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 		// Plan Pro, en el dominio del terminal. Canjear códigos tiene tope (que nadie los pruebe a ciegas)
 		if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
-			const guarded = url.pathname === '/pro/claim' || url.pathname === '/pro/pair' || url.pathname === '/pro/checkout'
+			const guarded = ['/pro/claim', '/pro/pair', '/pro/checkout', '/pro/trial'].includes(url.pathname)
 			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 			const r = await proApi(req, url, env as unknown as ProEnv)
 			if (r) return secure(r)

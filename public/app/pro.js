@@ -66,7 +66,7 @@ function renderProChip() {
 	if (!b) return
 	b.hidden = !bk.acct.connected
 	b.classList.toggle('on', pro.active)
-	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? 'Pro' : 'Hazte Pro'}</span>`
+	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? 'Pro' : 'Pro gratis'}</span>`
 	b.title = pro.active ? `Pro hasta el ${proDate(pro.expiresAt)}` : 'Terminal P2P Pro'
 }
 
@@ -77,14 +77,15 @@ function showPro() {
 	const plans = PRO_PLANS.map(([id, name, price, per]) => `<button class="pro-plan" data-plan="${id}"><b>${name}</b><span class="mono">${price}</span><small>${per}</small></button>`).join('')
 	openModal(
 		pro.active
-			? `<div class="stack pro-box"><h3>★ Eres Pro</h3>
-				<p class="muted">@${esc(pro.username)} · plan ${pro.plan === 'year' ? 'anual' : pro.plan === 'gift' ? 'regalado' : 'mensual'} · hasta el <b>${proDate(pro.expiresAt)}</b></p>
+			? `<div class="stack pro-box"><h3>★ ${pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h3>
+				<p class="muted">@${esc(pro.username)} · ${{ trial: 'prueba gratis', year: 'plan anual', gift: 'plan regalado' }[pro.plan] ?? 'plan mensual'} · hasta el <b>${proDate(pro.expiresAt)}</b>${pro.plan === 'trial' ? '. Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
 				<ul class="pro-feats">${feats}</ul>
 				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proSim">Vincular simulador</button><button class="btn" id="proBackup">Código de respaldo</button></div>
 				<p class="hint">Hasta 2 dispositivos a la vez. Renovar suma el periodo a lo que te queda:</p>
 				<div class="pro-plans">${plans}</div></div>`
 			: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
+				<button class="btn primary block" id="proTrial">Probar 1 mes gratis</button>
 				<div class="pro-plans">${plans}</div>
 				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador.</p>
 				<button class="link small" id="proClaim">Ya soy Pro en otro dispositivo</button></div>`,
@@ -94,6 +95,20 @@ function showPro() {
 	$('proSim')?.addEventListener('click', () => showPair(true))
 	$('proBackup')?.addEventListener('click', showBackup)
 	$('proClaim')?.addEventListener('click', showClaim)
+	$('proTrial')?.addEventListener('click', startTrial)
+}
+
+// Primer mes gratis: una vez por usuario de QvaPay (el servidor lo comprueba)
+async function startTrial() {
+	try {
+		applyPro(await proFetch('/pro/trial', { print: pro.print, username: bk.acct.username }))
+		openModal(`<div class="stack pro-box"><h3>★ Tienes un mes de Pro gratis</h3>
+			<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa en este dispositivo. Para el simulador completo, usa <b>Pro › Vincular simulador</b>.</p>
+			<button class="btn primary block" id="proOk">Listo</button></div>`)
+		$('proOk').onclick = closeModal
+	} catch (e) {
+		toast(e.message, true)
+	}
 }
 
 async function startCheckout(plan) {

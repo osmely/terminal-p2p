@@ -263,8 +263,10 @@ tr.me td { background: var(--accent-bg); }
 .pro-chip.on { background: var(--warn); color: #1a1300; border-color: var(--warn); }
 .go.pro { background: var(--warn); color: #1a1300; }
 .mk .lock { font: 700 9.5px var(--sans); font-style: normal; padding: 1px 5px; border-radius: 999px; background: var(--warn-bg); color: var(--warn); vertical-align: middle; }
-#proBody { display: flex; flex-direction: column; gap: 12px; }
-#proBody h2 { margin: 0; font-size: 18px; }
+/* La tarjeta del modal no tiene margen lateral (lo pone cada contenido): el de Pro lleva el suyo y es más estrecha */
+#proModal .modal-card { width: min(520px, 100%); padding: 22px 0 20px; }
+#proBody { display: flex; flex-direction: column; gap: 14px; padding: 0 22px; }
+#proBody h2 { margin: 0; padding: 0 40px 0 0; font-size: 18px; }
 #proBody p { margin: 0; }
 .pro-feats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .pro-feats li { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
