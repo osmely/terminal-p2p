@@ -564,6 +564,7 @@ function drawDepth() {
 	ctx.fillStyle = css('--text')
 	ctx.fillText(`medio ${fmtP(mid)}`, x(mid), pad.t - 2)
 	$('chartNote').textContent = `USD acumulados a ±${range * 100}% del precio medio`
+	$('chartNote').title = $('chartNote').textContent
 }
 
 function drawCompleted() {
@@ -618,6 +619,7 @@ function drawCompleted() {
 	vline(bids[0]?.price, css('--bid'), `mejor compra ${fmtP(bids[0]?.price)}`, 1)
 	vline(asks[0]?.price, css('--ask'), `mejor venta ${fmtP(asks[0]?.price)}`, 2)
 	$('chartNote').textContent = `${done.count.toLocaleString('es')} operaciones completadas en ${done.window_hours} h (±10% de la mediana)`
+	$('chartNote').title = $('chartNote').textContent
 }
 
 let historyChart = null
