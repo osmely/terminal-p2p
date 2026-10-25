@@ -122,7 +122,7 @@ async function startTrial() {
 
 async function startCheckout(plan) {
 	try {
-		const c = await proFetch('/pro/checkout', { print: pro.print, plan })
+		const c = await proFetch('/pro/checkout', { print: pro.print, plan, username: bk.acct.username })
 		store.set('pro.checkout', { id: c.id, url: c.url, at: Date.now() })
 		window.open(c.url, '_blank', 'noopener')
 		showWaiting()

@@ -204,7 +204,7 @@ test('el módulo Pro sale firmado con el usuario, y nunca sin licencia válida o
 	const { result } = await buy(s)
 	const mod = await s.get(`/pro/module.js?l=${encodeURIComponent(result.license)}`)
 	assert.equal(mod.status, 200)
-	assert.match(mod.body, /licencia de @ana \(u-ana\)/)
+	assert.match(mod.body, /licencia de @ana \(qp:ana\)/)
 	assert.match(mod.body, /window\.TPProUser="ana"/)
 	assert.match(mod.body, /console\.log\("pro"\)$/)
 	assert.equal((await s.get('/pro/module.js?l=falsa')).status, 403)
@@ -308,7 +308,7 @@ test('primer mes gratis en el simulador: una vez por cuenta de Telegram', async 
 test('panel: devolver un pago revoca la licencia (también en el simulador) y dice cuánto transferir', async () => {
 	const s = setup()
 	const { checkout } = await buy(s)
-	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login, pro_license) VALUES (3, 'Ana', 0, 0, 'u-ana')").run()
+	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login, pro_license) VALUES (3, 'Ana', 0, 0, 'qp:ana')").run()
 	const form = (fields: Record<string, string>) =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, T0)
 	const html = await (await form({ action: 'refund', checkout: checkout.id })).text()
@@ -402,4 +402,28 @@ test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobab
 	// Buscar por usuario
 	assert.doesNotMatch(await panel(undefined, '?q=nadie'), /<b>@pepe<\/b>/)
 	assert.match(await panel(undefined, '?q=PEPE'), /<b>@pepe<\/b>/)
+})
+
+test('paga otra cuenta (otra sesión abierta en qvapay.com): Pro queda a nombre de la conectada y la devolución va a quien pagó', async () => {
+	const s = setup()
+	// Conectado como @Ana en el terminal, pero en qvapay.com estaba abierta la sesión de @pepe
+	const c = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: '@Ana' })).body
+	s.q.pay('inv-1', 'pepe')
+	const r = (await s.status(c.id)).body
+	assert.deepEqual([r.status, r.pro, r.username], ['paid', true, 'Ana'])
+	// Si luego Ana paga con su propia cuenta, renueva la misma licencia
+	s.tick(27 * 86_400_000)
+	const c2 = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'Ana' })).body
+	s.q.pay('inv-2', 'ana')
+	assert.equal((await s.status(c2.id)).body.expiresAt, T0 + 60 * 86_400_000)
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM pro_licenses').get()?.n, 1)
+	// En el panel: pagó @pepe para @Ana; devolver el primer pago es transferir a @pepe
+	const form = (fields?: Record<string, string>) =>
+		proAdmin(
+			new Request('https://app.terminalp2p.com/admin/pro', { method: fields ? 'POST' : 'GET', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+			s.env,
+			s.now(),
+		).then((x) => x.text())
+	assert.match(await form(), /<b>@pepe<\/b> <span class="note">para @Ana<\/span>/)
+	assert.match(await form({ action: 'refund', checkout: c.id }), /transfiere <b>1,99 USD<\/b> a <b>@pepe<\/b>/)
 })
