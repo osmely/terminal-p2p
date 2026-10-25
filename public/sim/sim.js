@@ -552,8 +552,7 @@ function openPro() {
 	const proMarkets = Object.values(S.markets).filter((m) => !m.free).map((m) => m.base)
 	$('proBody').innerHTML = S.pro
 		? `<h2>★ Te quedan ${proDays()} de Pro</h2><p class="muted">${{ trial: 'Días gratis', gift: 'Días regalados' }[S.pro.plan] ?? 'Días comprados'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.</p>
-			<p class="muted">Son los días de Pro de tu cuenta del terminal: si compras más allí, aquí se suman solos.</p>
-			<a class="btn block" href="${APP_URL}/?pro=open" target="_blank" rel="noopener">Ver mi Pro en el terminal</a>`
+			<p class="muted">Son los días de Pro de tu cuenta del terminal: si compras más allí, aquí se suman solos.</p>`
 		: `<h2>★ Terminal P2P Pro</h2>
 			<ul class="pro-feats">
 				<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>
