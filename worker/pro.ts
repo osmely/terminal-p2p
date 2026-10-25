@@ -51,7 +51,8 @@ export interface License {
 
 interface Checkout {
 	id: string
-	print: string
+	print: string // '' si se pidió desde el simulador
+	tg: number | null // cuenta del simulador que la pidió
 	plan: Plan
 	amount: number
 	invoice: string | null
@@ -61,7 +62,7 @@ interface Checkout {
 	created_at: number
 }
 
-class ProError extends Error {
+export class ProError extends Error {
 	readonly status: number
 	constructor(status: number, message: string) {
 		super(message)
@@ -106,7 +107,7 @@ async function newBackup(db: D1, license: string, now: number) {
 }
 
 // Lo que el terminal necesita saber: si eres Pro, hasta cuándo y la licencia firmada para recoger el módulo
-async function statusOf(env: ProEnv, l: License | null, now: number) {
+export async function statusOf(env: ProEnv, l: License | null, now: number) {
 	if (!l) return { pro: false }
 	const license = await sign({ u: l.uuid, n: l.username, e: l.expires_at, x: now + LICENSE_MS }, env.PRO_KEY!)
 	return { pro: true, username: l.username, plan: l.plan, expiresAt: l.expires_at, license }
@@ -161,8 +162,78 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 		const code = await newBackup(db, payer.uuid, now)
 		await db.prepare('UPDATE pro_checkouts SET backup_code = ? WHERE id = ?').bind(code, c.id).run()
 	}
-	await attachPrint(db, payer.uuid, c.print, now)
+	if (c.print) await attachPrint(db, payer.uuid, c.print, now)
+	if (c.tg) await linkSim(db, c.tg, payer.uuid)
 	return true
+}
+
+// ── Compartido con el simulador ──────────────────────────────────────
+
+export async function activeLicense(db: D1, uuid: string | null | undefined, now: number): Promise<License | null> {
+	if (!uuid) return null
+	const l = await db.prepare('SELECT uuid, username, plan, expires_at, backup_hash, revoked FROM pro_licenses WHERE uuid = ?').bind(uuid).first<License>()
+	return l && !l.revoked && l.expires_at > now ? l : null
+}
+
+// La cuenta del simulador (Telegram) queda vinculada a la licencia: los Pro operan todos los mercados
+export async function linkSim(db: D1, tg: number, license: string) {
+	await db.prepare('UPDATE sim_users SET pro_license = ? WHERE tg_id = ?').bind(license, tg).run()
+}
+
+// Factura para hacerse Pro (o renovar) desde el terminal (con la huella del dispositivo) o desde el
+// simulador (con la cuenta de Telegram). El aviso de pago va siempre al dominio del terminal
+export async function createCheckout(env: ProEnv, who: { print?: string; tg?: number }, plan: Plan, origin: string, now: number, fetcher: typeof fetch = fetch) {
+	if (!(plan in PLANS)) throw new ProError(400, 'Plan no válido')
+	const id = `pro-${crypto.randomUUID()}`
+	const p = PLANS[plan]
+	const inv = await qvapay<{ transaction_uuid?: string; url?: string }>(
+		env,
+		'/v2/create_invoice',
+		{
+			amount: p.usd,
+			description: `Terminal P2P Pro · plan ${p.name}`,
+			remote_id: id,
+			webhook: `${origin.replace('://sim.', '://app.')}/api/pro/webhook`,
+			expire_at: new Date(now + CHECKOUT_MS).toISOString(),
+		},
+		fetcher,
+	)
+	if (!inv.transaction_uuid || !inv.url) throw new ProError(502, 'QvaPay no devolvió la factura')
+	await env.DB.prepare("INSERT INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)")
+		.bind(id, who.print ?? '', who.tg ?? null, plan, p.usd, inv.transaction_uuid, now)
+		.run()
+	return { id, url: inv.url }
+}
+
+// Cómo va una factura (y se comprueba con QvaPay si sigue pendiente). El código de respaldo nuevo se
+// entrega una sola vez, a quien la pidió
+export async function checkoutStatus(env: ProEnv, id: string, now: number, fetcher: typeof fetch = fetch) {
+	const db = env.DB
+	const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(id).first<Checkout>()
+	if (!c) throw new ProError(404, 'Pago no encontrado')
+	if (c.status === 'pending' && now - c.created_at < CHECKOUT_MS) await settle(env, c, now, fetcher)
+	const fresh = (await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(c.id).first<Checkout>())!
+	if (fresh.status !== 'paid') return { checkout: fresh, body: { status: now - c.created_at < CHECKOUT_MS ? 'pending' : 'expired' } }
+	if (fresh.backup_code) await db.prepare('UPDATE pro_checkouts SET backup_code = NULL WHERE id = ?').bind(c.id).run()
+	const l = fresh.print ? await licenseOfPrint(db, fresh.print, now) : await activeLicense(db, fresh.license, now)
+	return { checkout: fresh, body: { status: 'paid', backupCode: fresh.backup_code ?? null, ...(await statusOf(env, l, now)) } }
+}
+
+// Un código para entrar en Pro: el de 6 cifras (desde un dispositivo Pro, un uso, 5 min) o el de
+// respaldo (que cambia cada vez que se usa). Devuelve la licencia y, si se usó el de respaldo, el nuevo
+export async function claimCode(db: D1, raw: string, now: number): Promise<{ license: string; backupCode: string | null } | null> {
+	const code = raw.trim()
+	if (/^\d{3}[\s-]?\d{3}$/.test(code)) {
+		const pairing = code.replace(/\D/g, '')
+		const row = await db.prepare('SELECT license FROM pro_pairings WHERE code = ? AND expires_at > ?').bind(pairing, now).first<{ license: string }>()
+		if (!row) return null
+		await db.prepare('DELETE FROM pro_pairings WHERE code = ?').bind(pairing).run()
+		return { license: row.license, backupCode: null }
+	}
+	if (normCode(code).length < 14) return null
+	const row = await db.prepare('SELECT uuid FROM pro_licenses WHERE backup_hash = ? AND revoked = 0').bind(await backupHash(code)).first<{ uuid: string }>()
+	if (!row) return null
+	return { license: row.uuid, backupCode: await newBackup(db, row.uuid, now) }
 }
 
 // ── Rutas ────────────────────────────────────────────────────────────
@@ -192,42 +263,11 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		// Comprar o renovar: factura de QvaPay para este dispositivo
 		if (route === 'POST /pro/checkout') {
 			const b = await readBody(req)
-			const print = printOf(b.print)
-			const plan = String(b.plan) as Plan
-			if (!(plan in PLANS)) return json(400, { error: 'Plan no válido' })
-			const id = `pro-${crypto.randomUUID()}`
-			const p = PLANS[plan]
-			const inv = await qvapay<{ transaction_uuid?: string; url?: string }>(
-				env,
-				'/v2/create_invoice',
-				{
-					amount: p.usd,
-					description: `Terminal P2P Pro · plan ${p.name}`,
-					remote_id: id,
-					webhook: `${url.origin}/api/pro/webhook`,
-					expire_at: new Date(now + CHECKOUT_MS).toISOString(),
-				},
-				fetcher,
-			)
-			if (!inv.transaction_uuid || !inv.url) throw new ProError(502, 'QvaPay no devolvió la factura')
-			await db
-				.prepare("INSERT INTO pro_checkouts (id, print, plan, amount, invoice, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)")
-				.bind(id, print, plan, p.usd, inv.transaction_uuid, now)
-				.run()
-			return json(200, { id, url: inv.url })
+			return json(200, await createCheckout(env, { print: printOf(b.print) }, String(b.plan) as Plan, url.origin, now, fetcher))
 		}
 
-		// El navegador que pagó pregunta cómo va su factura (y la comprueba con QvaPay si sigue pendiente)
-		if (route === 'GET /pro/checkout') {
-			const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(String(url.searchParams.get('id') ?? '')).first<Checkout>()
-			if (!c) return json(404, { error: 'Pago no encontrado' })
-			if (c.status === 'pending' && now - c.created_at < CHECKOUT_MS) await settle(env, c, now, fetcher)
-			const fresh = (await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(c.id).first<Checkout>())!
-			if (fresh.status !== 'paid') return json(200, { status: now - c.created_at < CHECKOUT_MS ? 'pending' : 'expired' })
-			// El código de respaldo se entrega una sola vez
-			if (fresh.backup_code) await db.prepare('UPDATE pro_checkouts SET backup_code = NULL WHERE id = ?').bind(c.id).run()
-			return json(200, { status: 'paid', backupCode: fresh.backup_code ?? null, ...(await statusOf(env, await licenseOfPrint(db, c.print, now), now)) })
-		}
+		// El navegador que pagó pregunta cómo va su factura
+		if (route === 'GET /pro/checkout') return json(200, (await checkoutStatus(env, String(url.searchParams.get('id') ?? ''), now, fetcher)).body)
 
 		// Aviso de QvaPay: solo dice qué factura mirar; se confirma consultándola
 		if (req.method === 'POST' && (path === '/pro/webhook' || path === '/api/pro/webhook')) {
@@ -281,27 +321,10 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		if (route === 'POST /pro/claim') {
 			const b = await readBody(req)
 			const print = printOf(b.print)
-			const code = String(b.code ?? '').trim()
-			let license: string | null = null
-			let backupCode: string | null = null
-			if (/^\d{3}[\s-]?\d{3}$/.test(code)) {
-				const pairing = code.replace(/\D/g, '')
-				const row = await db.prepare('SELECT license FROM pro_pairings WHERE code = ? AND expires_at > ?').bind(pairing, now).first<{ license: string }>()
-				if (row) {
-					await db.prepare('DELETE FROM pro_pairings WHERE code = ?').bind(pairing).run()
-					license = row.license
-				}
-			} else if (normCode(code).length >= 14) {
-				const row = await db.prepare('SELECT uuid FROM pro_licenses WHERE backup_hash = ? AND revoked = 0').bind(await backupHash(code)).first<{ uuid: string }>()
-				if (row) {
-					license = row.uuid
-					// El código de respaldo cambia cada vez que se usa: uno compartido sirve una sola vez
-					backupCode = await newBackup(db, row.uuid, now)
-				}
-			}
-			if (!license) return json(400, { error: 'Código no válido o caducado' })
-			await attachPrint(db, license, print, now)
-			return json(200, { backupCode, ...(await statusOf(env, await licenseOfPrint(db, print, now), now)) })
+			const got = await claimCode(db, String(b.code ?? ''), now)
+			if (!got) return json(400, { error: 'Código no válido o caducado' })
+			await attachPrint(db, got.license, print, now)
+			return json(200, { backupCode: got.backupCode, ...(await statusOf(env, await licenseOfPrint(db, print, now), now)) })
 		}
 
 		// Desde un dispositivo Pro: un código de respaldo nuevo (el anterior deja de valer)

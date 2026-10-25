@@ -211,3 +211,38 @@ test('huella del token: siempre la misma para el mismo token, distinta entre tok
 	assert.notEqual(await tokenPrint('1234|otro'), a)
 	assert.ok(!a.includes('secreto'))
 })
+
+test('simulador: sin Pro solo BTC y ETH (y vender lo que ya tienes); con Pro, todos los mercados', async () => {
+	const { canTrade } = await import('../worker/sim.ts')
+	const s = setup()
+	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login) VALUES (7, 'Ana', 0, 0)").run()
+	const ok = (sym: string, side = 'BUY') => canTrade(s.env.DB, 7, sym as never, side, T0)
+	assert.deepEqual([await ok('BTCUSDT'), await ok('ETHUSDT'), await ok('SOLUSDT'), await ok('SOLUSDT', 'SELL'), await ok('PEPEUSDT', 'SHORT')], [true, true, false, true, false])
+	// Vincula su Telegram con un código de 6 cifras de su terminal Pro
+	await buy(s)
+	const { claimCode, linkSim } = await import('../worker/pro.ts')
+	const { code } = (await s.post('/pro/pair', { print: P1 })).body
+	const got = await claimCode(s.env.DB, code, T0)
+	await linkSim(s.env.DB, 7, got!.license)
+	assert.deepEqual([await ok('SOLUSDT'), await ok('TAOUSDT', 'SHORT')], [true, true])
+	// Si la licencia vence, vuelve a BTC y ETH
+	assert.equal(await canTrade(s.env.DB, 7, 'SOLUSDT' as never, 'BUY', T0 + 31 * 86_400_000), false)
+})
+
+test('simulador: hacerse Pro desde el simulador vincula esa cuenta de Telegram y da el código para el terminal', async () => {
+	const { createCheckout, checkoutStatus } = await import('../worker/pro.ts')
+	const { canTrade } = await import('../worker/sim.ts')
+	const s = setup()
+	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login) VALUES (9, 'Leo', 0, 0)").run()
+	const c = await createCheckout(s.env, { tg: 9 }, 'year', 'https://sim.terminalp2p.com', T0, s.q.fetcher)
+	assert.equal(s.q.invoices.get('inv-1')?.amount, 20)
+	s.q.pay('inv-1', 'leo')
+	const { checkout, body: raw } = await checkoutStatus(s.env, c.id, T0, s.q.fetcher)
+	const body = raw as { status: string; backupCode: string }
+	assert.equal(checkout.tg, 9)
+	assert.equal(body.status, 'paid')
+	assert.match(body.backupCode, /^TP-/)
+	assert.equal(await canTrade(s.env.DB, 9, 'DOGEUSDT' as never, 'BUY', T0), true)
+	// Con ese código, el terminal también queda Pro
+	assert.equal((await s.post('/pro/claim', { print: P2, code: body.backupCode })).body.pro, true)
+})

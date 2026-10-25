@@ -35,7 +35,7 @@ test('al empezar la semana: clasificación final, borrador del resumen y todos a
 	const add = (id: number, name: string, trades: number, cash: number, benched = 0, compete = 1) => {
 		const s: SimState = { ...freshState(MON - 86_400_000, undefined, prev), tradeCount: trades }
 		s.balances.USDT.free = cash
-		db.prepare('INSERT INTO sim_users VALUES (?, ?, ?, NULL, 0, 0, ?)').run(id, name, id === 3 ? null : name.toLowerCase(), compete)
+		db.prepare('INSERT INTO sim_users (tg_id, first_name, username, photo_url, created_at, last_login, compete) VALUES (?, ?, ?, NULL, 0, 0, ?)').run(id, name, id === 3 ? null : name.toLowerCase(), compete)
 		db.prepare('INSERT INTO sim_accounts VALUES (?, ?, ?, 0, ?, 0, 0, 0, 0, ?, ?)').run(id, JSON.stringify(s), cash, trades, prev, benched)
 	}
 	add(1, 'Ana', 5, 11_000)
@@ -67,7 +67,7 @@ test('al empezar la semana: clasificación final, borrador del resumen y todos a
 test('la primera vez solo marca la temporada en curso, sin tocar las cuentas', async () => {
 	const { db, d1 } = memD1()
 	const s = { ...freshState(MON), tradeCount: 2 }
-	db.prepare('INSERT INTO sim_users VALUES (1, ?, NULL, NULL, 0, 0, 0)').run('Ana')
+	db.prepare('INSERT INTO sim_users (tg_id, first_name, username, photo_url, created_at, last_login, compete) VALUES (1, ?, NULL, NULL, 0, 0, 0)').run('Ana')
 	db.prepare("INSERT INTO sim_accounts VALUES (1, ?, 10000, 0, 2, 0, 0, 0, 0, '', 0)").run(JSON.stringify(s))
 	assert.equal(await rollover(d1, MON + 1000), false)
 	const a = db.prepare('SELECT season, trades, state FROM sim_accounts').get() as { season: string; trades: number; state: string }

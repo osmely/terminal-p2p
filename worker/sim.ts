@@ -10,9 +10,10 @@
 import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle, type Quote, type SimState, type Symbol } from '../src/sim/engine.ts'
 import { b64url, enc, hex, hmac, same, unb64url } from './crypto.ts'
 import { authorized } from './metrics.ts'
+import { activeLicense, checkoutStatus, claimCode, createCheckout, linkSim, ProError, type Plan, type ProEnv } from './pro.ts'
 import { cubaOffset, type D1 } from './rates.ts'
 
-export interface SimEnv {
+export interface SimEnv extends Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	DB: D1
 	TELEGRAM_BOT_TOKEN?: string
 	SIM_SESSION_KEY?: string
@@ -458,13 +459,29 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 
 const isDev = (env: SimEnv, url: URL) => env.SIM_DEV_LOGIN === '1' && (url.hostname.endsWith('.localhost') || url.hostname === 'localhost')
 
+// Los usuarios regulares operan BTC y ETH; los Pro, todos los mercados. Fuera de estos, se puede seguir
+// vendiendo lo que ya tienes (o recomprando un corto), nunca abrir posición
+export const FREE_MARKETS = new Set<Symbol>(['BTCUSDT', 'ETHUSDT'])
+
+// La licencia Pro activa vinculada a una cuenta del simulador (o null)
+export async function simPro(db: D1, tgId: number, now = Date.now()) {
+	const u = await db.prepare('SELECT pro_license FROM sim_users WHERE tg_id = ?').bind(tgId).first<{ pro_license: string | null }>()
+	return activeLicense(db, u?.pro_license, now)
+}
+
+// ¿Puede esta cuenta poner esta orden? Comprobado en el servidor: no se puede saltar desde la página
+export async function canTrade(db: D1, tgId: number, symbol: Symbol, side: string, now = Date.now()) {
+	if (FREE_MARKETS.has(symbol) || side === 'SELL' || side === 'COVER') return true
+	return !!(await simPro(db, tgId, now))
+}
+
 export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Response> {
 	const route = `${req.method} ${url.pathname}`
 	if (!env.SIM_SESSION_KEY) return json(503, { error: 'El simulador aún no está configurado' })
 	// Las escrituras solo desde nuestra propia página
 	if (req.method !== 'GET' && req.headers.get('origin') !== url.origin) return json(403, { error: 'Origen no permitido' })
 	try {
-		if (route === 'GET /api/config') return json(200, { bot: env.SIM_BOT ?? 'terminalp2p_bot', dev: isDev(env, url), markets: SYMBOLS.map((s) => ({ symbol: s, ...MARKETS[s] })) })
+		if (route === 'GET /api/config') return json(200, { bot: env.SIM_BOT ?? 'terminalp2p_bot', dev: isDev(env, url), markets: SYMBOLS.map((s) => ({ symbol: s, ...MARKETS[s], free: FREE_MARKETS.has(s) })) })
 		if (route === 'GET /api/tickers') {
 			const u = new URL('/api/tickers', url.origin)
 			return await cached(u, TICKERS_TTL_S, () => tickers(u))
@@ -493,7 +510,8 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		const tgId = await readSession(req.headers.get('cookie'), env.SIM_SESSION_KEY)
 		if (route === 'GET /api/me') {
 			const user = tgId ? await env.DB.prepare('SELECT tg_id AS id, first_name, username, photo_url, compete FROM sim_users WHERE tg_id = ?').bind(tgId).first() : null
-			return json(200, { user })
+			const l = user && tgId ? await simPro(env.DB, tgId) : null
+			return json(200, { user, pro: l ? { username: l.username, plan: l.plan, expiresAt: l.expires_at } : null })
 		}
 		if (!tgId) return json(401, { error: 'Entra con Telegram para jugar' })
 		if (route === 'GET /api/state') {
@@ -503,6 +521,8 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		if (route === 'POST /api/orders') {
 			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
 			const symbol = normSymbol(body.symbol)
+			if (!(await canTrade(env.DB, tgId, symbol, String(body.side ?? '').toUpperCase())))
+				return json(403, { error: `${MARKETS[symbol].base} es un mercado Pro. Sin Pro operas BTC y ETH; con Pro, todos.`, pro: true })
 			const { result, engine, prices } = await withAccount(env.DB, tgId, (e, qs) => {
 				const q = qs[symbol]
 				if (!q) throw new SimError('Aún no hay precio para este mercado')
@@ -540,6 +560,24 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 				o.symbol,
 			)
 			return json(200, { order: result, ...view(engine, prices) })
+		}
+		// Pro en el simulador: vincular con un código (de un dispositivo Pro o el de respaldo) o comprar aquí
+		if (route === 'POST /api/pro/claim') {
+			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
+			const got = await claimCode(env.DB, String(body.code ?? ''), Date.now())
+			if (!got) return json(400, { error: 'Código no válido o caducado' })
+			await linkSim(env.DB, tgId, got.license)
+			const l = await simPro(env.DB, tgId)
+			return json(200, { backupCode: got.backupCode, pro: l ? { username: l.username, plan: l.plan, expiresAt: l.expires_at } : null })
+		}
+		if (route === 'POST /api/pro/checkout') {
+			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
+			return json(200, await createCheckout(env as unknown as ProEnv, { tg: tgId }, String(body.plan) as Plan, url.origin, Date.now()))
+		}
+		if (route === 'GET /api/pro/checkout') {
+			const { checkout, body } = await checkoutStatus(env as unknown as ProEnv, String(url.searchParams.get('id') ?? ''), Date.now())
+			if (checkout.tg !== tgId) return json(404, { error: 'Pago no encontrado' })
+			return json(200, body)
 		}
 		if (route === 'POST /api/close') {
 			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
@@ -596,6 +634,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		return json(404, { error: 'Ruta desconocida' })
 	} catch (err) {
 		if (err instanceof SimError) return json(400, { error: err.message })
+		if (err instanceof ProError) return json(err.status, { error: err.message })
 		console.error(`simulador ${route}: ${(err as Error).message}`)
 		return json(500, { error: 'Algo falló en el simulador; inténtalo de nuevo' })
 	}

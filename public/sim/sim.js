@@ -32,6 +32,7 @@ const S = {
 	markets: {}, // símbolo → { base, name, qtyStep, tick }
 	live: {}, // símbolo → { last, open }
 	user: null,
+	pro: null, // { username, plan, expiresAt } si la cuenta está vinculada a una licencia Pro activa
 	view: null, // cuenta, órdenes y operaciones del servidor
 	ranking: null,
 	symbol: store.get('sim.symbol', 'BTCUSDT'),
@@ -277,7 +278,7 @@ function renderLive() {
 		.map(([sym, m]) => {
 			const l = S.live[sym]
 			const ch = l ? (l.last / l.open - 1) * 100 : null
-			return `<button class="mk ${sym === S.symbol ? 'active' : ''}" data-sym="${sym}"><span><b>${esc(m.base)}</b><small>${esc(m.name)}</small></span><span class="mono">${l ? fmtPrice(l.last, sym) : '—'}</span><span class="mono ${cls(ch)}">${fmtPct(ch)}</span></button>`
+			return `<button class="mk ${sym === S.symbol ? 'active' : ''}" data-sym="${sym}"><span><b>${esc(m.base)}</b>${locked(sym) ? ' <i class="lock" title="Mercado Pro">PRO</i>' : ''}<small>${esc(m.name)}</small></span><span class="mono">${l ? fmtPrice(l.last, sym) : '—'}</span><span class="mono ${cls(ch)}">${fmtPct(ch)}</span></button>`
 		})
 		.join('')
 	if (shownSym !== S.symbol) {
@@ -413,6 +414,12 @@ function renderForm() {
 	go.className = `btn block go ${buy ? 'buy' : 'sell'}`
 	go.disabled = !S.user || S.busy
 	go.textContent = !S.user ? 'Entra con Telegram para operar' : S.busy ? 'Enviando…' : `${buy ? 'Comprar' : 'Vender'} ${base(S.symbol)}`
+	// Mercado Pro sin Pro: se puede vender lo que ya tienes, pero comprar pide hacerse Pro
+	if (S.user && buy && locked(S.symbol)) {
+		go.className = 'btn block go pro'
+		go.textContent = `★ Hazte Pro para operar ${base(S.symbol)}`
+	}
+	renderProChip()
 	renderHint()
 }
 
@@ -500,6 +507,7 @@ function setAmountFromPct(pct) {
 
 async function submitOrder() {
 	if (!S.user || S.busy) return
+	if (S.side === 'BUY' && locked(S.symbol)) return openPro()
 	const qty = formQty()
 	if (!(qty > 0)) return toast('Pon la cantidad', 'bad')
 	const body = { symbol: S.symbol, side: S.side, type: S.type }
@@ -524,9 +532,93 @@ async function submitOrder() {
 		$('fTp').value = ''
 	} catch (e) {
 		toast(e.message, 'bad')
+		if (e.status === 403) openPro()
 	} finally {
 		S.busy = false
 		renderForm()
+	}
+}
+
+// ── Pro ───────────────────────────────────────────────────────────────
+// Sin Pro se operan BTC y ETH; con Pro, todos los mercados (el servidor lo comprueba en cada orden).
+// La cuenta se vincula con un código de un dispositivo Pro del terminal (o el de respaldo), o
+// comprando aquí con QvaPay: quién paga lo confirma QvaPay, y el código de respaldo activa también el terminal
+const locked = (sym) => !S.pro && !S.markets[sym]?.free
+const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
+const PRO_PLANS = [
+	['month', 'Mensual', '1,99 USD', 'al mes'],
+	['year', 'Anual', '20 USD', 'al año · 2 meses gratis'],
+]
+let proPoll = null
+
+function renderProChip() {
+	const b = $('proBtn')
+	b.hidden = !S.user
+	b.classList.toggle('on', !!S.pro)
+	b.innerHTML = `★ <span class="pro-label">${S.pro ? 'Pro' : 'Hazte Pro'}</span>`
+	b.title = S.pro ? `Pro hasta el ${proDate(S.pro.expiresAt)}` : 'Terminal P2P Pro'
+}
+
+function setPro(pro) {
+	S.pro = pro
+	render()
+}
+
+function openPro(html) {
+	if (!S.user) return toast('Entra con Telegram primero', 'bad')
+	const proMarkets = Object.values(S.markets).filter((m) => !m.free).map((m) => m.base)
+	$('proBody').innerHTML =
+		html ??
+		(S.pro
+			? `<h2>★ Eres Pro</h2><p class="muted">Plan ${S.pro.plan === 'year' ? 'anual' : S.pro.plan === 'gift' ? 'regalado' : 'mensual'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.</p>
+				<p class="muted">Para renovar, desde aquí o desde el terminal:</p><div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>`
+			: `<h2>★ Terminal P2P Pro</h2>
+				<ul class="pro-feats">
+					<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>
+					<li><b>⚡ Orden inteligente en el terminal P2P</b><span class="muted">Si tu precio cruza el libro, toma lo que hay a mejor precio y publica el resto.</span></li>
+				</ul>
+				<div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>
+				<p class="muted small">Pagas con tu saldo en QvaPay. Una sola licencia para el simulador y el terminal.</p>
+				<div class="pro-claim"><input class="input mono" id="proCode" placeholder="¿Ya eres Pro? Código: 482 913 o TP-XXXX-…" autocomplete="off" /><button class="btn" id="proClaim">Vincular</button></div>
+				<p class="muted small">El código de 6 cifras sale en el terminal, en <b>Pro › Vincular simulador</b>.</p>`)
+	$('proModal').hidden = false
+}
+
+async function proCheckout(plan) {
+	try {
+		const c = await api('/pro/checkout', { method: 'POST', body: JSON.stringify({ plan }) })
+		window.open(c.url, '_blank', 'noopener')
+		openPro(`<h2>Esperando tu pago</h2><p class="muted">Paga la factura en QvaPay. Cuando QvaPay lo confirme, esto se actualiza solo.</p>
+			<a class="btn block go buy" href="${esc(c.url)}" target="_blank" rel="noopener">Abrir el pago en QvaPay</a>`)
+		clearTimeout(proPoll)
+		const started = Date.now()
+		const tick = async () => {
+			if (Date.now() - started > 60 * 60_000) return
+			try {
+				const r = await api(`/pro/checkout?id=${encodeURIComponent(c.id)}`)
+				if (r.status === 'paid') {
+					setPro({ username: r.username, plan: r.plan, expiresAt: r.expiresAt })
+					return openPro(`<h2>★ ¡Ya eres Pro!</h2><p class="muted">Hasta el <b>${proDate(r.expiresAt)}</b>. Ya puedes operar todos los mercados.</p>
+						${r.backupCode ? `<div class="pro-code-box"><p class="muted">Tu código de respaldo. Guárdalo: con él activas Pro también en el terminal P2P (<b>Hazte Pro › Ya soy Pro en otro dispositivo</b>).</p><div class="pro-code mono">${esc(r.backupCode)}</div></div>` : ''}`)
+				}
+				if (r.status === 'expired') return openPro('<h2>La factura caducó</h2><p class="muted">No se cobró nada. Puedes pedir otra.</p>')
+			} catch {}
+			proPoll = setTimeout(tick, 4000)
+		}
+		proPoll = setTimeout(tick, 4000)
+	} catch (e) {
+		toast(e.message, 'bad')
+	}
+}
+
+async function proClaim() {
+	try {
+		const r = await api('/pro/claim', { method: 'POST', body: JSON.stringify({ code: $('proCode').value }) })
+		setPro(r.pro)
+		openPro(`<h2>★ Pro vinculado</h2><p class="muted">Tu cuenta del simulador ya es Pro: operas todos los mercados.</p>
+			${r.backupCode ? `<div class="pro-code-box"><p class="muted">Usaste tu código de respaldo, así que ahora tienes uno nuevo (el anterior ya no vale). Guárdalo:</p><div class="pro-code mono">${esc(r.backupCode)}</div></div>` : ''}`)
+	} catch (e) {
+		toast(e.message, 'bad')
 	}
 }
 
@@ -878,6 +970,7 @@ function showLogin() {
 async function logout(silent = false) {
 	await api('/logout', { method: 'POST' }).catch(() => {})
 	S.user = null
+	S.pro = null
 	S.view = null
 	S.tradesSeen = null
 	if (!silent) toast('Has salido del simulador')
@@ -999,12 +1092,24 @@ function bind() {
 		}
 	$('rankBtn').onclick = openRanking
 	$('sRankBox').onclick = openRanking
+	$('proBtn').onclick = () => openPro()
+	$('proClose').onclick = () => ($('proModal').hidden = true)
+	$('proModal').addEventListener('click', (e) => {
+		if (e.target.id === 'proModal') return ($('proModal').hidden = true)
+		const plan = e.target.closest('[data-plan]')
+		if (plan) proCheckout(plan.dataset.plan)
+		if (e.target.closest('#proClaim')) proClaim()
+	})
 	$('rankClose').onclick = () => ($('rankModal').hidden = true)
 	$('rankModal').addEventListener('click', (e) => {
 		if (e.target.id === 'rankModal') $('rankModal').hidden = true
 		else rankClick(e)
 	})
-	document.addEventListener('keydown', (e) => e.key === 'Escape' && ($('rankModal').hidden = true))
+	document.addEventListener('keydown', (e) => {
+		if (e.key !== 'Escape') return
+		$('rankModal').hidden = true
+		$('proModal').hidden = true
+	})
 	$('tabBody').addEventListener('click', async (e) => {
 		const edit = e.target.closest('[data-edit]')
 		if (edit) {
@@ -1101,7 +1206,9 @@ async function start() {
 	S.markets = Object.fromEntries(S.config.markets.map((m) => [m.symbol, m]))
 	if (!S.markets[S.symbol]) S.symbol = 'BTCUSDT'
 	try {
-		S.user = (await api('/me')).user
+		const me = await api('/me')
+		S.user = me.user
+		S.pro = me.pro
 	} catch {
 		S.user = null
 	}

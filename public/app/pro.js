@@ -10,7 +10,10 @@ const PRO_PLANS = [
 	['month', 'Mensual', '1,99 USD', 'al mes'],
 	['year', 'Anual', '20 USD', 'al año · 2 meses gratis'],
 ]
-const PRO_FEATURES = [['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange']]
+const PRO_FEATURES = [
+	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
+	['📈', 'Todos los mercados del simulador', 'sin Pro, BTC y ETH; con Pro también SOL, XRP, BNB, DOGE, SUI, PEPE y TAO (sim.terminalp2p.com)'],
+]
 const CHECKOUT_POLL_MS = 4000
 const CHECKOUT_MAX_MS = 60 * 60_000
 const RENEW_SOON_MS = 5 * 86_400_000
@@ -77,7 +80,7 @@ function showPro() {
 			? `<div class="stack pro-box"><h3>★ Eres Pro</h3>
 				<p class="muted">@${esc(pro.username)} · plan ${pro.plan === 'year' ? 'anual' : pro.plan === 'gift' ? 'regalado' : 'mensual'} · hasta el <b>${proDate(pro.expiresAt)}</b></p>
 				<ul class="pro-feats">${feats}</ul>
-				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proBackup">Código de respaldo</button></div>
+				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proSim">Vincular simulador</button><button class="btn" id="proBackup">Código de respaldo</button></div>
 				<p class="hint">Hasta 2 dispositivos a la vez. Renovar suma el periodo a lo que te queda:</p>
 				<div class="pro-plans">${plans}</div></div>`
 			: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
@@ -87,7 +90,8 @@ function showPro() {
 				<button class="link small" id="proClaim">Ya soy Pro en otro dispositivo</button></div>`,
 	)
 	for (const b of $('modalBody').querySelectorAll('[data-plan]')) b.onclick = () => startCheckout(b.dataset.plan)
-	$('proPair')?.addEventListener('click', showPair)
+	$('proPair')?.addEventListener('click', () => showPair())
+	$('proSim')?.addEventListener('click', () => showPair(true))
 	$('proBackup')?.addEventListener('click', showBackup)
 	$('proClaim')?.addEventListener('click', showClaim)
 }
@@ -170,11 +174,16 @@ function showWelcome(backupCode) {
 	$('proOk').onclick = closeModal
 }
 
-async function showPair() {
+// El mismo código de 6 cifras sirve para otro dispositivo del terminal o para la cuenta del simulador
+async function showPair(sim = false) {
 	try {
 		const { code, expiresAt } = await proFetch('/pro/pair', { print: pro.print })
-		openModal(`<div class="stack pro-box"><h3>Añadir dispositivo</h3>
-			<p class="muted">En el otro móvil u ordenador, conecta tu cuenta, pulsa <b>Hazte Pro</b> y luego <b>Ya soy Pro en otro dispositivo</b>. Escribe este código:</p>
+		openModal(`<div class="stack pro-box"><h3>${sim ? 'Vincular simulador' : 'Añadir dispositivo'}</h3>
+			<p class="muted">${
+				sim
+					? 'En <a class="link" href="https://sim.terminalp2p.com" target="_blank" rel="noopener">sim.terminalp2p.com</a>, entra con Telegram, pulsa <b>★ Hazte Pro</b> y escribe este código en «¿Ya eres Pro?»:'
+					: 'En el otro móvil u ordenador, conecta tu cuenta, pulsa <b>Hazte Pro</b> y luego <b>Ya soy Pro en otro dispositivo</b>. Escribe este código:'
+			}</p>
 			<div class="pro-code mono big">${code.slice(0, 3)} ${code.slice(3)}</div>
 			<p class="hint">Caduca en <span class="countdown" data-expires="${new Date(expiresAt).toISOString()}"></span> y sirve una sola vez.</p></div>`)
 		tickClocks()

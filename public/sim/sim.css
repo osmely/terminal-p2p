@@ -257,3 +257,28 @@ tr.me td { background: var(--accent-bg); }
 	.rank-head .seg-tabs { display: flex; width: 100%; }
 	.rank-head .seg-tab { flex: 1 1 auto; padding: 5px 4px; font-size: 12px; }
 }
+
+/* ══ Pro ══════════════════════════════════════════════════════════════ */
+.pro-chip { padding: 7px 12px; border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); background: none; color: var(--warn); font-weight: 600; }
+.pro-chip.on { background: var(--warn); color: #1a1300; border-color: var(--warn); }
+.go.pro { background: var(--warn); color: #1a1300; }
+.mk .lock { font: 700 9.5px var(--sans); font-style: normal; padding: 1px 5px; border-radius: 999px; background: var(--warn-bg); color: var(--warn); vertical-align: middle; }
+#proBody { display: flex; flex-direction: column; gap: 12px; }
+#proBody h2 { margin: 0; font-size: 18px; }
+#proBody p { margin: 0; }
+.pro-feats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.pro-feats li { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.pro-feats .muted { font-size: 12.5px; }
+.pro-plans { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pro-plan { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2, var(--surface)); color: var(--text); text-align: left; cursor: pointer; }
+.pro-plan:hover { border-color: var(--warn); }
+.pro-plan .mono { font-size: 18px; font-weight: 600; }
+.pro-plan small { color: var(--muted); font-size: 11.5px; }
+.pro-claim { display: flex; gap: 8px; }
+.pro-claim .input { flex: 1; min-width: 0; }
+.pro-code-box { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 10px; background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
+.pro-code { font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+.muted.small, .small.muted { font-size: 12px; }
+@media (max-width: 760px) {
+	.pro-chip:not(.on) .pro-label { display: none; }
+}
