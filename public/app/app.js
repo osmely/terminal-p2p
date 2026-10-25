@@ -455,6 +455,10 @@ const ACT_ICON = {
 }
 function renderActivity(b) {
 	const items = b.activity.slice(0, 40)
+	// Solo se repinta si cambió algo: repintar con cada lectura del libro haría perder el clic en un nombre
+	const key = items.map((a) => `${a.t}:${a.kind}:${a.user}:${a.price}`).join('|')
+	if ($('activity').dataset.key === key) return
+	$('activity').dataset.key = key
 	const note = '<li class="act-note">Ofertas que entran y salen del libro. Las que salen las tomó alguien o las retiró su dueño: QvaPay no indica cuál.</li>'
 	$('activity').innerHTML = items.length
 		? note +
@@ -464,7 +468,7 @@ function renderActivity(b) {
 					const sideName = a.side === 'ask' ? 'una venta' : 'una compra'
 					const what = a.kind === 'new' ? `Entra ${sideName}` : `Sale ${sideName}`
 					const tip = a.kind === 'new' ? 'Oferta nueva o que volvió al libro' : 'La tomó alguien o la retiró su dueño; QvaPay no indica cuál'
-					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${a.kind} ${a.side}">${ACT_ICON[a.kind]}</i><span>${what} · ${fmtU(a.usd)} USD · @${esc(a.user)}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
+					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${a.kind} ${a.side}">${ACT_ICON[a.kind]}</i><span>${what} · ${fmtU(a.usd)} USD · <button type="button" class="link peer-link" data-peer="${esc(a.user)}" title="Ver su ficha">@${esc(a.user)}</button></span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
 				})
 				.join('')
 		: '<li><span></span><span class="muted">Esperando cambios en el libro…</span><span></span></li>'
@@ -920,6 +924,11 @@ function bind() {
 			store.set('rankCrit', state.rank.crit)
 			renderRanking()
 		})
+	// Los nombres de la actividad abren la ficha de esa contraparte
+	$('activity').addEventListener('click', (e) => {
+		const who = e.target.closest('[data-peer]')
+		if (who && typeof showPeer === 'function') showPeer(who.dataset.peer)
+	})
 	$('rankList').addEventListener('click', (e) => {
 		const li = e.target.closest('li[data-user]')
 		if (li && typeof showPeer === 'function') showPeer(li.dataset.user)
