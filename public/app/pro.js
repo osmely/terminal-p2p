@@ -146,7 +146,7 @@ function pollCheckout() {
 			return
 		}
 		try {
-			const r = await proFetch(`/pro/checkout?id=${encodeURIComponent(c.id)}`)
+			const r = await proFetch('/pro/checkout/status', { id: c.id, print: pro.print })
 			if (r.status === 'paid') {
 				proPolling = null
 				store.set('pro.checkout', null)

@@ -64,6 +64,7 @@ interface Checkout {
 	license: string | null
 	backup_code: string | null
 	created_at: number
+	paid_at: number | null
 }
 
 export class ProError extends Error {
@@ -149,7 +150,7 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	if (t.remote_id && t.remote_id !== c.id) return false
 	if (Number(t.amount) + 1e-6 < c.amount) return false
 	const db = env.DB
-	const marked = await db.prepare("UPDATE pro_checkouts SET status = 'paid', license = ? WHERE id = ? AND status = 'pending'").bind(payer.uuid, c.id).run()
+	const marked = await db.prepare("UPDATE pro_checkouts SET status = 'paid', license = ?, paid_at = ? WHERE id = ? AND status = 'pending'").bind(payer.uuid, now, c.id).run()
 	if (!marked.meta?.changes) return true
 	const plan = PLANS[c.plan]
 	const old = await db.prepare('SELECT uuid, expires_at, backup_hash FROM pro_licenses WHERE uuid = ?').bind(payer.uuid).first<License>()
@@ -172,6 +173,23 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	if (c.print) await attachPrint(db, payer.uuid, c.print, now)
 	if (c.tg) await linkSim(db, c.tg, payer.uuid)
 	return true
+}
+
+// Facturas pendientes de la última hora, confirmadas con QvaPay aunque nadie las esté mirando: si se
+// pidió otra después, se cerró la pestaña o el aviso de QvaPay no llegó. Lo lanza el cron cada minuto
+// (todas) y la consulta de estado de cada dispositivo o cuenta del simulador (solo las suyas)
+const PENDING_BATCH = 25
+export async function settlePending(env: ProEnv, now: number, who: { print?: string; tg?: number } = {}, fetcher: typeof fetch = fetch) {
+	const [filter, arg] = who.print ? [' AND print = ?', who.print] : who.tg ? [' AND tg = ?', who.tg] : ['', null]
+	const { results } = await env.DB.prepare(`SELECT * FROM pro_checkouts WHERE status = 'pending' AND created_at > ? AND invoice IS NOT NULL${filter} ORDER BY created_at DESC LIMIT ?`)
+		.bind(...(arg === null ? [now - CHECKOUT_MS, PENDING_BATCH] : [now - CHECKOUT_MS, arg, PENDING_BATCH]))
+		.all<Checkout>()
+	for (const c of results)
+		try {
+			await settle(env, c, now, fetcher)
+		} catch (err) {
+			console.error(`pro: factura ${c.id}: ${(err as Error).message}`)
+		}
 }
 
 // ── Compartido con el simulador ──────────────────────────────────────
@@ -230,14 +248,21 @@ export async function createCheckout(env: ProEnv, who: { print?: string; tg?: nu
 
 // Cómo va una factura (y se comprueba con QvaPay si sigue pendiente). El código de respaldo nuevo se
 // entrega una sola vez, a quien la pidió
-export async function checkoutStatus(env: ProEnv, id: string, now: number, fetcher: typeof fetch = fetch) {
+// Solo responde a quien pidió la factura (su dispositivo o su cuenta del simulador): la respuesta lleva
+// el código de respaldo y el identificador de la factura lo ve también quien la paga
+export async function checkoutStatus(env: ProEnv, id: string, owner: { print: string } | { tg: number }, now: number, fetcher: typeof fetch = fetch) {
 	const db = env.DB
 	const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(id).first<Checkout>()
-	if (!c) throw new ProError(404, 'Pago no encontrado')
-	if (c.status === 'pending' && now - c.created_at < CHECKOUT_MS) await settle(env, c, now, fetcher)
-	const fresh = (await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(c.id).first<Checkout>())!
+	if (!c || ('print' in owner ? c.print !== owner.print : c.tg !== owner.tg)) throw new ProError(404, 'Pago no encontrado')
+	const [col, who] = 'print' in owner ? ['print', owner.print] : ['tg', owner.tg]
+	if (c.status === 'pending' && now - c.created_at < CHECKOUT_MS) await settlePending(env, now, owner, fetcher)
+	// Si mientras tanto pagó otra factura suya (p. ej. una que pidió antes que esta), cuenta como esta
+	const fresh = (await db
+		.prepare(`SELECT * FROM pro_checkouts WHERE ${col} = ? AND (id = ? OR (status = 'paid' AND paid_at > ?)) ORDER BY status = 'paid' DESC, paid_at DESC LIMIT 1`)
+		.bind(who, c.id, c.created_at)
+		.first<Checkout>())!
 	if (fresh.status !== 'paid') return { checkout: fresh, body: { status: now - c.created_at < CHECKOUT_MS ? 'pending' : 'expired' } }
-	if (fresh.backup_code) await db.prepare('UPDATE pro_checkouts SET backup_code = NULL WHERE id = ?').bind(c.id).run()
+	if (fresh.backup_code) await db.prepare('UPDATE pro_checkouts SET backup_code = NULL WHERE id = ?').bind(fresh.id).run()
 	const l = fresh.print ? await licenseOfPrint(db, fresh.print, now) : await activeLicense(db, fresh.license, now)
 	return { checkout: fresh, body: { status: 'paid', backupCode: fresh.backup_code ?? null, ...(await statusOf(env, l, now)) } }
 }
@@ -278,6 +303,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		// ¿Este dispositivo es Pro?
 		if (route === 'POST /pro/status') {
 			const print = printOf((await readBody(req)).print)
+			await settlePending(env, now, { print }, fetcher)
 			const l = await licenseOfPrint(db, print, now)
 			if (l) await db.prepare('UPDATE pro_prints SET seen_at = ? WHERE print = ?').bind(now, print).run()
 			return json(200, await statusOf(env, l, now))
@@ -290,7 +316,10 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		}
 
 		// El navegador que pagó pregunta cómo va su factura
-		if (route === 'GET /pro/checkout') return json(200, (await checkoutStatus(env, String(url.searchParams.get('id') ?? ''), now, fetcher)).body)
+		if (route === 'POST /pro/checkout/status') {
+			const b = await readBody(req)
+			return json(200, (await checkoutStatus(env, String(b.id ?? ''), { print: printOf(b.print) }, now, fetcher)).body)
+		}
 
 		// Aviso de QvaPay: solo dice qué factura mirar; se confirma consultándola
 		if (req.method === 'POST' && (path === '/pro/webhook' || path === '/api/pro/webhook')) {

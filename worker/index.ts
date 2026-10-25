@@ -12,7 +12,7 @@ import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent 
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { adminPage, askKey } from './admin.ts'
-import { proAdmin, proApi, type ProEnv } from './pro.ts'
+import { proAdmin, proApi, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
@@ -125,7 +125,7 @@ export default {
 		return staged(await handle(req, env, ctx))
 	},
 
-	// Cada minuto: las órdenes pendientes del simulador. Cada 10: los agregados públicos de QvaPay,
+	// Cada minuto: las órdenes pendientes del simulador y las facturas Pro sin confirmar. Cada 10: los agregados públicos de QvaPay,
 	// la tasa informal de elTOQUE y el patrimonio del ranking del simulador
 	async scheduled(event, env) {
 		// Cloudflare lanza el cron unos segundos antes de su minuto: se redondea al minuto más cercano
@@ -137,6 +137,12 @@ export default {
 				await simCron(env.DB, Date.now(), tenth)
 			} catch (err) {
 				console.error(`simulador: ${(err as Error).message}`)
+			}
+		if (env.PRO_KEY && env.QVAPAY_APP_SECRET)
+			try {
+				await settlePending(env as unknown as ProEnv, Date.now())
+			} catch (err) {
+				console.error(`pro: ${(err as Error).message}`)
 			}
 		if (!tenth) return
 		try {

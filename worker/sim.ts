@@ -11,7 +11,7 @@ import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle
 import { b64url, enc, hex, hmac, same, unb64url } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
-import { activeLicense, checkoutStatus, claimCode, createCheckout, linkSim, ProError, startTrial, type Plan, type ProEnv } from './pro.ts'
+import { activeLicense, checkoutStatus, claimCode, createCheckout, linkSim, ProError, settlePending, startTrial, type Plan, type ProEnv } from './pro.ts'
 import { cubaOffset, type D1 } from './rates.ts'
 
 export interface SimEnv extends Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
@@ -511,6 +511,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		const tgId = await readSession(req.headers.get('cookie'), env.SIM_SESSION_KEY)
 		if (route === 'GET /api/me') {
 			const user = tgId ? await env.DB.prepare('SELECT tg_id AS id, first_name, username, photo_url, compete FROM sim_users WHERE tg_id = ?').bind(tgId).first() : null
+			if (user && tgId) await settlePending(env as unknown as ProEnv, Date.now(), { tg: tgId })
 			const l = user && tgId ? await simPro(env.DB, tgId) : null
 			return json(200, { user, pro: l ? { username: l.username, plan: l.plan, expiresAt: l.expires_at } : null })
 		}
@@ -585,11 +586,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
 			return json(200, await createCheckout(env as unknown as ProEnv, { tg: tgId }, String(body.plan) as Plan, url.origin, Date.now()))
 		}
-		if (route === 'GET /api/pro/checkout') {
-			const { checkout, body } = await checkoutStatus(env as unknown as ProEnv, String(url.searchParams.get('id') ?? ''), Date.now())
-			if (checkout.tg !== tgId) return json(404, { error: 'Pago no encontrado' })
-			return json(200, body)
-		}
+		if (route === 'GET /api/pro/checkout') return json(200, (await checkoutStatus(env as unknown as ProEnv, String(url.searchParams.get('id') ?? ''), { tg: tgId }, Date.now())).body)
 		if (route === 'POST /api/close') {
 			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
 			const symbol = normSymbol(body.symbol)

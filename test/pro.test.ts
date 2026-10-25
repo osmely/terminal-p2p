@@ -56,7 +56,17 @@ function setup(extra: Partial<ProEnv> = {}) {
 		const res = (await proApi(req, new URL(req.url), env, now, q.fetcher))!
 		return { status: res.status, body: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() }
 	}
-	return { db, env, q, call, tick: (ms: number) => (now += ms), post: (p: string, b: unknown) => call('POST', p, b), get: (p: string) => call('GET', p) }
+	return {
+		db,
+		env,
+		q,
+		call,
+		tick: (ms: number) => (now += ms),
+		now: () => now,
+		post: (p: string, b: unknown) => call('POST', p, b),
+		get: (p: string) => call('GET', p),
+		status: (id: string, print = P1) => call('POST', '/pro/checkout/status', { id, print }),
+	}
 }
 
 // Compra completa: factura, pago en QvaPay y el navegador recoge el resultado
@@ -64,7 +74,7 @@ async function buy(s: ReturnType<typeof setup>, print = P1, plan = 'month', user
 	const c = await s.post('/pro/checkout', { print, plan })
 	const inv = [...s.q.invoices.keys()].at(-1)!
 	s.q.pay(inv, username)
-	return { checkout: c.body, result: (await s.get(`/pro/checkout?id=${c.body.id}`)).body }
+	return { checkout: c.body, result: (await s.status(c.body.id, print)).body }
 }
 
 test('comprar: factura de QvaPay, quién pagó lo confirma QvaPay y el código de respaldo se entrega una vez', async () => {
@@ -74,17 +84,17 @@ test('comprar: factura de QvaPay, quién pagó lo confirma QvaPay y el código d
 	assert.match(c.body.url, /^https:\/\/www\.qvapay\.com\/pay\/inv-1$/)
 	assert.deepEqual(s.q.invoices.get('inv-1')?.amount, 1.99)
 	// Sin pagar sigue pendiente y no es Pro
-	assert.equal((await s.get(`/pro/checkout?id=${c.body.id}`)).body.status, 'pending')
+	assert.equal((await s.status(c.body.id)).body.status, 'pending')
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
 	s.q.pay('inv-1', 'ana')
-	const r = (await s.get(`/pro/checkout?id=${c.body.id}`)).body
+	const r = (await s.status(c.body.id)).body
 	assert.equal(r.status, 'paid')
 	assert.equal(r.pro, true)
 	assert.equal(r.username, 'ana')
 	assert.match(r.backupCode, /^TP-[2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}$/)
 	assert.equal(r.expiresAt, T0 + 30 * 86_400_000)
 	// Una segunda consulta ya no devuelve el código (solo lo tiene quien compró)
-	assert.equal((await s.get(`/pro/checkout?id=${c.body.id}`)).body.backupCode, null)
+	assert.equal((await s.status(c.body.id)).body.backupCode, null)
 	const st = (await s.post('/pro/status', { print: P1 })).body
 	assert.deepEqual([st.pro, st.username, st.plan], [true, 'ana', 'month'])
 	// En la base: el usuario y la huella, nunca un token
@@ -108,7 +118,7 @@ test('no se da por pagada si QvaPay no lo confirma, si paga menos o si el aviso 
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
 	// Pagó menos de lo que vale el plan
 	s.q.pay('inv-1', 'ana', 1)
-	assert.equal((await s.get(`/pro/checkout?id=${c.body.id}`)).body.status, 'pending')
+	assert.equal((await s.status(c.body.id)).body.status, 'pending')
 	// Pagado de verdad: el aviso de QvaPay lo activa
 	s.q.pay('inv-1', 'ana', 20)
 	await s.post('/api/pro/webhook', { transaction_uuid: 'inv-1' })
@@ -237,7 +247,7 @@ test('simulador: hacerse Pro desde el simulador vincula esa cuenta de Telegram y
 	const c = await createCheckout(s.env, { tg: 9 }, 'year', 'https://sim.terminalp2p.com', T0, s.q.fetcher)
 	assert.equal(s.q.invoices.get('inv-1')?.amount, 20)
 	s.q.pay('inv-1', 'leo')
-	const { checkout, body: raw } = await checkoutStatus(s.env, c.id, T0, s.q.fetcher)
+	const { checkout, body: raw } = await checkoutStatus(s.env, c.id, { tg: 9 }, T0, s.q.fetcher)
 	const body = raw as { status: string; backupCode: string }
 	assert.equal(checkout.tg, 9)
 	assert.equal(body.status, 'paid')
@@ -259,7 +269,7 @@ test('primer mes gratis: una vez por usuario de QvaPay y por dispositivo; si pag
 	s.tick(10 * 86_400_000)
 	const c = await s.post('/pro/checkout', { print: P1, plan: 'month' })
 	s.q.pay([...s.q.invoices.keys()].at(-1)!, 'ana')
-	const paid = (await s.get(`/pro/checkout?id=${c.body.id}`)).body
+	const paid = (await s.status(c.body.id)).body
 	assert.equal(paid.plan, 'month')
 	assert.equal(paid.expiresAt, T0 + 30 * 86_400_000 + 30 * 86_400_000)
 })
@@ -288,4 +298,55 @@ test('panel: devolver un pago revoca la licencia (también en el simulador) y di
 	assert.equal((s.db.prepare('SELECT pro_license FROM sim_users WHERE tg_id = 3').get() as { pro_license: string | null }).pro_license, null)
 	// No se devuelve dos veces
 	assert.match(await (await form({ action: 'refund', checkout: checkout.id })).text(), /ya se devolvió/)
+})
+
+test('factura pagada sin que nadie la mire: la confirma la consulta de estado del dispositivo o el cron', async () => {
+	const { settlePending } = await import('../worker/pro.ts')
+	const s = setup()
+	// Pide la factura, cierra la pestaña y paga desde el móvil: al volver, la consulta de estado la confirma
+	await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	s.q.pay('inv-1', 'ana')
+	const st = (await s.post('/pro/status', { print: P1 })).body
+	assert.deepEqual([st.pro, st.username], [true, 'ana'])
+	// Otro dispositivo paga y nadie vuelve: el cron la confirma igual
+	await s.post('/pro/checkout', { print: P2, plan: 'month' })
+	s.q.pay('inv-2', 'leo')
+	await settlePending(s.env, s.now(), {}, s.q.fetcher)
+	assert.equal(s.db.prepare("SELECT status FROM pro_checkouts WHERE invoice = 'inv-2'").get()?.status, 'paid')
+	// Las facturas de hace más de una hora ya no se consultan
+	await s.post('/pro/checkout', { print: P3, plan: 'month' })
+	s.tick(61 * 60_000)
+	const before = s.q.calls.length
+	await settlePending(s.env, s.now(), {}, s.q.fetcher)
+	assert.equal(s.q.calls.length, before)
+})
+
+test('pide una factura, luego otra, y paga la primera: la pantalla que espera la segunda también se entera', async () => {
+	const s = setup()
+	const first = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	s.tick(60_000)
+	const second = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	s.tick(60_000)
+	s.q.pay('inv-1', 'ana')
+	const r = (await s.status(second.id)).body
+	assert.deepEqual([r.status, r.pro], ['paid', true])
+	assert.match(r.backupCode, /^TP-/)
+	// Una factura pagada antes de pedir esta no cuenta como pago de esta
+	s.tick(60_000)
+	const third = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	assert.equal((await s.status(third.id)).body.status, 'pending')
+	assert.equal((await s.status(first.id)).body.backupCode, null)
+})
+
+test('el estado de una factura solo se lo da a quien la pidió: otro no se lleva el código de respaldo', async () => {
+	const { checkoutStatus } = await import('../worker/pro.ts')
+	const s = setup()
+	const c = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	s.q.pay('inv-1', 'ana')
+	assert.equal((await s.status(c.id, P2)).status, 404)
+	await assert.rejects(checkoutStatus(s.env, c.id, { tg: 1 }, s.now(), s.q.fetcher), /Pago no encontrado/)
+	// El dueño sigue recibiendo su código
+	assert.match((await s.status(c.id)).body.backupCode, /^TP-/)
+	// Ya no hay consulta por GET con solo el identificador
+	assert.equal((await s.get(`/pro/checkout?id=${c.id}`)).status, 404)
 })
