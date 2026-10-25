@@ -276,6 +276,43 @@ function renderStats(b, asks, bids) {
 		.map(([k, v, cls]) => `<div class="stat"><label>${k}</label><b class="${cls === 'warn' ? '' : cls}">${cls === 'warn' ? `<span class="badge warn">${v}</span>` : v}</b></div>`)
 		.join('')
 	renderIntent(mid ? within(bids, 'bid') : 0, mid ? within(asks, 'ask') : 0, mid, doneMedian)
+	renderPulse(b)
+}
+
+// Actividad del mercado en la última hora: ofertas del libro publicadas, editadas o reabiertas en ese
+// tiempo (cada oferta trae su última actividad) más las que salieron del libro mientras lo miras.
+// Se compara con el ritmo normal, las operaciones completadas por hora en la ventana de QvaPay.
+// Si nada se movió en 30 minutos, el mercado está quieto
+const PULSE = ['Quieto', 'Baja', 'Normal', 'Alta', 'Muy alta']
+function pulseScore(b) {
+	const levels = [...b.ask.levels, ...b.bid.levels].filter((l) => !l.outlier)
+	if (!levels.length) return null
+	const now = b.serverTime ?? Date.now()
+	const hour = 3_600_000
+	const fresh = levels.filter((l) => l.updatedAt && now - l.updatedAt < hour).length
+	const gone = b.activity.filter((a) => a.kind === 'gone' && now - a.t < hour).length
+	const last = Math.max(0, ...levels.map((l) => l.updatedAt ?? 0), ...b.activity.map((a) => a.t))
+	const done = b.completed
+	const pace = done?.count && done.window_hours ? done.count / done.window_hours : null
+	const moves = fresh + gone
+	const ratio = pace ? moves / pace : null
+	const level = !last || now - last > 30 * 60_000 ? 0 : ratio != null ? (ratio >= 2 ? 4 : ratio >= 1 ? 3 : ratio >= 0.4 ? 2 : 1) : moves >= 20 ? 4 : moves >= 8 ? 3 : moves >= 3 ? 2 : 1
+	return { level, fresh, gone, last: last ? now - last : null, pace }
+}
+function renderPulse(b) {
+	const el = $('pulse')
+	const r = pulseScore(b)
+	el.classList.toggle('off', !r)
+	el.dataset.level = r ? String(r.level) : ''
+	const label = r ? PULSE[r.level] : '—'
+	el.setAttribute('aria-label', r ? `Actividad del mercado: ${label}` : 'Actividad del mercado: sin libro en vivo')
+	el.innerHTML = `<label>Actividad</label><div class="pulse-body" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<i class="${r && r.level >= i ? 'on' : ''}" style="height:${6 + i * 4}px"></i>`).join('')}<span>${label}</span></div>`
+	el.title = r
+		? `Actividad del mercado: ${label.toLowerCase()}.\n` +
+			`· Última novedad en el libro: hace ${ago(r.last ?? 0)}.\n` +
+			`· En la última hora: ${r.fresh} ${r.fresh === 1 ? 'oferta publicada o editada' : 'ofertas publicadas o editadas'} y ${r.gone} que ${r.gone === 1 ? 'salió' : 'salieron'} del libro (estas, desde que lo tienes abierto).\n` +
+			(r.pace != null ? `· Ritmo normal: unas ${Math.round(r.pace)} operaciones completadas por hora.` : '· Sin datos de operaciones completadas para comparar.')
+		: 'La actividad del mercado se calcula con el libro en vivo: conecta tu cuenta de QvaPay.'
 }
 
 // Intención del mercado (0 = más venden, 100 = más compran): un 70% sale de la profundidad a ±2%

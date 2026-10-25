@@ -211,6 +211,15 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .intent[data-side='bid'] .g-hub { fill: var(--bid); }
 .intent.off .gauge path { stroke: var(--line-strong); opacity: 1; }
 .intent.off .g-needle, .intent.off .g-hub { display: none; }
+/* Actividad: barras como las de la cobertura del móvil */
+.pulse { display: flex; flex-direction: column; gap: 3px; cursor: help; }
+.pulse label { font-size: 11px; color: var(--muted); font-weight: 500; }
+.pulse-body { display: flex; align-items: flex-end; gap: 3px; height: 27px; padding-bottom: 2px; box-sizing: border-box; }
+.pulse-body i { width: 5px; border-radius: 2px; background: var(--line-strong); transition: background 0.3s; }
+.pulse-body span { margin-left: 5px; font: 600 12.5px var(--mono); color: var(--text-2, var(--text)); white-space: nowrap; }
+.pulse[data-level='1'] i.on { background: var(--warn); }
+.pulse[data-level='2'] i.on, .pulse[data-level='3'] i.on, .pulse[data-level='4'] i.on { background: var(--bid); }
+.pulse.off .pulse-body span { color: var(--muted); }
 
 /* ══ Rejilla principal ════════════════════════════════════════════════ */
 .layout {
@@ -577,7 +586,7 @@ a.icon-btn { text-decoration: none; }
 	.stat:nth-child(4) { display: none; } /* "Medio": seis datos caben en dos filas */
 	/* La intención va junto al par, arriba a la derecha, y las cifras debajo */
 	.ticker-pair { order: 0; flex: 1 1 0; min-width: 0; }
-	.intent { order: 1; align-self: center; margin-left: 0; align-items: center; }
+	.intent, .pulse { order: 1; align-self: center; margin-left: 0; align-items: center; }
 	.ticker-stats { order: 2; }
 
 	/* Una sección a la vez, elegida en las pestañas */
