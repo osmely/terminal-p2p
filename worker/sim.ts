@@ -284,7 +284,7 @@ export function summaryText(seasonId: string, standings: { name: string; pnlPct:
 	const medal = ['🥇', '🥈', '🥉']
 	const top = standings.slice(0, SUMMARY_SIZE).map((x, i) => `${medal[i] ?? `${i + 1}.`} ${escHtml(x.name)} <b>${pctEs(x.pnlPct)}</b>`)
 	return [
-		`🏆 <b>Simulador de trading: temporada del ${dayEs(start)} al ${dayEs(start + 6 * DAY_MS)}</b>`,
+		`🏆 <b>Terminal Trading: temporada del ${dayEs(start)} al ${dayEs(start + 6 * DAY_MS)}</b>`,
 		'',
 		...(top.length ? top : ['Esta semana nadie llegó a las 3 operaciones. ¡La próxima puede ser tuya!']),
 		'',
