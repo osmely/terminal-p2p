@@ -1027,6 +1027,18 @@ async function start() {
 	}
 	if (!S.user) showLogin()
 	render()
+	// Paneles redimensionables en escritorio (cuando los cuatro paneles están lado a lado)
+	window.TPResize?.({
+		layout: '#layout',
+		key: 'sim.layout',
+		minWidth: 1281,
+		handles: [
+			{ panel: '.markets', edge: 'right', v: '--c-markets', min: 170, max: 400 },
+			{ panel: '.book-panel', edge: 'left', v: '--c-book', min: 210, max: 460 },
+			{ panel: '.order-panel', edge: 'left', v: '--c-order', min: 270, max: 460 },
+			{ panel: '.chart-panel', edge: 'bottom', v: '--h-top', min: 360, max: 1000 },
+		],
+	})
 	loadTickers()
 	loadCandles()
 	setInterval(() => !document.hidden && loadTickers(), TICK_MS)

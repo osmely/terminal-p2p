@@ -1015,6 +1015,17 @@ function bind() {
 }
 
 bind()
+// Paneles redimensionables en escritorio (cuando mercados, gráfico y libro están lado a lado)
+window.TPResize?.({
+	layout: '#layout',
+	key: 'tp.layout',
+	minWidth: 1281,
+	handles: [
+		{ panel: '.area-markets', edge: 'right', v: '--c-markets', min: 200, max: 460 },
+		{ panel: '.area-book', edge: 'left', v: '--c-book', min: 300, max: 600 },
+		{ panel: '.area-chart', edge: 'bottom', v: '--h-top', min: 280, max: 860 },
+	],
+})
 showView(state.view)
 showChart(state.chart)
 render()

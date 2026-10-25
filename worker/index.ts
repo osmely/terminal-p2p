@@ -48,7 +48,7 @@ const SECURITY_HEADERS: Record<string, string> = {
 const RATES_TTL_S = 300
 const INFORMAL_TTL_S = 600
 // La landing y el simulador reutilizan estos archivos del terminal en vez de duplicarlos
-const SHARED = ['/vendor/', '/favicon.svg', '/theme.js']
+const SHARED = ['/vendor/', '/favicon.svg', '/theme.js', '/resize.js']
 
 // app.terminalp2p.com (app.localhost en desarrollo) → terminal; sim.* → simulador; el resto → landing
 const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : host.startsWith('sim.') ? 'sim' : 'site')

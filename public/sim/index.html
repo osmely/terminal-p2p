@@ -16,6 +16,7 @@
 	<link rel="stylesheet" href="/vendor/fonts.css" />
 	<link rel="stylesheet" href="/sim.css" />
 	<script src="/vendor/lightweight-charts.js" defer></script>
+	<script src="/resize.js" defer></script>
 	<script src="/sim.js" defer></script>
 </head>
 <body>
@@ -56,7 +57,7 @@
 		<button class="sum sum-rank" id="sRankBox" title="Ver el ranking semanal"><label>Ranking semanal</label><b id="sRank">—</b></button>
 	</div>
 
-	<main class="layout">
+	<main class="layout" id="layout">
 		<aside class="panel markets">
 			<div class="panel-head"><h2>Mercados</h2></div>
 			<div class="mk-cols"><span>Mercado</span><span>Precio</span><span>24 h</span></div>

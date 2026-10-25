@@ -215,12 +215,13 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 /* ══ Rejilla principal ════════════════════════════════════════════════ */
 .layout {
 	display: grid; gap: var(--gap); padding: var(--gap) 16px;
-	grid-template-columns: 290px minmax(0, 1fr) 390px;
+	/* Tamaños que se pueden cambiar arrastrando los bordes (resize.js) */
+	grid-template-columns: var(--c-markets, 290px) minmax(0, 1fr) var(--c-book, 390px);
 	grid-template-areas:
 		'markets chart book'
 		'markets insights book'
 		'orders orders orders';
-	grid-template-rows: 420px minmax(200px, auto) auto;
+	grid-template-rows: var(--h-top, 420px) minmax(200px, auto) auto;
 }
 .area-markets { grid-area: markets; }
 .area-chart { grid-area: chart; }
