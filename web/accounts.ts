@@ -34,7 +34,7 @@ export class BrowserAccounts implements AccountStore {
 		const me = await client.me()
 		this.clear()
 		safe(() => (opts.remember ? this.storage.local : this.storage.session).setItem(TOKEN_KEY, token))
-		this.acc = { sid: SID, me, client }
+		this.acc = { sid: SID, me, client, print: await tokenPrint(token) }
 		return this.acc
 	}
 
@@ -60,7 +60,7 @@ export class BrowserAccounts implements AccountStore {
 		if (!token) return null
 		const client = new QvaPayClient({ token, dryRun: false, baseUrl: this.baseUrl })
 		try {
-			this.acc = { sid: SID, me: await client.me(), client }
+			this.acc = { sid: SID, me: await client.me(), client, print: await tokenPrint(token) }
 			return this.acc
 		} catch (err) {
 			// Token revocado o caducado: se borra de este navegador
@@ -73,6 +73,15 @@ export class BrowserAccounts implements AccountStore {
 		safe(() => this.storage.session.removeItem(TOKEN_KEY))
 		safe(() => this.storage.local.removeItem(TOKEN_KEY))
 	}
+}
+
+// Huella del token para el plan Pro: HMAC-SHA256 con una etiqueta fija. Identifica el dispositivo ante
+// nuestro servidor sin revelar el token (no se puede invertir) y nadie puede calcularla sin el token
+export async function tokenPrint(token: string) {
+	const enc = new TextEncoder()
+	const key = await crypto.subtle.importKey('raw', enc.encode('terminalp2p-pro'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+	const sig = await crypto.subtle.sign('HMAC', key, enc.encode(token))
+	return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 // El almacenamiento puede fallar (modo privado, cuota, bloqueado): nunca rompe la app

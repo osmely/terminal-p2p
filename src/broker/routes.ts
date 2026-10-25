@@ -14,6 +14,9 @@ export interface Account {
 	sid: string
 	me: Me
 	client: QvaPayClient
+	// Huella del token para el plan Pro: HMAC del token calculado aquí, en el navegador. El servidor solo
+	// ve esta huella (de la que no se puede sacar el token)
+	print?: string
 }
 
 // Dónde vive la cuenta conectada (en el navegador: su almacenamiento local)
@@ -85,6 +88,10 @@ export class Broker {
 			switch (route) {
 				case 'GET /me':
 					return await this.me(ctx)
+				case 'GET /print': {
+					const acc = await this.accounts.get(ctx.sid).catch(() => null)
+					return json(200, { print: acc?.print ?? null })
+				}
 				case 'POST /connect':
 					return await this.connect(ctx)
 				case 'POST /disconnect':
@@ -111,6 +118,12 @@ export class Broker {
 					return await this.pauseOffer(ctx, acc)
 				case 'POST /offer/apply':
 					return await this.applyOffer(ctx, acc)
+				case 'POST /smart':
+					return await this.smart(ctx, acc)
+				case 'POST /smart/check':
+					return await this.smartCheck(ctx, acc)
+				case 'POST /smart/add':
+					return await this.smartAdd(ctx, acc)
 				case 'GET /peer':
 					return await this.peer(ctx, acc)
 				case 'GET /swap/quote':
@@ -281,33 +294,166 @@ export class Broker {
 	}
 
 	private async createOffer({ req }: Ctx, acc: Account) {
-		const b = await readJson(req)
-		const type = b.type === 'buy' || b.type === 'sell' ? b.type : null
-		const coin = String(b.coin ?? '')
-		if (!type || !TICKS.has(coin)) return json(400, { error: 'Elige si compras o vendes USD y el mercado' })
-		const terms = offerTerms(b, b.kind === 'flexible')
-		if ('error' in terms) return json(400, terms)
-		const details = (Array.isArray(b.details) ? b.details : [])
-			.map((d: { name?: unknown; value?: unknown }) => ({ name: String(d?.name ?? '').slice(0, 60), value: String(d?.value ?? '').trim().slice(0, 200) }))
-			.filter((d: { name: string; value: string }) => d.name && d.value)
-			.slice(0, 10)
-		if (!details.length) return json(400, { error: 'Completa tus datos de pago' })
-		const key = String(b.idempotencyKey ?? '')
-		const body: CreateOfferBody = {
-			type,
-			coin,
-			amount: terms.amount,
-			receive: terms.receive,
-			details,
-			private: b.private === false ? 0 : 1,
-			only_vip: b.onlyVip ? 1 : 0,
-			...(terms.kind === 'flexible' ? { offer_kind: 'flexible' as const, order_min: terms.orderMin, order_max: terms.orderMax } : {}),
-			...(terms.requirements ? { requirements: terms.requirements } : {}),
-			...(typeof b.message === 'string' && b.message.trim() ? { message: b.message.trim().slice(0, 79) } : {}),
-			...(/^[A-Za-z0-9._-]{8,64}$/.test(key) ? { idempotency_key: key } : {}),
-		}
+		const body = createBody(await readJson(req))
+		if ('error' in body) return json(400, body)
 		const r = await acc.client.createOffer(body)
 		return json(200, { ok: true, offer: r.p2p.uuid, message: r.duplicate ? 'La oferta ya estaba publicada' : 'Oferta publicada' })
+	}
+
+	// ── Orden inteligente ───────────────────────────────────────────────
+
+	// Como una orden límite de exchange: toma lo que se pueda de lo que ya cruza con tu precio y publica el
+	// resto. No se cancela nunca nada: una oferta que ya no sirve (cambió, desapareció) se salta y su parte
+	// se suma a lo que publicas. Antes y después de cada toma se vuelve a leer la oferta, para no tomar nada
+	// que ya no cruce y para confirmar de verdad lo tomado (un corte de red puede esconder una toma hecha)
+	private async smart({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		const side: 'buy' | 'sell' | null = b.side === 'buy' || b.side === 'sell' ? b.side : null
+		const coin = String(b.coin ?? '')
+		const limit = Number(b.price)
+		if (!side || !TICKS.has(coin) || !(limit > 0)) return json(400, { error: 'Orden no válida' })
+		const takes = (Array.isArray(b.takes) ? b.takes : []).map((t: { offer?: unknown; amount?: unknown }) => ({ offer: String(t?.offer ?? ''), amount: round2(Number(t?.amount)) }))
+		if (!takes.length || takes.length > SMART_TAKES) return json(400, { error: `La orden inteligente toma entre 1 y ${SMART_TAKES} ofertas` })
+		// La oferta para el resto llega siempre (aunque sea por 0): si se salta alguna toma, su parte va ahí
+		const template = (b.offer && typeof b.offer === 'object' ? b.offer : {}) as Record<string, unknown>
+		const baseRest = round2(Math.max(0, Number(template.amount) || 0))
+		const details = side === 'sell' ? payDetails(b.details) : []
+		if (side === 'sell' && !details.length) return json(400, { error: 'Pon tus datos para recibir el pago' })
+		const total = round2(takes.reduce((s: number, t: { amount: number }) => s + t.amount, 0) + baseRest)
+		// El resto con su monto final, validado. Siempre entero, nunca por partes: así son como mucho tres
+		// operaciones y, comprando, como mucho tres pagos
+		const restBody = (amount: number) => createBody({ ...template, type: side, coin, amount, kind: 'fixed', orderMin: undefined, orderMax: undefined })
+		// Si todo saliera mal, se publicaría el total: tiene que ser publicable ya
+		const check = restBody(total)
+		if ('error' in check) return json(400, check)
+
+		// pay: comprando, a quién pagar, cuánto y hasta cuándo (para la lista de pagos al terminar)
+		type Pay = { details: { name: string; value: string }[]; expiresAt: string | null; coinAmount: number }
+		type Step = { offer: string; user: string; status: 'pending' | 'taken' | 'skipped' | 'failed' | 'stuck'; order: string | null; error?: string; pay?: Pay }
+		const steps: Step[] = takes.map((t: { offer: string }) => ({ offer: t.offer, user: '—', status: 'pending', order: null }))
+		const notes: string[] = []
+
+		if (side === 'sell') {
+			// Vendiendo, entre lo que tomas y lo que publicas se reserva el total
+			const me = await acc.client.me()
+			acc.me = me
+			if (total > num(me.balance) + 1e-9) return json(200, { ok: false, nothingDone: true, error: `No tienes saldo suficiente: necesitas ${total.toLocaleString('es')} USD y tienes ${num(me.balance).toLocaleString('es')}.`, steps })
+		}
+
+		let chatSent: boolean | undefined
+		for (const [i, t] of takes.entries()) {
+			// 1) ¿Sigue sirviendo tal como se planeó?
+			const o = await acc.client.getOffer(t.offer).catch(() => null)
+			steps[i].user = o?.User?.username ?? '—'
+			const user = steps[i].user
+			const problem = takeProblem(o, t.amount, side, coin, limit, acc.me.uuid)
+			if (problem) {
+				steps[i].status = 'skipped'
+				steps[i].error = problem
+				continue
+			}
+			// 2) Tomarla y confirmar con una lectura nueva
+			const flexible = o!.offer_kind === 'flexible'
+			const before = new Set((o!.Orders ?? []).map((x) => x.uuid))
+			let error: string | undefined
+			let order: string | null = null
+			try {
+				order = (await acc.client.applyOffer(o!.uuid, flexible ? t.amount : undefined, { coin, side: o!.type, usd: t.amount, via: 'smart' })).order ?? null
+			} catch (e) {
+				error = friendly(e)
+			}
+			const now = await acc.client.getOffer(o!.uuid).catch(() => null)
+			const held = now ? heldTake(now, flexible, before, order, acc.me.uuid) : error ? 'unknown' : { order, price: null }
+			if (held === 'unknown') {
+				// No se sabe si quedó tomada: su parte no se suma a lo publicado (podrías comprar de más) y se avisa
+				steps[i].status = 'stuck'
+				steps[i].error = `no se pudo confirmar si quedó tomada (${error})`
+				notes.push(`No se pudo confirmar si la oferta de @${user} quedó tomada: revísala en «Mis operaciones». Sus ${t.amount.toLocaleString('es')} USD no se sumaron a tu oferta.`)
+				continue
+			}
+			if (!held) {
+				steps[i].status = 'failed'
+				steps[i].error = error ?? 'no quedó tomada'
+				continue
+			}
+			steps[i].status = 'taken'
+			steps[i].order = held.order
+			if (side === 'buy' && now) {
+				const ord = held.order ? now.Orders?.find((x) => x.uuid === held.order) : undefined
+				steps[i].pay = {
+					details: paymentDetails(now.details),
+					expiresAt: ord?.payment_window_expires_at ?? now.payment_window_expires_at ?? null,
+					coinAmount: round2(t.amount * (held.price ?? limit)),
+				}
+			}
+			// Su dueño cambió el precio justo antes de tomarla: no se cancela, se avisa (comprando, la puedes
+			// cancelar tú sin disputa mientras no la hayas pagado)
+			if (held.price != null && (side === 'buy' ? held.price > limit * (1 + 1e-9) : held.price < limit * (1 - 1e-9)))
+				notes.push(
+					`@${user} cambió el precio justo antes: ${side === 'buy' ? 'compraste' : 'vendiste'} a ${held.price.toLocaleString('es')}, ${side === 'buy' ? 'por encima' : 'por debajo'} de tu ${limit.toLocaleString('es')}.${side === 'buy' ? ' Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.' : ''}`,
+				)
+			// Vendiendo, el comprador recibe tus datos por el chat
+			if (side === 'sell') {
+				const text = `Hola. Vendo ${t.amount} USD desde Terminal P2P. Págame aquí:\n${details.map((d) => `${d.label}: ${d.value}`).join('\n')}`
+				const sent = await acc.client
+					.sendChat(o!.uuid, text.slice(0, 599), held.order ?? undefined)
+					.then(() => true)
+					.catch(() => false)
+				if (!sent) notes.push(`No se pudo mandar tus datos a @${user}: escríbeselos por el chat de la operación.`)
+				chatSent = (chatSent ?? true) && sent
+			}
+		}
+
+		// 3) Publicar el resto: lo planeado más lo que no se pudo tomar
+		const missed = round2(takes.reduce((s: number, t: { amount: number }, i: number) => s + (steps[i].status === 'skipped' || steps[i].status === 'failed' ? t.amount : 0), 0))
+		const rest = round2(baseRest + missed)
+		let published: string | null = null
+		let publishError: string | undefined
+		if (rest >= 0.1) {
+			try {
+				const body = restBody(rest)
+				if ('error' in body) throw new Error(body.error)
+				published = (await acc.client.createOffer(body)).p2p.uuid
+			} catch (e) {
+				publishError = friendly(e)
+			}
+		}
+		return json(200, { ok: true, steps, published, rest, publishError, chatSent, notes })
+	}
+
+	// Cómo siguen las tomas de una orden inteligente: para avisar si la contraparte canceló alguna
+	private async smartCheck({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		const takes = (Array.isArray(b.takes) ? b.takes : []).slice(0, 4) as { offer?: unknown; order?: unknown }[]
+		const states: TakeState[] = []
+		for (const t of takes) states.push(takeState(await acc.client.getOffer(String(t?.offer ?? '')).catch(() => null), t?.order ? String(t.order) : null, acc.me.uuid))
+		return json(200, { states })
+	}
+
+	// Suma USD a tu oferta publicada de una orden inteligente (cuando una toma se cayó), con su mismo precio
+	private async smartAdd({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		const add = round2(Number(b.add))
+		if (!(add > 0)) return json(400, { error: 'Monto no válido' })
+		const o = await acc.client.getOffer(String(b.offer ?? ''))
+		if (o.User?.uuid !== acc.me.uuid) return json(403, { error: 'Solo puedes cambiar tus ofertas' })
+		if (o.status !== 'open') return json(409, { error: 'Tu oferta ya no está publicada' })
+		const flexible = o.offer_kind === 'flexible'
+		const price = num(o.amount) > 0 ? num(o.receive) / num(o.amount) : 0
+		const amount = round2((flexible ? num(o.available_amount ?? o.amount) : num(o.amount)) + add)
+		if (o.type === 'sell') {
+			// Vendiendo, lo que sumas se reserva de tu saldo
+			const me = await acc.client.me()
+			acc.me = me
+			if (add > num(me.balance) + 1e-9) return json(400, { error: `No tienes saldo suficiente: tienes ${num(me.balance).toLocaleString('es')} USD` })
+		}
+		const terms = offerTerms({ amount, price, orderMin: o.order_min, orderMax: o.order_max }, flexible, true)
+		if (terms.error !== undefined) return json(400, { error: terms.error })
+		await acc.client.editOffer(
+			o.uuid,
+			flexible ? { available_amount: terms.amount, receive: terms.receive, order_min: terms.orderMin, order_max: terms.orderMax } : { amount: terms.amount, receive: terms.receive },
+		)
+		return json(200, { ok: true, amount: terms.amount, message: `Tu oferta ahora es de ${terms.amount.toLocaleString('es')} USD` })
 	}
 
 	private async editOffer({ req }: Ctx, acc: Account) {
@@ -564,6 +710,98 @@ export function bestSwap<T extends Pick<SwapOffer, 'usd' | 'kind' | 'orderMin' |
 // ── Ofertas: validación y vista ────────────────────────────────────────
 
 const round2 = (n: number) => Math.round(n * 100) / 100
+
+// Cuerpo para publicar una oferta, validado (de /offer/create y del resto de una orden inteligente)
+function createBody(b: Record<string, unknown>): CreateOfferBody | { error: string } {
+	const type = b.type === 'buy' || b.type === 'sell' ? b.type : null
+	const coin = String(b.coin ?? '')
+	if (!type || !TICKS.has(coin)) return { error: 'Elige si compras o vendes USD y el mercado' }
+	const terms = offerTerms(b, b.kind === 'flexible')
+	if (terms.error !== undefined) return { error: terms.error }
+	const details = (Array.isArray(b.details) ? b.details : [])
+		.map((d: { name?: unknown; value?: unknown }) => ({ name: String(d?.name ?? '').slice(0, 60), value: String(d?.value ?? '').trim().slice(0, 200) }))
+		.filter((d: { name: string; value: string }) => d.name && d.value)
+		.slice(0, 10)
+	if (!details.length) return { error: 'Completa tus datos de pago' }
+	const key = String(b.idempotencyKey ?? '')
+	return {
+		type,
+		coin,
+		amount: terms.amount,
+		receive: terms.receive,
+		details,
+		// Pública salvo que pidas lo contrario (como en QvaPay): se anuncia en su canal de Telegram
+		private: b.private === true ? 1 : 0,
+		only_vip: b.onlyVip ? 1 : 0,
+		...(terms.kind === 'flexible' ? { offer_kind: 'flexible' as const, order_min: terms.orderMin, order_max: terms.orderMax } : {}),
+		...(terms.requirements ? { requirements: terms.requirements } : {}),
+		...(typeof b.message === 'string' && b.message.trim() ? { message: b.message.trim().slice(0, 79) } : {}),
+		...(/^[A-Za-z0-9._-]{8,64}$/.test(key) ? { idempotency_key: key } : {}),
+	}
+}
+
+// Tus datos para cobrar, tal como se le mandan al comprador por el chat
+function payDetails(v: unknown) {
+	return (Array.isArray(v) ? v : [])
+		.map((d: { name?: unknown; label?: unknown; value?: unknown }) => ({ label: String(d?.label ?? d?.name ?? '').slice(0, 60), value: String(d?.value ?? '').trim().slice(0, 200) }))
+		.filter((d) => d.label && d.value)
+		.slice(0, 10)
+}
+
+// Orden inteligente: hasta 2 tomas (QvaPay deja tomar 2 por minuto)
+export const SMART_TAKES = 2
+// Solo contrapartes con historial: el plan no elige por ti una cuenta nueva solo porque es la más barata
+export const SMART_MIN_OPS = 10
+export const SMART_MIN_RATING = 4.5
+
+// Si la oferta, leída justo después de tomarla, quedó de verdad en tus manos: con qué orden (en las por
+// rango, la tuya nueva) y a qué precio. null si no la tienes
+export function heldTake(o: P2POffer, flexible: boolean, before: Set<string>, order: string | null, me: string): { order: string | null; price: number | null } | null {
+	const offerPrice = num(o.amount) > 0 ? num(o.receive) / num(o.amount) : null
+	if (flexible) {
+		const mine = (o.Orders ?? []).find((x) => (order ? x.uuid === order : !before.has(x.uuid) && x.Taker?.uuid === me) && x.status !== 'cancelled')
+		if (!mine) return null
+		return { order: mine.uuid, price: num(mine.amount) > 0 && num(mine.receive) > 0 ? num(mine.receive) / num(mine.amount) : offerPrice }
+	}
+	if (o.Peer?.uuid !== me || o.status === 'open' || o.status === 'cancelled') return null
+	return { order: null, price: offerPrice }
+}
+
+// Cómo sigue una toma vista desde quien la tomó: en marcha, terminada, caída (la contraparte canceló o se
+// venció el plazo y ya no participas) o sin saber (no se pudo leer)
+export type TakeState = 'active' | 'done' | 'cancelled' | 'unknown'
+export function takeState(o: P2POffer | null, order: string | null, me: string): TakeState {
+	if (!o) return 'unknown'
+	if (order) {
+		const ord = o.Orders?.find((x) => x.uuid === order)
+		if (!ord) return 'unknown'
+		return ord.status === 'completed' ? 'done' : ord.status === 'cancelled' ? 'cancelled' : 'active'
+	}
+	if (o.Peer?.uuid !== me) return 'cancelled'
+	return o.status === 'completed' ? 'done' : o.status === 'cancelled' || o.status === 'open' ? 'cancelled' : 'active'
+}
+
+// Por qué una oferta ya no sirve para la orden inteligente (null si sirve tal cual se planeó)
+export function takeProblem(o: P2POffer | null, amount: number, side: 'buy' | 'sell', coin: string, limit: number, me: string): string | null {
+	if (!o) return 'ya no existe'
+	if (o.coin !== coin || o.type !== (side === 'buy' ? 'sell' : 'buy')) return 'no corresponde a esta orden'
+	if (o.User?.uuid === me) return 'es tuya'
+	if (o.status !== 'open' || o.pause) return 'ya no está disponible'
+	if (o.only_vip) return 'es solo para cuentas VIP'
+	if (o.requirements_met === false) return 'pide requisitos que no cumples'
+	const u = o.User
+	const ops = u?._count ? (u._count.P2P ?? 0) + (u._count.P2P_Peer ?? 0) : 0
+	const rating = u?.rating_count ? (u.rating_avg ?? 0) : 0
+	if (ops < SMART_MIN_OPS || rating < SMART_MIN_RATING) return `tiene poco historial (necesita ${SMART_MIN_OPS} operaciones y ${SMART_MIN_RATING} ★)`
+	const price = num(o.amount) > 0 ? num(o.receive) / num(o.amount) : 0
+	if (side === 'buy' ? price > limit * (1 + 1e-9) : price < limit * (1 - 1e-9)) return `cambió de precio (${price.toLocaleString('es')}) y ya no cruza con el tuyo`
+	if (o.offer_kind === 'flexible') {
+		const min = num(o.order_min ?? 0)
+		const max = round2(Math.min(num(o.order_max ?? Infinity), num(o.available_amount ?? o.amount)))
+		if (!(amount >= min && amount <= max)) return `ahora admite entre ${min.toLocaleString('es')} y ${max.toLocaleString('es')} USD`
+	} else if (Math.abs(num(o.amount) - amount) > 0.005) return 'cambió de monto'
+	return null
+}
 
 // Monto, precio, límites por orden y requisitos de una oferta, con los rangos de QvaPay
 // En una edición por partes el máximo por orden puede superar lo que queda disponible

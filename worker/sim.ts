@@ -8,6 +8,7 @@
 //     cuenta. Así se ejecutan aunque nadie tenga la pantalla abierta. Precios: ver «Precios» abajo.
 
 import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle, type Quote, type SimState, type Symbol } from '../src/sim/engine.ts'
+import { b64url, enc, hex, hmac, same, unb64url } from './crypto.ts'
 import { authorized } from './metrics.ts'
 import { cubaOffset, type D1 } from './rates.ts'
 
@@ -387,24 +388,6 @@ export async function simCron(db: D1, now: number, refreshAll: boolean) {
 
 // ── Telegram y sesión ─────────────────────────────────────────────────
 
-const enc = new TextEncoder()
-const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('')
-const b64url = (s: string) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-const unb64url = (s: string) => atob(s.replace(/-/g, '+').replace(/_/g, '/'))
-
-async function hmac(key: ArrayBuffer | string, data: string) {
-	const raw = typeof key === 'string' ? new Uint8Array(enc.encode(key)) : key
-	const k = await crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-	return crypto.subtle.sign('HMAC', k, new Uint8Array(enc.encode(data)))
-}
-
-// Igualdad en tiempo constante entre dos cadenas de la misma longitud
-function same(a: string, b: string) {
-	if (a.length !== b.length) return false
-	let diff = 0
-	for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
-	return diff === 0
-}
 
 export interface TgUser {
 	id: number

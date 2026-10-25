@@ -117,3 +117,174 @@ test('Vender ya: no vende si el precio bajó, si no cabe el monto o si no es VIP
 	assert.equal((await post('/swap', { offer: 'v3', amount: 50, minPrice: 990, details })).status, 409)
 	assert.deepEqual(fake.calls, [])
 })
+
+// QvaPay simulado para la orden inteligente: ventas que se pueden comprar y una compra que se puede vender
+function smartQvaPay(failApply?: string, failCreate = false) {
+	const calls: string[] = []
+	const created: unknown[] = []
+	const seller = (u: string) => ({ uuid: `u-${u}`, username: u, rating_avg: 4.9, rating_count: 40, _count: { P2P: 30, P2P_Peer: 20 } })
+	const offers: Record<string, P2POffer> = {
+		s1: { uuid: 's1', type: 'sell', coin: 'BANK_CUP', amount: '20', receive: '20960', status: 'open', User: seller('ana'), details: [{ name: 'Tarjeta', value: '9200 2222' }], payment_window_expires_at: '2026-10-25T03:30:00Z' },
+		s2: { uuid: 's2', type: 'sell', coin: 'BANK_CUP', amount: '100', receive: '105000', available_amount: '70', order_min: '10', order_max: '70', offer_kind: 'flexible', status: 'open', User: seller('leo') },
+		b1: { uuid: 'b1', type: 'buy', coin: 'BANK_CUP', amount: '50', receive: '52000', status: 'open', User: seller('eva') },
+		b2: { uuid: 'b2', type: 'buy', coin: 'BANK_CUP', amount: '30', receive: '31200', status: 'open', User: seller('max') },
+	}
+	const client = {
+		me: async () => ({ uuid: 'me', username: 'yo', balance: 300, kyc: true, golden_check: false, p2p_enabled: true }),
+		getOffer: async (uuid: string) => {
+			if (!offers[uuid]) throw new Error('404')
+			return structuredClone(offers[uuid])
+		},
+		applyOffer: async (uuid: string, amount?: number) => {
+			calls.push(`apply:${uuid}:${amount}`)
+			if (uuid === failApply) throw new Error('Esta oferta ya fue tomada')
+			// Como en QvaPay: la fija pasa a en proceso contigo de contraparte; en la por rango nace tu orden
+			const o = offers[uuid]
+			if (o.offer_kind === 'flexible') o.Orders = [...(o.Orders ?? []), { uuid: `ord-${uuid}`, amount: String(amount), receive: '0', status: 'processing', Taker: { uuid: 'me', username: 'yo' } }]
+			else Object.assign(o, { status: 'processing', Peer: { uuid: 'me', username: 'yo' } })
+			return { order: o.offer_kind === 'flexible' ? `ord-${uuid}` : null }
+		},
+		cancelOrder: async (uuid: string, order?: string) => (calls.push(`cancel:${uuid}:${order}`), { message: 'P2P cancelada' }),
+		createOffer: async (body: { amount: number }) => {
+			calls.push(`create:${body.amount}`)
+			created.push(body)
+			if (failCreate) throw new Error('Datos inválidos')
+			return { p2p: { uuid: 'nueva' } }
+		},
+		sendChat: async (uuid: string, message: string) => void calls.push(`chat:${uuid}:${message}`),
+		editOffer: async (uuid: string, body: unknown) => void calls.push(`edit:${uuid}:${JSON.stringify(body)}`),
+	}
+	return { client: client as unknown as QvaPayClient, calls, offers, created }
+}
+
+async function smartSetup(failApply?: string, failCreate = false) {
+	const fake = smartQvaPay(failApply, failCreate)
+	const acc = { sid: 'sid1', me: await fake.client.me(), client: fake.client }
+	const broker = new Broker({ accounts: { get: async () => acc } as unknown as AccountStore, market: { wake() {} }, dryRun: false })
+	const to = (path: string) => async (body: unknown) => {
+		const res = (await broker.handle(new Request(`https://app.terminalp2p.com/api/broker${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Broker': '1' }, body: JSON.stringify(body) })))!
+		return res.json()
+	}
+	return { fake, post: to('/smart'), check: to('/smart/check'), add: to('/smart/add') }
+}
+
+const rest = { amount: 210, price: 1050, kind: 'fixed', details: [{ name: 'Tarjeta', value: '9200' }] }
+const buyOrder = { side: 'buy', coin: 'BANK_CUP', price: 1050, takes: [{ offer: 's1', amount: 20 }, { offer: 's2', amount: 70 }], offer: rest }
+const statuses = (r: { steps: { status: string }[] }) => r.steps.map((s) => s.status)
+const noCancels = (calls: string[]) => assert.ok(!calls.some((c) => c.startsWith('cancel')), `se canceló algo: ${calls.join(', ')}`)
+
+test('orden inteligente: toma las dos y publica el resto, con la lista de pagos', async () => {
+	const { fake, post } = await smartSetup()
+	const r = await post(buyOrder)
+	assert.equal(r.ok, true)
+	assert.deepEqual(fake.calls, ['apply:s1:undefined', 'apply:s2:70', 'create:210'])
+	assert.deepEqual([r.published, r.rest], ['nueva', 210])
+	assert.deepEqual(statuses(r), ['taken', 'taken'])
+	assert.deepEqual(r.steps[0].pay, { details: [{ name: 'Tarjeta', value: '9200 2222' }], expiresAt: '2026-10-25T03:30:00Z', coinAmount: 20960 })
+	assert.equal(r.steps[1].pay.coinAmount, 73500)
+})
+
+test('orden inteligente: una oferta que cambió se salta y su parte se suma a lo que publicas', async () => {
+	const { fake, post } = await smartSetup()
+	fake.offers.s2.receive = '107000' // ahora 1070 por USD: ya no cruza con tu 1050
+	const r = await post(buyOrder)
+	assert.equal(r.ok, true)
+	assert.deepEqual(statuses(r), ['taken', 'skipped'])
+	assert.match(r.steps[1].error, /cambió de precio/)
+	assert.deepEqual(fake.calls, ['apply:s1:undefined', 'create:280'])
+	// Igual con una cuenta sin historial o una oferta que ya no existe
+	const { fake: f2, post: p2 } = await smartSetup()
+	f2.offers.s1.User = { uuid: 'u-nuevo', username: 'nuevo', rating_count: 0, _count: { P2P: 1, P2P_Peer: 0 } }
+	delete f2.offers.s2
+	const r2 = await p2(buyOrder)
+	assert.deepEqual(statuses(r2), ['skipped', 'skipped'])
+	assert.match(r2.steps[0].error, /poco historial/)
+	assert.deepEqual(f2.calls, ['create:300'])
+})
+
+test('orden inteligente: si una toma falla, se sigue con lo demás y no se cancela nada', async () => {
+	const { fake, post } = await smartSetup('s1')
+	const r = await post(buyOrder)
+	assert.deepEqual(statuses(r), ['failed', 'taken'])
+	assert.deepEqual(fake.calls, ['apply:s1:undefined', 'apply:s2:70', 'create:230'])
+	noCancels(fake.calls)
+})
+
+test('orden inteligente: si no se puede publicar el resto, las tomas siguen y se avisa', async () => {
+	const { fake, post } = await smartSetup(undefined, true)
+	const r = await post(buyOrder)
+	assert.equal(r.ok, true)
+	assert.deepEqual(statuses(r), ['taken', 'taken'])
+	assert.equal(r.published, null)
+	assert.equal(r.publishError, 'Datos inválidos')
+	noCancels(fake.calls)
+})
+
+test('orden inteligente: un corte de red no esconde una toma hecha', async () => {
+	const { fake, post } = await smartSetup()
+	const realApply = fake.client.applyOffer.bind(fake.client)
+	;(fake.client as unknown as { applyOffer: typeof realApply }).applyOffer = async (uuid, amount, meta) => {
+		const r = await realApply(uuid, amount, meta)
+		if (uuid === 's1') throw new TypeError('Failed to fetch')
+		return r
+	}
+	const r = await post(buyOrder)
+	assert.deepEqual(statuses(r), ['taken', 'taken'])
+	assert.deepEqual(fake.calls, ['apply:s1:undefined', 'apply:s2:70', 'create:210'])
+})
+
+test('orden inteligente: si el dueño subió el precio justo antes, queda tomada y se avisa (sin cancelar)', async () => {
+	const { fake, post } = await smartSetup()
+	const realApply = fake.client.applyOffer.bind(fake.client)
+	;(fake.client as unknown as { applyOffer: typeof realApply }).applyOffer = async (uuid, amount, meta) => {
+		if (uuid === 's2') fake.offers.s2.receive = '108000'
+		return realApply(uuid, amount, meta)
+	}
+	const r = await post(buyOrder)
+	assert.deepEqual(statuses(r), ['taken', 'taken'])
+	assert.match(r.notes[0], /@leo cambió el precio justo antes: compraste a 1080.*cancelarla en «Mis operaciones» sin disputa/)
+	noCancels(fake.calls)
+})
+
+test('orden inteligente vendiendo: dos tomas, tus datos a cada comprador y nunca más que tu saldo', async () => {
+	const { fake, post } = await smartSetup()
+	const details = [{ label: 'Tarjeta', value: '9200 1111' }]
+	const sell = { side: 'sell', coin: 'BANK_CUP', price: 1040, takes: [{ offer: 'b1', amount: 50 }, { offer: 'b2', amount: 30 }], offer: { ...rest, amount: 20 }, details }
+	const poor = await post({ ...sell, offer: { ...rest, amount: 230 } })
+	assert.equal(poor.nothingDone, true)
+	assert.match(poor.error, /necesitas 310 USD/)
+	assert.equal(fake.calls.length, 0)
+	const r = await post(sell)
+	assert.deepEqual(statuses(r), ['taken', 'taken'])
+	assert.equal(r.chatSent, true)
+	assert.equal(fake.calls[0], 'apply:b1:undefined')
+	assert.match(fake.calls[1], /^chat:b1:Hola\. Vendo 50 USD[\s\S]*Tarjeta: 9200 1111/)
+	assert.match(fake.calls[3], /^chat:b2:Hola\. Vendo 30 USD/)
+	assert.equal(fake.calls[4], 'create:20')
+	noCancels(fake.calls)
+})
+
+test('aviso de toma caída: estado de cada toma y sumar lo caído a tu oferta, con su mismo precio', async () => {
+	const { fake, post, check, add } = await smartSetup()
+	await post(buyOrder)
+	assert.deepEqual((await check({ takes: [{ offer: 's1' }, { offer: 's2', order: 'ord-s2' }, { offer: 'nada' }] })).states, ['active', 'active', 'unknown'])
+	Object.assign(fake.offers.s1, { status: 'open', Peer: null })
+	fake.offers.s2.Orders![0].status = 'completed'
+	assert.deepEqual((await check({ takes: [{ offer: 's1' }, { offer: 's2', order: 'ord-s2' }] })).states, ['cancelled', 'done'])
+	fake.offers.nueva = { uuid: 'nueva', type: 'buy', coin: 'BANK_CUP', amount: '210', receive: '220500', status: 'open', User: { uuid: 'me', username: 'yo' } }
+	assert.equal((await add({ offer: 'nueva', add: 20 })).ok, true)
+	assert.equal(fake.calls.at(-1), 'edit:nueva:{"amount":230,"receive":241500}')
+	fake.offers.nueva.status = 'processing'
+	assert.match((await add({ offer: 'nueva', add: 20 })).error, /ya no está publicada/)
+})
+
+test('orden inteligente: el resto se publica siempre entero, aunque se pida por partes', async () => {
+	const { fake, post } = await smartSetup()
+	await post({ ...buyOrder, offer: { ...rest, kind: 'flexible', orderMin: 10, orderMax: 100 } })
+	const body = fake.created[0] as Record<string, unknown>
+	assert.equal(body.amount, 210)
+	assert.equal(body.offer_kind, undefined)
+	assert.equal(body.order_min, undefined)
+	// Pública salvo que se pida privada
+	assert.equal(body.private, 0)
+})

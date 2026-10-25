@@ -46,12 +46,16 @@ const nameOf = (tick) => state.overview.find((c) => c.tick === tick)?.name ?? ti
 
 // ── Modal ─────────────────────────────────────────────────────────────
 let onModalClose = null
+// Mientras se ejecuta una orden inteligente la ventana no se cierra ni se sustituye: lo que pase debe verse
+let modalLocked = false
 function openModal(html, onClose) {
+	if (modalLocked) return toast('Espera a que termine la orden inteligente', true)
 	$('modalBody').innerHTML = html
 	$('modal').hidden = false
 	onModalClose = onClose ?? null
 }
 function closeModal() {
+	if (modalLocked) return toast('Espera a que termine la orden inteligente', true)
 	document.querySelector('.confirm-layer')?.remove()
 	$('modal').hidden = true
 	$('modalBody').innerHTML = ''
@@ -108,12 +112,14 @@ async function loadAccount() {
 	renderAccount()
 	if (bk.acct.connected) loadTrades()
 	else renderTrades()
+	if (typeof refreshPro === 'function') refreshPro()
 }
 
 function renderAccount() {
 	const a = bk.acct
 	$('account').innerHTML = a.connected
 		? `${a.dryRun ? '<span class="badge warn" title="Modo simulación: no se envía nada a QvaPay">Simulación</span>' : ''}
+			<button class="pro-chip" id="proBtn" hidden></button>
 			<div class="acct">
 				<span class="avatar" aria-hidden="true">${esc((a.username ?? '?').slice(0, 2))}</span>
 				<div><div class="acct-name">@${esc(a.username)}${a.gold ? ' <span class="badge warn">GOLD</span>' : ''}</div><div class="acct-bal">${fmtU(a.balance ?? 0)} USD</div></div>
@@ -122,6 +128,7 @@ function renderAccount() {
 				</button>
 			</div>`
 		: `<button class="btn primary" id="connectBtn">Conectar<span class="hide-sm">QvaPay</span></button>`
+	if (typeof renderProChip === 'function') renderProChip()
 	$('connectBtn')?.addEventListener('click', showConnect)
 	$('disconnectBtn')?.addEventListener('click', async () => {
 		if (!(await confirmDialog('Desconectar cuenta', '<p class="muted">Se borra el token de este navegador. Tus operaciones en QvaPay no se tocan.</p>', 'Desconectar', 'danger'))) return
@@ -177,6 +184,7 @@ async function loadTrades() {
 		bk.openOffers = r.openOffers
 		document.title = r.pending ? `(${r.pending}) ${BASE_TITLE}` : BASE_TITLE
 		deliver(r.alerts ?? [])
+		window.TPProSmart?.onTrades?.()
 	} catch (e) {
 		bk.trades = []
 		bk.openOffers = []
@@ -393,6 +401,21 @@ function renderDetail(t) {
 	bindDetail(t)
 }
 
+// Botones de copiar (datos de pago, referencias) dentro de un bloque
+function bindCopy(body) {
+	for (const b of body.querySelectorAll('[data-copy]'))
+		b.onclick = (e) => {
+			e.preventDefault()
+			navigator.clipboard?.writeText(b.dataset.copy)
+			b.innerHTML = ICON_DONE
+			b.classList.add('done')
+			setTimeout(() => {
+				b.innerHTML = ICON_COPY
+				b.classList.remove('done')
+			}, 1400)
+		}
+}
+
 function bindDetail(t) {
 	const body = $('modalBody')
 	body.querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer))
@@ -406,17 +429,7 @@ function bindDetail(t) {
 			toast(e.message, true)
 		}
 	}
-	for (const b of body.querySelectorAll('[data-copy]'))
-		b.onclick = (e) => {
-			e.preventDefault()
-			navigator.clipboard?.writeText(b.dataset.copy)
-			b.innerHTML = ICON_DONE
-			b.classList.add('done')
-			setTimeout(() => {
-				b.innerHTML = ICON_COPY
-				b.classList.remove('done')
-			}, 1400)
-		}
+	bindCopy(body)
 	const seen = $('seenMoney')
 	if (seen) seen.onchange = () => (body.querySelector('[data-act="release"]').disabled = !seen.checked)
 	// "Ya pagué" solo con la referencia de la transferencia escrita
@@ -539,6 +552,21 @@ function bookRank(coin, type, price) {
 	return rank
 }
 
+// ── Orden inteligente (Pro) ───────────────────────────────────────────
+// La orden inteligente llega en el módulo Pro (/pro/module.js, de un repositorio privado), que rellena el
+// hueco #ofSmart del formulario. Sin Pro, si tu precio ya cruza el libro se avisa de lo que haría.
+// Las rutas que mueven dinero (/smart…) son públicas y se pueden auditar
+function smartTeaser(f) {
+	const b = state.book?.coin?.tick === f.coin ? state.book : null
+	if (!b || !(f.amount > 0 && f.price > 0)) return ''
+	const buy = f.type === 'buy'
+	const n = (buy ? b.ask.levels : b.bid.levels).filter((l) => !l.outlier && l.user !== myUsername() && (buy ? l.price <= f.price : l.price >= f.price)).length
+	if (!n) return ''
+	return `<p class="smart-head"><b>⚡ Orden inteligente</b> <span class="pro-tag">PRO</span></p>
+		<p class="hint">Ya hay ${n === 1 ? 'una oferta' : `${n} ofertas`} a tu precio o mejor. Con Pro las tomarías al mejor precio y solo publicarías el resto, como en un exchange.</p>
+		<button type="button" class="btn small" id="smartPro">★ Hazte Pro</button>`
+}
+
 function priceWarning(type, price, mid) {
 	if (!mid || !(price > 0)) return ''
 	const dev = price / mid - 1
@@ -548,11 +576,11 @@ function priceWarning(type, price, mid) {
 	return ''
 }
 
-async function showCreateOffer() {
+async function showCreateOffer(preset = null) {
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para publicar', true)
 	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin), unit: unitOf(state.coin) }]
 	const key = `tp-${crypto.randomUUID()}` // misma clave si se reintenta: QvaPay no la duplica
-	let type = 'sell'
+	let type = preset?.type === 'buy' ? 'buy' : 'sell'
 	openModal(`<div class="stack offer-form">
 		<div id="ofForm" class="stack">
 			<h3>Publicar oferta</h3>
@@ -562,12 +590,14 @@ async function showCreateOffer() {
 			</div>
 			<label class="field">Mercado<select class="input" id="ofCoin">${markets.map((c) => `<option value="${c.tick}">${esc(c.name)}</option>`).join('')}</select></label>
 			<div class="grid2">
-				<label class="field">Monto (USD)<input class="input" id="ofAmount" type="number" min="0.1" max="10000" step="0.01" inputmode="decimal" placeholder="100" /></label>
+				<label class="field"><span class="field-row">Monto (USD)<button type="button" class="link small" id="ofBal" hidden></button></span><input class="input" id="ofAmount" type="number" min="0.1" max="10000" step="0.01" inputmode="decimal" placeholder="100" /></label>
 				<label class="field"><span>Precio por USD (<span id="ofUnit"></span>)</span><input class="input" id="ofPrice" type="number" min="0" step="any" inputmode="decimal" /></label>
 			</div>
 			<div class="ref-chips" id="ofRefs"></div>
 			<p class="hint" id="ofTotal"></p>
+			<div class="smart" id="ofSmart" hidden></div>
 			<label class="check"><input type="checkbox" id="ofFlex" /> Por rango: que la tomen por partes</label>
+			<p class="hint" id="ofFlexNote" hidden>Con la orden inteligente el resto se publica entero. Desmárcala si lo quieres por partes.</p>
 			<div class="grid2" id="ofFlexBox" hidden>
 				<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" type="number" step="0.01" inputmode="decimal" /></label>
 				<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" type="number" step="0.01" inputmode="decimal" /></label>
@@ -578,7 +608,7 @@ async function showCreateOffer() {
 				${Object.entries(REQ_OPTIONS)
 					.map(([k, [label, vals, fmt]]) => `<label class="field">${label}<select class="input" data-req="${k}"><option value="0">Sin requisito</option>${vals.map((v) => `<option value="${v}">${fmt(v)}</option>`).join('')}</select></label>`)
 					.join('')}
-				<label class="check"><input type="checkbox" id="ofPrivate" checked /> Privada: no se anuncia en el canal de Telegram de QvaPay</label>
+				<label class="check"><input type="checkbox" id="ofPrivate" /> Privada: no se anuncia en el canal de Telegram de QvaPay</label>
 				<label class="check"><input type="checkbox" id="ofVip" /> Solo cuentas VIP</label>
 			</div></details>
 			<div id="ofWarn"></div>
@@ -586,7 +616,11 @@ async function showCreateOffer() {
 		</div>
 		<div id="ofConfirm" class="stack" hidden></div>
 	</div>`)
-	$('ofCoin').value = state.coin
+	$('ofCoin').value = preset?.coin ?? state.coin
+	if (preset) {
+		$('ofAmount').value = String(preset.amount)
+		$('ofPrice').value = String(preset.price)
+	}
 
 	const fields = await loadCoinFields()
 	const read = () => {
@@ -626,7 +660,13 @@ async function showCreateOffer() {
 					.join('')
 			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Inténtalo de nuevo.</p>'
 	}
+	// Vendiendo, nunca más que tu saldo: el monto se recorta a lo que tienes
+	const balance = () => Math.floor((bk.acct.balance ?? 0) * 100) / 100
 	const update = () => {
+		if (type === 'sell' && num2($('ofAmount').value) > balance()) $('ofAmount').value = String(balance())
+		$('ofBal').hidden = type !== 'sell'
+		$('ofBal').innerHTML = `Saldo: <b class="mono">${fmtU(balance())}</b> USD`
+		$('ofAmount').max = String(type === 'sell' ? Math.min(10_000, balance()) : 10_000)
 		for (const b of document.querySelectorAll('[data-type]')) {
 			b.classList.toggle('active', b.dataset.type === type)
 			b.setAttribute('aria-checked', String(b.dataset.type === type))
@@ -644,10 +684,39 @@ async function showCreateOffer() {
 			? `${type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtU(total)} ${unit}</b>${rank ? ` · serías la <b>${rank}ª</b> ${type === 'sell' ? 'venta' : 'compra'} del libro` : ''}`
 			: ''
 		const w = priceWarning(type, f.price, mid)
-		$('ofWarn').innerHTML = w ? `<p class="notice warn">${w}</p>` : ''
+		// La orden inteligente (módulo Pro) rellena su hueco y dice si está activa; sin Pro, el aviso de lo que haría
+		const sm = smart ? smart.render({ f, unit, warn: w }) : null
+		if (!smart) {
+			const t = smartTeaser(f)
+			$('ofSmart').hidden = !t
+			$('ofSmart').innerHTML = t
+		}
+		smartActive = !!sm?.active
+		// Con la orden inteligente el aviso va dentro del plan, sobre el resto que se publica
+		$('ofWarn').innerHTML = w && !smartActive ? `<p class="notice warn">${w}</p>` : ''
+		// Con la orden inteligente el resto se publica entero: sin «por rango»
+		if (smartActive && $('ofFlex').checked) $('ofFlex').checked = false
+		$('ofFlex').disabled = smartActive
+		$('ofFlexNote').hidden = !smartActive
+		if (smartActive) $('ofFlexBox').hidden = true
+		// Con la orden inteligente el total es lo que tomas más lo que publicas
+		if (smartActive && total && sm.total) $('ofTotal').innerHTML = `${type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtU(sm.total)} ${unit}</b> en total`
+		$('ofReview').textContent = smartActive ? 'Revisar orden inteligente' : 'Revisar'
 	}
+	// El módulo Pro (si estás en Pro) maneja la orden inteligente de este formulario; si llega después
+	// (por ejemplo, al volver de pagar), se engancha al momento
+	let smart = null
+	let smartActive = false
+	const ctx = { update: () => update(), read, fields, getType: () => type }
+	smart = window.TPProSmart?.open(ctx) ?? null
 	renderDetails()
 	update()
+	const onSmartReady = () => {
+		if (!$('ofForm')) return document.removeEventListener('tp:smart-ready', onSmartReady)
+		smart ??= window.TPProSmart.open(ctx)
+		if (!$('ofForm').hidden) update()
+	}
+	document.addEventListener('tp:smart-ready', onSmartReady)
 
 	const body = $('modalBody')
 	for (const b of body.querySelectorAll('[data-type]'))
@@ -660,6 +729,11 @@ async function showCreateOffer() {
 		update()
 	}
 	for (const id of ['ofAmount', 'ofPrice', 'ofMin', 'ofMax', 'ofFlex']) $(id).addEventListener('input', update)
+	$('ofBal').onclick = () => {
+		$('ofAmount').value = String(balance())
+		update()
+	}
+	$('ofSmart').addEventListener('click', (e) => e.target.closest('#smartPro') && typeof showPro === 'function' && showPro())
 	$('ofRefs').onclick = (e) => {
 		const b = e.target.closest('[data-ref]')
 		if (!b) return
@@ -671,7 +745,9 @@ async function showCreateOffer() {
 		const f = read()
 		const unit = unitOf(f.coin)
 		const err =
-			!(f.amount >= 0.1 && f.amount <= 10000)
+			type === 'sell' && f.amount > balance()
+				? `No tienes saldo suficiente: tienes ${fmtU(balance())} USD`
+				: !(f.amount >= 0.1 && f.amount <= 10000)
 				? 'El monto debe estar entre 0,1 y 10.000 USD'
 				: !(f.price > 0)
 					? 'Pon el precio por cada USD'
@@ -681,6 +757,7 @@ async function showCreateOffer() {
 							? 'Completa todos tus datos de pago'
 							: ''
 		if (err) return toast(err, true)
+		if (smartActive) return smart.review(f)
 		const total = f.amount * f.price
 		const req = reqText(f.requirements)
 		$('ofForm').hidden = true
@@ -729,6 +806,7 @@ async function showCreateOffer() {
 			}
 		}
 	}
+
 }
 
 // ── Gestionar una oferta tuya ─────────────────────────────────────────
@@ -1482,7 +1560,7 @@ function bindBroker() {
 	})
 	$('refreshTrades').onclick = loadTrades
 	$('alertsBtn').onclick = toggleAlerts
-	for (const b of document.querySelectorAll('[data-new-offer]')) b.addEventListener('click', showCreateOffer)
+	for (const b of document.querySelectorAll('[data-new-offer]')) b.addEventListener('click', () => showCreateOffer())
 	for (const b of document.querySelectorAll('[data-swap]')) b.addEventListener('click', showSwap)
 	renderAlertsBtn()
 	$('myTrades').addEventListener('click', async (e) => {

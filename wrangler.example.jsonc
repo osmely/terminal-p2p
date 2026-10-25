@@ -27,8 +27,14 @@
 	"ratelimits": [
 		{ "name": "EVENT_LIMIT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
 		{ "name": "PANEL_LIMIT", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } },
-		{ "name": "SIM_LIMIT", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } }
+		{ "name": "SIM_LIMIT", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } },
+		{ "name": "PRO_LIMIT", "namespace_id": "1004", "simple": { "limit": 10, "period": 60 } }
 	],
+	// Plan Pro: la app de comerciante de QvaPay (facturas y quién pagó). El app-id no es secreto; el
+	// app-secret y la clave de las licencias sí (npx wrangler secret put QVAPAY_APP_SECRET / PRO_KEY)
+	// Módulo Pro (de un repositorio privado): se sube aquí y el Worker lo entrega solo con licencia
+	"kv_namespaces": [{ "binding": "PRO", "id": "<id de tu espacio KV para el módulo Pro>" }],
+	"vars": { "QVAPAY_APP_ID": "<app-id de tu app de comerciante de QvaPay>" },
 	"triggers": { "crons": ["* * * * *"] },
 	// Opcional: la referencia del mercado informal de elTOQUE necesita su clave como secreto
 	// (npx wrangler secret put ELTOQUE_TOKEN). Sin ella, el cron solo guarda lo de QvaPay.

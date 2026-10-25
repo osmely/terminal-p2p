@@ -11,9 +11,10 @@ import { cubaDate, informalSince, latestInformal, syncInformal } from './informa
 import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
+import { proAdmin, proApi, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 
-interface Env extends Omit<SimEnv, 'DB'> {
+interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	ASSETS: Fetcher
 	DB: D1Database
 	// Clave de la API de tasas de elTOQUE (secreto del Worker). Sin ella no hay referencia informal
@@ -26,6 +27,7 @@ interface Env extends Omit<SimEnv, 'DB'> {
 	EVENT_LIMIT?: RateLimiter
 	PANEL_LIMIT?: RateLimiter
 	SIM_LIMIT?: RateLimiter
+	PRO_LIMIT?: RateLimiter
 }
 
 interface RateLimiter {
@@ -81,6 +83,17 @@ export default {
 		if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/'))) {
 			if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 			return secure(await simAdmin(req, url, env as unknown as SimEnv))
+		}
+		// Plan Pro, en el dominio del terminal. Canjear códigos tiene tope (que nadie los pruebe a ciegas)
+		if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
+			const guarded = url.pathname === '/pro/claim' || url.pathname === '/pro/pair' || url.pathname === '/pro/checkout'
+			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
+			const r = await proApi(req, url, env as unknown as ProEnv)
+			if (r) return secure(r)
+		}
+		if (folderFor(url.hostname) === 'app' && url.pathname === '/admin/pro') {
+			if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
+			return secure(await proAdmin(req, env as unknown as ProEnv))
 		}
 		if (folderFor(url.hostname) === 'sim' && url.pathname.startsWith('/api/')) {
 			if (req.method !== 'GET' && !(await underLimit(env.SIM_LIMIT, req))) return secure(jsonError(429, 'Demasiadas órdenes seguidas: espera unos segundos'))
