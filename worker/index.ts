@@ -110,12 +110,26 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 const STAGING_BADGE =
 	'<div style="position:fixed;left:8px;bottom:8px;z-index:99999;padding:3px 8px;border-radius:6px;background:#f0b93a;color:#000;font:700 11px/1.4 system-ui,sans-serif;letter-spacing:.06em;pointer-events:none">STAGING</div>'
 
+// Los enlaces entre la web, el terminal y el simulador llevan los dominios de producción: en staging,
+// a sus equivalentes (sim.terminalp2p.com → sim.staging.terminalp2p.com)
+export const toStaging = (href: string) =>
+	href.replace(/^https:\/\/(?:(app|sim|www)\.)?terminalp2p\.com(?=[/?#]|$)/, (_, sub?: string) => `https://${sub && sub !== 'www' ? `${sub}.` : ''}staging.terminalp2p.com`)
+
 function staged(res: Response) {
 	if (res.status === 101) return res
 	const out = new Response(res.body, res)
 	out.headers.set('X-Robots-Tag', 'noindex, nofollow')
 	if (!out.headers.get('Content-Type')?.includes('text/html')) return out
-	return new HTMLRewriter().on('body', { element: (b) => void b.append(STAGING_BADGE, { html: true }) }).transform(out)
+	return new HTMLRewriter()
+		.on('body', { element: (b) => void b.append(STAGING_BADGE, { html: true }) })
+		.on('a[href]', {
+			element: (a) => {
+				const href = a.getAttribute('href')!
+				const to = toStaging(href)
+				if (to !== href) a.setAttribute('href', to)
+			},
+		})
+		.transform(out)
 }
 
 export default {
