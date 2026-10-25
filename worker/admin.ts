@@ -1,11 +1,11 @@
 // Panel de administración único (app.terminalp2p.com/admin), con la clave del panel (METRICS_KEY):
-// métricas del P2P, usuarios Pro y resumen semanal del simulador, cada uno en su pestaña
+// métricas del P2P y usuarios Pro, cada uno en su pestaña
 
-export type AdminTab = 'metrics' | 'pro' | 'sim'
+export type AdminTab = 'metrics' | 'pro'
 const TABS: [AdminTab, string][] = [
 	['metrics', 'Métricas'],
 	['pro', 'Pro'],
-	['sim', 'Simulador'],
+	
 ]
 
 const CSS = `

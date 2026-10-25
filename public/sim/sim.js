@@ -1,5 +1,5 @@
 // Simulador de trading de Terminal P2P. Los precios en vivo y el gráfico llegan directamente de
-// Binance; la cuenta, las órdenes y el ranking los lleva el servidor (/api/*, worker/sim.ts).
+// Binance; la cuenta y las órdenes las lleva el servidor (/api/*, worker/sim.ts).
 
 const $ = (id) => document.getElementById(id)
 const $$ = (sel) => [...document.querySelectorAll(sel)]
@@ -36,7 +36,7 @@ const S = {
 	user: null,
 	pro: null, // { username, plan, expiresAt } si la cuenta está vinculada a una licencia Pro activa
 	view: null, // cuenta, órdenes y operaciones del servidor
-	ranking: null,
+	
 	symbol: store.get('sim.symbol', 'BTCUSDT'),
 	interval: store.get('sim.interval', '15m'),
 	side: 'BUY',
@@ -327,7 +327,7 @@ function render() {
 	$('hero').hidden = logged
 	$('summary').hidden = !logged
 	$('resetBtn').hidden = !logged
-	renderUser()
+	
 	renderForm()
 	renderLive()
 	renderTab()
@@ -337,17 +337,6 @@ function render() {
 	$('cntOpen').textContent = open
 }
 
-// Con Telegram vinculado (para el ranking), su nombre y su foto; la sesión es la del terminal
-function renderUser() {
-	const u = S.user?.telegram
-	if (!u) {
-		$('user').innerHTML = ''
-		return
-	}
-	const name = u.username ? `@${u.username}` : u.first_name
-	const avatar = u.photo_url && /^https:\/\/(t\.me|[a-z0-9.-]*telegram\.org)\//.test(u.photo_url) ? `<img src="${esc(u.photo_url)}" alt="" referrerpolicy="no-referrer" />` : esc((u.first_name || '?').slice(0, 2))
-	$('user').innerHTML = `<span class="user-chip"><span class="avatar">${avatar}</span><span class="uname">${esc(name)}</span></span>`
-}
 
 // ── Formulario de órdenes ─────────────────────────────────────────────
 function holding(sym = S.symbol) {
@@ -710,7 +699,7 @@ function cardLabels(body) {
 function renderTab() {
 	for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === S.tab)
 	const body = $('tabBody')
-	if (!S.view) return (body.innerHTML = '<p class="empty">Entra con Telegram para tener tu cuenta de 10.000 USDT ficticios.</p>')
+	if (!S.view) return (body.innerHTML = '<p class="empty">Conecta tu cuenta en el terminal para tener tu cuenta de 10.000 USDT ficticios.</p>')
 	if (S.tab === 'positions') {
 		const ps = liveAccount().positions
 		const pnl = (p) => `${p.pnl == null ? '—' : `${p.pnl >= 0 ? '+' : ''}${fmtUsd(p.pnl)}`}${p.pnlPct != null ? ` (${fmtPct(p.pnlPct)})` : ''}`
@@ -773,162 +762,6 @@ function renderTab() {
 				.join('')}</tbody></table>`
 		: '<p class="empty">Aún no has hecho ninguna operación.</p>'
 	cardLabels(body)
-}
-
-async function loadRanking() {
-	try {
-		S.ranking = await api('/ranking')
-		renderRanking()
-	} catch {}
-}
-
-const dayShort = (t) => new Date(t).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'America/Havana' })
-function leftText(ms) {
-	if (ms <= 0) return 'terminando'
-	const d = Math.floor(ms / 86_400_000)
-	const h = Math.floor((ms % 86_400_000) / 3600_000)
-	return d ? `${d} d ${h} h` : `${h} h ${Math.floor((ms % 3600_000) / 60_000)} min`
-}
-
-// El ranking se ve en su ventana (botón 🏆) y tu puesto en el resumen
-function renderRanking() {
-	renderRankWidgets()
-	if ($('rankModal').hidden) return
-	$('rankModalBody').innerHTML = rankingHtml()
-	tgButton($('tgLink'))
-}
-
-// Botón oficial de Telegram para vincularlo: al aceptar vuelve a /api/auth/telegram con los datos firmados
-function tgButton(box) {
-	if (!box || !S.config || box.childElementCount) return
-	if (S.config.dev) {
-		box.innerHTML = '<span class="fine">(el botón de Telegram no funciona en desarrollo)</span>'
-		return
-	}
-	const s = document.createElement('script')
-	s.async = true
-	s.src = 'https://telegram.org/js/telegram-widget.js?22'
-	s.dataset.telegramLogin = S.config.bot
-	s.dataset.size = 'medium'
-	s.dataset.radius = '8'
-	s.dataset.authUrl = `${location.origin}/api/auth/telegram`
-	box.appendChild(s)
-}
-
-function rankingHtml() {
-	const r = S.ranking
-	if (!r) return '<p class="empty">Cargando el ranking…</p>'
-	const view = S.rankView ?? 'week'
-	const sub = [
-		['week', 'Esta semana'],
-		['last', 'Semana pasada'],
-		['fame', 'Salón de la fama'],
-	]
-		.map(([k, label]) => `<button class="seg-tab ${k === view ? 'active' : ''}" data-rank-view="${k}">${label}</button>`)
-		.join('')
-	const head = `<div class="rank-head"><div class="seg-tabs">${sub}</div>
-		<span class="fine">Temporada del ${dayShort(r.season.start)} al ${dayShort(r.season.end - 1)} · termina en ${leftText(r.season.end - Date.now())}</span></div>`
-	const pctRow = (x) => `<tr class="${x.me ? 'me' : ''}"><td>${x.rank}</td><td class="txt">${esc(x.name)}${x.me ? ' <span class="tag neutral">tú</span>' : ''}</td><td class="${cls(x.pnlPct)}">${fmtPct(x.pnlPct)}</td>${x.equity != null ? `<td>${fmtUsd(x.equity)}</td>` : ''}<td>${x.trades}</td></tr>`
-	let content = ''
-	if (view === 'week') {
-		const m = r.mine
-		const tg = S.user?.telegram
-		const status = !S.user
-			? 'Conecta tu cuenta en el terminal para jugar y, si quieres, competir.'
-			: !tg
-				? `Juegas en privado: nadie ve tu nombre. Para salir en el ranking, vincula tu Telegram (su nombre es el que se verá):<span class="tg-link" id="tgLink"></span>`
-				: !m
-					? ''
-					: !m.compete
-						? `Juegas en privado: nadie ve tu nombre. <button class="btn small join" data-compete="1">Participar en la temporada</button> <button class="link small" data-tg-unlink>Desvincular Telegram</button>`
-					: m.benched
-						? `Estás apuntado, pero entras en la clasificación el lunes ${dayShort(r.season.end)}: ya habías operado o reiniciado tu cuenta esta semana. Mientras tanto puedes seguir jugando. <button class="link small" data-compete="0">Dejar de competir</button>`
-						: m.trades < r.minTrades
-							? `Compites esta semana: llevas ${m.trades} de ${r.minTrades} operaciones, con ${r.minTrades - m.trades} más entras en la clasificación. <button class="link small" data-compete="0">Dejar de competir</button>`
-							: `Vas ${m.rank}.º con ${fmtPct(m.pnlPct)}. <button class="link small" data-compete="0">Dejar de competir</button>`
-		content = `${status ? `<p class="rank-status">${status}</p>` : ''}${
-			r.rows.length
-				? `<table><thead><tr><th>#</th><th>Jugador</th><th>Rentabilidad</th><th>Patrimonio (USDT)</th><th>Operaciones</th></tr></thead><tbody>${r.rows.map(pctRow).join('')}</tbody></table>`
-				: `<p class="empty">Aún nadie lleva ${r.minTrades} operaciones esta semana. ¡Estrena el primer puesto!</p>`
-		}`
-	} else if (view === 'last') {
-		content = r.last?.rows.length
-			? `<p class="rank-status">Temporada que empezó el ${dayShort(Date.parse(`${r.last.season}T12:00:00Z`))}</p><table><thead><tr><th>#</th><th>Jugador</th><th>Rentabilidad</th><th>Operaciones</th></tr></thead><tbody>${r.last.rows.map(pctRow).join('')}</tbody></table>`
-			: '<p class="empty">Todavía no ha terminado ninguna temporada.</p>'
-	} else {
-		content = r.fame.length
-			? `<table><thead><tr><th>Jugador</th><th>Semanas ganadas</th><th>Podios</th></tr></thead><tbody>${r.fame
-					.map((f) => `<tr class="${f.me ? 'me' : ''}"><td class="txt">${esc(f.name)}${f.me ? ' <span class="tag neutral">tú</span>' : ''}</td><td>${f.wins}</td><td>${f.podiums}</td></tr>`)
-					.join('')}</tbody></table>`
-			: '<p class="empty">El salón de la fama se estrena cuando termine la primera temporada.</p>'
-	}
-	return `${head}${content}
-		<div class="rules"><b>Cómo funciona el ranking</b><ul>
-			<li><b>Competir es opcional.</b> Si no te apuntas, juegas en privado y nadie ve tu nombre. Para competir hay que vincular Telegram: en el ranking sale tu @usuario.</li>
-			<li>Cada <b>lunes a las 00:00</b> (hora de Cuba) empieza una temporada y todos vuelven a <b>10.000 USDT</b>.</li>
-			<li>Para aparecer en la clasificación tienes que competir y hacer <b>al menos ${r.minTrades} operaciones</b> en la semana.</li>
-			<li><b>Te apuntas sin haber operado esta semana:</b> compites desde ese momento.</li>
-			<li><b>Te apuntas cuando ya operaste esta semana:</b> sigues jugando, pero entras en la clasificación el lunes siguiente.</li>
-			<li><b>Reinicias tu cuenta después de operar:</b> sales de la clasificación hasta el lunes siguiente.</li>
-			<li><b>Dejas de competir:</b> desapareces de la clasificación al momento.</li>
-			<li>Gana la mayor rentabilidad, contando tus posiciones a precio de mercado. El top 10 de cada semana se anuncia en el grupo de Telegram @terminalp2p.</li>
-		</ul></div>`
-}
-
-function renderRankWidgets() {
-	const r = S.ranking
-	const m = r?.mine
-	// Tu puesto en la barra de resumen
-	$('sRank').textContent = !r || !m ? '—' : !m.compete ? (S.user?.telegram ? 'Participar' : 'En privado') : m.benched ? 'Desde el lunes' : m.rank ? `${m.rank}.º` : `${m.trades}/${r.minTrades} ops.`
-}
-
-function openRanking() {
-	$('rankModal').hidden = false
-	renderRanking()
-	loadRanking()
-}
-
-// Clics del ranking (pestañas de semana y botones de competir), en la pestaña y en la ventana
-async function rankClick(e) {
-	const rv = e.target.closest('[data-rank-view]')
-	if (rv) {
-		S.rankView = rv.dataset.rankView
-		renderRanking()
-		return true
-	}
-	if (e.target.closest('[data-tg-unlink]')) {
-		if (!confirm('¿Desvincular tu Telegram? Dejas de competir y tu nombre sale del ranking.')) return true
-		try {
-			const r = await api('/telegram/unlink', { method: 'POST', body: '{}' })
-			S.user.telegram = null
-			S.user.compete = false
-			S.ranking = r.ranking
-			renderUser()
-			renderRanking()
-			toast('Telegram desvinculado: juegas en privado', 'ok')
-		} catch (err) {
-			toast(err.message, 'bad')
-		}
-		return true
-	}
-	const comp = e.target.closest('[data-compete]')
-	if (!comp) return false
-	const on = comp.dataset.compete === '1'
-	const traded = (S.ranking?.mine?.trades ?? 0) > 0
-	const ask = on
-		? `Al competir, tu @usuario de Telegram aparece en el ranking y, si quedas entre los 10 primeros de la semana, en el grupo @terminalp2p. Puedes dejarlo cuando quieras.${traded ? '\n\nComo ya operaste esta semana, entrarás en la clasificación el lunes siguiente.' : '\n\nCompites desde ya.'}\n\n¿Participar?`
-		: `Dejarás de aparecer en el ranking y en los anuncios.${traded ? ' Si vuelves a apuntarte esta semana, entrarás en la clasificación el lunes siguiente.' : ''}\n\n¿Dejar de competir?`
-	if (!confirm(ask)) return true
-	try {
-		const r = await api('/compete', { method: 'POST', body: JSON.stringify({ on }) })
-		S.ranking = r.ranking
-		if (S.user) S.user.compete = !!r.compete
-		toast(!on ? 'Ya no compites: juegas en privado' : r.startsMonday ? 'Apuntado: compites desde el lunes' : '¡Apuntado! Ya compites en esta temporada', 'ok')
-		renderRanking()
-	} catch (err) {
-		toast(err.message, 'bad')
-	}
-	return true
 }
 
 // ── Sesión ────────────────────────────────────────────────────────────
@@ -1053,21 +886,15 @@ function bind() {
 			store.set('sim.tab', S.tab)
 			renderTab()
 		}
-	$('rankBtn').onclick = openRanking
-	$('sRankBox').onclick = openRanking
+	
 	$('proBtn').onclick = () => openPro()
 	$('proClose').onclick = () => ($('proModal').hidden = true)
 	$('proModal').addEventListener('click', (e) => {
 		if (e.target.id === 'proModal') $('proModal').hidden = true
 	})
-	$('rankClose').onclick = () => ($('rankModal').hidden = true)
-	$('rankModal').addEventListener('click', (e) => {
-		if (e.target.id === 'rankModal') $('rankModal').hidden = true
-		else rankClick(e)
-	})
+	
 	document.addEventListener('keydown', (e) => {
 		if (e.key !== 'Escape') return
-		$('rankModal').hidden = true
 		$('proModal').hidden = true
 	})
 	$('tabBody').addEventListener('click', async (e) => {
@@ -1134,14 +961,11 @@ function bind() {
 		}
 	})
 	$('resetBtn').onclick = async () => {
-		const traded = S.view?.account.trades > 0
-		const competing = !!S.ranking?.mine?.compete
-		if (!confirm(`¿Reiniciar tu cuenta? Vuelves a 10.000 USDT y se borran tus posiciones y órdenes.${traded && competing ? '\n\nComo ya operaste esta semana, sales de la clasificación hasta el lunes siguiente.' : ''}`)) return
+		if (!confirm('¿Reiniciar tu cuenta? Vuelves a 10.000 USDT y se borran tus posiciones y órdenes.')) return
 		try {
 			S.tradesSeen = 0
 			applyView(await api('/reset', { method: 'POST' }))
 			toast('Cuenta reiniciada: 10.000 USDT')
-			loadRanking()
 		} catch (e) {
 			toast(e.message, 'bad')
 		}
@@ -1175,13 +999,6 @@ async function start() {
 	$('appLink').href = APP_URL
 	$('devLogin').hidden = !S.config.dev
 	render()
-	// Vuelves de vincular Telegram: ya compites
-	const q = new URLSearchParams(location.search)
-	if (q.has('ranking')) {
-		toast(q.get('ranking') === 'lunes' ? 'Telegram vinculado: compites desde el lunes' : 'Telegram vinculado: ¡ya compites!', 'ok')
-		history.replaceState(null, '', location.pathname + location.hash)
-		openRanking()
-	}
 	// Paneles redimensionables en escritorio (cuando los cuatro paneles están lado a lado)
 	window.TPResize?.({
 		layout: '#layout',
@@ -1200,10 +1017,9 @@ async function start() {
 	loadBook()
 	setInterval(() => !document.hidden && loadBook(), TICK_MS)
 	setInterval(() => !document.hidden && loadCandles(true), CANDLES_MS)
-	loadRanking()
 	await loadState()
 	setInterval(() => !document.hidden && loadState(), POLL_MS)
-	setInterval(() => !document.hidden && loadRanking(), 60_000)
+	
 	document.addEventListener('visibilitychange', () => {
 		if (document.hidden) return
 		loadState()

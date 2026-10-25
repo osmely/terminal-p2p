@@ -1,32 +1,8 @@
 import assert from 'node:assert/strict'
-import { createHash, createHmac } from 'node:crypto'
 import { test } from 'node:test'
 import { Engine, freshState, type Candle } from '../src/sim/engine.ts'
-import { catchUp, verifyTelegram } from '../worker/sim.ts'
+import { catchUp } from '../worker/sim.ts'
 import { readSession, sessionCookie, sessionToken } from '../worker/session.ts'
-
-const BOT = '123456:ABC-prueba'
-const NOW_S = 1_792_900_000
-
-// Firma como la del botón de Telegram
-function signed(fields: Record<string, string>, token = BOT) {
-	const check = Object.keys(fields)
-		.sort()
-		.map((k) => `${k}=${fields[k]}`)
-		.join('\n')
-	const hash = createHmac('sha256', createHash('sha256').update(token).digest()).update(check).digest('hex')
-	return new URLSearchParams({ ...fields, hash })
-}
-
-test('Telegram: acepta su firma y rechaza la manipulada, la de otro bot o la caducada', async () => {
-	const fields = { id: '42', first_name: 'Ana', username: 'ana_trader', auth_date: String(NOW_S - 60) }
-	assert.deepEqual(await verifyTelegram(signed(fields), BOT, NOW_S), { id: 42, first_name: 'Ana', username: 'ana_trader', photo_url: undefined })
-	const tampered = signed(fields)
-	tampered.set('id', '43')
-	assert.equal(await verifyTelegram(tampered, BOT, NOW_S), null)
-	assert.equal(await verifyTelegram(signed(fields, '999:OTRO'), BOT, NOW_S), null)
-	assert.equal(await verifyTelegram(signed({ ...fields, auth_date: String(NOW_S - 2 * 86_400) }), BOT, NOW_S), null)
-})
 
 test('sesión del terminal: cookie firmada con la huella, que caduca y no se puede falsificar', async () => {
 	const P = 'a'.repeat(64)

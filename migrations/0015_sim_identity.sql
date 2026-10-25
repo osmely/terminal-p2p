@@ -1,18 +1,14 @@
 -- El simulador deja de tener login propio: la sesión viene del terminal (cookie del dominio con la huella del
 -- token). La cuenta de cada jugador va con el dueño de la licencia Pro del dispositivo (la misma en todos sus
--- dispositivos) o, sin licencia, con la huella. Telegram ya no sirve para entrar: solo para salir en el ranking.
+-- dispositivos) o, sin licencia, con la huella. Sin ranking ni temporadas por ahora (ni Telegram).
 -- Las cuentas que había (con Telegram) no tienen cómo pasarse a la identidad nueva: se empieza de cero
 DROP TABLE IF EXISTS sim_results;
 DROP TABLE IF EXISTS sim_accounts;
 DROP TABLE IF EXISTS sim_users;
+DROP TABLE IF EXISTS sim_meta;
 
 CREATE TABLE sim_players (
 	id         INTEGER PRIMARY KEY,
-	tg_id      INTEGER UNIQUE,              -- Telegram vinculado para competir (null: juega en privado)
-	first_name TEXT,
-	username   TEXT,
-	photo_url  TEXT,
-	compete    INTEGER NOT NULL DEFAULT 0,  -- sale en el ranking (exige Telegram)
 	created_at INTEGER NOT NULL,
 	last_seen  INTEGER NOT NULL
 );
@@ -30,27 +26,9 @@ CREATE TABLE sim_accounts (
 	equity      REAL    NOT NULL,
 	pnl_pct     REAL    NOT NULL,
 	trades      INTEGER NOT NULL,
-	open_orders INTEGER NOT NULL,
+	open_orders INTEGER NOT NULL, -- órdenes abiertas: el cron solo revisa estas cuentas
 	checked_at  INTEGER NOT NULL,
 	updated_at  INTEGER NOT NULL,
-	version     INTEGER NOT NULL,
-	season      TEXT    NOT NULL DEFAULT '',
-	benched     INTEGER NOT NULL DEFAULT 0
+	version     INTEGER NOT NULL  -- control de concurrencia: cada escritura sube la versión
 );
 CREATE INDEX sim_accounts_open ON sim_accounts (open_orders) WHERE open_orders > 0;
-CREATE INDEX sim_accounts_rank ON sim_accounts (pnl_pct) WHERE trades > 0;
-
-CREATE TABLE sim_results (
-	season  TEXT    NOT NULL,
-	rank    INTEGER NOT NULL,
-	player  INTEGER NOT NULL,
-	name    TEXT    NOT NULL, -- @usuario o nombre de Telegram al cerrar la temporada
-	pnl_pct REAL    NOT NULL,
-	equity  REAL    NOT NULL,
-	trades  INTEGER NOT NULL,
-	PRIMARY KEY (season, rank)
-) WITHOUT ROWID;
-CREATE INDEX sim_results_winners ON sim_results (player) WHERE rank <= 3;
-
--- La temporada vuelve a empezar con las cuentas nuevas; el borrador del resumen anterior ya no vale
-DELETE FROM sim_meta;

@@ -13,7 +13,7 @@ import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { adminPage, askKey } from './admin.ts'
 import { proAdmin, proApi, settlePending, type ProEnv } from './pro.ts'
-import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
+import { simApi, simCron, type SimEnv } from './sim.ts'
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	ASSETS: Fetcher
@@ -79,15 +79,15 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 			}),
 		)
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
-	// Panel único en el dominio del terminal; el antiguo del simulador lleva a su pestaña
+	// Panel único en el dominio del terminal
 	if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/')))
-		return Response.redirect(`${url.origin.replace('://sim.', '://app.')}/admin/sim`, 301)
+		return Response.redirect(`${url.origin.replace('://sim.', '://app.')}/admin`, 301)
 	if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
 		if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 		if (url.pathname === '/admin') return Response.redirect(`${url.origin}/admin/metrics`, 302)
 		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
 		if (url.pathname === '/admin/pro') return secure(await proAdmin(req, env as unknown as ProEnv))
-		if (url.pathname === '/admin/sim' || url.pathname === '/admin/sim/publish') return secure(await simAdmin(req, url, env as unknown as SimEnv))
+		
 		return secure(jsonError(404, 'no encontrado'))
 	}
 	if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
@@ -139,8 +139,8 @@ export default {
 		return staged(await handle(req, env, ctx))
 	},
 
-	// Cada minuto: las órdenes pendientes del simulador y las facturas Pro sin confirmar. Cada 10: los agregados públicos de QvaPay,
-	// la tasa informal de elTOQUE y el patrimonio del ranking del simulador
+	// Cada minuto: las órdenes pendientes del simulador y las facturas Pro sin confirmar. Cada 10: los agregados públicos de QvaPay
+	// y la tasa informal de elTOQUE
 	async scheduled(event, env) {
 		// Cloudflare lanza el cron unos segundos antes de su minuto: se redondea al minuto más cercano
 		// (si no, a las 19:49:56 se tomaría por el minuto 49 y se guardaría en la franja de las 19:40)
@@ -148,7 +148,7 @@ export default {
 		const tenth = (at / 60_000) % 10 === 0
 		if (env.PRO_KEY)
 			try {
-				await simCron(env.DB, Date.now(), tenth)
+				await simCron(env.DB, Date.now())
 			} catch (err) {
 				console.error(`simulador: ${(err as Error).message}`)
 			}

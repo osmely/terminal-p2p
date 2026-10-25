@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { createHash, createHmac } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
@@ -37,7 +36,6 @@ function fakeQvaPay() {
 	return { fetcher, pay }
 }
 
-const BOT = '123:bot-de-prueba'
 const P1 = 'a'.repeat(64)
 const P2 = 'b'.repeat(64)
 const P3 = 'c'.repeat(64)
@@ -46,7 +44,7 @@ const P4 = 'd'.repeat(64)
 function setup() {
 	const { db, d1 } = memD1()
 	const q = fakeQvaPay()
-	const env = { DB: d1, QVAPAY_APP_ID: 'app', QVAPAY_APP_SECRET: 'secreto', PRO_KEY: 'clave', METRICS_KEY: 'panel', TELEGRAM_BOT_TOKEN: BOT }
+	const env = { DB: d1, QVAPAY_APP_ID: 'app', QVAPAY_APP_SECRET: 'secreto', PRO_KEY: 'clave', METRICS_KEY: 'panel' }
 	// El terminal (app.terminalp2p.com): devuelve el cuerpo y la cookie de sesión que deja
 	const terminal = async (path: string, body: unknown) => {
 		const req = new Request(`https://app.terminalp2p.com${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -66,16 +64,6 @@ function setup() {
 	return { db, q, terminal, sim, keys }
 }
 
-// Firma como la del botón de Telegram
-function tgParams(fields: Record<string, string>) {
-	const check = Object.keys(fields)
-		.sort()
-		.map((k) => `${k}=${fields[k]}`)
-		.join('\n')
-	const hash = createHmac('sha256', createHash('sha256').update(BOT).digest()).update(check).digest('hex')
-	return new URLSearchParams({ ...fields, hash })
-}
-
 test('sin la sesión del terminal no se juega; con ella se entra sin otro login', async () => {
 	const s = setup()
 	assert.deepEqual((await s.sim('GET', '/api/me', null)).body, { player: null, pro: null })
@@ -84,7 +72,7 @@ test('sin la sesión del terminal no se juega; con ella se entra sin otro login'
 	const { cookie } = await s.terminal('/pro/status', { print: P1 })
 	assert.ok(cookie)
 	const me = (await s.sim('GET', '/api/me', cookie)).body
-	assert.deepEqual([typeof me.player.id, me.player.telegram, me.pro], ['number', null, null])
+	assert.deepEqual([typeof me.player.id, me.pro], ['number', null])
 	assert.equal((await s.sim('GET', '/api/state', cookie)).body.account.equity, 10_000)
 	// Una cookie inventada no vale
 	assert.equal((await s.sim('GET', '/api/state', 'x.y')).status, 401)
@@ -126,29 +114,4 @@ test('cambiar de token en el terminal: la cuenta del simulador pasa a la huella 
 	const fresh = (await s.terminal('/pro/status', { print: P4 })).cookie
 	assert.equal((await s.terminal('/pro/rotate', { from: P3, to: P4 })).body.pro, false)
 	assert.equal((await s.sim('GET', '/api/me', fresh)).body.player.id, id)
-})
-
-test('ranking: para competir hay que vincular Telegram; un Telegram solo puede estar en una cuenta', async () => {
-	const s = setup()
-	const c1 = (await s.terminal('/pro/status', { print: P1 })).cookie
-	assert.equal((await s.sim('POST', '/api/compete', c1, { on: true })).status, 400)
-	// Telegram vuelve con sus datos firmados: se vincula y ya compites
-	const auth = tgParams({ id: '42', first_name: 'Ana', username: 'ana_tg', auth_date: String(Math.floor(Date.now() / 1000)) })
-	const r = await s.sim('GET', `/api/auth/telegram?${auth}`, c1)
-	assert.deepEqual([r.status, r.location], [302, '/?ranking=ya'])
-	let me = (await s.sim('GET', '/api/me', c1)).body
-	assert.deepEqual([me.player.telegram.username, me.player.compete], ['ana_tg', true])
-	assert.equal((await s.sim('GET', '/api/ranking', c1)).body.mine.compete, true)
-	// Una firma falsa no vincula nada
-	const fake = new URLSearchParams(auth)
-	fake.set('id', '43')
-	assert.equal((await s.sim('GET', `/api/auth/telegram?${fake}`, c1)).status, 401)
-	// El mismo Telegram en otra cuenta: sale de la primera
-	const c2 = (await s.terminal('/pro/status', { print: P2 })).cookie
-	await s.sim('GET', `/api/auth/telegram?${auth}`, c2)
-	me = (await s.sim('GET', '/api/me', c1)).body
-	assert.deepEqual([me.player.telegram, me.player.compete], [null, false])
-	// Desvincular: deja de competir
-	await s.sim('POST', '/api/telegram/unlink', c2, {})
-	assert.deepEqual((await s.sim('GET', '/api/me', c2)).body.player.telegram, null)
 })

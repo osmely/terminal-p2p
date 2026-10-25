@@ -66,10 +66,6 @@ a.btn { color: var(--text); text-decoration: none; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .feed.live .dot { background: var(--bid); box-shadow: 0 0 0 3px var(--bid-bg); }
 :root[data-theme='light'] .i-sun, :root:not([data-theme='light']) .i-moon { display: none; }
-.user { display: flex; align-items: center; gap: 8px; }
-.user-chip { display: flex; align-items: center; gap: 8px; padding: 3px 4px 3px 3px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); font-size: 12.5px; font-weight: 600; }
-.avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-bg); color: var(--accent); font-weight: 700; font-size: 12px; text-transform: uppercase; overflow: hidden; }
-.avatar img { width: 100%; height: 100%; object-fit: cover; }
 
 /* ══ Portada sin sesión ═══════════════════════════════════════════════ */
 .hero { padding: 34px 16px 10px; text-align: center; }
@@ -192,13 +188,6 @@ th { font-size: 11.5px; color: var(--muted); font-weight: 600; }
 td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 td.txt { font-family: var(--sans); }
 tr.me td { background: var(--accent-bg); }
-.rank-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-.rank-status { margin: 0; padding: 10px 12px; font-size: 13px; color: var(--text-2); border-bottom: 1px solid var(--line); }
-.rank-status .join { margin-left: 8px; padding: 5px 12px; font-size: 12.5px; background: var(--accent); border-color: var(--accent); color: #fff; }
-.rank-status .link { margin-left: 6px; }
-.rules { padding: 12px 14px; font-size: 12.5px; color: var(--text-2); border-top: 1px solid var(--line); }
-.rules ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
-.rules b { color: var(--text); }
 .empty { padding: 22px 12px; text-align: center; color: var(--muted); }
 .tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font: 600 11px var(--sans); }
 .tag.buy { background: var(--bid-bg); color: var(--bid); }
@@ -206,12 +195,6 @@ tr.me td { background: var(--accent-bg); }
 .tag.neutral { background: var(--surface-3); color: var(--muted); }
 .edit-price { width: 110px; padding: 4px 6px; font-size: 13px; text-align: right; }
 
-/* ══ Ranking a la vista ═══════════════════════════════════════════════ */
-.rank-btn { padding: 7px 12px; border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: var(--warn-bg); color: var(--warn); }
-.rank-btn:hover { background: var(--warn-bg); filter: brightness(1.15); }
-.sum-rank { border: 0; background: none; padding: 0; text-align: left; cursor: pointer; color: inherit; font: inherit; }
-.sum-rank b { color: var(--warn); }
-.sum-rank:hover b { text-decoration: underline; }
 .overlay { position: fixed; inset: 0; z-index: 40; background: rgba(4, 6, 10, 0.7); display: flex; align-items: flex-start; justify-content: center; padding: calc(6vh + env(safe-area-inset-top, 0px)) 16px 6vh; overflow-y: auto; backdrop-filter: blur(2px); }
 .modal-card { position: relative; width: min(760px, 100%); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 18px 0 8px; box-shadow: var(--shadow); }
 .modal-card h2 { margin: 0 0 10px; padding: 0 18px; font-size: 18px; }
@@ -239,7 +222,7 @@ tr.me td { background: var(--accent-bg); }
 }
 @media (max-width: 760px) {
 	.nav { gap: 8px; padding: env(safe-area-inset-top, 0px) 12px 0; }
-	.brand-name, .feed span, .uname, .rank-label { display: none; }
+	.brand-name, .feed span { display: none; }
 	.layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'markets' 'chart' 'order' 'book' 'bottom'; padding: 10px 12px; }
 	.oinput { font-size: 16px; }
 	.chart { height: 320px; }
@@ -256,9 +239,6 @@ tr.me td { background: var(--accent-bg); }
 	#tabBody table.cards td:not([data-l]) { grid-column: 1 / -1; }
 	#tabBody table.cards td:not([data-l]) .link { padding: 4px 0; font-size: 14px; }
 	.cards-bar { display: block; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-	/* Las tres pestañas del ranking caben enteras */
-	.rank-head .seg-tabs { display: flex; width: 100%; }
-	.rank-head .seg-tab { flex: 1 1 auto; padding: 5px 4px; font-size: 12px; }
 }
 
 /* ══ Pro ══════════════════════════════════════════════════════════════ */
@@ -274,8 +254,6 @@ tr.me td { background: var(--accent-bg); }
 .pro-feats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .pro-feats li { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
 .pro-feats .muted { font-size: 12.5px; }
-/* Botón de Telegram para vincularlo y competir */
-.tg-link { display: block; margin-top: 10px; min-height: 30px; }
 .muted.small, .small.muted { font-size: 12px; }
 @media (max-width: 760px) {
 	.pro-chip:not(.on) .pro-label { display: none; }

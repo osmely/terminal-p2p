@@ -4,9 +4,9 @@
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 	<title>Terminal Trading · Simulador de trading</title>
-	<meta name="description" content="Practica trading con 10.000 USDT ficticios y precios reales del mercado: órdenes a mercado, límite, stop loss y take profit, y ranking de jugadores. Entra con Telegram." />
+	<meta name="description" content="Practica trading con 10.000 USDT ficticios y precios reales del mercado: órdenes a mercado, límite, stop loss y take profit. Entra con tu cuenta de Terminal P2P." />
 	<meta property="og:title" content="Terminal Trading · Simulador de trading" />
-	<meta property="og:description" content="10.000 USDT ficticios, precios reales, stop loss, take profit y ranking. Entra con Telegram." />
+	<meta property="og:description" content="10.000 USDT ficticios, precios reales, stop loss y take profit. Entra con tu cuenta de Terminal P2P." />
 	<meta property="og:url" content="https://sim.terminalp2p.com/" />
 	<meta property="og:image" content="https://terminalp2p.com/img/terminal-escritorio.jpg" />
 	<meta name="theme-color" content="#10151c" media="(prefers-color-scheme: dark)" />
@@ -31,20 +31,19 @@
 			<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
 		</a>
 		<button class="btn pro-chip" id="proBtn" hidden></button>
-		<button class="btn rank-btn" id="rankBtn" title="Ranking semanal" aria-label="Ranking semanal">🏆 <span class="rank-label">Ranking</span></button>
+		
 		<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
 			<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 			<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
 		</button>
-		<div id="user" class="user"></div>
 	</header>
 
 	<section class="hero" id="hero" hidden>
 		<div>
 			<h1>Practica trading con <span class="grad">10.000 USDT ficticios</span> y precios reales</h1>
-			<p>Compra y vende Bitcoin, Ethereum, Solana y más con precios reales del mercado, sin VPN. Pon órdenes límite, stop loss y take profit: se ejecutan aunque cierres la página. Y si quieres, compite cada semana en el ranking.</p>
+			<p>Compra y vende Bitcoin, Ethereum, Solana y más con precios reales del mercado, sin VPN. Pon órdenes límite, stop loss y take profit: se ejecutan aunque cierres la página.</p>
 			<div class="hero-login"><a class="btn primary" id="appLink" href="https://app.terminalp2p.com">Conecta tu cuenta en Terminal P2P</a><button class="btn" id="devLogin" hidden>Entrar (desarrollo)</button></div>
-			<p class="fine">Sin dinero real y sin otra cuenta: entras con la de Terminal P2P. Con tu cuenta conectada allí, vuelve aquí y ya estás dentro. Si eres Pro, operas todos los mercados. Juegas en privado salvo que vincules Telegram para competir en el ranking semanal.</p>
+			<p class="fine">Sin dinero real y sin otra cuenta: entras con la de Terminal P2P. Con tu cuenta conectada allí, vuelve aquí y ya estás dentro. Si eres Pro, operas todos los mercados.</p>
 		</div>
 	</section>
 
@@ -54,7 +53,7 @@
 		<div class="sum"><label>USDT libres</label><b id="sCash">—</b></div>
 		<div class="sum"><label>En órdenes</label><b id="sLocked">—</b></div>
 		<div class="sum"><label>Operaciones</label><b id="sTrades">—</b></div>
-		<button class="sum sum-rank" id="sRankBox" title="Ver el ranking semanal"><label>Ranking semanal</label><b id="sRank">—</b></button>
+		
 	</div>
 
 	<main class="layout" id="layout">
@@ -159,14 +158,6 @@
 		Simulador con dinero ficticio: no se opera con dinero real ni es consejo financiero.
 		· <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>
 	</footer>
-
-	<div class="overlay" id="rankModal" hidden>
-		<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="rankTitle">
-			<button class="icon-btn modal-x" id="rankClose" aria-label="Cerrar">✕</button>
-			<h2 id="rankTitle">🏆 Ranking semanal</h2>
-			<div id="rankModalBody" class="tab-body"></div>
-		</div>
-	</div>
 
 	<div class="overlay" id="proModal" hidden>
 		<div class="modal-card" role="dialog" aria-modal="true" aria-label="Terminal P2P Pro">
