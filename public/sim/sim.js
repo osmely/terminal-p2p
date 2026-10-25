@@ -571,7 +571,7 @@ function openPro(html) {
 		html ??
 		(S.pro
 			? `<h2>★ ${S.pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h2><p class="muted">${{ trial: 'Prueba gratis', year: 'Plan anual', gift: 'Plan regalado' }[S.pro.plan] ?? 'Plan mensual'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.${S.pro.plan === 'trial' ? ' Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
-				<p class="muted">Para renovar, desde aquí o desde el terminal:</p><div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>`
+				<p class="muted">No se renueva solo. Para renovar, desde aquí o desde el terminal:</p><div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>`
 			: `<h2>★ Terminal P2P Pro</h2>
 				<ul class="pro-feats">
 					<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>
@@ -579,7 +579,7 @@ function openPro(html) {
 				</ul>
 				<button class="btn block go pro" id="proTrial">Probar 1 mes gratis</button>
 				<div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>
-				<p class="muted small">Pagas con tu saldo en QvaPay. Una sola licencia para el simulador y el terminal.</p>
+				<p class="muted small">Pagas con tu saldo en QvaPay. Una sola licencia para el simulador y el terminal. Sin renovación automática: cada pago lo haces tú. Si no te convence, te devolvemos el dinero en los 7 días siguientes al primer pago: escríbenos a <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.</p>
 				<div class="pro-claim"><input class="input mono" id="proCode" placeholder="¿Ya eres Pro? Código: 482 913 o TP-XXXX-…" autocomplete="off" /><button class="btn" id="proClaim">Vincular</button></div>
 				<p class="muted small">El código de 6 cifras sale en el terminal, en <b>Pro › Vincular simulador</b>.</p>`)
 	$('proModal').hidden = false

@@ -32,6 +32,8 @@ export const PLANS = {
 export type Plan = keyof typeof PLANS
 
 export const PRO_DEVICES = 2
+// Devolución completa en los días siguientes al primer pago (a mano: QvaPay no tiene devoluciones por API)
+export const REFUND_DAYS = 7
 export const TRIAL_DAYS = 30
 const DAY_MS = 86_400_000
 const LICENSE_MS = DAY_MS // la licencia firmada vale un día y el terminal la renueva sola
@@ -417,6 +419,20 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Pro
 				notice = `<p>Licencia para <b>@${escHtml(username)}</b> hasta ${new Date(expires).toLocaleDateString('es')}. Pásale este código para que lo pegue en «Ya soy Pro»:</p><p class="code">${code}</p>`
 			}
 		}
+		// Devolver un pago: se revoca la licencia (también en el simulador) y se apunta; el dinero se
+		// transfiere a mano desde QvaPay a quien pagó
+		if (action === 'refund') {
+			const id = String(f.get('checkout') ?? '')
+			const c = await db.prepare("SELECT c.id, c.amount, c.license, l.username FROM pro_checkouts c JOIN pro_licenses l ON l.uuid = c.license WHERE c.id = ? AND c.status = 'paid' AND c.refunded_at IS NULL").bind(id).first<{ id: string; amount: number; license: string; username: string }>()
+			if (!c) notice = '<p class="note">Ese pago no existe o ya se devolvió.</p>'
+			else {
+				await db.prepare('UPDATE pro_checkouts SET refunded_at = ? WHERE id = ?').bind(now, c.id).run()
+				await db.prepare('UPDATE pro_licenses SET revoked = 1, updated_at = ? WHERE uuid = ?').bind(now, c.license).run()
+				await db.prepare('DELETE FROM pro_prints WHERE license = ?').bind(c.license).run()
+				await db.prepare('UPDATE sim_users SET pro_license = NULL WHERE pro_license = ?').bind(c.license).run()
+				notice = `<p class="ok">Licencia de @${escHtml(c.username)} revocada. Ahora transfiere <b>${c.amount.toLocaleString('es')} USD</b> a <b>@${escHtml(c.username)}</b> desde tu cuenta de QvaPay.</p>`
+			}
+		}
 		if (action === 'revoke' || action === 'restore') {
 			await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ?').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
 			if (action === 'revoke') await db.prepare('DELETE FROM pro_prints WHERE license = ?').bind(uuid).run()
@@ -427,9 +443,22 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Pro
 		.prepare('SELECT l.uuid, l.username, l.plan, l.expires_at, l.revoked, (SELECT COUNT(*) FROM pro_prints p WHERE p.license = l.uuid) AS devices FROM pro_licenses l ORDER BY l.expires_at DESC LIMIT 500')
 		.all<License & { devices: number }>()
 	const active = results.filter((l) => !l.revoked && l.expires_at > now).length
+	// Pagos de cada licencia: el primero marca el plazo de devolución; se puede devolver el último sin devolver
+	const pays = (await db.prepare("SELECT id, license, amount, created_at, refunded_at FROM pro_checkouts WHERE status = 'paid' ORDER BY created_at").all<{ id: string; license: string; amount: number; created_at: number; refunded_at: number | null }>()).results
+	const payCell = (uuid: string) => {
+		const ps = pays.filter((p) => p.license === uuid)
+		if (!ps.length) return '<span class="note">sin pagos</span>'
+		const total = ps.reduce((s, p) => s + p.amount, 0)
+		const last = ps.at(-1)!
+		const inTime = now - ps[0].created_at < REFUND_DAYS * DAY_MS
+		const refund = last.refunded_at
+			? `<span class="note">devuelto el ${new Date(last.refunded_at).toLocaleDateString('es')}</span>`
+			: `<form method="post" style="display:inline" onsubmit="return confirm('¿Devolver ${last.amount} USD? Se revoca la licencia y luego haces tú la transferencia en QvaPay.')"><input type="hidden" name="checkout" value="${escHtml(last.id)}"><button class="ghost" name="action" value="refund">Devolver ${last.amount.toLocaleString('es')} USD</button></form>${inTime ? '' : ` <span class="note">fuera de los ${REFUND_DAYS} días</span>`}`
+		return `${ps.length} · ${total.toLocaleString('es')} USD ${refund}`
+	}
 	const rows = results
 		.map(
-			(l) => `<tr><td>@${escHtml(l.username)}</td><td>${escHtml(l.plan)}</td><td>${new Date(l.expires_at).toLocaleDateString('es')}${l.expires_at < now ? ' <span class="note">(vencida)</span>' : ''}</td><td>${l.devices}</td>
+			(l) => `<tr><td>@${escHtml(l.username)}</td><td>${escHtml(l.plan)}</td><td>${new Date(l.expires_at).toLocaleDateString('es')}${l.revoked ? ' <span class="note">(revocada)</span>' : l.expires_at < now ? ' <span class="note">(vencida)</span>' : ''}</td><td>${l.devices}</td><td>${payCell(l.uuid)}</td>
 			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}">${l.revoked ? 'Restaurar' : 'Revocar'}</button></form></td></tr>`,
 		)
 		.join('')
@@ -438,6 +467,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Pro
 		'Pro',
 		`<h1>Usuarios Pro</h1><p class="note">${active} activos · ${results.length} en total. De cada usuario solo se guarda su usuario de QvaPay, su plan y la huella de sus dispositivos, nunca el token.</p>${notice}
 		<h2>Regalar una licencia</h2><form method="post" class="row"><input type="hidden" name="action" value="gift"><input name="username" placeholder="usuario de QvaPay" required><input name="days" type="number" value="30" min="1" style="width:90px"> días <button>Crear</button></form>
-		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Plan</th><th>Hasta</th><th>Dispositivos</th><th></th></tr>${rows || '<tr><td colspan="5" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>`,
+		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Plan</th><th>Hasta</th><th>Dispositivos</th><th>Pagos</th><th></th></tr>${rows || '<tr><td colspan="6" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
+		<p class="note">Política: sin renovación automática; devolución completa en los ${REFUND_DAYS} días siguientes al primer pago. Si Pro falla por nuestra culpa, en vez de devolver se regalan los días perdidos (Regalar una licencia).</p>`,
 	)
 }

@@ -81,13 +81,13 @@ function showPro() {
 				<p class="muted">@${esc(pro.username)} · ${{ trial: 'prueba gratis', year: 'plan anual', gift: 'plan regalado' }[pro.plan] ?? 'plan mensual'} · hasta el <b>${proDate(pro.expiresAt)}</b>${pro.plan === 'trial' ? '. Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
 				<ul class="pro-feats">${feats}</ul>
 				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proSim">Vincular simulador</button><button class="btn" id="proBackup">Código de respaldo</button></div>
-				<p class="hint">Hasta 2 dispositivos a la vez. Renovar suma el periodo a lo que te queda:</p>
+				<p class="hint">Hasta 2 dispositivos a la vez. No se renueva solo: renovar suma el periodo a lo que te queda:</p>
 				<div class="pro-plans">${plans}</div></div>`
 			: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
 				<button class="btn primary block" id="proTrial">Probar 1 mes gratis</button>
 				<div class="pro-plans">${plans}</div>
-				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador.</p>
+				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Sin renovación automática: cada pago lo haces tú. Si no te convence, te devolvemos el dinero en los 7 días siguientes al primer pago: escríbenos a <a class="link" href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.</p>
 				<button class="link small" id="proClaim">Ya soy Pro en otro dispositivo</button></div>`,
 	)
 	for (const b of $('modalBody').querySelectorAll('[data-plan]')) b.onclick = () => startCheckout(b.dataset.plan)

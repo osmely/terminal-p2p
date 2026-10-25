@@ -275,3 +275,17 @@ test('primer mes gratis en el simulador: una vez por cuenta de Telegram', async 
 	await assert.rejects(startTrial(s.env.DB, 'trial:tg:5', 'Eva', ['tg:5'], T0 + 31 * 86_400_000), /Ya usaste tu mes gratis/)
 	assert.equal(await canTrade(s.env.DB, 5, 'SOLUSDT' as never, 'BUY', T0 + 31 * 86_400_000), false)
 })
+
+test('panel: devolver un pago revoca la licencia (también en el simulador) y dice cuánto transferir', async () => {
+	const s = setup()
+	const { checkout } = await buy(s)
+	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login, pro_license) VALUES (3, 'Ana', 0, 0, 'u-ana')").run()
+	const form = (fields: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, T0)
+	const html = await (await form({ action: 'refund', checkout: checkout.id })).text()
+	assert.match(html, /transfiere <b>1,99 USD<\/b> a <b>@ana<\/b>/)
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
+	assert.equal((s.db.prepare('SELECT pro_license FROM sim_users WHERE tg_id = 3').get() as { pro_license: string | null }).pro_license, null)
+	// No se devuelve dos veces
+	assert.match(await (await form({ action: 'refund', checkout: checkout.id })).text(), /ya se devolvió/)
+})
