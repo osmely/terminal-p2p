@@ -236,6 +236,8 @@ function drawOrderLines() {
 	chartLevels = []
 	if (!S.view) return candleSeries.setMarkers([])
 	const u = base(S.symbol)
+	// En el móvil, sin la cantidad: el título largo se salía por la izquierda del gráfico
+	const narrow = window.innerWidth < 760
 	const line = (price, color, title, style = 2) => {
 		priceLines.push(candleSeries.createPriceLine({ price, color, lineStyle: style, lineWidth: style === 0 ? 2 : 1, axisLabelVisible: true, title }))
 		chartLevels.push(price)
@@ -244,11 +246,11 @@ function drawOrderLines() {
 	if (pos?.avgCost) {
 		const pnl = pos.pnl ?? 0
 		const pct = pos.side === 'LONG' ? pos.pnlPct : (pnl / (pos.avgCost * pos.qty)) * 100
-		line(pos.avgCost, pnl >= 0 ? css('--bid') : css('--ask'), `${pos.side === 'LONG' ? 'Posición' : 'Corto'} ${fmtQty(pos.qty)} ${u}  ${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)} (${fmtPct(pct)})`, 0)
+		line(pos.avgCost, pnl >= 0 ? css('--bid') : css('--ask'), `${pos.side === 'LONG' ? 'Posición' : 'Corto'}${narrow ? '' : ` ${fmtQty(pos.qty)} ${u}`}  ${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)} (${fmtPct(pct)})`, 0)
 	}
 	for (const o of S.view.openOrders.filter((x) => x.symbol === S.symbol)) {
 		const buy = o.side === 'BUY' || o.side === 'COVER'
-		const qty = `${fmtQty(o.qty)} ${u}`
+		const qty = narrow ? '' : `${fmtQty(o.qty)} ${u}`
 		if (o.type === 'OCO') {
 			line(o.price, css('--bid'), `Take profit ${qty}`)
 			line(o.stopPrice, css('--ask'), `Stop loss ${qty}`)
@@ -269,6 +271,7 @@ function drawOrderLines() {
 }
 
 // ── Pintado ───────────────────────────────────────────────────────────
+let shownSym = null // mercado que ya se puso a la vista en la tira de mercados
 function renderLive() {
 	$('markets').innerHTML = Object.entries(S.markets)
 		.map(([sym, m]) => {
@@ -277,6 +280,11 @@ function renderLive() {
 			return `<button class="mk ${sym === S.symbol ? 'active' : ''}" data-sym="${sym}"><span><b>${esc(m.base)}</b><small>${esc(m.name)}</small></span><span class="mono">${l ? fmtPrice(l.last, sym) : '—'}</span><span class="mono ${cls(ch)}">${fmtPct(ch)}</span></button>`
 		})
 		.join('')
+	if (shownSym !== S.symbol) {
+		shownSym = S.symbol
+		const a = $('markets').querySelector('.active')
+		if (a) $('markets').scrollLeft = a.offsetLeft - $('markets').offsetLeft - 8
+	}
 	const l = S.live[S.symbol]
 	$('pairName').textContent = `${base(S.symbol)} / USDT`
 	$('pairPrice').textContent = l ? fmtPrice(l.last) : '—'
@@ -649,6 +657,15 @@ function renderTrades(body, u, key) {
 }
 
 // ── Pestañas de abajo ─────────────────────────────────────────────────
+// Cada celda lleva el nombre de su columna: en el móvil la tabla se ve como tarjetas y lo muestra encima del dato
+function cardLabels(body) {
+	const t = body.querySelector('table')
+	if (!t) return
+	t.classList.add('cards')
+	const names = [...t.tHead.rows[0].cells].map((th) => (th.querySelector('button') ? '' : th.textContent.trim()))
+	for (const tr of t.tBodies[0].rows) [...tr.cells].forEach((td, i) => names[i] && (td.dataset.l = names[i]))
+}
+
 function renderTab() {
 	for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === S.tab)
 	const body = $('tabBody')
@@ -680,7 +697,7 @@ function renderTab() {
 					)
 					.join('')}</tbody></table>`
 			: '<p class="empty">No tienes posiciones. Elige un mercado y compra.</p>'
-		return
+		return cardLabels(body)
 	}
 	if (S.tab === 'open') {
 		// No se repinta mientras se edita un precio (la lectura periódica borraría lo escrito)
@@ -691,7 +708,7 @@ function renderTab() {
 				? `<input class="input mono edit-price" data-edit-key="${key}" value="${o[key]}" type="number" step="any" inputmode="decimal" />`
 				: fmtPrice(o[key], o.symbol)
 		body.innerHTML = os.length
-			? `<table><thead><tr><th>Mercado</th><th>Lado</th><th>Tipo</th><th>Cantidad</th><th>Precio</th><th>Stop</th><th>Puesta</th><th class="txt"><button class="link small" data-cancel-all>Cancelar todas</button></th></tr></thead><tbody>${os
+			? `<div class="cards-bar"><button class="link small" data-cancel-all>Cancelar todas</button></div><table><thead><tr><th>Mercado</th><th>Lado</th><th>Tipo</th><th>Cantidad</th><th>Precio</th><th>Stop</th><th>Puesta</th><th class="txt"><button class="link small" data-cancel-all>Cancelar todas</button></th></tr></thead><tbody>${os
 					.map(
 						(o) => `<tr data-row="${o.id}"><td class="txt"><b>${esc(base(o.symbol))}</b></td><td class="txt"><span class="tag ${o.side === 'BUY' || o.side === 'COVER' ? 'buy' : 'sell'}">${o.side === 'BUY' ? 'Compra' : 'Venta'}</span></td>
 						<td class="txt">${{ LIMIT: 'Límite', STOP: 'Stop', OCO: 'Objetivo + stop', MARKET: 'Mercado' }[o.type]}${o.note ? ' <span class="tag neutral">auto</span>' : ''}</td><td>${fmtQty(o.qty, o.symbol)}</td><td>${cell(o, 'price')}</td><td>${cell(o, 'stopPrice')}</td><td class="txt">${when(o.createdAt)}</td>
@@ -703,7 +720,7 @@ function renderTab() {
 					)
 					.join('')}</tbody></table>`
 			: '<p class="empty">No tienes órdenes abiertas.</p>'
-		return
+		return cardLabels(body)
 	}
 	const ts = S.view.trades
 	body.innerHTML = ts.length
@@ -714,6 +731,7 @@ function renderTab() {
 				)
 				.join('')}</tbody></table>`
 		: '<p class="empty">Aún no has hecho ninguna operación.</p>'
+	cardLabels(body)
 }
 
 async function loadRanking() {

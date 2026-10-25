@@ -182,6 +182,7 @@ a { color: var(--accent); }
 
 /* ══ Tablas de abajo ══════════════════════════════════════════════════ */
 .tab-body { overflow-x: auto; }
+.cards-bar { display: none; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { padding: 8px 12px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
@@ -241,7 +242,8 @@ tr.me td { background: var(--accent-bg); }
 }
 @media (max-width: 1060px) {
 	.layout { grid-template-columns: minmax(0, 1fr) 300px; grid-template-areas: 'markets markets' 'chart order' 'book order' 'bottom bottom'; }
-	.book-panel { max-height: 360px; overflow-y: auto; }
+	/* Sin alto fijo de la rejilla, el libro necesita el suyo (con flex: 1 1 0 se quedaba en cero) */
+	.book-panel .book-body { flex: none; height: 380px; }
 }
 @media (max-width: 760px) {
 	.nav { gap: 8px; padding: env(safe-area-inset-top, 0px) 12px 0; }
@@ -252,4 +254,17 @@ tr.me td { background: var(--accent-bg); }
 	.summary { gap: 8px 18px; padding: 10px 12px; }
 	.sum b { font-size: 14px; }
 	.input { font-size: 16px; }
+	.book-panel .book-body { height: 440px; }
+	/* Posiciones, órdenes e historial como tarjetas: cada dato con su nombre encima, y los botones a la vista */
+	#tabBody table.cards thead { display: none; }
+	#tabBody table.cards, #tabBody table.cards tbody { display: block; }
+	#tabBody table.cards tr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; padding: 12px; border-bottom: 1px solid var(--line); }
+	#tabBody table.cards td { display: block; padding: 0; border: 0; text-align: left; white-space: normal; min-width: 0; overflow-wrap: anywhere; }
+	#tabBody table.cards td[data-l]::before { content: attr(data-l); display: block; margin-bottom: 2px; font: 500 10.5px var(--sans); color: var(--muted); }
+	#tabBody table.cards td:not([data-l]) { grid-column: 1 / -1; }
+	#tabBody table.cards td:not([data-l]) .link { padding: 4px 0; font-size: 14px; }
+	.cards-bar { display: block; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+	/* Las tres pestañas del ranking caben enteras */
+	.rank-head .seg-tabs { display: flex; width: 100%; }
+	.rank-head .seg-tab { flex: 1 1 auto; padding: 5px 4px; font-size: 12px; }
 }

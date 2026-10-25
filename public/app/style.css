@@ -190,6 +190,8 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .stat { display: flex; flex-direction: column; gap: 3px; }
 .stat label { font-size: 11px; color: var(--muted); font-weight: 500; }
 .stat b { font: 600 14.5px var(--mono); font-variant-numeric: tabular-nums; }
+.stat .sh { display: none; }
+.stat .unit { font: inherit; }
 .stat b.ask { color: var(--ask); }
 .stat b.bid { color: var(--bid); }
 .tg-icon { color: #229ed9; }
@@ -584,6 +586,8 @@ a.icon-btn { text-decoration: none; }
 	.stat label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.stat b { font-size: 13px; }
 	.stat:nth-child(4) { display: none; } /* "Medio": seis datos caben en dos filas */
+	.stat .unit, .stat .lg { display: none; }
+	.stat .sh { display: inline; }
 	/* La intención va junto al par, arriba a la derecha, y las cifras debajo */
 	.ticker-pair { order: 0; flex: 1 1 0; min-width: 0; }
 	.intent, .pulse { order: 1; align-self: center; margin-left: 0; align-items: center; }
@@ -613,8 +617,17 @@ a.icon-btn { text-decoration: none; }
 	.area-chart { height: max(340px, calc(100dvh - 190px)); }
 	.area-chart .panel-head { flex-wrap: wrap; }
 	.area-chart .panel-note { text-align: left; width: 100%; }
+	/* Rangos y leyenda encima del gráfico, no sobre él: en pantalla estrecha tapaban las líneas y las etiquetas.
+	   La leyenda guarda su sitio aunque no haya nada que mostrar, para que el gráfico no salte */
+	.chart-wrap { display: flex; flex-direction: column; gap: 6px; }
+	.chart-wrap > .chart { flex: 1; min-height: 0; }
+	.range-tabs { position: static; align-self: flex-start; }
+	.ops-legend { position: static; max-width: none; padding: 0 2px; min-height: 16px; background: none; }
+	.chart-wrap:has(#history:not([hidden])) .ops-legend[hidden] { display: block !important; visibility: hidden; }
 	.pane { max-height: none; }
 	.feed li { grid-template-columns: 42px 1fr auto; padding: 9px 12px; }
+	/* En el móvil la línea baja de renglón: recortada, se perdía el nombre (que abre la ficha) */
+	.feed .act > span { white-space: normal; }
 
 	/* Abajo cuando cabe; si es más alto que la pantalla, desde arriba y con scroll
 	   (con align-items: flex-end la parte de arriba quedaría fuera de alcance) */

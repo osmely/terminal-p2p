@@ -521,6 +521,8 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.op-shot { padding: 12px; }
 	.op-shot img { max-height: 70vh; }
 }
+/* En un teléfono estrecho, «Abrir» a secas: así la barra cabe en una fila */
+@media (max-width: 420px) { .hide-xs { display: none; } }
 @media (prefers-reduced-motion: reduce) {
 	* { animation: none !important; transition: none !important; }
 	html { scroll-behavior: auto; }

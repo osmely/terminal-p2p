@@ -268,12 +268,13 @@ function renderStats(b, asks, bids) {
 		['Mejor compra', fmtP(bid), 'bid'],
 		['Diferencial', ask && bid ? pct(ask / bid - 1) : '—', crossed ? 'warn' : ''],
 		['Medio', fmtP(mid), ''],
-		['Mediana completadas', fmtP(doneMedian), ''],
+		['Mediana completadas', fmtP(doneMedian), '', 'Mediana cerradas'],
 		[`Operaciones ${done?.window_hours ?? 48} h`, done ? done.count.toLocaleString('es') : '—', ''],
-		['Profundidad ±2%', mid ? `${fmtU(within(bids, 'bid'))} / ${fmtU(within(asks, 'ask'))} USD` : '—', ''],
+		['Profundidad ±2%', mid ? `${fmtU(within(bids, 'bid'))} / ${fmtU(within(asks, 'ask'))}<small class="unit"> USD</small>` : '—', '', 'Prof. ±2% (USD)'],
 	]
 	$('stats').innerHTML = items
-		.map(([k, v, cls]) => `<div class="stat"><label>${k}</label><b class="${cls === 'warn' ? '' : cls}">${cls === 'warn' ? `<span class="badge warn">${v}</span>` : v}</b></div>`)
+		// En el móvil, una etiqueta más corta si la hay (con tres columnas no caben las largas)
+		.map(([k, v, cls, short]) => `<div class="stat"><label>${short ? `<span class="lg">${k}</span><span class="sh">${short}</span>` : k}</label><b class="${cls === 'warn' ? '' : cls}">${cls === 'warn' ? `<span class="badge warn">${v}</span>` : v}</b></div>`)
 		.join('')
 	renderIntent(mid ? within(bids, 'bid') : 0, mid ? within(asks, 'ask') : 0, mid, doneMedian)
 	renderPulse(b)
@@ -717,31 +718,28 @@ function drawHistory() {
 		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT' })
 		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.74, bottom: 0 } })
 		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.3 } })
+		historyChart.timeScale().subscribeSizeChange(fitHistory)
 		historyChart.subscribeCrosshairMove((p) => opsLegend(p.time ? (p.time - -new Date().getTimezoneOffset() * 60) * 1000 : null))
 		themeHistory()
 	}
-	if (state.history === historyDrawn) return
-	historyDrawn = state.history
-	const tz = -new Date().getTimezoneOffset() * 60
-	const points = state.history?.points ?? []
-	const series = (key) => points.filter((p) => p[key] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[key] }))
-	bidSeries.setData(series('buy'))
-	askSeries.setData(series('sell'))
-	const accent = css('--accent')
-	opsSeries.setData(
-		(state.history?.daily ?? []).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d.ops, color: `${accent}${d.partial ? '40' : '80'}` })),
-	)
-	const informal = showInformal() ? state.history.informal : []
-	const ref = (key) => informal.filter((d) => d[key] != null).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d[key] }))
-	usdSeries.setData(ref('usd'))
-	usdtSeries.setData(ref('usdt'))
-	opsLegend()
-	// Se encuadra al abrir un mercado o un rango; con datos nuevos del mismo, se respeta el zoom
-	const key = `${state.coin}:${state.range}`
-	if (state.history && key !== historyKey) {
-		historyChart.timeScale().fitContent()
-		historyKey = key
+	const informal = (showInformal() && state.history?.informal) || []
+	if (state.history !== historyDrawn) {
+		historyDrawn = state.history
+		const tz = -new Date().getTimezoneOffset() * 60
+		const points = state.history?.points ?? []
+		const series = (key) => points.filter((p) => p[key] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[key] }))
+		bidSeries.setData(series('buy'))
+		askSeries.setData(series('sell'))
+		const accent = css('--accent')
+		opsSeries.setData(
+			(state.history?.daily ?? []).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d.ops, color: `${accent}${d.partial ? '40' : '80'}` })),
+		)
+		const ref = (key) => informal.filter((d) => d[key] != null).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d[key] }))
+		usdSeries.setData(ref('usd'))
+		usdtSeries.setData(ref('usdt'))
+		opsLegend()
 	}
+	fitHistory()
 	const first = state.history?.firstPoint
 	const step = { 600000: 'cada 10 min', 3600000: 'por hora', 86400000: 'por día' }[state.history?.bucketMs] ?? ''
 	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
@@ -753,6 +751,15 @@ function drawHistory() {
 	$('chartNote').title =
 		'Líneas continuas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.' +
 		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
+}
+
+// Se encuadra al abrir un mercado o un rango; con datos nuevos del mismo, se respeta el zoom.
+// Con el gráfico oculto (en el móvil, otra sección a la vista) no tiene ancho: se encuadra al mostrarse
+function fitHistory() {
+	const key = `${state.coin}:${state.range}`
+	if (!state.history || key === historyKey || !historyChart.timeScale().width()) return
+	historyChart.timeScale().fitContent()
+	historyKey = key
 }
 
 // Los colores del gráfico histórico siguen al tema claro u oscuro
@@ -786,6 +793,8 @@ function showChart(name) {
 	$('completed').hidden = name !== 'completed'
 	$('history').hidden = name !== 'history'
 	drawActive()
+	// Al volver al histórico, la leyenda vuelve a mostrar el último día
+	if (name === 'history' && historyChart) opsLegend()
 }
 
 // ── Ranking de usuarios ───────────────────────────────────────────────
