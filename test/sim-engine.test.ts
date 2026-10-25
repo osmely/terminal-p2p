@@ -100,3 +100,18 @@ test('cancelar todas, o solo las de un mercado', () => {
 	assert.equal(e.cancelAll(), 1)
 	assert.equal(e.state.balances.USDT.locked, 0)
 })
+
+test('cerrar una posición: cancela sus salidas automáticas y vende todo de una vez', () => {
+	const e = new Engine(freshState(T0))
+	const buy = e.placeOrder({ symbol: 'SOL', side: 'BUY', quoteAmount: 1000, stopLoss: 90, takeProfit: 120 }, q(100), T0)
+	e.placeOrder({ symbol: 'ETH', side: 'BUY', type: 'LIMIT', price: 50, quoteAmount: 200 }, q(100), T0)
+	assert.equal(e.openOrders().length, 2) // la OCO de SOL y el límite de ETH
+	const sell = e.closePosition('SOLUSDT', q(110), T0 + 1000)
+	assert.deepEqual([sell.status, sell.qty, sell.avgPrice], ['FILLED', buy.qty, 109.5])
+	assert.equal(e.state.balances.SOL.free + e.state.balances.SOL.locked, 0)
+	// Solo queda la orden de otro mercado
+	assert.deepEqual(e.openOrders().map((o) => o.symbol), ['ETHUSDT'])
+	// Sin posición no hace nada y no cambia la cuenta
+	assert.throws(() => e.closePosition('SOLUSDT', q(110)), /No tienes SOL/)
+	assert.equal(e.openOrders().length, 1)
+})

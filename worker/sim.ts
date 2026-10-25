@@ -558,6 +558,21 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 			)
 			return json(200, { order: result, ...view(engine, prices) })
 		}
+		if (route === 'POST /api/close') {
+			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
+			const symbol = normSymbol(body.symbol)
+			const { result, engine, prices } = await withAccount(
+				env.DB,
+				tgId,
+				(e, qs) => {
+					const q = qs[symbol]
+					if (!q) throw new SimError('Aún no hay precio para este mercado')
+					return e.closePosition(symbol, q)
+				},
+				symbol,
+			)
+			return json(200, { order: result, ...view(engine, prices) })
+		}
 		if (route === 'DELETE /api/orders') {
 			const symbol = url.searchParams.get('symbol') ? normSymbol(url.searchParams.get('symbol')) : undefined
 			const { result, engine, prices } = await withAccount(env.DB, tgId, (e) => e.cancelAll(symbol))

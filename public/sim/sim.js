@@ -605,11 +605,27 @@ function renderTab() {
 	if (!S.view) return (body.innerHTML = '<p class="empty">Entra con Telegram para tener tu cuenta de 10.000 USDT ficticios.</p>')
 	if (S.tab === 'positions') {
 		const ps = liveAccount().positions
+		const pnl = (p) => `${p.pnl == null ? '—' : `${p.pnl >= 0 ? '+' : ''}${fmtUsd(p.pnl)}`}${p.pnlPct != null ? ` (${fmtPct(p.pnlPct)})` : ''}`
+		// Con cada precio nuevo solo cambian el precio, el valor y el resultado: se actualizan en su sitio.
+		// Repintar la tabla entera cada 3 s cambiaba el botón «Vender todo» entre pulsar y soltar, y el clic se perdía
+		const keys = ps.map((p) => `${p.symbol}:${p.side}:${p.qty}:${p.avgCost}`).join('|')
+		const rows = body.querySelectorAll('tr[data-pos]')
+		if (ps.length && body.dataset.pos === keys && rows.length === ps.length) {
+			ps.forEach((p, i) => {
+				const c = rows[i].cells
+				c[3].textContent = fmtPrice(p.price, p.symbol)
+				c[4].textContent = fmtUsd(p.value)
+				c[5].textContent = pnl(p)
+				c[5].className = cls(p.pnl)
+			})
+			return
+		}
+		body.dataset.pos = keys
 		body.innerHTML = ps.length
 			? `<table><thead><tr><th>Mercado</th><th>Cantidad</th><th>Precio medio</th><th>Precio</th><th>Valor (USDT)</th><th>Resultado</th><th></th></tr></thead><tbody>${ps
 					.map(
-						(p) => `<tr><td class="txt"><b>${esc(base(p.symbol))}</b> ${p.side === 'SHORT' ? '<span class="tag sell">corto</span>' : ''}</td><td>${fmtQty(p.qty, p.symbol)}</td><td>${fmtPrice(p.avgCost, p.symbol)}</td><td>${fmtPrice(p.price, p.symbol)}</td><td>${fmtUsd(p.value)}</td>
-						<td class="${cls(p.pnl)}">${p.pnl == null ? '—' : `${p.pnl >= 0 ? '+' : ''}${fmtUsd(p.pnl)}`}${p.pnlPct != null ? ` (${fmtPct(p.pnlPct)})` : ''}</td>
+						(p) => `<tr data-pos><td class="txt"><b>${esc(base(p.symbol))}</b> ${p.side === 'SHORT' ? '<span class="tag sell">corto</span>' : ''}</td><td>${fmtQty(p.qty, p.symbol)}</td><td>${fmtPrice(p.avgCost, p.symbol)}</td><td>${fmtPrice(p.price, p.symbol)}</td><td>${fmtUsd(p.value)}</td>
+						<td class="${cls(p.pnl)}">${pnl(p)}</td>
 						<td class="txt">${p.side === 'LONG' ? `<button class="link small" data-close="${p.symbol}">Vender todo</button>` : ''}</td></tr>`,
 					)
 					.join('')}</tbody></table>`
@@ -976,16 +992,22 @@ function bind() {
 				applyView(await api(`/orders/${cancel.dataset.cancel}`, { method: 'DELETE' }))
 				toast('Orden cancelada')
 			} else if (close) {
+				if (close.disabled) return
 				const sym = close.dataset.close
-				// Las salidas automáticas de esa posición tienen sus monedas reservadas: se cancelan antes
-				for (const o of S.view.openOrders.filter((o) => o.symbol === sym && o.side === 'SELL')) applyView(await api(`/orders/${o.id}`, { method: 'DELETE' }))
-				const r = await api('/orders', { method: 'POST', body: JSON.stringify({ symbol: sym, side: 'SELL', type: 'MARKET', quantity: holding(sym) }) })
+				close.disabled = true
+				close.textContent = 'Vendiendo…'
+				// El servidor cancela las salidas automáticas de esa posición y vende todo de una vez
+				const r = await api('/close', { method: 'POST', body: JSON.stringify({ symbol: sym }) })
 				S.tradesSeen = r.account.trades
 				applyView(r)
 				toast(`Vendiste ${fmtQty(r.order.qty, sym)} ${base(sym)} a ${fmtPrice(r.order.avgPrice, sym)}`, 'ok')
 			}
 		} catch (err) {
 			toast(err.message, 'bad')
+			if (close?.isConnected) {
+				close.disabled = false
+				close.textContent = 'Vender todo'
+			}
 		}
 	})
 	$('resetBtn').onclick = async () => {

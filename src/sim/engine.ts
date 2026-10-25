@@ -285,6 +285,22 @@ export class Engine {
 		}
 	}
 
+	// Vende toda la posición larga de un mercado a mercado. Antes cancela las ventas abiertas de ese mercado
+	// (las salidas automáticas tienen reservadas esas monedas). Si no se puede vender, todo queda como estaba
+	closePosition(symbol: Symbol, q: Quote, now = Date.now()) {
+		const m = MARKETS[symbol]
+		const before = structuredClone(this.state)
+		try {
+			for (const o of this.openOrders().filter((x) => x.symbol === symbol && x.side === 'SELL')) this.cancelOrder(o.id)
+			const qty = floorStep(this.state.balances[m.base].free, m.qtyStep)
+			if (!(qty > 0)) throw new SimError(`No tienes ${m.base} para vender`)
+			return this.placeOrder({ symbol, side: 'SELL', type: 'MARKET', quantity: qty }, q, now)
+		} catch (err) {
+			this.state = before
+			throw err
+		}
+	}
+
 	cancelAll(symbol?: Symbol) {
 		const open = this.openOrders().filter((o) => !symbol || o.symbol === symbol)
 		for (const o of open) this.cancelOrder(o.id)
