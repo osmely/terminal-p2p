@@ -749,7 +749,7 @@ function leftText(ms) {
 	return d ? `${d} d ${h} h` : `${h} h ${Math.floor((ms % 3600_000) / 60_000)} min`
 }
 
-// El ranking se ve en su ventana (botón 🏆), en el top 5 de la izquierda y en el resumen
+// El ranking se ve en su ventana (botón 🏆) y tu puesto en el resumen
 function renderRanking() {
 	renderRankWidgets()
 	if (!$('rankModal').hidden) $('rankModalBody').innerHTML = rankingHtml()
@@ -817,15 +817,6 @@ function renderRankWidgets() {
 	const m = r?.mine
 	// Tu puesto en la barra de resumen
 	$('sRank').textContent = !r || !m ? '—' : !m.compete ? 'Participar' : m.benched ? 'Desde el lunes' : m.rank ? `${m.rank}.º` : `${m.trades}/${r.minTrades} ops.`
-	// Top 5 de la semana, debajo de los mercados
-	if (!r) return ($('top5').innerHTML = '')
-	const rows = r.rows.slice(0, 5)
-	const medal = ['🥇', '🥈', '🥉']
-	$('top5').innerHTML = `<h3>🏆 Top 5 de la semana <small>termina en ${leftText(r.season.end - Date.now())}</small></h3>${
-		rows.length
-			? `<ol>${rows.map((x, i) => `<li class="${x.me ? 'me' : ''}"><span>${medal[i] ?? `${i + 1}.`}</span><span>${esc(x.name)}</span><span class="mono ${cls(x.pnlPct)}">${fmtPct(x.pnlPct)}</span></li>`).join('')}</ol>`
-			: `<p class="empty">Aún nadie lleva ${r.minTrades} operaciones esta semana.</p>`
-	}<button class="btn" data-open-ranking>Ver ranking completo</button>`
 }
 
 function openRanking() {
@@ -1008,7 +999,6 @@ function bind() {
 		}
 	$('rankBtn').onclick = openRanking
 	$('sRankBox').onclick = openRanking
-	$('top5').addEventListener('click', (e) => e.target.closest('[data-open-ranking]') && openRanking())
 	$('rankClose').onclick = () => ($('rankModal').hidden = true)
 	$('rankModal').addEventListener('click', (e) => {
 		if (e.target.id === 'rankModal') $('rankModal').hidden = true
