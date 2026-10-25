@@ -110,7 +110,7 @@ test('renovar suma el periodo y no cambia el código de respaldo', async () => {
 	assert.equal(result.backupCode, null)
 })
 
-test('siendo Pro no se puede pagar hasta los últimos 5 días; una factura pendiente del mismo plan se reutiliza', async () => {
+test('con días de Pro de sobra no se compran más hasta que queden 5; una factura pendiente de los mismos días se reutiliza', async () => {
 	const s = setup()
 	// Dos clics en «Mensual»: la misma factura, no dos
 	const a = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
@@ -123,7 +123,7 @@ test('siendo Pro no se puede pagar hasta los últimos 5 días; una factura pendi
 	// Ya es Pro con 30 días: no puede pagar otra vez
 	const r = await s.post('/pro/checkout', { print: P1, plan: 'month' })
 	assert.equal(r.status, 409)
-	assert.match(r.body.error, /últimos 5 días/)
+	assert.match(r.body.error, /cuando te queden 5 o menos/)
 	// En los últimos 5 días, sí
 	s.tick(26 * 86_400_000)
 	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'month' })).status, 200)
@@ -244,15 +244,20 @@ test('huella del token: siempre la misma para el mismo token, distinta entre tok
 	assert.ok(!a.includes('secreto'))
 })
 
-test('primer mes gratis: una vez por usuario de QvaPay y por dispositivo; si paga, los días que quedaban se suman', async () => {
+test('30 días gratis al conectar la cuenta: una vez por usuario de QvaPay y por dispositivo; si compra, los días que quedaban se suman', async () => {
 	const s = setup()
-	const r = await s.post('/pro/trial', { print: P1, username: 'Ana' })
-	assert.deepEqual([r.status, r.body.pro, r.body.plan, r.body.expiresAt], [200, true, 'trial', T0 + 30 * 86_400_000])
-	// Otro token (otro dispositivo) con el mismo usuario: no hay otro mes gratis
-	assert.equal((await s.post('/pro/trial', { print: P2, username: 'ana' })).status, 409)
-	// Ni otro usuario desde el mismo dispositivo
-	assert.equal((await s.post('/pro/trial', { print: P1, username: 'leo' })).status, 409)
-	// A los 10 días paga el plan mensual: le quedaban 20 días de prueba, que se suman
+	// Sin usuario conectado (solo la huella) no se activa nada
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
+	const r = await s.post('/pro/status', { print: P1, username: 'Ana' })
+	assert.deepEqual([r.body.pro, r.body.plan, r.body.expiresAt, r.body.started], [true, 'trial', T0 + 30 * 86_400_000, true])
+	// La siguiente consulta ya no los vuelve a dar
+	assert.equal((await s.post('/pro/status', { print: P1, username: 'Ana' })).body.started, false)
+	// Otro token (otro dispositivo) con el mismo usuario: no hay otros 30 días
+	assert.deepEqual([(await s.post('/pro/status', { print: P2, username: 'ana' })).body.pro], [false])
+	// Ni otro usuario desde el mismo dispositivo (que además ya tiene sus días)
+	assert.equal((await s.post('/pro/status', { print: P3, username: 'leo' })).body.started, true)
+	assert.equal((await s.post('/pro/status', { print: P3, username: 'eva' })).body.started, false)
+	// A los 10 días compra 30 días: le quedaban 20 gratis, que se suman
 	s.tick(10 * 86_400_000)
 	const c = await s.post('/pro/checkout', { print: P1, plan: 'month' })
 	s.q.pay([...s.q.invoices.keys()].at(-1)!, 'ana')

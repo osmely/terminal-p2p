@@ -564,7 +564,7 @@ function smartTeaser(f) {
 	if (!n) return ''
 	return `<p class="smart-head"><b>⚡ Orden inteligente</b> <span class="pro-tag">PRO</span></p>
 		<p class="hint">Ya hay ${n === 1 ? 'una oferta' : `${n} ofertas`} a tu precio o mejor. Con Pro las tomarías al mejor precio y solo publicarías el resto, como en un exchange.</p>
-		<button type="button" class="btn small" id="smartPro">★ Hazte Pro</button>`
+		<button type="button" class="btn small" id="smartPro">★ Comprar días de Pro</button>`
 }
 
 function priceWarning(type, price, mid) {

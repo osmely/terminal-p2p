@@ -81,15 +81,16 @@ test('sin la sesión del terminal no se juega; con ella se entra sin otro login'
 	assert.equal(leave.cookie, '')
 })
 
-test('el plan se hereda del terminal; la cuenta pasa al dueño de la licencia y sigue del mes gratis al pago y a otro dispositivo', async () => {
+test('Pro se hereda del terminal; la cuenta pasa al dueño de la licencia y sigue de los días gratis a los comprados y a otro dispositivo', async () => {
 	const s = setup()
 	const c1 = (await s.terminal('/pro/status', { print: P1 })).cookie
 	const id = (await s.sim('GET', '/api/me', c1)).body.player.id
 	assert.deepEqual(s.keys(), [`print:aaaaaa→${id}`])
 	// Sin Pro: BTC y ETH; vender lo que ya tienes siempre se puede
 	assert.deepEqual([canTrade(false, 'BTCUSDT', 'BUY'), canTrade(false, 'SOLUSDT', 'BUY'), canTrade(false, 'SOLUSDT', 'SELL'), canTrade(true, 'SOLUSDT', 'BUY')], [true, false, true, true])
-	// Mes gratis en el terminal: el simulador lo ve al momento, y la cuenta pasa a ir con @ana
-	await s.terminal('/pro/trial', { print: P1, username: 'Ana' })
+	// Al conectar la cuenta en el terminal (con su usuario) empiezan sus 30 días gratis: el simulador lo ve al
+	// momento, y la cuenta pasa a ir con @ana
+	assert.equal((await s.terminal('/pro/status', { print: P1, username: 'Ana' })).body.started, true)
 	let me = (await s.sim('GET', '/api/me', c1)).body
 	assert.deepEqual([me.player.id, me.pro.plan], [id, 'trial'])
 	assert.deepEqual(s.keys(), [`user:ana→${id}`])

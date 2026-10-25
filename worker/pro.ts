@@ -27,8 +27,8 @@ export interface ProEnv {
 }
 
 export const PLANS = {
-	month: { usd: 1.99, days: 30, name: 'mensual' },
-	year: { usd: 20, days: 365, name: 'anual' },
+	month: { usd: 1.99, days: 30, name: '30 días' },
+	year: { usd: 20, days: 365, name: '365 días' },
 } as const
 export type Plan = keyof typeof PLANS
 
@@ -40,7 +40,7 @@ const DAY_MS = 86_400_000
 const LICENSE_MS = DAY_MS // la licencia firmada vale un día y el terminal la renueva sola
 const PAIR_MS = 5 * 60_000
 const CHECKOUT_MS = 60 * 60_000
-// Siendo Pro (de pago o regalado) solo se puede pagar en los últimos días del plan; en el mes gratis, siempre
+// Con días de Pro (pagados o regalados) solo se compran más cuando quedan pocos; con los días gratis, siempre
 export const RENEW_DAYS = 5
 // Una factura pendiente se reutiliza si aún le queda margen para pagarla
 const REUSE_MS = 45 * 60_000
@@ -169,7 +169,7 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	if (!marked.meta?.changes) return true
 	const plan = PLANS[c.plan]
 	const old = await db.prepare('SELECT uuid, expires_at, backup_hash, revoked FROM pro_licenses WHERE uuid = ?').bind(key).first<License>()
-	// Lo que le quedaba a quien la pidió (su mes gratis, un regalo u otra licencia) se suma
+	// Lo que le quedaba a quien la pidió (sus días gratis, un regalo u otra licencia) se suma
 	const mine = c.print ? await licenseOfPrint(db, c.print, now) : null
 	const left = mine && mine.uuid !== key ? mine.expires_at : 0
 	// Renovar suma el periodo a lo que quedaba (lo devuelto no cuenta)
@@ -215,10 +215,23 @@ export async function activeLicense(db: D1, uuid: string | null | undefined, now
 }
 
 
-// Primer mes gratis. Las llaves dicen quién ya lo usó (una sola vez cada una); si alguna ya se usó, no hay otro
+// Los 30 días gratis de quien conecta su cuenta por primera vez (false si ese usuario o ese dispositivo ya los usó)
+async function freeDays(db: D1, username: string, print: string, now: number) {
+	const license = `trial:qp:${username.toLowerCase()}`
+	try {
+		await startTrial(db, license, username, [`qp:${username.toLowerCase()}`, `print:${print}`], now)
+	} catch (err) {
+		if (err instanceof ProError) return false
+		throw err
+	}
+	await attachPrint(db, license, print, now)
+	return true
+}
+
+// Los 30 días gratis. Las llaves dicen quién ya los usó (una sola vez cada una); si alguna ya se usó, no hay otro
 export async function startTrial(db: D1, license: string, username: string, keys: string[], now: number) {
-	for (const k of keys) if (await db.prepare('SELECT 1 FROM pro_trials WHERE key = ?').bind(k).first()) throw new ProError(409, 'Ya usaste tu mes gratis. Hazte Pro para seguir.')
-	if (await activeLicense(db, license, now)) throw new ProError(409, 'Ya tienes tu mes gratis activo')
+	for (const k of keys) if (await db.prepare('SELECT 1 FROM pro_trials WHERE key = ?').bind(k).first()) throw new ProError(409, 'Ya usaste tus 30 días gratis')
+	if (await activeLicense(db, license, now)) throw new ProError(409, 'Ya tienes tus días gratis activos')
 	await db
 		.prepare("INSERT INTO pro_licenses (uuid, username, plan, expires_at, revoked, created_at, updated_at) VALUES (?, ?, 'trial', ?, 0, ?, ?) ON CONFLICT(uuid) DO UPDATE SET plan = 'trial', expires_at = excluded.expires_at, updated_at = excluded.updated_at")
 		.bind(license, username, now + TRIAL_DAYS * DAY_MS, now, now)
@@ -226,14 +239,12 @@ export async function startTrial(db: D1, license: string, username: string, keys
 	for (const k of keys) await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(k, license, now).run()
 }
 
-
-// Factura para hacerse Pro (o renovar) desde el terminal (con la huella del dispositivo) o desde el
-// simulador (con la cuenta de Telegram). El aviso de pago va siempre al dominio del terminal
+// Factura para comprar días de Pro desde el terminal (con la huella del dispositivo)
 export async function createCheckout(env: ProEnv, who: { print: string; username?: string }, plan: Plan, origin: string, now: number, fetcher: typeof fetch = fetch) {
 	if (!(plan in PLANS)) throw new ProError(400, 'Plan no válido')
 	const db = env.DB
 	const l = await licenseOfPrint(db, who.print, now)
-	if (l && l.plan !== 'trial' && l.expires_at - now > RENEW_DAYS * DAY_MS) throw new ProError(409, `Ya eres Pro. Podrás renovar en los últimos ${RENEW_DAYS} días de tu plan.`)
+	if (l && l.plan !== 'trial' && l.expires_at - now > RENEW_DAYS * DAY_MS) throw new ProError(409, `Aún te quedan días de Pro. Podrás añadir más cuando te queden ${RENEW_DAYS} o menos.`)
 	// Si ya tiene una factura pendiente del mismo plan, la misma: así no se pagan dos por error
 	const open = await db
 		.prepare("SELECT id, invoice FROM pro_checkouts WHERE status = 'pending' AND created_at > ? AND plan = ? AND print = ? AND invoice IS NOT NULL ORDER BY created_at DESC LIMIT 1")
@@ -247,7 +258,7 @@ export async function createCheckout(env: ProEnv, who: { print: string; username
 		'/v2/create_invoice',
 		{
 			amount: p.usd,
-			description: `Terminal P2P Pro · plan ${p.name}`,
+			description: `Terminal P2P Pro · ${p.name}`,
 			remote_id: id,
 			webhook: `${origin}/api/pro/webhook`,
 			expire_at: new Date(now + CHECKOUT_MS).toISOString(),
@@ -321,12 +332,18 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 	try {
 		// ¿Este dispositivo es Pro?
 		if (route === 'POST /pro/status') {
-			const print = printOf((await readBody(req)).print)
+			const b = await readBody(req)
+			const print = printOf(b.print)
 			await settlePending(env, now, { print }, fetcher)
-			const l = await licenseOfPrint(db, print, now)
+			let l = await licenseOfPrint(db, print, now)
+			// Todos empiezan con 30 días gratis: se activan solos al conectar la cuenta, una vez por usuario de
+			// QvaPay y por dispositivo
+			const username = usernameOf(b.username)
+			const started = !l && !!username && (await freeDays(db, username, print, now))
+			if (started) l = await licenseOfPrint(db, print, now)
 			if (l) await db.prepare('UPDATE pro_prints SET seen_at = ? WHERE print = ?').bind(now, print).run()
-			// La sesión compartida con el simulador: con ella entra sin otro login y hereda tu plan
-			const res = json(200, await statusOf(env, l, now))
+			// La sesión compartida con el simulador: con ella entra sin otro login y hereda tus días de Pro
+			const res = json(200, { ...(await statusOf(env, l, now)), started })
 			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
 			return res
 		}
@@ -367,19 +384,6 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			for (const inv of invoices) c ??= await db.prepare('SELECT * FROM pro_checkouts WHERE invoice = ?').bind(inv).first<Checkout>()
 			if (c) await settle(env, c, now, fetcher)
 			return json(200, { ok: true })
-		}
-
-		// Primer mes gratis en el terminal: una vez por usuario de QvaPay y por dispositivo
-		if (route === 'POST /pro/trial') {
-			const b = await readBody(req)
-			const print = printOf(b.print)
-			const username = usernameOf(b.username)
-			if (!username) return json(400, { error: 'Conecta tu cuenta de QvaPay' })
-			if (await licenseOfPrint(db, print, now)) return json(409, { error: 'Este dispositivo ya es Pro' })
-			const license = `trial:qp:${username.toLowerCase()}`
-			await startTrial(db, license, username, [`qp:${username.toLowerCase()}`, `print:${print}`], now)
-			await attachPrint(db, license, print, now)
-			return json(200, await statusOf(env, await licenseOfPrint(db, print, now), now))
 		}
 
 		// Cambiaste de token en este navegador: la huella vieja autoriza a la nueva
@@ -476,7 +480,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 					.bind(id, username, expires, now, now)
 					.run()
 				const code = await newBackup(db, id, now)
-				notice = `<p>Licencia para <b>@${escHtml(username)}</b> hasta ${new Date(expires).toLocaleDateString('es')}. Pásale este código para que lo pegue en «Ya soy Pro»:</p><p class="code">${code}</p>`
+				notice = `<p>Licencia para <b>@${escHtml(username)}</b> hasta ${new Date(expires).toLocaleDateString('es')}. Pásale este código para que lo pegue en «Ya tengo Pro en otro dispositivo»:</p><p class="code">${code}</p>`
 			}
 		}
 		// Devolver un pago: se revoca la licencia (también en el simulador) y se apunta; el dinero se
@@ -540,11 +544,11 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 	const usd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('es')} USD`
 	const card = (label: string, value: string, small = '') => `<div class="card"><span>${label}</span><b>${value}</b>${small ? `<small>${small}</small>` : ''}</div>`
 	const cards = `<div class="cards">
-		${card('Pro de pago activos', String(sum?.paying ?? 0), `${sum?.trials ?? 0} en mes gratis · ${sum?.gifts ?? 0} regalados`)}
+		${card('Pro con días pagados', String(sum?.paying ?? 0), `${sum?.trials ?? 0} con días gratis · ${sum?.gifts ?? 0} regalados`)}
 		${card('Ingresos este mes', usd(sum?.month ?? 0), `${sum?.monthCount ?? 0} pagos`)}
 		${card('Ingresos totales', usd(sum?.total ?? 0), `${sum?.paidCount ?? 0} pagos · devuelto ${usd(sum?.refunded ?? 0)}`)}
 		${card('Facturas sin pagar', String(sum?.unpaid ?? 0), 'pedidas en las últimas 24 h')}
-		${card('Meses gratis usados', String(sum?.trialKeys ?? 0), 'usuarios, dispositivos o cuentas de Telegram')}
+		${card('Días gratis dados', String(sum?.trialKeys ?? 0), 'usuarios y dispositivos que ya los usaron')}
 	</div>`
 
 	// Hora de Cuba, como el resto del proyecto
@@ -603,7 +607,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		)
 		.bind(...(q ? [like, like] : []))
 		.all<License & { created_at: number; devices: number; seen: number | null; pays: number; paid: number }>()
-	const planName = (p: string) => ({ month: 'mensual', year: 'anual', trial: 'mes gratis', gift: 'regalo' })[p] ?? p
+	const planName = (p: string) => ({ month: '30 días', year: '365 días', trial: '30 días gratis', gift: 'regalo' })[p] ?? p
 	const rows = results
 		.map((l) => {
 			const left = Math.ceil((l.expires_at - now) / DAY_MS)
@@ -619,10 +623,10 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		'Pro',
 		`<div class="top"><h1>Pro</h1><form method="get" class="row"><input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"><button>Buscar</button>${q ? ' <a href="/admin/pro" class="note">quitar filtro</a>' : ''}</form></div>
 		<p class="note">De cada usuario solo se guarda su usuario de QvaPay, su plan y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay. Horas de Cuba.</p>${notice}${cards}
-		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Pagó</th><th>Plan</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
-		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Plan</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
-		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Plan</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
+		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Pagó</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
+		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
+		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Últimos días</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
 		<h2>Regalar una licencia</h2><form method="post" class="row"><input type="hidden" name="action" value="gift"><input name="username" placeholder="usuario de QvaPay" required><input name="days" type="number" value="30" min="1" style="width:90px"> días <button>Crear</button></form>
-		<p class="note">Política: sin renovación automática; devolución completa en los ${REFUND_DAYS} días siguientes al primer pago. Si Pro falla por nuestra culpa, en vez de devolver se regalan los días perdidos (Regalar una licencia).</p>`,
+		<p class="note">Política: se compran días, nada se cobra solo; devolución completa en los ${REFUND_DAYS} días siguientes a la primera compra. Si Pro falla por nuestra culpa, en vez de devolver se regalan los días perdidos (Regalar una licencia).</p>`,
 	)
 }

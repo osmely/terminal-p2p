@@ -278,7 +278,7 @@ export async function simCron(db: D1, now: number) {
 // ── Jugadores: la sesión del terminal ─────────────────────────────────
 
 // Quién juega con esta huella del terminal. Con licencia (aunque haya vencido), la cuenta va con su dueño:
-// la misma en todos sus dispositivos, y sigue al pasar del mes gratis al plan de pago. Sin licencia, con la
+// la misma en todos sus dispositivos, y sigue al pasar de los días gratis a los comprados. Sin licencia, con la
 // huella; al hacerse Pro, esa cuenta pasa al dueño de la licencia con su saldo y su historial
 export async function playerOf(db: D1, print: string, now: number) {
 	const lic = await db

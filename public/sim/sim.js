@@ -407,7 +407,7 @@ function renderForm() {
 	// Mercado Pro sin Pro: se puede vender lo que ya tienes, pero comprar pide hacerse Pro
 	if (S.user && buy && locked(S.symbol)) {
 		go.className = 'btn block go pro'
-		go.textContent = `★ Hazte Pro para operar ${base(S.symbol)}`
+		go.textContent = `★ Con Pro operas ${base(S.symbol)}`
 	}
 	renderProChip()
 	renderHint()
@@ -534,29 +534,33 @@ async function submitOrder() {
 // es el de tu cuenta del terminal: se hereda solo, y Pro se compra en el terminal
 const locked = (sym) => !S.pro && !S.markets[sym]?.free
 const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
+const proDays = () => {
+	const n = Math.max(0, Math.ceil((S.pro.expiresAt - Date.now()) / 86_400_000))
+	return n === 1 ? '1 día' : `${n} días`
+}
 
 function renderProChip() {
 	const b = $('proBtn')
 	b.hidden = !S.user
 	b.classList.toggle('on', !!S.pro)
-	b.innerHTML = `★ <span class="pro-label">${S.pro ? 'Pro' : 'Pro gratis'}</span>`
-	b.title = S.pro ? `Pro hasta el ${proDate(S.pro.expiresAt)}` : 'Terminal P2P Pro'
+	b.innerHTML = `★ <span class="pro-label">${S.pro ? proDays() : 'Pro'}</span>`
+	b.title = S.pro ? `Te quedan ${proDays()} de Pro (hasta el ${proDate(S.pro.expiresAt)})` : 'Terminal P2P Pro'
 }
 
 function openPro() {
 	if (!S.user) return toast('Conecta tu cuenta en el terminal primero', 'bad')
 	const proMarkets = Object.values(S.markets).filter((m) => !m.free).map((m) => m.base)
 	$('proBody').innerHTML = S.pro
-		? `<h2>★ ${S.pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h2><p class="muted">${{ trial: 'Prueba gratis', year: 'Plan anual', gift: 'Plan regalado' }[S.pro.plan] ?? 'Plan mensual'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.</p>
-			<p class="muted">Es el Pro de tu cuenta del terminal: si lo renuevas allí, aquí se renueva solo.</p>
+		? `<h2>★ Te quedan ${proDays()} de Pro</h2><p class="muted">${{ trial: 'Días gratis', gift: 'Días regalados' }[S.pro.plan] ?? 'Días comprados'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.</p>
+			<p class="muted">Son los días de Pro de tu cuenta del terminal: si compras más allí, aquí se suman solos.</p>
 			<a class="btn block" href="${APP_URL}/?pro=open" target="_blank" rel="noopener">Ver mi Pro en el terminal</a>`
 		: `<h2>★ Terminal P2P Pro</h2>
 			<ul class="pro-feats">
 				<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>
 				<li><b>⚡ Orden inteligente en el terminal P2P</b><span class="muted">Si tu precio cruza el libro, toma lo que hay a mejor precio y publica el resto.</span></li>
 			</ul>
-			<a class="btn block go pro" href="${APP_URL}/?pro=open" target="_blank" rel="noopener">Hazte Pro en el terminal (primer mes gratis)</a>
-			<p class="muted small">Pro va con tu cuenta del terminal: en cuanto lo actives allí, aquí se desbloquean todos los mercados.</p>`
+			<a class="btn block go pro" href="${APP_URL}/?pro=open" target="_blank" rel="noopener">Comprar días de Pro en el terminal</a>
+			<p class="muted small">Pro va con tu cuenta del terminal: en cuanto tengas días allí, aquí se desbloquean todos los mercados.</p>`
 	$('proModal').hidden = false
 }
 

@@ -13,9 +13,10 @@ const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname)
 		? `${location.protocol}//sim.localhost:5180`
 		: 'https://sim.terminalp2p.com'
 
+// Lo que se compra son días de Pro: se suman a los que te queden
 const PRO_PLANS = [
-	['month', 'Mensual', '1,99 USD', 'al mes'],
-	['year', 'Anual', '20 USD', 'al año · 2 meses gratis'],
+	['month', '30 días', '1,99 USD', '0,07 USD al día'],
+	['year', '365 días', '20 USD', '0,05 USD al día'],
 ]
 const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
@@ -32,6 +33,8 @@ async function proFetch(path, body) {
 	if (!r.ok) throw new Error(d.error || 'Algo falló. Inténtalo de nuevo.')
 	return d
 }
+const daysLeft = () => Math.max(0, Math.ceil((pro.expiresAt - Date.now()) / 86_400_000))
+const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
 const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
 
 function applyPro(s) {
@@ -57,8 +60,9 @@ async function refreshPro() {
 	try {
 		pro.print = (await api('/print')).print
 		if (!pro.print) return applyPro({ pro: false })
-		// Además de decir si eres Pro, deja la sesión compartida con el simulador
-		let s = await proFetch('/pro/status', { print: pro.print })
+		// Además de decir si eres Pro, deja la sesión compartida con el simulador y, si es la primera vez
+		// que conectas esta cuenta, activa tus 30 días gratis
+		let s = await proFetch('/pro/status', { print: pro.print, username: bk.acct.username })
 		// Si cambiaste de token en este navegador, la huella vieja pasa su Pro y su cuenta del simulador a la nueva
 		const old = store.get('pro.print', null)
 		if (old && old !== pro.print) {
@@ -67,9 +71,10 @@ async function refreshPro() {
 		}
 		store.set('pro.print', pro.print)
 		applyPro(s)
+		if (s.started) showFreeDays()
 		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && store.get('pro.renewTold', '') !== new Date().toDateString()) {
 			store.set('pro.renewTold', new Date().toDateString())
-			toast(`Tu Pro vence el ${proDate(pro.expiresAt)}. Renuévalo desde el botón Pro.`)
+			toast(`Te quedan ${daysText(daysLeft())} de Pro. Añade más desde el botón ★.`)
 		}
 		resumeCheckout()
 	} catch {
@@ -82,55 +87,49 @@ function renderProChip() {
 	if (!b) return
 	b.hidden = !bk.acct.connected
 	b.classList.toggle('on', pro.active)
-	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? 'Pro' : 'Pro gratis'}</span>`
-	b.title = pro.active ? `Pro hasta el ${proDate(pro.expiresAt)}` : 'Terminal P2P Pro'
+	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? daysText(daysLeft()) : 'Pro'}</span>`
+	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : 'Terminal P2P Pro'
 }
 
 // ── Ventana Pro ──────────────────────────────────────────────────────
-// Siendo Pro solo se paga en los últimos días del plan (el servidor también lo exige); en el mes gratis, siempre
+// Con días de Pro solo se compran más cuando quedan pocos (el servidor también lo exige); con los gratis, siempre
 const canRenew = () => !pro.active || pro.plan === 'trial' || pro.expiresAt - Date.now() <= RENEW_SOON_MS
 
 function showPro() {
-	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para hacerte Pro', true)
+	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para usar Pro', true)
 	const feats = PRO_FEATURES.map(([i, t, d]) => `<li><span class="pro-ic">${i}</span><div><b>${t}</b><p class="muted">${d}</p></div></li>`).join('')
 	const plans = PRO_PLANS.map(([id, name, price, per]) => `<button class="pro-plan" data-plan="${id}"><b>${name}</b><span class="mono">${price}</span><small>${per}</small></button>`).join('')
+	const refund = `Si no te convence, te devolvemos el dinero en los 7 días siguientes a tu primera compra: escríbenos a <a class="link" href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.`
 	openModal(
 		pro.active
-			? `<div class="stack pro-box"><h3>★ ${pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h3>
-				<p class="muted">@${esc(pro.username)} · ${{ trial: 'prueba gratis', year: 'plan anual', gift: 'plan regalado' }[pro.plan] ?? 'plan mensual'} · hasta el <b>${proDate(pro.expiresAt)}</b>${pro.plan === 'trial' ? '. Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
+			? `<div class="stack pro-box"><h3>★ Te quedan ${daysText(daysLeft())} de Pro</h3>
+				<p class="muted">@${esc(pro.username)} · ${{ trial: 'días gratis', gift: 'días regalados' }[pro.plan] ?? 'días comprados'} · hasta el <b>${proDate(pro.expiresAt)}</b></p>
 				<ul class="pro-feats">${feats}</ul>
 				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proBackup">Código de respaldo</button></div>
 				${
 					canRenew()
-						? `<p class="hint">Hasta 2 dispositivos a la vez. No se renueva solo: renovar suma el periodo a lo que te queda:</p><div class="pro-plans">${plans}</div>`
-						: `<p class="hint">Hasta 2 dispositivos a la vez. No se renueva solo: podrás renovar desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>.</p>`
+						? `<p class="hint">Hasta 2 dispositivos a la vez. Compra más días cuando quieras: se suman a los que te quedan.</p><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. Nada se cobra solo. ${refund}</p>`
+						: `<p class="hint">Hasta 2 dispositivos a la vez. Podrás comprar más días cuando te queden 5 o menos, desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>. Nada se cobra solo.</p>`
 				}</div>`
 			: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
-				<button class="btn primary block" id="proTrial">Probar 1 mes gratis</button>
+				<p class="muted">Ya usaste tus 30 días gratis. Compra días de Pro:</p>
 				<div class="pro-plans">${plans}</div>
-				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Sin renovación automática: cada pago lo haces tú. Si no te convence, te devolvemos el dinero en los 7 días siguientes al primer pago: escríbenos a <a class="link" href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.</p>
-				<button class="link small" id="proClaim">Ya soy Pro en otro dispositivo</button></div>`,
+				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Nada se cobra solo: cada compra la haces tú. ${refund}</p>
+				<button class="link small" id="proClaim">Ya tengo Pro en otro dispositivo</button></div>`,
 	)
 	for (const b of $('modalBody').querySelectorAll('[data-plan]')) b.onclick = () => startCheckout(b.dataset.plan)
 	$('proPair')?.addEventListener('click', () => showPair())
-	
 	$('proBackup')?.addEventListener('click', showBackup)
 	$('proClaim')?.addEventListener('click', showClaim)
-	$('proTrial')?.addEventListener('click', startTrial)
 }
 
-// Primer mes gratis: una vez por usuario de QvaPay (el servidor lo comprueba)
-async function startTrial() {
-	try {
-		applyPro(await proFetch('/pro/trial', { print: pro.print, username: bk.acct.username }))
-		openModal(`<div class="stack pro-box"><h3>★ Tienes un mes de Pro gratis</h3>
-			<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa en este dispositivo, y en el <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">simulador</a> ya operas todos los mercados.</p>
-			<button class="btn primary block" id="proOk">Listo</button></div>`)
-		$('proOk').onclick = closeModal
-	} catch (e) {
-		toast(e.message, true)
-	}
+// Al conectar la cuenta por primera vez: los 30 días gratis ya están activos
+function showFreeDays() {
+	openModal(`<div class="stack pro-box"><h3>★ Tienes 30 días de Pro gratis</h3>
+		<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa, y en el <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">simulador</a> operas todos los mercados. Cuando se acaben, puedes comprar más días desde el botón ★.</p>
+		<button class="btn primary block" id="proOk">Listo</button></div>`)
+	$('proOk').onclick = closeModal
 }
 
 async function startCheckout(plan) {
@@ -205,8 +204,8 @@ function backupHtml(code, title) {
 }
 
 function showWelcome(backupCode) {
-	openModal(`<div class="stack pro-box"><h3>★ ¡Ya eres Pro!</h3>
-		<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. Las funciones Pro ya están activas en este dispositivo.</p>
+	openModal(`<div class="stack pro-box"><h3>★ Días añadidos</h3>
+		<p class="muted">Ahora te quedan <b>${daysText(daysLeft())}</b> de Pro, hasta el <b>${proDate(pro.expiresAt)}</b>.</p>
 		${backupCode ? `${backupHtml(backupCode, 'Tu código de respaldo. Guárdalo: sirve para recuperar Pro si pierdes este dispositivo y cambias de token.')}` : ''}
 		<button class="btn primary block" id="proOk">Listo</button></div>`)
 	bindCopy($('modalBody'))
@@ -218,7 +217,7 @@ async function showPair() {
 	try {
 		const { code, expiresAt } = await proFetch('/pro/pair', { print: pro.print })
 		openModal(`<div class="stack pro-box"><h3>Añadir dispositivo</h3>
-			<p class="muted">En el otro móvil u ordenador, conecta tu cuenta, pulsa <b>Hazte Pro</b> y luego <b>Ya soy Pro en otro dispositivo</b>. Escribe este código:</p>
+			<p class="muted">En el otro móvil u ordenador, conecta tu cuenta, pulsa <b>★</b> y luego <b>Ya tengo Pro en otro dispositivo</b>. Escribe este código:</p>
 			<div class="pro-code mono big">${code.slice(0, 3)} ${code.slice(3)}</div>
 			<p class="hint">Caduca en <span class="countdown" data-expires="${new Date(expiresAt).toISOString()}"></span> y sirve una sola vez.</p></div>`)
 		tickClocks()
@@ -240,7 +239,7 @@ async function showBackup() {
 }
 
 function showClaim() {
-	openModal(`<div class="stack pro-box"><h3>Ya soy Pro</h3>
+	openModal(`<div class="stack pro-box"><h3>Ya tengo Pro</h3>
 		<p class="muted">Escribe el código de 6 cifras que te muestra tu otro dispositivo Pro (en <b>Pro › Añadir dispositivo</b>) o tu código de respaldo.</p>
 		<label class="field">Código<input class="input mono" id="proCode" placeholder="482 913 o TP-XXXX-XXXX-XXXX" autocomplete="off" /></label>
 		<button class="btn primary block" id="proGo">Activar Pro aquí</button></div>`)
