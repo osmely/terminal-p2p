@@ -127,6 +127,7 @@
 			</div>
 			<label class="check" id="fTpslBox"><input type="checkbox" id="fTpsl" /> Take profit / stop loss</label>
 			<div id="exits" class="exits" hidden>
+				<p class="fine">Cuando se ejecute la compra se pone sola una orden de venta con estos precios. Si pones los dos, el primero que se toque cancela el otro.</p>
 				<div class="exit">
 					<div class="ofield"><span class="olabel up">Take profit</span><input class="oinput mono" id="fTp" type="number" step="any" inputmode="decimal" placeholder="Vender si sube a…" /><span class="ounit">USDT</span></div>
 					<div class="chips" data-exit="fTp"><button type="button" data-pct="2">+2%</button><button type="button" data-pct="5">+5%</button><button type="button" data-pct="10">+10%</button><button type="button" data-pct="20">+20%</button></div>
@@ -148,7 +149,6 @@
 					<button class="seg-tab" data-tab="positions">Posiciones</button>
 					<button class="seg-tab" data-tab="open">Órdenes abiertas <span class="count" id="cntOpen" hidden></span></button>
 					<button class="seg-tab" data-tab="history">Historial</button>
-					<button class="seg-tab" data-tab="ranking">Ranking</button>
 				</div>
 				<button class="link small" id="resetBtn" hidden>Reiniciar cuenta</button>
 			</div>

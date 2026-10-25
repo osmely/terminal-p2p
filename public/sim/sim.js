@@ -43,7 +43,7 @@ const S = {
 	book: null, // { bids, asks } del mercado que se mira
 	trades: null,
 	bookTab: store.get('sim.bookTab', 'book'),
-	tab: store.get('sim.tab', 'positions'),
+	tab: ['positions', 'open', 'history'].includes(store.get('sim.tab')) ? store.get('sim.tab') : 'positions',
 	tradesSeen: null,
 	busy: false,
 }
@@ -353,23 +353,33 @@ function bestPrice(side = S.side) {
 	const top = side === 'BUY' ? b?.asks?.[0]?.[0] : b?.bids?.[0]?.[0]
 	return top ?? S.live[S.symbol]?.last ?? null
 }
+// Precio para esperar en el libro: el mejor de tu lado (el bid al comprar, el ask al vender)
+function restPrice(side = S.side) {
+	return bestPrice(side === 'BUY' ? 'SELL' : 'BUY')
+}
 // Precio de referencia de la orden según su tipo
 function refPrice() {
 	if (S.type === 'LIMIT') return Number($('fPrice').value) || null
 	if (S.type === 'STOP') return Number($('fStop').value) || null
 	return bestPrice()
 }
+// Lo que cuesta cada USDT de compra: comisión y, en una compra stop, el 0,2% que se reserva por si se ejecuta algo peor
+const buyFactor = () => (S.side === 'BUY' ? 1.001 * (S.type === 'STOP' ? 1.002 : 1) : 1)
 // Cantidad en monedas que representa lo que hay escrito
 function formQty() {
 	const v = Number($('fAmount').value)
 	const px = refPrice()
 	if (!(v > 0)) return 0
 	if (S.unit === 'base') return v
-	return px ? v / px / (S.side === 'BUY' ? 1.001 : 1) : 0
+	return px ? v / px / buyFactor() : 0
+}
+// Monedas de una posición que ya están reservadas en ventas abiertas (las salidas automáticas, por ejemplo)
+function lockedQty(sym = S.symbol) {
+	return (S.view?.openOrders ?? []).filter((o) => o.symbol === sym && o.side === 'SELL').reduce((a, o) => a + o.qty, 0)
 }
 function available() {
 	if (!S.view) return 0
-	return S.side === 'BUY' ? S.view.account.cash.free : holding()
+	return S.side === 'BUY' ? S.view.account.cash.free : Math.max(0, floorStep(holding() - lockedQty()))
 }
 
 function renderForm() {
@@ -380,6 +390,14 @@ function renderForm() {
 	$('fStopBox').hidden = S.type !== 'STOP'
 	$('fMarketBox').hidden = S.type !== 'MARKET'
 	$('fQuick').hidden = S.type === 'MARKET'
+	// Límite: el mejor precio o el último. Stop: a qué distancia del precio actual se activa (arriba al comprar, abajo al vender)
+	const off = (ps, sign) => ps.map((p) => `<button type="button" data-off="${sign * p}">${sign > 0 ? '+' : '−'}${String(p).replace('.', ',')}%</button>`).join('')
+	const quick = S.type === 'STOP' ? off([0.5, 1, 2, 5], buy ? 1 : -1) : `<button type="button" data-fill="rest">${buy ? 'Mejor compra' : 'Mejor venta'}</button><button type="button" data-fill="last">Último</button>${off([1, 2], buy ? -1 : 1)}`
+	if ($('fQuick').dataset.k !== `${S.type}:${S.side}`) {
+		$('fQuick').dataset.k = `${S.type}:${S.side}`
+		$('fQuick').innerHTML = quick
+	}
+	$('fStop').placeholder = buy ? 'Compra si sube a…' : 'Vende si baja a…'
 	$('fUnit').textContent = S.unit === 'base' ? base(S.symbol) : 'USDT'
 	$('fTpslBox').hidden = !buy
 	$('exits').hidden = !buy || !$('fTpsl').checked
@@ -408,24 +426,57 @@ function renderHint() {
 		const used = buy ? total + fee : qty
 		$('fSlider').value = String(avail > 0 ? Math.min(100, Math.round((used / avail) * 100)) : 0)
 	}
-	const est = (target, el) => {
+	// dir: el take profit va por encima del precio de compra y el stop loss por debajo
+	const est = (target, el, dir) => {
 		const t = Number($(target).value)
-		if (!(t > 0 && px && qty > 0)) return ($(el).textContent = '')
+		if (!(t > 0 && px)) return ($(el).textContent = '')
+		if ((t - px) * dir <= 0) {
+			$(el).textContent = `Debe ir por ${dir > 0 ? 'encima' : 'debajo'} del precio de compra (${fmtPrice(px)})`
+			$(el).className = 'est down'
+			return
+		}
+		if (!(qty > 0)) return ($(el).textContent = `${fmtPct((t / px - 1) * 100)} desde la compra`)
 		const pnl = (t - px) * qty - (px + t) * qty * 0.001
 		$(el).textContent = `${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)} USDT (${fmtPct((t / px - 1) * 100)})`
 		$(el).className = `est ${cls(pnl)}`
 	}
-	est('fTp', 'fTpEst')
-	est('fSl', 'fSlEst')
-	$('fHint').textContent = S.type === 'MARKET' ? 'Se ejecuta al momento al mejor precio disponible.' : S.type === 'LIMIT' ? 'Se ejecuta cuando el mercado llegue a tu precio, aunque cierres la página.' : 'Al llegar a la activación se ejecuta a mercado.'
+	est('fTp', 'fTpEst', 1)
+	est('fSl', 'fSlEst', -1)
+	const hint = orderHint(px)
+	$('fHint').textContent = hint.text
+	$('fHint').className = `fine ${hint.bad ? 'bad' : ''}`
+}
+
+// Qué va a pasar con la orden, según su tipo, su lado y el precio actual
+function orderHint(px) {
+	const buy = S.side === 'BUY'
+	const best = bestPrice()
+	const now = S.live[S.symbol]?.last
+	if (!buy && S.view && holding() > 0 && available() === 0)
+		return { bad: true, text: `Tus ${base(S.symbol)} están reservados por una orden de venta abierta (la salida automática, por ejemplo). Cancélala en «Órdenes abiertas» o usa «Vender todo» en Posiciones.` }
+	if (S.type === 'MARKET') return { text: `${buy ? 'Compra' : 'Vende'} ya, al mejor precio del libro.${buy ? ' Puedes añadir take profit y stop loss: al comprar se pone sola la orden de salida.' : ''}` }
+	if (S.type === 'LIMIT') {
+		if (px && best && (buy ? px >= best : px <= best))
+			return { text: `Tu precio ${px === best ? 'alcanza el' : buy ? 'supera el' : 'queda por debajo del'} mejor precio de ${buy ? 'venta' : 'compra'} del libro: se ejecuta ya, a ${fmtPrice(best)}.` }
+		return { text: `${buy ? 'Compra si el precio baja' : 'Vende si el precio sube'} hasta tu precio, aunque cierres la página. Nunca a un precio peor.` }
+	}
+	if (px && now && (buy ? px <= now : px >= now))
+		return { bad: true, text: `La activación de un stop de ${buy ? 'compra va por encima' : 'venta va por debajo'} del precio actual (${fmtPrice(now)}). ${buy ? 'Para comprar más barato usa una orden límite.' : 'Para vender más caro usa una orden límite.'}` }
+	return {
+		text: buy
+			? 'Si el precio sube hasta la activación, compra a mercado. Sirve para entrar cuando rompe hacia arriba. Puede ejecutarse algo por encima si el precio salta.'
+			: 'Si el precio baja hasta la activación, vende a mercado. Sirve para limitar pérdidas. Puede ejecutarse algo por debajo si el precio cae de golpe.',
+	}
 }
 
 // Los precios de la orden se rellenan con el actual si están vacíos
 function prefillPrices() {
 	const l = S.live[S.symbol]
 	if (!l || !mk()) return
-	if (S.type === 'LIMIT' && !$('fPrice').value) $('fPrice').value = String(roundTick(bestPrice() ?? l.last))
-	if (S.type === 'STOP' && !$('fStop').value) $('fStop').value = String(roundTick(l.last))
+	// Una límite empieza en el mejor precio de su lado: queda la primera de la fila sin ejecutarse ya
+	if (S.type === 'LIMIT' && !$('fPrice').value) $('fPrice').value = String(roundTick(restPrice() ?? l.last))
+	// Un stop se activa más allá del precio actual: por encima al comprar, por debajo al vender
+	if (S.type === 'STOP' && !$('fStop').value) $('fStop').value = String(roundTick(l.last * (S.side === 'BUY' ? 1.01 : 0.99)))
 }
 
 function setAmountFromPct(pct) {
@@ -433,7 +484,7 @@ function setAmountFromPct(pct) {
 	const px = refPrice()
 	if (!(avail > 0)) return ($('fAmount').value = '')
 	let v
-	if (S.side === 'BUY') v = S.unit === 'quote' ? Math.floor(avail * pct) / 100 : px ? floorStep((avail * pct) / 100 / px / 1.001) : 0
+	if (S.side === 'BUY') v = S.unit === 'quote' ? Math.floor(avail * pct) / 100 : px ? floorStep((avail * pct) / 100 / px / buyFactor()) : 0
 	else v = S.unit === 'base' ? floorStep((avail * pct) / 100) : px ? Math.floor(((avail * pct) / 100) * px * 100) / 100 : 0
 	$('fAmount').value = v > 0 ? String(v) : ''
 	renderHint()
@@ -601,7 +652,6 @@ function renderTrades(body, u, key) {
 function renderTab() {
 	for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === S.tab)
 	const body = $('tabBody')
-	if (S.tab === 'ranking') return renderRanking()
 	if (!S.view) return (body.innerHTML = '<p class="empty">Entra con Telegram para tener tu cuenta de 10.000 USDT ficticios.</p>')
 	if (S.tab === 'positions') {
 		const ps = liveAccount().positions
@@ -681,13 +731,10 @@ function leftText(ms) {
 	return d ? `${d} d ${h} h` : `${h} h ${Math.floor((ms % 3600_000) / 60_000)} min`
 }
 
-// El ranking se ve en la pestaña de abajo, en su ventana (botón 🏆), en el top 5 de la izquierda y en el resumen
+// El ranking se ve en su ventana (botón 🏆), en el top 5 de la izquierda y en el resumen
 function renderRanking() {
 	renderRankWidgets()
-	const targets = [S.tab === 'ranking' && $('tabBody'), !$('rankModal').hidden && $('rankModalBody')].filter(Boolean)
-	if (!targets.length) return
-	const html = rankingHtml()
-	for (const t of targets) t.innerHTML = html
+	if (!$('rankModal').hidden) $('rankModalBody').innerHTML = rankingHtml()
 }
 
 function rankingHtml() {
@@ -862,6 +909,10 @@ function bind() {
 		b.onclick = () => {
 			S.side = b.dataset.side
 			$('fAmount').value = ''
+			// Los precios de la orden dependen del lado: se rellenan de nuevo
+			$('fStop').value = ''
+			$('fPrice').value = ''
+			prefillPrices()
 			renderForm()
 		}
 	for (const b of document.querySelectorAll('[data-type]'))
@@ -882,9 +933,10 @@ function bind() {
 			renderHint()
 		}
 	$('fQuick').addEventListener('click', (e) => {
-		const b = e.target.closest('[data-fill]')
+		const b = e.target.closest('[data-fill], [data-off]')
 		if (!b) return
-		const p = b.dataset.fill === 'best' ? bestPrice() : S.live[S.symbol]?.last
+		const last = S.live[S.symbol]?.last
+		const p = b.dataset.off ? last && last * (1 + Number(b.dataset.off) / 100) : b.dataset.fill === 'rest' ? restPrice() : last
 		if (p) $(S.type === 'STOP' ? 'fStop' : 'fPrice').value = String(roundTick(p))
 		renderHint()
 	})
@@ -894,7 +946,7 @@ function bind() {
 		const px = refPrice()
 		S.unit = S.unit === 'base' ? 'quote' : 'base'
 		store.set('sim.unit', S.unit)
-		if (qty > 0 && px) $('fAmount').value = String(S.unit === 'base' ? floorStep(qty) : Math.floor(qty * px * (S.side === 'BUY' ? 1.001 : 1) * 100) / 100)
+		if (qty > 0 && px) $('fAmount').value = String(S.unit === 'base' ? floorStep(qty) : Math.floor(qty * px * buyFactor() * 100) / 100)
 		renderForm()
 	}
 	$('fSlider').addEventListener('input', () => setAmountFromPct(Number($('fSlider').value)))
@@ -934,7 +986,6 @@ function bind() {
 		b.onclick = () => {
 			S.tab = b.dataset.tab
 			store.set('sim.tab', S.tab)
-			if (S.tab === 'ranking') loadRanking()
 			renderTab()
 		}
 	$('rankBtn').onclick = openRanking
@@ -947,7 +998,6 @@ function bind() {
 	})
 	document.addEventListener('keydown', (e) => e.key === 'Escape' && ($('rankModal').hidden = true))
 	$('tabBody').addEventListener('click', async (e) => {
-		if (await rankClick(e)) return
 		const edit = e.target.closest('[data-edit]')
 		if (edit) {
 			S.editing = Number(edit.dataset.edit)

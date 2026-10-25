@@ -115,3 +115,28 @@ test('cerrar una posición: cancela sus salidas automáticas y vende todo de una
 	assert.throws(() => e.closePosition('SOLUSDT', q(110)), /No tienes SOL/)
 	assert.equal(e.openOrders().length, 1)
 })
+
+test('comprar a mercado con todo el saldo en USDT cabe; una compra stop reserva un 0,2% más', () => {
+	const e = new Engine(freshState(T0))
+	const o = e.placeOrder({ symbol: 'SOL', side: 'BUY', type: 'MARKET', quoteAmount: 10_000 }, q(100), T0)
+	assert.equal(o.status, 'FILLED')
+	const e2 = new Engine(freshState(T0))
+	const s = e2.placeOrder({ symbol: 'SOL', side: 'BUY', type: 'STOP', stopPrice: 110, quoteAmount: 10_000 }, q(100), T0)
+	assert.ok(s.locked <= 10_000 && s.locked > 9_990)
+})
+
+test('la salida automática no se pierde aunque un hueco ya pasara el stop, ni en compras pequeñas', () => {
+	const e = new Engine(freshState(T0))
+	// Límite a 100 con stop a 98; la vela abre en 95 (la compra sale a 95, ya por debajo del stop)
+	e.placeOrder({ symbol: 'SOL', side: 'BUY', type: 'LIMIT', price: 100, quoteAmount: 1000, stopLoss: 98, takeProfit: 110 }, q(102), T0)
+	e.replay('SOLUSDT', [{ t: T0 + 60_000, o: 95, h: 96, l: 94, c: 95 }])
+	assert.deepEqual(e.openOrders().map((o) => o.type), ['OCO'])
+	// Con la vela siguiente salta el stop, al precio de apertura
+	e.replay('SOLUSDT', [{ t: T0 + 120_000, o: 95, h: 96, l: 94, c: 95 }])
+	assert.equal(e.openOrders().length, 0)
+	assert.equal(e.state.trades.at(-1)!.trigger, 'stop')
+	// 5,1 USDT con stop al −5%: la salida vale menos del mínimo, pero se pone igual
+	const e2 = new Engine(freshState(T0))
+	e2.placeOrder({ symbol: 'SOL', side: 'BUY', type: 'MARKET', quoteAmount: 5.2, stopLoss: 95 }, q(100), T0)
+	assert.deepEqual(e2.openOrders().map((o) => o.type), ['STOP'])
+})

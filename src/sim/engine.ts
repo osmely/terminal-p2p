@@ -19,6 +19,7 @@ export type Symbol = keyof typeof MARKETS
 export const SYMBOLS = Object.keys(MARKETS) as Symbol[]
 
 export const FEE = 0.001 // 0,1 % por operación (como Binance spot)
+export const STOP_MARGIN = 0.002 // lo que se reserva de más en una compra stop
 export const MIN_NOTIONAL = 5 // mínimo $5 por orden
 export const START_BALANCE = 10_000
 // Lo que se guarda de cada cuenta: todas las órdenes abiertas y las últimas cerradas y operaciones
@@ -170,7 +171,9 @@ export class Engine {
 	// ── Órdenes ──────────────────────────────────────────────────────────
 	// OCO solo cierra posiciones: SELL (objetivo arriba, stop abajo) o COVER (objetivo abajo, stop arriba).
 	// stopLoss/takeProfit se adjuntan a entradas: BUY (stop abajo, objetivo arriba) o SHORT (stop arriba, objetivo abajo).
-	placeOrder(req: OrderRequest, q: Quote, now = Date.now()): Order {
+	// auto: salida automática de una entrada recién ejecutada. No se le exigen el mínimo ni que el stop o el objetivo
+	// estén aún por delante del precio: si un hueco ya los pasó, se ejecuta con la vela siguiente en vez de quedarse sin salida
+	placeOrder(req: OrderRequest, q: Quote, now = Date.now(), auto = false): Order {
 		const symbol = normSymbol(req.symbol)
 		const m = MARKETS[symbol]
 		const side = String(req.side ?? '').toUpperCase() as Side
@@ -185,23 +188,26 @@ export class Engine {
 		const stopPrice = req.stopPrice != null && req.stopPrice !== ('' as unknown) ? round(+req.stopPrice, m.tick) : null
 		if ((type === 'LIMIT' || type === 'OCO') && !(price! > 0)) throw new SimError('Pon el precio límite')
 		if ((type === 'STOP' || type === 'OCO') && !(stopPrice! > 0)) throw new SimError('Pon el precio del stop')
-		if (type === 'OCO' && side === 'SELL' && !(price! > q.bid && stopPrice! < q.bid))
+		if (!auto && type === 'OCO' && side === 'SELL' && !(price! > q.bid && stopPrice! < q.bid))
 			throw new SimError(`En una OCO de venta el objetivo va por encima del precio actual (${q.bid}) y el stop por debajo`)
-		if (type === 'OCO' && side === 'COVER' && !(price! < q.ask && stopPrice! > q.ask))
+		if (!auto && type === 'OCO' && side === 'COVER' && !(price! < q.ask && stopPrice! > q.ask))
 			throw new SimError(`En una OCO de recompra el objetivo va por debajo del precio actual (${q.ask}) y el stop por encima`)
-		if (type === 'STOP' && !buy && stopPrice! >= q.bid) throw new SimError(`Un stop de venta va por debajo del precio actual (${q.bid})`)
-		if (type === 'STOP' && buy && stopPrice! <= q.ask) throw new SimError(`Un stop de compra va por encima del precio actual (${q.ask})`)
+		if (!auto && type === 'STOP' && !buy && stopPrice! >= q.bid) throw new SimError(`Un stop de venta va por debajo del precio actual (${q.bid})`)
+		if (!auto && type === 'STOP' && buy && stopPrice! <= q.ask) throw new SimError(`Un stop de compra va por encima del precio actual (${q.ask})`)
 
 		// Cantidad: en monedas o en USDT (en entradas incluye la comisión)
 		const refPrice = type === 'MARKET' ? (buy ? q.ask : q.bid) : type === 'STOP' ? stopPrice! : price!
 		const entry = side === 'BUY' || side === 'SHORT'
+		// Un stop puede ejecutarse algo peor que su activación: en entradas se reserva un 0,2% más.
+		// La de mercado se ejecuta ya al precio que se ve, y la límite nunca peor que su precio
+		const reserve = entry ? (1 + FEE) * (type === 'STOP' ? 1 + STOP_MARGIN : 1) : 1
 		let qty: number
 		if (req.quantity != null && +req.quantity > 0) qty = floorStep(+req.quantity, m.qtyStep)
-		else if (req.quoteAmount != null && +req.quoteAmount > 0) qty = floorStep(+req.quoteAmount / refPrice / (entry ? 1 + FEE : 1), m.qtyStep)
+		else if (req.quoteAmount != null && +req.quoteAmount > 0) qty = floorStep(+req.quoteAmount / refPrice / reserve, m.qtyStep)
 		else throw new SimError('Indica la cantidad')
 		qty = round(qty, m.qtyStep)
 		if (!(qty > 0)) throw new SimError('La cantidad es demasiado pequeña')
-		if (qty * refPrice < MIN_NOTIONAL) throw new SimError(`La orden mínima es de ${MIN_NOTIONAL} USDT`)
+		if (!auto && qty * refPrice < MIN_NOTIONAL) throw new SimError(`La orden mínima es de ${MIN_NOTIONAL} USDT`)
 
 		const bal = this.state.balances
 		const order: Order = {
@@ -229,7 +235,7 @@ export class Engine {
 
 		// Reservar fondos: USDT para entradas (en cortos, la garantía), monedas para SELL, deuda corta para COVER
 		if (entry) {
-			const need = qty * refPrice * (1 + FEE) * (type === 'MARKET' || type === 'STOP' ? 1.002 : 1)
+			const need = qty * refPrice * reserve
 			if (bal.USDT.free + 1e-9 < need) throw new SimError(`Saldo insuficiente: necesitas ${need.toFixed(2)} USDT y tienes ${bal.USDT.free.toFixed(2)} libres`)
 			bal.USDT.free -= need
 			bal.USDT.locked += need
@@ -426,11 +432,9 @@ export class Engine {
 						? { type: 'STOP', stopPrice: o.stopLoss }
 						: { type: 'LIMIT', price: o.takeProfit }
 			try {
-				// La salida se valida contra el precio de ejecución, y empieza a mirar velas desde la siguiente
-				this.placeOrder({ symbol: o.symbol, side: o.side === 'BUY' ? 'SELL' : 'COVER', quantity: o.qty, ...exit, note: `Salida automática de la orden #${o.id}` }, { bid: px, ask: px }, now)
-			} catch {
-				// Si el precio ya pasó el objetivo o el stop al ejecutarse, la posición queda abierta sin salida
-			}
+				// La salida empieza a mirar velas desde la siguiente
+				this.placeOrder({ symbol: o.symbol, side: o.side === 'BUY' ? 'SELL' : 'COVER', quantity: o.qty, ...exit, note: `Salida automática de la orden #${o.id}` }, { bid: px, ask: px }, now, true)
+			} catch {}
 		}
 	}
 
