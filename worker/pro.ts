@@ -438,7 +438,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 
 const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
-export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Promise<Response> {
+export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetcher: typeof fetch = fetch): Promise<Response> {
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const db = env.DB
 	let notice = ''
@@ -477,41 +477,132 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Pro
 				notice = `<p class="ok">Licencia de @${escHtml(c.username)} revocada. Ahora transfiere <b>${c.amount.toLocaleString('es')} USD</b> a <b>@${escHtml(c.username)}</b> desde tu cuenta de QvaPay.</p>`
 			}
 		}
+		// Comprobar a mano una factura sin pagar (también las de hace más de una hora, que el cron ya no mira)
+		if (action === 'check') {
+			const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(String(f.get('checkout') ?? '')).first<Checkout>()
+			if (!c) notice = '<p class="note">Esa factura no existe.</p>'
+			else
+				try {
+					const paid = await settle(env, c, now, fetcher)
+					notice = paid ? '<p class="ok">QvaPay la da por pagada: ya está activada.</p>' : '<p class="note">QvaPay dice que sigue sin pagar.</p>'
+				} catch (err) {
+					notice = `<p class="note">No se pudo consultar: ${escHtml((err as Error).message)}</p>`
+				}
+		}
 		if (action === 'revoke' || action === 'restore') {
 			await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ?').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
 			if (action === 'revoke') await db.prepare('DELETE FROM pro_prints WHERE license = ?').bind(uuid).run()
 			notice = `<p class="ok">${action === 'revoke' ? 'Licencia revocada y sus dispositivos fuera' : 'Licencia restaurada'}.</p>`
 		}
 	}
-	const { results } = await db
-		.prepare('SELECT l.uuid, l.username, l.plan, l.expires_at, l.revoked, (SELECT COUNT(*) FROM pro_prints p WHERE p.license = l.uuid) AS devices FROM pro_licenses l ORDER BY l.expires_at DESC LIMIT 500')
-		.all<License & { devices: number }>()
-	const active = results.filter((l) => !l.revoked && l.expires_at > now).length
-	// Pagos de cada licencia: el primero marca el plazo de devolución; se puede devolver el último sin devolver
-	const pays = (await db.prepare("SELECT id, license, amount, created_at, refunded_at FROM pro_checkouts WHERE status = 'paid' ORDER BY created_at").all<{ id: string; license: string; amount: number; created_at: number; refunded_at: number | null }>()).results
-	const payCell = (uuid: string) => {
-		const ps = pays.filter((p) => p.license === uuid)
-		if (!ps.length) return '<span class="note">sin pagos</span>'
-		const total = ps.reduce((s, p) => s + p.amount, 0)
-		const last = ps.at(-1)!
-		const inTime = now - ps[0].created_at < REFUND_DAYS * DAY_MS
-		const refund = last.refunded_at
-			? `<span class="note">devuelto el ${new Date(last.refunded_at).toLocaleDateString('es')}</span>`
-			: `<form method="post" style="display:inline" onsubmit="return confirm('¿Devolver ${last.amount} USD? Se revoca la licencia y luego haces tú la transferencia en QvaPay.')"><input type="hidden" name="checkout" value="${escHtml(last.id)}"><button class="ghost" name="action" value="refund">Devolver ${last.amount.toLocaleString('es')} USD</button></form>${inTime ? '' : ` <span class="note">fuera de los ${REFUND_DAYS} días</span>`}`
-		return `${ps.length} · ${total.toLocaleString('es')} USD ${refund}`
-	}
-	const rows = results
-		.map(
-			(l) => `<tr><td>@${escHtml(l.username)}</td><td>${escHtml(l.plan)}</td><td>${new Date(l.expires_at).toLocaleDateString('es')}${l.revoked ? ' <span class="note">(revocada)</span>' : l.expires_at < now ? ' <span class="note">(vencida)</span>' : ''}</td><td>${l.devices}</td><td>${payCell(l.uuid)}</td>
-			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}">${l.revoked ? 'Restaurar' : 'Revocar'}</button></form></td></tr>`,
+	const url = new URL(req.url)
+	const q = (url.searchParams.get('q') ?? '').replace(/^@/, '').trim().toLowerCase()
+	const like = `%${q}%`
+
+	// Resumen
+	const monthStart = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1)
+	const sum = await db
+		.prepare(
+			`SELECT
+				(SELECT COUNT(*) FROM pro_licenses WHERE revoked = 0 AND expires_at > ?1 AND plan IN ('month', 'year')) AS paying,
+				(SELECT COUNT(*) FROM pro_licenses WHERE revoked = 0 AND expires_at > ?1 AND plan = 'trial') AS trials,
+				(SELECT COUNT(*) FROM pro_licenses WHERE revoked = 0 AND expires_at > ?1 AND plan = 'gift') AS gifts,
+				(SELECT COUNT(*) FROM pro_trials) AS trialKeys,
+				(SELECT COALESCE(SUM(amount), 0) FROM pro_checkouts WHERE status = 'paid' AND refunded_at IS NULL AND COALESCE(paid_at, created_at) >= ?2) AS month,
+				(SELECT COUNT(*) FROM pro_checkouts WHERE status = 'paid' AND refunded_at IS NULL AND COALESCE(paid_at, created_at) >= ?2) AS monthCount,
+				(SELECT COALESCE(SUM(amount), 0) FROM pro_checkouts WHERE status = 'paid' AND refunded_at IS NULL) AS total,
+				(SELECT COUNT(*) FROM pro_checkouts WHERE status = 'paid') AS paidCount,
+				(SELECT COALESCE(SUM(amount), 0) FROM pro_checkouts WHERE refunded_at IS NOT NULL) AS refunded,
+				(SELECT COUNT(*) FROM pro_checkouts WHERE status = 'pending' AND created_at > ?3) AS unpaid`,
 		)
+		.bind(now, monthStart, now - DAY_MS)
+		.first<Record<string, number>>()
+	const usd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('es')} USD`
+	const card = (label: string, value: string, small = '') => `<div class="card"><span>${label}</span><b>${value}</b>${small ? `<small>${small}</small>` : ''}</div>`
+	const cards = `<div class="cards">
+		${card('Pro de pago activos', String(sum?.paying ?? 0), `${sum?.trials ?? 0} en mes gratis · ${sum?.gifts ?? 0} regalados`)}
+		${card('Ingresos este mes', usd(sum?.month ?? 0), `${sum?.monthCount ?? 0} pagos`)}
+		${card('Ingresos totales', usd(sum?.total ?? 0), `${sum?.paidCount ?? 0} pagos · devuelto ${usd(sum?.refunded ?? 0)}`)}
+		${card('Facturas sin pagar', String(sum?.unpaid ?? 0), 'pedidas en las últimas 24 h')}
+		${card('Meses gratis usados', String(sum?.trialKeys ?? 0), 'usuarios, dispositivos o cuentas de Telegram')}
+	</div>`
+
+	// Hora de Cuba, como el resto del proyecto
+	const when = (ms: number) => new Date(ms).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+	const day = (ms: number) => new Date(ms).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric' })
+	const short = (s: string) => `<span title="${escHtml(s)}">${escHtml(s.slice(0, 8))}…</span>`
+	type Row = Checkout & { refunded_at: number | null; payer: string | null; tg_name: string | null; tg_user: string | null; first_paid: number | null }
+	// De dónde se pidió: el simulador (con la cuenta de Telegram) o un dispositivo del terminal (solo su huella)
+	const origin = (c: Row) =>
+		c.tg ? `Simulador · ${c.tg_user ? `@${escHtml(c.tg_user)}` : escHtml(c.tg_name ?? String(c.tg))}` : `Terminal · ${short(c.print)}`
+	const checkouts = (where: string, order: string, limit: number) =>
+		db
+			.prepare(
+				`SELECT c.*, l.username AS payer, u.first_name AS tg_name, u.username AS tg_user,
+					(SELECT MIN(COALESCE(f.paid_at, f.created_at)) FROM pro_checkouts f WHERE f.license = c.license AND f.status = 'paid') AS first_paid
+				FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license LEFT JOIN sim_users u ON u.tg_id = c.tg
+				WHERE ${where} ${q ? 'AND (LOWER(l.username) LIKE ? OR LOWER(u.username) LIKE ? OR LOWER(u.first_name) LIKE ? OR c.id LIKE ? OR c.invoice LIKE ?)' : ''}
+				ORDER BY ${order} LIMIT ${limit}`,
+			)
+			.bind(...(q ? [like, like, like, like, like] : []))
+			.all<Row>()
+
+	// Pagos: quién pagó (lo dice QvaPay), desde dónde se pidió y su factura
+	const paid = (await checkouts("c.status = 'paid'", 'COALESCE(c.paid_at, c.created_at) DESC', 300)).results
+	const payRows = paid
+		.map((c) => {
+			const at = c.paid_at ?? c.created_at
+			const inTime = c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS
+			const state = c.refunded_at
+				? `<span class="note">devuelto el ${day(c.refunded_at)}</span>`
+				: `<form method="post" style="display:inline" onsubmit="return confirm('¿Devolver ${c.amount} USD a @${escHtml(c.payer ?? '')}? Se revoca su licencia y luego haces tú la transferencia en QvaPay.')"><input type="hidden" name="checkout" value="${escHtml(c.id)}"><button class="ghost" name="action" value="refund">Devolver</button></form>${inTime ? ' <span class="note">en plazo</span>' : ' <span class="note">fuera de plazo</span>'}`
+			return `<tr><td>${when(at)}</td><td><b>@${escHtml(c.payer ?? '?')}</b></td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td>${usd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? short(c.invoice) : '—'}</td><td>${state}</td></tr>`
+		})
+		.join('')
+
+	// Facturas sin pagar de la última semana: si alguien dice que pagó y no se activó, se comprueba aquí
+	const pending = (await checkouts(`c.status = 'pending' AND c.created_at > ${now - 7 * DAY_MS}`, 'c.created_at DESC', 100)).results
+	const pendingRows = pending
+		.map(
+			(c) =>
+				`<tr><td>${when(c.created_at)}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td>${usd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? short(c.invoice) : '—'}</td><td>${now - c.created_at < CHECKOUT_MS ? 'esperando el pago' : '<span class="note">caducada</span>'}</td>
+				<td><form method="post"><input type="hidden" name="checkout" value="${escHtml(c.id)}"><button class="ghost" name="action" value="check" title="Preguntar a QvaPay si ya se pagó">Comprobar</button></form></td></tr>`,
+		)
+		.join('')
+
+	// Licencias: plan, vencimiento, dispositivos, cuentas del simulador y lo pagado
+	const { results } = await db
+		.prepare(
+			`SELECT l.uuid, l.username, l.plan, l.expires_at, l.revoked, l.created_at,
+				(SELECT COUNT(*) FROM pro_prints p WHERE p.license = l.uuid) AS devices,
+				(SELECT MAX(p.seen_at) FROM pro_prints p WHERE p.license = l.uuid) AS seen,
+				(SELECT GROUP_CONCAT(COALESCE('@' || u.username, u.first_name), ', ') FROM sim_users u WHERE u.pro_license = l.uuid) AS sims,
+				(SELECT COUNT(*) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid') AS pays,
+				(SELECT COALESCE(SUM(c.amount), 0) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid' AND c.refunded_at IS NULL) AS paid
+			FROM pro_licenses l ${q ? 'WHERE LOWER(l.username) LIKE ? OR l.uuid LIKE ?' : ''} ORDER BY l.revoked, l.expires_at DESC LIMIT 500`,
+		)
+		.bind(...(q ? [like, like] : []))
+		.all<License & { created_at: number; devices: number; seen: number | null; sims: string | null; pays: number; paid: number }>()
+	const planName = (p: string) => ({ month: 'mensual', year: 'anual', trial: 'mes gratis', gift: 'regalo' })[p] ?? p
+	const rows = results
+		.map((l) => {
+			const left = Math.ceil((l.expires_at - now) / DAY_MS)
+			const state = l.revoked ? ' <span class="note">(revocada)</span>' : left <= 0 ? ' <span class="note">(vencida)</span>' : ` <span class="note">(${left} días)</span>`
+			// El mes gratis del simulador va con el nombre de Telegram, no con un usuario de QvaPay
+			const who = l.uuid.startsWith('trial:tg:') ? `${escHtml(l.username)} <span class="note">(Telegram)</span>` : `<b>@${escHtml(l.username)}</b>`
+			return `<tr><td>${who}</td><td>${planName(l.plan)}</td><td>${day(l.created_at)}</td><td>${day(l.expires_at)}${state}</td><td>${l.devices}${l.seen ? ` <span class="note">· usado ${day(l.seen)}</span>` : ''}</td><td>${l.sims ? escHtml(l.sims) : '—'}</td><td>${!l.pays ? '<span class="note">sin pagos</span>' : l.paid ? `${l.pays} · ${usd(l.paid)}` : '<span class="note">devuelto</span>'}</td>
+			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}">${l.revoked ? 'Restaurar' : 'Revocar'}</button></form></td></tr>`
+		})
 		.join('')
 	return adminPage(
 		'pro',
 		'Pro',
-		`<h1>Usuarios Pro</h1><p class="note">${active} activos · ${results.length} en total. De cada usuario solo se guarda su usuario de QvaPay, su plan y la huella de sus dispositivos, nunca el token.</p>${notice}
+		`<div class="top"><h1>Pro</h1><form method="get" class="row"><input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"><button>Buscar</button>${q ? ' <a href="/admin/pro" class="note">quitar filtro</a>' : ''}</form></div>
+		<p class="note">De cada usuario solo se guarda su usuario de QvaPay, su plan y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay. Horas de Cuba.</p>${notice}${cards}
+		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Pagó</th><th>Plan</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
+		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Plan</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
+		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Plan</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Simulador</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="8" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
 		<h2>Regalar una licencia</h2><form method="post" class="row"><input type="hidden" name="action" value="gift"><input name="username" placeholder="usuario de QvaPay" required><input name="days" type="number" value="30" min="1" style="width:90px"> días <button>Crear</button></form>
-		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Plan</th><th>Hasta</th><th>Dispositivos</th><th>Pagos</th><th></th></tr>${rows || '<tr><td colspan="6" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
 		<p class="note">Política: sin renovación automática; devolución completa en los ${REFUND_DAYS} días siguientes al primer pago. Si Pro falla por nuestra culpa, en vez de devolver se regalan los días perdidos (Regalar una licencia).</p>`,
 	)
 }

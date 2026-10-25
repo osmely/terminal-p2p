@@ -369,3 +369,37 @@ test('el estado de una factura solo se lo da a quien la pidió: otro no se lleva
 	// Ya no hay consulta por GET con solo el identificador
 	assert.equal((await s.get(`/pro/checkout?id=${c.id}`)).status, 404)
 })
+
+test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobables a mano) y licencias con su detalle', async () => {
+	const { createCheckout } = await import('../worker/pro.ts')
+	const s = setup()
+	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, username, created_at, last_login) VALUES (9, 'Leo', 'leo_tg', 0, 0)").run()
+	// Leo la pide en el simulador y la paga otra cuenta de QvaPay (@pepe)
+	await createCheckout(s.env, { tg: 9 }, 'month', 'https://sim.terminalp2p.com', T0, s.q.fetcher)
+	s.q.pay('inv-1', 'pepe')
+	// Otra se pide en el terminal y queda sin confirmar (nadie la mira y pasa más de una hora)
+	await s.post('/pro/checkout', { print: P1, plan: 'year' })
+	s.tick(2 * 60 * 60_000)
+	const panel = (fields?: Record<string, string>, query = '') =>
+		proAdmin(
+			new Request(`https://app.terminalp2p.com/admin/pro${query}`, { method: fields ? 'POST' : 'GET', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+			s.env,
+			s.now(),
+			s.q.fetcher,
+		).then((r) => r.text())
+	let html = await panel()
+	assert.match(html, /Facturas sin pagar/)
+	assert.match(html, /Simulador · @leo_tg/)
+	assert.match(html, /Terminal · <span/)
+	assert.match(html, /caducada/)
+	// Comprobar a mano: QvaPay la da por pagada y se activa
+	const id = (s.db.prepare("SELECT id FROM pro_checkouts WHERE invoice = 'inv-1'").get() as { id: string }).id
+	assert.match(await panel({ action: 'check', checkout: id }), /ya está activada/)
+	html = await panel()
+	assert.match(html, /<b>@pepe<\/b>/)
+	assert.match(html, /@leo_tg/) // la cuenta del simulador vinculada a la licencia de @pepe
+	assert.match(html, /Ingresos totales<\/span><b>1,99 USD/)
+	// Buscar por usuario
+	assert.doesNotMatch(await panel(undefined, '?q=nadie'), /<b>@pepe<\/b>/)
+	assert.match(await panel(undefined, '?q=PEPE'), /<b>@pepe<\/b>/)
+})
