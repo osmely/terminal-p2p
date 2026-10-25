@@ -8,6 +8,7 @@
 // código de respaldo (que cambia cada vez que se usa).
 
 import { sha256, sign, verify } from './crypto.ts'
+import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 
@@ -356,17 +357,10 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 
 // ── Panel (/admin/pro, con la clave del panel de métricas) ───────────
 
-const page = (body: string, status = 200) =>
-	new Response(
-		`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Pro · Terminal P2P</title>
-<style>:root{color-scheme:dark}body{margin:0;background:#0a0d12;color:#e7ecf3;font:14px/1.5 system-ui,sans-serif}main{width:min(900px,100% - 32px);margin:28px auto 60px}h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:28px 0 10px}.m{color:#7a8799;font-size:13px}table{width:100%;border-collapse:collapse}td,th{padding:7px 8px;border-bottom:1px solid #1e2733;text-align:left}th{color:#7a8799;font-size:12px}input,select,button{font:inherit;padding:7px 10px;border-radius:8px;border:1px solid #1e2733;background:#10151c;color:inherit}button{background:#5b8cff;border:0;color:#fff;font-weight:600;cursor:pointer}.code{font:600 18px ui-monospace,monospace;padding:10px 14px;border-radius:8px;background:rgba(31,194,139,.12);color:#1fc28b;display:inline-block}</style></head><body><main>${body}</main></body></html>`,
-		{ status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } },
-	)
 const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Promise<Response> {
-	if (!(await authorized(req, env.METRICS_KEY)))
-		return new Response('Necesitas la clave del panel', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Terminal P2P metrics", charset="UTF-8"', 'Cache-Control': 'no-store' } })
+	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const db = env.DB
 	let notice = ''
 	if (req.method === 'POST') {
@@ -377,7 +371,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Pro
 		if (action === 'gift') {
 			const username = String(f.get('username') ?? '').replace(/^@/, '').trim()
 			const days = Math.min(3650, Math.max(1, Number(f.get('days')) || 30))
-			if (!/^[A-Za-z0-9._-]{1,40}$/.test(username)) notice = '<p class="m">Usuario no válido.</p>'
+			if (!/^[A-Za-z0-9._-]{1,40}$/.test(username)) notice = '<p class="note">Usuario no válido.</p>'
 			else {
 				const id = `gift:${username.toLowerCase()}`
 				const old = await db.prepare('SELECT expires_at FROM pro_licenses WHERE uuid = ?').bind(id).first<{ expires_at: number }>()
@@ -393,7 +387,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Pro
 		if (action === 'revoke' || action === 'restore') {
 			await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ?').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
 			if (action === 'revoke') await db.prepare('DELETE FROM pro_prints WHERE license = ?').bind(uuid).run()
-			notice = `<p class="m">${action === 'revoke' ? 'Licencia revocada y sus dispositivos fuera' : 'Licencia restaurada'}.</p>`
+			notice = `<p class="ok">${action === 'revoke' ? 'Licencia revocada y sus dispositivos fuera' : 'Licencia restaurada'}.</p>`
 		}
 	}
 	const { results } = await db
@@ -402,11 +396,15 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now()): Pro
 	const active = results.filter((l) => !l.revoked && l.expires_at > now).length
 	const rows = results
 		.map(
-			(l) => `<tr><td>@${escHtml(l.username)}</td><td>${escHtml(l.plan)}</td><td>${new Date(l.expires_at).toLocaleDateString('es')}${l.expires_at < now ? ' <span class="m">(vencida)</span>' : ''}</td><td>${l.devices}</td>
-			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button name="action" value="${l.revoked ? 'restore' : 'revoke'}">${l.revoked ? 'Restaurar' : 'Revocar'}</button></form></td></tr>`,
+			(l) => `<tr><td>@${escHtml(l.username)}</td><td>${escHtml(l.plan)}</td><td>${new Date(l.expires_at).toLocaleDateString('es')}${l.expires_at < now ? ' <span class="note">(vencida)</span>' : ''}</td><td>${l.devices}</td>
+			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}">${l.revoked ? 'Restaurar' : 'Revocar'}</button></form></td></tr>`,
 		)
 		.join('')
-	return page(`<h1>Usuarios Pro</h1><p class="m">${active} activos · ${results.length} en total</p>${notice}
-		<h2>Regalar una licencia</h2><form method="post"><input type="hidden" name="action" value="gift"><input name="username" placeholder="usuario de QvaPay" required> <input name="days" type="number" value="30" min="1" style="width:90px"> días <button>Crear</button></form>
-		<h2>Licencias</h2><table><tr><th>Usuario</th><th>Plan</th><th>Hasta</th><th>Dispositivos</th><th></th></tr>${rows || '<tr><td colspan="5" class="m">Todavía no hay usuarios Pro.</td></tr>'}</table>`)
+	return adminPage(
+		'pro',
+		'Pro',
+		`<h1>Usuarios Pro</h1><p class="note">${active} activos · ${results.length} en total. De cada usuario solo se guarda su usuario de QvaPay, su plan y la huella de sus dispositivos, nunca el token.</p>${notice}
+		<h2>Regalar una licencia</h2><form method="post" class="row"><input type="hidden" name="action" value="gift"><input name="username" placeholder="usuario de QvaPay" required><input name="days" type="number" value="30" min="1" style="width:90px"> días <button>Crear</button></form>
+		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Plan</th><th>Hasta</th><th>Dispositivos</th><th></th></tr>${rows || '<tr><td colspan="5" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>`,
+	)
 }

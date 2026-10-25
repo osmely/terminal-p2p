@@ -11,6 +11,7 @@ import { cubaDate, informalSince, latestInformal, syncInformal } from './informa
 import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
+import { adminPage, askKey } from './admin.ts'
 import { proAdmin, proApi, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 
@@ -77,23 +78,25 @@ export default {
 				}),
 			)
 		if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
-		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
+		// Panel único en el dominio del terminal; el antiguo del simulador lleva a su pestaña
+		if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/')))
+			return Response.redirect(`${url.origin.replace('://sim.', '://app.')}/admin/sim`, 301)
+		if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
+			if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
+			if (url.pathname === '/admin') return Response.redirect(`${url.origin}/admin/metrics`, 302)
+			if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
+			if (url.pathname === '/admin/pro') return secure(await proAdmin(req, env as unknown as ProEnv))
+			if (url.pathname === '/admin/sim' || url.pathname === '/admin/sim/publish') return secure(await simAdmin(req, url, env as unknown as SimEnv))
+			return secure(jsonError(404, 'no encontrado'))
+		}
 		if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
 		if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
-		if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/'))) {
-			if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
-			return secure(await simAdmin(req, url, env as unknown as SimEnv))
-		}
 		// Plan Pro, en el dominio del terminal. Canjear códigos tiene tope (que nadie los pruebe a ciegas)
 		if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
 			const guarded = url.pathname === '/pro/claim' || url.pathname === '/pro/pair' || url.pathname === '/pro/checkout'
 			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 			const r = await proApi(req, url, env as unknown as ProEnv)
 			if (r) return secure(r)
-		}
-		if (folderFor(url.hostname) === 'app' && url.pathname === '/admin/pro') {
-			if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
-			return secure(await proAdmin(req, env as unknown as ProEnv))
 		}
 		if (folderFor(url.hostname) === 'sim' && url.pathname.startsWith('/api/')) {
 			if (req.method !== 'GET' && !(await underLimit(env.SIM_LIMIT, req))) return secure(jsonError(429, 'Demasiadas órdenes seguidas: espera unos segundos'))
@@ -177,13 +180,9 @@ async function event(req: Request, url: URL, env: Env) {
 // Panel privado de métricas, con HTTP Basic (cualquier usuario y la clave METRICS_KEY)
 async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
-	if (!(await underLimit(env.PANEL_LIMIT, req))) return jsonError(429, 'Demasiados intentos: espera un minuto')
-	if (!(await authorized(req, env.METRICS_KEY)))
-		return new Response('Necesitas la clave del panel', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Terminal P2P metrics", charset="UTF-8"', 'Cache-Control': 'no-store' } })
+	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
-	return new Response(panelHtml(await loadSummary(env.DB, days)), {
-		headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' },
-	})
+	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days)))
 }
 
 // La tasa informal más reciente (para la landing y la lectura del mercado), cacheada 10 minutos

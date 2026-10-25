@@ -9,6 +9,7 @@
 
 import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle, type Quote, type SimState, type Symbol } from '../src/sim/engine.ts'
 import { b64url, enc, hex, hmac, same, unb64url } from './crypto.ts'
+import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
 import { activeLicense, checkoutStatus, claimCode, createCheckout, linkSim, ProError, type Plan, type ProEnv } from './pro.ts'
 import { cubaOffset, type D1 } from './rates.ts'
@@ -703,12 +704,7 @@ interface Draft {
 
 const seasonDay = (id: string) => dayEs(Date.parse(`${id}T12:00:00Z`))
 
-const html = (body: string, status = 200) =>
-	new Response(
-		`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Resumen semanal · Simulador</title>
-<style>:root{color-scheme:dark;--bg:#0a0d12;--s:#10151c;--l:#1e2733;--t:#e7ecf3;--m:#7a8799;--a:#5b8cff;--g:#1fc28b}body{margin:0;background:var(--bg);color:var(--t);font:15px/1.5 system-ui,sans-serif}main{width:min(760px,100% - 32px);margin:28px auto 60px}h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:28px 0 10px}.m{color:var(--m);font-size:13px}textarea{width:100%;min-height:260px;box-sizing:border-box;background:var(--s);color:var(--t);border:1px solid var(--l);border-radius:10px;padding:12px;font:14px/1.5 ui-monospace,Menlo,monospace}button{margin-top:10px;padding:10px 16px;border:0;border-radius:8px;background:var(--a);color:#fff;font-weight:600;font-size:14px;cursor:pointer}.ok{padding:10px 14px;border-radius:8px;background:rgba(31,194,139,.12);color:var(--g)}table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:7px 10px;border-bottom:1px solid var(--l);text-align:left}th{color:var(--m);font-size:12px}</style></head><body><main>${body}</main></body></html>`,
-		{ status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } },
-	)
+const html = (body: string, status = 200) => adminPage('sim', 'Simulador', body, status)
 
 async function sendTelegram(token: string, chat: string, text: string) {
 	const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -722,26 +718,25 @@ async function sendTelegram(token: string, chat: string, text: string) {
 
 export async function simAdmin(req: Request, url: URL, env: SimEnv): Promise<Response> {
 	if (!env.METRICS_KEY) return new Response('no encontrado', { status: 404 })
-	if (!(await authorized(req, env.METRICS_KEY)))
-		return new Response('Necesitas la clave del panel', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Terminal P2P metrics", charset="UTF-8"', 'Cache-Control': 'no-store' } })
+	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const row = await env.DB.prepare("SELECT value FROM sim_meta WHERE key = 'draft'").first<{ value: string }>()
 	const draft = row ? (JSON.parse(row.value) as Draft) : null
 
-	if (req.method === 'POST' && url.pathname === '/admin/publish') {
+	if (req.method === 'POST' && url.pathname === '/admin/sim/publish') {
 		if (req.headers.get('origin') !== url.origin) return new Response('Origen no permitido', { status: 403 })
 		if (!draft) return html('<p>No hay ningún resumen pendiente.</p>', 400)
-		if (draft.posted) return Response.redirect(`${url.origin}/admin?ya=1`, 303)
+		if (draft.posted) return Response.redirect(`${url.origin}/admin/sim?ya=1`, 303)
 		if (!env.TELEGRAM_BOT_TOKEN) return html('<p>Falta el token del bot.</p>', 503)
 		const text = String((await req.formData()).get('text') ?? '').trim().slice(0, 4000) || draft.text
 		try {
 			await sendTelegram(env.TELEGRAM_BOT_TOKEN, env.SIM_CHANNEL ?? '@terminalp2p', text)
 		} catch (e) {
-			return html(`<h1>No se publicó</h1><p>${escHtml((e as Error).message)}</p><p><a href="/admin" style="color:#5b8cff">Volver</a></p>`, 502)
+			return html(`<h1>No se publicó</h1><p>${escHtml((e as Error).message)}</p><p><a href="/admin/sim">Volver</a></p>`, 502)
 		}
 		await env.DB.prepare("UPDATE sim_meta SET value = ? WHERE key = 'draft'").bind(JSON.stringify({ ...draft, text, posted: true, postedAt: Date.now() })).run()
-		return Response.redirect(`${url.origin}/admin?ok=1`, 303)
+		return Response.redirect(`${url.origin}/admin/sim?ok=1`, 303)
 	}
-	if (url.pathname !== '/admin') return new Response('no encontrado', { status: 404 })
+	if (url.pathname !== '/admin/sim') return new Response('no encontrado', { status: 404 })
 
 	// Clasificación provisional de la temporada en curso
 	const cur = season()
@@ -753,18 +748,18 @@ export async function simAdmin(req: Request, url: URL, env: SimEnv): Promise<Res
 		.all<{ pnl_pct: number; trades: number; first_name: string; username: string | null }>()
 	const notice = url.searchParams.has('ok') ? '<p class="ok">Publicado en el grupo de Telegram.</p>' : url.searchParams.has('ya') ? '<p class="ok">Ese resumen ya estaba publicado.</p>' : ''
 	const draftBlock = !draft
-		? '<p class="m">Aún no ha terminado ninguna temporada. El borrador aparece aquí el lunes a las 00:00 (hora de Cuba).</p>'
+		? '<p class="note">Aún no ha terminado ninguna temporada. El borrador aparece aquí el lunes a las 00:00 (hora de Cuba).</p>'
 		: draft.posted
-			? `<p class="m">El resumen de la temporada del ${seasonDay(draft.season)} se publicó el ${new Date(draft.postedAt ?? 0).toLocaleString('es')}.</p><textarea readonly>${escHtml(draft.text)}</textarea>`
-			: `<p class="m">Temporada del ${seasonDay(draft.season)}. Puedes editar el texto (HTML de Telegram: &lt;b&gt;, &lt;i&gt;) antes de publicarlo.</p>
-				<form method="post" action="/admin/publish"><textarea name="text">${escHtml(draft.text)}</textarea><button type="submit">Publicar en ${escHtml(env.SIM_CHANNEL ?? '@terminalp2p')}</button></form>`
-	return html(`<h1>Resumen semanal del simulador</h1><p class="m">Temporada en curso: ${dayEs(cur.start)} – ${dayEs(cur.end - 1)} (termina el lunes a las 00:00, hora de Cuba)</p>${notice}
+			? `<p class="note">El resumen de la temporada del ${seasonDay(draft.season)} se publicó el ${new Date(draft.postedAt ?? 0).toLocaleString('es')}.</p><textarea readonly>${escHtml(draft.text)}</textarea>`
+			: `<p class="note">Temporada del ${seasonDay(draft.season)}. Puedes editar el texto (HTML de Telegram: &lt;b&gt;, &lt;i&gt;) antes de publicarlo.</p>
+				<form method="post" action="/admin/sim/publish"><textarea name="text">${escHtml(draft.text)}</textarea><button type="submit">Publicar en ${escHtml(env.SIM_CHANNEL ?? '@terminalp2p')}</button></form>`
+	return html(`<h1>Resumen semanal del simulador</h1><p class="note">Temporada en curso: ${dayEs(cur.start)} – ${dayEs(cur.end - 1)} (termina el lunes a las 00:00, hora de Cuba)</p>${notice}
 		<h2>Resumen pendiente</h2>${draftBlock}
 		<h2>Clasificación provisional de esta semana</h2>${
 			results.length
-				? `<table><thead><tr><th>#</th><th>Jugador</th><th>Rentabilidad</th><th>Operaciones</th></tr></thead><tbody>${results
+				? `<div class="wrap"><table class="left"><thead><tr><th>#</th><th>Jugador</th><th>Rentabilidad</th><th>Operaciones</th></tr></thead><tbody>${results
 						.map((r, i) => `<tr><td>${i + 1}</td><td>${escHtml(displayName(r))}</td><td>${pctEs(r.pnl_pct)}</td><td>${r.trades}</td></tr>`)
-						.join('')}</tbody></table>`
-				: `<p class="m">Nadie lleva aún ${MIN_TRADES} operaciones esta semana.</p>`
+						.join('')}</tbody></table></div>`
+				: `<p class="note">Nadie lleva aún ${MIN_TRADES} operaciones esta semana.</p>`
 		}`)
 }
