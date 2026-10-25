@@ -6,8 +6,12 @@
 const pro = { active: false, username: null, plan: null, expiresAt: null, license: null, print: null, loaded: false }
 window.TPPro = pro
 
-// El simulador del mismo entorno (sim.staging… desde app.staging…); en desarrollo, el de producción
-const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname) ? location.origin.replace('://app.', '://sim.') : 'https://sim.terminalp2p.com'
+// El simulador del mismo entorno (sim.staging… desde app.staging…; en desarrollo, el de sim.localhost)
+const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname)
+	? location.origin.replace('://app.', '://sim.')
+	: location.hostname.endsWith('localhost')
+		? `${location.protocol}//sim.localhost:5180`
+		: 'https://sim.terminalp2p.com'
 
 const PRO_PLANS = [
 	['month', 'Mensual', '1,99 USD', 'al mes'],
@@ -32,8 +36,7 @@ const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', 
 
 function applyPro(s) {
 	Object.assign(pro, { active: !!s.pro, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
-	// La huella con la que se es Pro se recuerda: si cambias de token, autoriza a la nueva
-	if (pro.active) store.set('pro.print', pro.print)
+	
 	if (pro.active && !pro.loaded) {
 		pro.loaded = true
 		const s2 = document.createElement('script')
@@ -46,13 +49,23 @@ function applyPro(s) {
 
 // Al conectar la cuenta (y cada pocas horas, para renovar la licencia firmada de un día)
 async function refreshPro() {
-	if (!bk.acct.connected) return applyPro({ pro: false })
+	// Sin cuenta conectada, el simulador tampoco tiene sesión
+	if (!bk.acct.connected) {
+		fetch('/pro/leave', { method: 'POST', cache: 'no-store' }).catch(() => {})
+		return applyPro({ pro: false })
+	}
 	try {
 		pro.print = (await api('/print')).print
 		if (!pro.print) return applyPro({ pro: false })
+		// Además de decir si eres Pro, deja la sesión compartida con el simulador
 		let s = await proFetch('/pro/status', { print: pro.print })
+		// Si cambiaste de token en este navegador, la huella vieja pasa su Pro y su cuenta del simulador a la nueva
 		const old = store.get('pro.print', null)
-		if (!s.pro && old && old !== pro.print) s = await proFetch('/pro/rotate', { from: old, to: pro.print }).catch(() => ({ pro: false }))
+		if (old && old !== pro.print) {
+			const moved = await proFetch('/pro/rotate', { from: old, to: pro.print }).catch(() => null)
+			if (moved && !s.pro) s = moved
+		}
+		store.set('pro.print', pro.print)
 		applyPro(s)
 		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && store.get('pro.renewTold', '') !== new Date().toDateString()) {
 			store.set('pro.renewTold', new Date().toDateString())
@@ -86,7 +99,7 @@ function showPro() {
 			? `<div class="stack pro-box"><h3>★ ${pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h3>
 				<p class="muted">@${esc(pro.username)} · ${{ trial: 'prueba gratis', year: 'plan anual', gift: 'plan regalado' }[pro.plan] ?? 'plan mensual'} · hasta el <b>${proDate(pro.expiresAt)}</b>${pro.plan === 'trial' ? '. Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
 				<ul class="pro-feats">${feats}</ul>
-				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proSim">Vincular simulador</button><button class="btn" id="proBackup">Código de respaldo</button></div>
+				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proBackup">Código de respaldo</button></div>
 				${
 					canRenew()
 						? `<p class="hint">Hasta 2 dispositivos a la vez. No se renueva solo: renovar suma el periodo a lo que te queda:</p><div class="pro-plans">${plans}</div>`
@@ -101,7 +114,7 @@ function showPro() {
 	)
 	for (const b of $('modalBody').querySelectorAll('[data-plan]')) b.onclick = () => startCheckout(b.dataset.plan)
 	$('proPair')?.addEventListener('click', () => showPair())
-	$('proSim')?.addEventListener('click', () => showPair(true))
+	
 	$('proBackup')?.addEventListener('click', showBackup)
 	$('proClaim')?.addEventListener('click', showClaim)
 	$('proTrial')?.addEventListener('click', startTrial)
@@ -112,7 +125,7 @@ async function startTrial() {
 	try {
 		applyPro(await proFetch('/pro/trial', { print: pro.print, username: bk.acct.username }))
 		openModal(`<div class="stack pro-box"><h3>★ Tienes un mes de Pro gratis</h3>
-			<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa en este dispositivo. Para el simulador completo, usa <b>Pro › Vincular simulador</b>.</p>
+			<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa en este dispositivo, y en el <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">simulador</a> ya operas todos los mercados.</p>
 			<button class="btn primary block" id="proOk">Listo</button></div>`)
 		$('proOk').onclick = closeModal
 	} catch (e) {
@@ -178,6 +191,8 @@ function resumeCheckout() {
 		q.delete('pro')
 		history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
 	}
+	// El simulador manda aquí para hacerse Pro
+	if (back === 'open') return showPro()
 	if (back === 'cancel') {
 		store.set('pro.checkout', null)
 		return toast('Pago cancelado: no se cobró nada')
@@ -199,15 +214,11 @@ function showWelcome(backupCode) {
 }
 
 // El mismo código de 6 cifras sirve para otro dispositivo del terminal o para la cuenta del simulador
-async function showPair(sim = false) {
+async function showPair() {
 	try {
 		const { code, expiresAt } = await proFetch('/pro/pair', { print: pro.print })
-		openModal(`<div class="stack pro-box"><h3>${sim ? 'Vincular simulador' : 'Añadir dispositivo'}</h3>
-			<p class="muted">${
-				sim
-					? `En <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">${new URL(SIM_URL).host}</a>, entra con Telegram, pulsa <b>★ Hazte Pro</b> y escribe este código en «¿Ya eres Pro?»:`
-					: 'En el otro móvil u ordenador, conecta tu cuenta, pulsa <b>Hazte Pro</b> y luego <b>Ya soy Pro en otro dispositivo</b>. Escribe este código:'
-			}</p>
+		openModal(`<div class="stack pro-box"><h3>Añadir dispositivo</h3>
+			<p class="muted">En el otro móvil u ordenador, conecta tu cuenta, pulsa <b>Hazte Pro</b> y luego <b>Ya soy Pro en otro dispositivo</b>. Escribe este código:</p>
 			<div class="pro-code mono big">${code.slice(0, 3)} ${code.slice(3)}</div>
 			<p class="hint">Caduca en <span class="countdown" data-expires="${new Date(expiresAt).toISOString()}"></span> y sirve una sola vez.</p></div>`)
 		tickClocks()

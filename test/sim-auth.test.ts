@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { createHash, createHmac } from 'node:crypto'
 import { test } from 'node:test'
 import { Engine, freshState, type Candle } from '../src/sim/engine.ts'
-import { catchUp, readSession, sessionCookie, verifyTelegram } from '../worker/sim.ts'
+import { catchUp, verifyTelegram } from '../worker/sim.ts'
+import { readSession, sessionCookie, sessionToken } from '../worker/session.ts'
 
 const BOT = '123456:ABC-prueba'
 const NOW_S = 1_792_900_000
@@ -27,15 +28,29 @@ test('Telegram: acepta su firma y rechaza la manipulada, la de otro bot o la cad
 	assert.equal(await verifyTelegram(signed({ ...fields, auth_date: String(NOW_S - 2 * 86_400) }), BOT, NOW_S), null)
 })
 
-test('sesión: cookie firmada, que caduca y no se puede falsificar', async () => {
-	const c = await sessionCookie(42, 'clave', 1000)
-	assert.equal(await readSession(`otra=1; tps=${c}`, 'clave', 2000), 42)
-	assert.equal(await readSession(`tps=${c}`, 'otra-clave', 2000), null)
-	assert.equal(await readSession(`tps=${c}`, 'clave', 1000 + 31 * 86_400_000), null)
+test('sesión del terminal: cookie firmada con la huella, que caduca y no se puede falsificar', async () => {
+	const P = 'a'.repeat(64)
+	const c = await sessionToken(P, 'clave', 1000)
+	assert.equal(await readSession(`otra=1; tpid=${c}`, 'clave', 2000), P)
+	assert.equal(await readSession(`tpid=${c}`, 'otra-clave', 2000), null)
+	assert.equal(await readSession(`tpid=${c}`, 'clave', 1000 + 31 * 86_400_000), null)
 	const [, sig] = c.split('.')
-	const forged = `${Buffer.from(JSON.stringify({ u: 1, e: 9e15 })).toString('base64url')}.${sig}`
-	assert.equal(await readSession(`tps=${forged}`, 'clave', 2000), null)
+	const forged = `${Buffer.from(JSON.stringify({ k: 'sess', p: 'b'.repeat(64), e: 9e15 })).toString('base64url')}.${sig}`
+	assert.equal(await readSession(`tpid=${forged}`, 'clave', 2000), null)
+	// Una licencia firmada con la misma clave no sirve como sesión
+	const { sign } = await import('../worker/crypto.ts')
+	assert.equal(await readSession(`tpid=${await sign({ u: 'x', n: 'ana', e: 9e15, x: 9e15 }, 'clave')}`, 'clave', 2000), null)
 	assert.equal(await readSession(null, 'clave'), null)
+	// Llegan las cookies de producción y de staging con el mismo nombre: vale la de la clave de este entorno
+	const prod = await sessionToken('c'.repeat(64), 'clave-prod', 1000)
+	assert.equal(await readSession(`tpid=${prod}; tpid=${c}`, 'clave', 2000), P)
+})
+
+test('la cookie de sesión es del dominio principal: la comparten el terminal y el simulador de cada entorno', () => {
+	assert.match(sessionCookie(new URL('https://app.terminalp2p.com/pro/status'), 'v'), /; Domain=terminalp2p\.com; Secure$/)
+	assert.match(sessionCookie(new URL('https://app.staging.terminalp2p.com/pro/status'), 'v'), /; Domain=staging\.terminalp2p\.com; Secure$/)
+	assert.match(sessionCookie(new URL('https://app.terminalp2p.com/pro/leave'), '', 0), /^tpid=; HttpOnly; SameSite=Lax; Path=\/; Max-Age=0; Domain=terminalp2p\.com/)
+	assert.doesNotMatch(sessionCookie(new URL('http://app.localhost:5177/pro/status'), 'v'), /Domain|Secure/)
 })
 
 test('revisión: velas de 1 minuto desde la última revisión, solo las ya cerradas', async () => {

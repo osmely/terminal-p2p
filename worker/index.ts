@@ -146,7 +146,7 @@ export default {
 		// (si no, a las 19:49:56 se tomaría por el minuto 49 y se guardaría en la franja de las 19:40)
 		const at = Math.round(event.scheduledTime / 60_000) * 60_000
 		const tenth = (at / 60_000) % 10 === 0
-		if (env.SIM_SESSION_KEY)
+		if (env.PRO_KEY)
 			try {
 				await simCron(env.DB, Date.now(), tenth)
 			} catch (err) {

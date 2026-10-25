@@ -244,41 +244,6 @@ test('huella del token: siempre la misma para el mismo token, distinta entre tok
 	assert.ok(!a.includes('secreto'))
 })
 
-test('simulador: sin Pro solo BTC y ETH (y vender lo que ya tienes); con Pro, todos los mercados', async () => {
-	const { canTrade } = await import('../worker/sim.ts')
-	const s = setup()
-	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login) VALUES (7, 'Ana', 0, 0)").run()
-	const ok = (sym: string, side = 'BUY') => canTrade(s.env.DB, 7, sym as never, side, T0)
-	assert.deepEqual([await ok('BTCUSDT'), await ok('ETHUSDT'), await ok('SOLUSDT'), await ok('SOLUSDT', 'SELL'), await ok('PEPEUSDT', 'SHORT')], [true, true, false, true, false])
-	// Vincula su Telegram con un código de 6 cifras de su terminal Pro
-	await buy(s)
-	const { claimCode, linkSim } = await import('../worker/pro.ts')
-	const { code } = (await s.post('/pro/pair', { print: P1 })).body
-	const got = await claimCode(s.env.DB, code, T0)
-	await linkSim(s.env.DB, 7, got!.license)
-	assert.deepEqual([await ok('SOLUSDT'), await ok('TAOUSDT', 'SHORT')], [true, true])
-	// Si la licencia vence, vuelve a BTC y ETH
-	assert.equal(await canTrade(s.env.DB, 7, 'SOLUSDT' as never, 'BUY', T0 + 31 * 86_400_000), false)
-})
-
-test('simulador: hacerse Pro desde el simulador vincula esa cuenta de Telegram y da el código para el terminal', async () => {
-	const { createCheckout, checkoutStatus } = await import('../worker/pro.ts')
-	const { canTrade } = await import('../worker/sim.ts')
-	const s = setup()
-	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login) VALUES (9, 'Leo', 0, 0)").run()
-	const c = await createCheckout(s.env, { tg: 9 }, 'year', 'https://sim.terminalp2p.com', T0, s.q.fetcher)
-	assert.equal(s.q.invoices.get('inv-1')?.amount, 20)
-	s.q.pay('inv-1', 'leo')
-	const { checkout, body: raw } = await checkoutStatus(s.env, c.id, { tg: 9 }, T0, s.q.fetcher)
-	const body = raw as { status: string; backupCode: string }
-	assert.equal(checkout.tg, 9)
-	assert.equal(body.status, 'paid')
-	assert.match(body.backupCode, /^TP-/)
-	assert.equal(await canTrade(s.env.DB, 9, 'DOGEUSDT' as never, 'BUY', T0), true)
-	// Con ese código, el terminal también queda Pro
-	assert.equal((await s.post('/pro/claim', { print: P2, code: body.backupCode })).body.pro, true)
-})
-
 test('primer mes gratis: una vez por usuario de QvaPay y por dispositivo; si paga, los días que quedaban se suman', async () => {
 	const s = setup()
 	const r = await s.post('/pro/trial', { print: P1, username: 'Ana' })
@@ -296,28 +261,14 @@ test('primer mes gratis: una vez por usuario de QvaPay y por dispositivo; si pag
 	assert.equal(paid.expiresAt, T0 + 30 * 86_400_000 + 30 * 86_400_000)
 })
 
-test('primer mes gratis en el simulador: una vez por cuenta de Telegram', async () => {
-	const { startTrial, linkSim } = await import('../worker/pro.ts')
-	const { canTrade } = await import('../worker/sim.ts')
-	const s = setup()
-	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login) VALUES (5, 'Eva', 0, 0)").run()
-	await startTrial(s.env.DB, 'trial:tg:5', 'Eva', ['tg:5'], T0)
-	await linkSim(s.env.DB, 5, 'trial:tg:5')
-	assert.equal(await canTrade(s.env.DB, 5, 'SOLUSDT' as never, 'BUY', T0), true)
-	await assert.rejects(startTrial(s.env.DB, 'trial:tg:5', 'Eva', ['tg:5'], T0 + 31 * 86_400_000), /Ya usaste tu mes gratis/)
-	assert.equal(await canTrade(s.env.DB, 5, 'SOLUSDT' as never, 'BUY', T0 + 31 * 86_400_000), false)
-})
-
-test('panel: devolver un pago revoca la licencia (también en el simulador) y dice cuánto transferir', async () => {
+test('panel: devolver un pago revoca la licencia y dice cuánto transferir', async () => {
 	const s = setup()
 	const { checkout } = await buy(s)
-	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, created_at, last_login, pro_license) VALUES (3, 'Ana', 0, 0, 'qp:ana')").run()
 	const form = (fields: Record<string, string>) =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, T0)
 	const html = await (await form({ action: 'refund', checkout: checkout.id })).text()
 	assert.match(html, /transfiere <b>1,99 USD<\/b> a <b>@ana<\/b>/)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
-	assert.equal((s.db.prepare('SELECT pro_license FROM sim_users WHERE tg_id = 3').get() as { pro_license: string | null }).pro_license, null)
 	// No se devuelve dos veces
 	assert.match(await (await form({ action: 'refund', checkout: checkout.id })).text(), /ya se devolvió/)
 })
@@ -361,12 +312,10 @@ test('pide una factura, luego otra, y paga la primera: la pantalla que espera la
 })
 
 test('el estado de una factura solo se lo da a quien la pidió: otro no se lleva el código de respaldo', async () => {
-	const { checkoutStatus } = await import('../worker/pro.ts')
 	const s = setup()
 	const c = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
 	s.q.pay('inv-1', 'ana')
 	assert.equal((await s.status(c.id, P2)).status, 404)
-	await assert.rejects(checkoutStatus(s.env, c.id, { tg: 1 }, s.now(), s.q.fetcher), /Pago no encontrado/)
 	// El dueño sigue recibiendo su código
 	assert.match((await s.status(c.id)).body.backupCode, /^TP-/)
 	// Ya no hay consulta por GET con solo el identificador
@@ -374,13 +323,11 @@ test('el estado de una factura solo se lo da a quien la pidió: otro no se lleva
 })
 
 test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobables a mano) y licencias con su detalle', async () => {
-	const { createCheckout } = await import('../worker/pro.ts')
 	const s = setup()
-	s.db.prepare("INSERT INTO sim_users (tg_id, first_name, username, created_at, last_login) VALUES (9, 'Leo', 'leo_tg', 0, 0)").run()
-	// Leo la pide en el simulador y la paga otra cuenta de QvaPay (@pepe)
-	await createCheckout(s.env, { tg: 9 }, 'month', 'https://sim.terminalp2p.com', T0, s.q.fetcher)
+	// @leo la pide en el terminal y la paga otra cuenta de QvaPay (@pepe)
+	await s.post('/pro/checkout', { print: P2, plan: 'month', username: 'leo' })
 	s.q.pay('inv-1', 'pepe')
-	// Otra se pide en el terminal y queda sin confirmar (nadie la mira y pasa más de una hora)
+	// Otra se pide desde un dispositivo sin cuenta conocida y queda sin confirmar (nadie la mira y pasa más de una hora)
 	await s.post('/pro/checkout', { print: P1, plan: 'year' })
 	s.tick(2 * 60 * 60_000)
 	const panel = (fields?: Record<string, string>, query = '') =>
@@ -392,15 +339,14 @@ test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobab
 		).then((r) => r.text())
 	let html = await panel()
 	assert.match(html, /Facturas sin pagar/)
-	assert.match(html, /Simulador · @leo_tg/)
+	assert.match(html, /Terminal · @leo/)
 	assert.match(html, /Terminal · <span/)
 	assert.match(html, /caducada/)
 	// Comprobar a mano: QvaPay la da por pagada y se activa
 	const id = (s.db.prepare("SELECT id FROM pro_checkouts WHERE invoice = 'inv-1'").get() as { id: string }).id
 	assert.match(await panel({ action: 'check', checkout: id }), /ya está activada/)
 	html = await panel()
-	assert.match(html, /<b>@pepe<\/b>/)
-	assert.match(html, /@leo_tg/) // la cuenta del simulador vinculada a la licencia de @pepe
+	assert.match(html, /<b>@pepe<\/b> <span class="note">para @leo<\/span>/)
 	assert.match(html, /Ingresos totales<\/span><b>1,99 USD/)
 	// Buscar por usuario
 	assert.doesNotMatch(await panel(undefined, '?q=nadie'), /<b>@pepe<\/b>/)

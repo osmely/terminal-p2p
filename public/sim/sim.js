@@ -21,6 +21,8 @@ const store = {
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim()
 
+// El terminal del mismo entorno (app.staging… desde sim.staging…; en desarrollo, app.localhost): la sesión y Pro vienen de allí
+const APP_URL = location.hostname.endsWith('localhost') ? `${location.protocol}//app.localhost:5177` : location.origin.replace('://sim.', '://app.')
 const POLL_MS = 15_000
 // Precios cada 3 s y velas completas cada minuto, de este mismo dominio (que los trae de MEXC)
 const TICK_MS = 3000
@@ -82,7 +84,7 @@ async function loadState() {
 	try {
 		applyView(await api('/state'))
 	} catch (e) {
-		if (e.status === 401) return logout(true)
+		if (e.status === 401) return signedOut()
 	}
 }
 
@@ -335,17 +337,16 @@ function render() {
 	$('cntOpen').textContent = open
 }
 
+// Con Telegram vinculado (para el ranking), su nombre y su foto; la sesión es la del terminal
 function renderUser() {
-	if (!S.user) {
+	const u = S.user?.telegram
+	if (!u) {
 		$('user').innerHTML = ''
 		return
 	}
-	const u = S.user
 	const name = u.username ? `@${u.username}` : u.first_name
 	const avatar = u.photo_url && /^https:\/\/(t\.me|[a-z0-9.-]*telegram\.org)\//.test(u.photo_url) ? `<img src="${esc(u.photo_url)}" alt="" referrerpolicy="no-referrer" />` : esc((u.first_name || '?').slice(0, 2))
-	$('user').innerHTML = `<span class="user-chip"><span class="avatar">${avatar}</span><span class="uname">${esc(name)}</span>
-		<button class="icon-btn small" id="logoutBtn" title="Salir" aria-label="Salir"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span>`
-	$('logoutBtn').onclick = () => logout()
+	$('user').innerHTML = `<span class="user-chip"><span class="avatar">${avatar}</span><span class="uname">${esc(name)}</span></span>`
 }
 
 // ── Formulario de órdenes ─────────────────────────────────────────────
@@ -413,7 +414,7 @@ function renderForm() {
 	const go = $('fGo')
 	go.className = `btn block go ${buy ? 'buy' : 'sell'}`
 	go.disabled = !S.user || S.busy
-	go.textContent = !S.user ? 'Entra con Telegram para operar' : S.busy ? 'Enviando…' : `${buy ? 'Comprar' : 'Vender'} ${base(S.symbol)}`
+	go.textContent = !S.user ? 'Conecta tu cuenta en el terminal para operar' : S.busy ? 'Enviando…' : `${buy ? 'Comprar' : 'Vender'} ${base(S.symbol)}`
 	// Mercado Pro sin Pro: se puede vender lo que ya tienes, pero comprar pide hacerse Pro
 	if (S.user && buy && locked(S.symbol)) {
 		go.className = 'btn block go pro'
@@ -540,18 +541,10 @@ async function submitOrder() {
 }
 
 // ── Pro ───────────────────────────────────────────────────────────────
-// Sin Pro se operan BTC y ETH; con Pro, todos los mercados (el servidor lo comprueba en cada orden).
-// La cuenta se vincula con un código de un dispositivo Pro del terminal (o el de respaldo), o
-// comprando aquí con QvaPay: quién paga lo confirma QvaPay, y el código de respaldo activa también el terminal
+// Sin Pro se operan BTC y ETH; con Pro, todos los mercados (el servidor lo comprueba en cada orden). El plan
+// es el de tu cuenta del terminal: se hereda solo, y Pro se compra en el terminal
 const locked = (sym) => !S.pro && !S.markets[sym]?.free
 const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
-// Siendo Pro solo se paga en los últimos días del plan (el servidor también lo exige); en el mes gratis, siempre
-const RENEW_SOON_MS = 5 * 86_400_000
-const PRO_PLANS = [
-	['month', 'Mensual', '1,99 USD', 'al mes'],
-	['year', 'Anual', '20 USD', 'al año · 2 meses gratis'],
-]
-let proPoll = null
 
 function renderProChip() {
 	const b = $('proBtn')
@@ -561,84 +554,21 @@ function renderProChip() {
 	b.title = S.pro ? `Pro hasta el ${proDate(S.pro.expiresAt)}` : 'Terminal P2P Pro'
 }
 
-function setPro(pro) {
-	S.pro = pro
-	render()
-}
-
-function openPro(html) {
-	if (!S.user) return toast('Entra con Telegram primero', 'bad')
+function openPro() {
+	if (!S.user) return toast('Conecta tu cuenta en el terminal primero', 'bad')
 	const proMarkets = Object.values(S.markets).filter((m) => !m.free).map((m) => m.base)
-	$('proBody').innerHTML =
-		html ??
-		(S.pro
-			? `<h2>★ ${S.pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h2><p class="muted">${{ trial: 'Prueba gratis', year: 'Plan anual', gift: 'Plan regalado' }[S.pro.plan] ?? 'Plan mensual'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.${S.pro.plan === 'trial' ? ' Si te haces Pro antes, los días que te queden se suman.' : ''}</p>
-				${
-					S.pro.plan === 'trial' || S.pro.expiresAt - Date.now() <= RENEW_SOON_MS
-						? `<p class="muted">No se renueva solo. Para renovar, desde aquí o desde el terminal:</p><div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>`
-						: `<p class="muted">No se renueva solo: podrás renovar desde el <b>${proDate(S.pro.expiresAt - RENEW_SOON_MS)}</b>.</p>`
-				}`
-			: `<h2>★ Terminal P2P Pro</h2>
-				<ul class="pro-feats">
-					<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>
-					<li><b>⚡ Orden inteligente en el terminal P2P</b><span class="muted">Si tu precio cruza el libro, toma lo que hay a mejor precio y publica el resto.</span></li>
-				</ul>
-				<button class="btn block go pro" id="proTrial">Probar 1 mes gratis</button>
-				<div class="pro-plans">${PRO_PLANS.map(([id, n, p, per]) => `<button class="pro-plan" data-plan="${id}"><b>${n}</b><span class="mono">${p}</span><small>${per}</small></button>`).join('')}</div>
-				<p class="muted small">Pagas con tu saldo en QvaPay. Una sola licencia para el simulador y el terminal. Sin renovación automática: cada pago lo haces tú. Si no te convence, te devolvemos el dinero en los 7 días siguientes al primer pago: escríbenos a <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.</p>
-				<label class="pro-claim-title" for="proCode">¿Ya eres Pro?</label>
-				<div class="pro-claim"><input class="input mono" id="proCode" placeholder="482 913 o TP-XXXX-…" autocomplete="off" /><button class="btn" id="proClaim">Vincular</button></div>
-				<p class="muted small">El código de 6 cifras sale en el terminal, en <b>Pro › Vincular simulador</b>.</p>`)
+	$('proBody').innerHTML = S.pro
+		? `<h2>★ ${S.pro.plan === 'trial' ? 'Tu mes gratis de Pro' : 'Eres Pro'}</h2><p class="muted">${{ trial: 'Prueba gratis', year: 'Plan anual', gift: 'Plan regalado' }[S.pro.plan] ?? 'Plan mensual'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.</p>
+			<p class="muted">Es el Pro de tu cuenta del terminal: si lo renuevas allí, aquí se renueva solo.</p>
+			<a class="btn block" href="${APP_URL}/?pro=open" target="_blank" rel="noopener">Ver mi Pro en el terminal</a>`
+		: `<h2>★ Terminal P2P Pro</h2>
+			<ul class="pro-feats">
+				<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>
+				<li><b>⚡ Orden inteligente en el terminal P2P</b><span class="muted">Si tu precio cruza el libro, toma lo que hay a mejor precio y publica el resto.</span></li>
+			</ul>
+			<a class="btn block go pro" href="${APP_URL}/?pro=open" target="_blank" rel="noopener">Hazte Pro en el terminal (primer mes gratis)</a>
+			<p class="muted small">Pro va con tu cuenta del terminal: en cuanto lo actives allí, aquí se desbloquean todos los mercados.</p>`
 	$('proModal').hidden = false
-}
-
-async function proCheckout(plan) {
-	try {
-		const c = await api('/pro/checkout', { method: 'POST', body: JSON.stringify({ plan }) })
-		window.open(c.url, '_blank', 'noopener')
-		openPro(`<h2>Esperando tu pago</h2><p class="muted">Paga la factura en QvaPay. Cuando QvaPay lo confirme, esto se actualiza solo.</p>
-			<a class="btn block go buy" href="${esc(c.url)}" target="_blank" rel="noopener">Abrir el pago en QvaPay</a>`)
-		clearTimeout(proPoll)
-		const started = Date.now()
-		const tick = async () => {
-			if (Date.now() - started > 60 * 60_000) return
-			try {
-				const r = await api(`/pro/checkout?id=${encodeURIComponent(c.id)}`)
-				if (r.status === 'paid') {
-					setPro({ username: r.username, plan: r.plan, expiresAt: r.expiresAt })
-					return openPro(`<h2>★ ¡Ya eres Pro!</h2><p class="muted">Hasta el <b>${proDate(r.expiresAt)}</b>. Ya puedes operar todos los mercados.</p>
-						${r.backupCode ? `<div class="pro-code-box"><p class="muted">Tu código de respaldo. Guárdalo: con él activas Pro también en el terminal P2P (<b>Hazte Pro › Ya soy Pro en otro dispositivo</b>).</p><div class="pro-code mono">${esc(r.backupCode)}</div></div>` : ''}`)
-				}
-				if (r.status === 'expired') return openPro('<h2>La factura caducó</h2><p class="muted">No se cobró nada. Puedes pedir otra.</p>')
-			} catch {}
-			proPoll = setTimeout(tick, 4000)
-		}
-		proPoll = setTimeout(tick, 4000)
-	} catch (e) {
-		toast(e.message, 'bad')
-	}
-}
-
-// Primer mes gratis: una vez por cuenta de Telegram (el servidor lo comprueba)
-async function proTrial() {
-	try {
-		const r = await api('/pro/trial', { method: 'POST', body: '{}' })
-		setPro(r.pro)
-		openPro(`<h2>★ Tienes un mes de Pro gratis</h2><p class="muted">Hasta el <b>${proDate(r.pro.expiresAt)}</b>. Ya puedes operar todos los mercados.</p>`)
-	} catch (e) {
-		toast(e.message, 'bad')
-	}
-}
-
-async function proClaim() {
-	try {
-		const r = await api('/pro/claim', { method: 'POST', body: JSON.stringify({ code: $('proCode').value }) })
-		setPro(r.pro)
-		openPro(`<h2>★ Pro vinculado</h2><p class="muted">Tu cuenta del simulador ya es Pro: operas todos los mercados.</p>
-			${r.backupCode ? `<div class="pro-code-box"><p class="muted">Usaste tu código de respaldo, así que ahora tienes uno nuevo (el anterior ya no vale). Guárdalo:</p><div class="pro-code mono">${esc(r.backupCode)}</div></div>` : ''}`)
-	} catch (e) {
-		toast(e.message, 'bad')
-	}
 }
 
 // ── Libro de órdenes y últimas operaciones ────────────────────────────
@@ -863,7 +793,26 @@ function leftText(ms) {
 // El ranking se ve en su ventana (botón 🏆) y tu puesto en el resumen
 function renderRanking() {
 	renderRankWidgets()
-	if (!$('rankModal').hidden) $('rankModalBody').innerHTML = rankingHtml()
+	if ($('rankModal').hidden) return
+	$('rankModalBody').innerHTML = rankingHtml()
+	tgButton($('tgLink'))
+}
+
+// Botón oficial de Telegram para vincularlo: al aceptar vuelve a /api/auth/telegram con los datos firmados
+function tgButton(box) {
+	if (!box || !S.config || box.childElementCount) return
+	if (S.config.dev) {
+		box.innerHTML = '<span class="fine">(el botón de Telegram no funciona en desarrollo)</span>'
+		return
+	}
+	const s = document.createElement('script')
+	s.async = true
+	s.src = 'https://telegram.org/js/telegram-widget.js?22'
+	s.dataset.telegramLogin = S.config.bot
+	s.dataset.size = 'medium'
+	s.dataset.radius = '8'
+	s.dataset.authUrl = `${location.origin}/api/auth/telegram`
+	box.appendChild(s)
 }
 
 function rankingHtml() {
@@ -883,12 +832,15 @@ function rankingHtml() {
 	let content = ''
 	if (view === 'week') {
 		const m = r.mine
+		const tg = S.user?.telegram
 		const status = !S.user
-			? 'Entra con Telegram para jugar y, si quieres, competir.'
-			: !m
-				? ''
-				: !m.compete
-					? `Juegas en privado: nadie ve tu nombre. <button class="btn small join" data-compete="1">Participar en la temporada</button>`
+			? 'Conecta tu cuenta en el terminal para jugar y, si quieres, competir.'
+			: !tg
+				? `Juegas en privado: nadie ve tu nombre. Para salir en el ranking, vincula tu Telegram (su nombre es el que se verá):<span class="tg-link" id="tgLink"></span>`
+				: !m
+					? ''
+					: !m.compete
+						? `Juegas en privado: nadie ve tu nombre. <button class="btn small join" data-compete="1">Participar en la temporada</button> <button class="link small" data-tg-unlink>Desvincular Telegram</button>`
 					: m.benched
 						? `Estás apuntado, pero entras en la clasificación el lunes ${dayShort(r.season.end)}: ya habías operado o reiniciado tu cuenta esta semana. Mientras tanto puedes seguir jugando. <button class="link small" data-compete="0">Dejar de competir</button>`
 						: m.trades < r.minTrades
@@ -912,7 +864,7 @@ function rankingHtml() {
 	}
 	return `${head}${content}
 		<div class="rules"><b>Cómo funciona el ranking</b><ul>
-			<li><b>Competir es opcional.</b> Si no te apuntas, juegas en privado y nadie ve tu nombre.</li>
+			<li><b>Competir es opcional.</b> Si no te apuntas, juegas en privado y nadie ve tu nombre. Para competir hay que vincular Telegram: en el ranking sale tu @usuario.</li>
 			<li>Cada <b>lunes a las 00:00</b> (hora de Cuba) empieza una temporada y todos vuelven a <b>10.000 USDT</b>.</li>
 			<li>Para aparecer en la clasificación tienes que competir y hacer <b>al menos ${r.minTrades} operaciones</b> en la semana.</li>
 			<li><b>Te apuntas sin haber operado esta semana:</b> compites desde ese momento.</li>
@@ -927,7 +879,7 @@ function renderRankWidgets() {
 	const r = S.ranking
 	const m = r?.mine
 	// Tu puesto en la barra de resumen
-	$('sRank').textContent = !r || !m ? '—' : !m.compete ? 'Participar' : m.benched ? 'Desde el lunes' : m.rank ? `${m.rank}.º` : `${m.trades}/${r.minTrades} ops.`
+	$('sRank').textContent = !r || !m ? '—' : !m.compete ? (S.user?.telegram ? 'Participar' : 'En privado') : m.benched ? 'Desde el lunes' : m.rank ? `${m.rank}.º` : `${m.trades}/${r.minTrades} ops.`
 }
 
 function openRanking() {
@@ -944,13 +896,24 @@ async function rankClick(e) {
 		renderRanking()
 		return true
 	}
+	if (e.target.closest('[data-tg-unlink]')) {
+		if (!confirm('¿Desvincular tu Telegram? Dejas de competir y tu nombre sale del ranking.')) return true
+		try {
+			const r = await api('/telegram/unlink', { method: 'POST', body: '{}' })
+			S.user.telegram = null
+			S.user.compete = false
+			S.ranking = r.ranking
+			renderUser()
+			renderRanking()
+			toast('Telegram desvinculado: juegas en privado', 'ok')
+		} catch (err) {
+			toast(err.message, 'bad')
+		}
+		return true
+	}
 	const comp = e.target.closest('[data-compete]')
 	if (!comp) return false
 	const on = comp.dataset.compete === '1'
-	if (on && !S.user) {
-		toast('Entra con Telegram para competir', 'bad')
-		return true
-	}
 	const traded = (S.ranking?.mine?.trades ?? 0) > 0
 	const ask = on
 		? `Al competir, tu @usuario de Telegram aparece en el ranking y, si quedas entre los 10 primeros de la semana, en el grupo @terminalp2p. Puedes dejarlo cuando quieras.${traded ? '\n\nComo ya operaste esta semana, entrarás en la clasificación el lunes siguiente.' : '\n\nCompites desde ya.'}\n\n¿Participar?`
@@ -959,7 +922,7 @@ async function rankClick(e) {
 	try {
 		const r = await api('/compete', { method: 'POST', body: JSON.stringify({ on }) })
 		S.ranking = r.ranking
-		if (S.user) S.user.compete = r.compete ? 1 : 0
+		if (S.user) S.user.compete = !!r.compete
 		toast(!on ? 'Ya no compites: juegas en privado' : r.startsMonday ? 'Apuntado: compites desde el lunes' : '¡Apuntado! Ya compites en esta temporada', 'ok')
 		renderRanking()
 	} catch (err) {
@@ -969,31 +932,12 @@ async function rankClick(e) {
 }
 
 // ── Sesión ────────────────────────────────────────────────────────────
-function showLogin() {
-	const box = $('tgLogin')
-	if (box.childElementCount || !S.config) return
-	$('devLogin').hidden = !S.config.dev
-	// En desarrollo el botón de Telegram no funciona (solo vale en el dominio registrado en BotFather)
-	if (S.config.dev) return
-	// Botón oficial de Telegram: al entrar redirige a /api/auth/telegram con los datos firmados
-	const s = document.createElement('script')
-	s.async = true
-	s.src = 'https://telegram.org/js/telegram-widget.js?22'
-	s.dataset.telegramLogin = S.config.bot
-	s.dataset.size = 'large'
-	s.dataset.radius = '8'
-	s.dataset.authUrl = `${location.origin}/api/auth/telegram`
-	box.appendChild(s)
-}
-
-async function logout(silent = false) {
-	await api('/logout', { method: 'POST' }).catch(() => {})
+// La sesión es la del terminal: si te desconectas allí (o caduca), aquí se sale también
+function signedOut() {
 	S.user = null
 	S.pro = null
 	S.view = null
 	S.tradesSeen = null
-	if (!silent) toast('Has salido del simulador')
-	showLogin()
 	render()
 }
 
@@ -1114,11 +1058,7 @@ function bind() {
 	$('proBtn').onclick = () => openPro()
 	$('proClose').onclick = () => ($('proModal').hidden = true)
 	$('proModal').addEventListener('click', (e) => {
-		if (e.target.id === 'proModal') return ($('proModal').hidden = true)
-		const plan = e.target.closest('[data-plan]')
-		if (plan) proCheckout(plan.dataset.plan)
-		if (e.target.closest('#proClaim')) proClaim()
-		if (e.target.closest('#proTrial')) proTrial()
+		if (e.target.id === 'proModal') $('proModal').hidden = true
 	})
 	$('rankClose').onclick = () => ($('rankModal').hidden = true)
 	$('rankModal').addEventListener('click', (e) => {
@@ -1227,13 +1167,21 @@ async function start() {
 	if (!S.markets[S.symbol]) S.symbol = 'BTCUSDT'
 	try {
 		const me = await api('/me')
-		S.user = me.user
+		S.user = me.player
 		S.pro = me.pro
 	} catch {
 		S.user = null
 	}
-	if (!S.user) showLogin()
+	$('appLink').href = APP_URL
+	$('devLogin').hidden = !S.config.dev
 	render()
+	// Vuelves de vincular Telegram: ya compites
+	const q = new URLSearchParams(location.search)
+	if (q.has('ranking')) {
+		toast(q.get('ranking') === 'lunes' ? 'Telegram vinculado: compites desde el lunes' : 'Telegram vinculado: ¡ya compites!', 'ok')
+		history.replaceState(null, '', location.pathname + location.hash)
+		openRanking()
+	}
 	// Paneles redimensionables en escritorio (cuando los cuatro paneles están lado a lado)
 	window.TPResize?.({
 		layout: '#layout',
