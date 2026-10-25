@@ -46,7 +46,6 @@ a { color: var(--accent); }
 .field .unit { color: var(--muted); font-weight: 400; }
 .field .input { grid-column: 1 / -1; }
 .badge { display: inline-flex; align-items: center; font: 600 11px var(--sans); padding: 2px 8px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); }
-.badge.sim { background: var(--warn-bg); color: var(--warn); }
 .count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font: 600 10.5px var(--sans); }
 .seg-tabs { display: inline-flex; gap: 2px; background: var(--bg); padding: 3px; border-radius: 8px; border: 1px solid var(--line); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .seg-tabs::-webkit-scrollbar { display: none; }
