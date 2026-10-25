@@ -32,6 +32,12 @@ function fakeQvaPay() {
 			invoices.set(uuid, { remote_id: b.remote_id, amount: b.amount, status: 'pending', PaidBy: null })
 			return Response.json({ transaction_uuid: uuid, url: `https://www.qvapay.com/pay/${uuid}` })
 		}
+		// Listado de facturas de la app, las más recientes primero (como QvaPay)
+		if (url.endsWith('/v2/transactions')) {
+			const { page = 1, take = 30 } = JSON.parse(String(init?.body ?? '{}'))
+			const list = [...invoices].reverse().map(([uuid, i]) => ({ uuid, remote_id: i.remote_id, amount: i.amount, status: i.status, created_at: new Date(T0).toISOString() }))
+			return Response.json({ transactions: list.slice((page - 1) * take, page * take) })
+		}
 		const m = url.match(/\/v2\/transactions\/(.+)$/)
 		if (m) return Response.json({ transaction: invoices.get(decodeURIComponent(m[1])) ?? null })
 		return new Response('{}', { status: 404 })
@@ -380,4 +386,63 @@ test('paga otra cuenta (otra sesión abierta en qvapay.com): Pro queda a nombre 
 		).then((x) => x.text())
 	assert.match(await form(), /<b>@pepe<\/b> <span class="note">para @Ana<\/span>/)
 	assert.match(await form({ action: 'refund', checkout: c.id }), /transfiere <b>1,99 USD<\/b> a <b>@pepe<\/b>/)
+})
+
+test('repaso diario con QvaPay: activa un pago que se quedó sin activar y recupera uno que aquí no consta', async () => {
+	const { reconcile, recover } = await import('../worker/pro.ts')
+	const s = setup()
+	// Se pide y se paga, pero nadie lo mira en la primera hora (y el cron ya no lo revisa)
+	await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
+	s.q.pay('inv-1', 'ana')
+	s.tick(5 * 60 * 60_000)
+	// Otro pago cuya fila se perdió aquí (como si se perdiera la base)
+	await s.post('/pro/checkout', { print: P2, plan: 'year', username: 'leo' })
+	s.q.pay('inv-2', 'leo')
+	s.db.prepare("DELETE FROM pro_checkouts WHERE invoice = 'inv-2'").run()
+	const r = await reconcile(s.env, s.now(), s.q.fetcher)
+	assert.equal(r.checked, 2)
+	assert.equal(r.activated.length, 1)
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
+	assert.deepEqual(r.unknown.map((u) => [u.invoice, u.payer, u.amount]), [['inv-2', 'leo', 20]])
+	// Se recupera desde lo que dice QvaPay: 365 días para quien pagó, con la devolución posible
+	assert.deepEqual(await recover(s.env, 'inv-2', s.now(), s.q.fetcher), { username: 'leo', plan: 'year' })
+	const lic = s.db.prepare("SELECT username, plan, expires_at FROM pro_licenses WHERE uuid = 'qp:leo'").get() as { username: string; plan: string; expires_at: number }
+	assert.deepEqual([lic.username, lic.plan, lic.expires_at], ['leo', 'year', s.now() + 365 * 86_400_000])
+	assert.equal((s.db.prepare("SELECT payer FROM pro_checkouts WHERE invoice = 'inv-2'").get() as { payer: string }).payer, 'leo')
+	// Un segundo repaso ya no encuentra nada pendiente
+	const again = await reconcile(s.env, s.now(), s.q.fetcher)
+	assert.deepEqual([again.activated.length, again.unknown.length], [0, 0])
+})
+
+test('copias: CSV de pagos con quién pagó, copia completa sin códigos de respaldo y copia diaria en el KV', async () => {
+	const { backupPro } = await import('../worker/pro.ts')
+	const kv = new Map<string, { value: string; ttl?: number }>()
+	const s = setup({ PRO: { get: async (k: string) => kv.get(k)?.value ?? null, put: async (k: string, value: string, o?: { expirationTtl?: number }) => void kv.set(k, { value, ttl: o?.expirationTtl }) } })
+	const c = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'Ana' })).body
+	s.q.pay('inv-1', 'pepe')
+	await s.status(c.id)
+	const get = (q: string) => proAdmin(new Request(`https://app.terminalp2p.com/admin/pro?${q}`, { headers: { Authorization: `Basic ${btoa('x:panel')}` } }), s.env, s.now())
+	const csv = await (await get('export=pagos')).text()
+	const [head, row] = csv.trim().split('\n')
+	assert.equal(head, 'pagado,pago,pago_uuid,para,dias,importe_usd,factura_qvapay,id,devuelto')
+	assert.match(row, /,pepe,u-pepe,Ana,30,1.99,inv-1,pro-/)
+	const copy = JSON.parse(await (await get('export=copia')).text())
+	assert.equal(copy.checkouts.length, 1)
+	assert.equal('backup_code' in copy.checkouts[0], false)
+	assert.equal(copy.licenses[0].uuid, 'qp:ana')
+	// Sin la clave del panel no se descarga nada
+	assert.equal((await proAdmin(new Request('https://app.terminalp2p.com/admin/pro?export=pagos'), s.env, s.now())).status, 401)
+	const key = await backupPro(s.env, s.now())
+	assert.equal(key, `backup/pro/${new Date(s.now()).toISOString().slice(0, 10)}`)
+	assert.equal(kv.get(key!)?.ttl, 120 * 86_400)
+	assert.equal(JSON.parse(kv.get(key!)!.value).checkouts[0].payer, 'pepe')
+})
+
+test('ningún código ni migración borra licencias, pagos o días gratis usados', () => {
+	const sources = [...readdirSync('worker').map((f) => `worker/${f}`), ...readdirSync('migrations').map((f) => `migrations/${f}`)]
+	for (const f of sources) {
+		const text = readFileSync(f, 'utf8')
+		assert.doesNotMatch(text, /DELETE\s+FROM\s+pro_(licenses|checkouts|trials)\b/i, f)
+		assert.doesNotMatch(text, /DROP\s+TABLE\s+(IF\s+EXISTS\s+)?pro_/i, f)
+	}
 })

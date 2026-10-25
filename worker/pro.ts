@@ -20,8 +20,9 @@ export interface ProEnv {
 	QVAPAY_APP_SECRET?: string
 	// Clave con la que se firman las licencias de 24 h (secreto). Sin ella Pro no funciona
 	PRO_KEY?: string
-	// Almacén privado con el módulo Pro (module.js), que no está en el repositorio público
-	PRO?: { get(key: string): Promise<string | null> }
+	// Almacén privado con el módulo Pro (module.js), que no está en el repositorio público, y la copia diaria
+	// de las tablas de Pro (backup/pro/AAAA-MM-DD)
+	PRO?: { get(key: string): Promise<string | null>; put?(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void> }
 	// Clave del panel (la misma de las métricas)
 	METRICS_KEY?: string
 }
@@ -141,9 +142,11 @@ async function qvapay<T>(env: ProEnv, path: string, body: unknown, fetcher: type
 }
 
 interface Transaction {
+	uuid?: string
 	status?: string
 	amount?: number | string
 	remote_id?: string
+	created_at?: string
 	PaidBy?: { uuid?: string; username?: string } | null
 }
 
@@ -204,6 +207,72 @@ export async function settlePending(env: ProEnv, now: number, who: { print?: str
 		} catch (err) {
 			console.error(`pro: factura ${c.id}: ${(err as Error).message}`)
 		}
+}
+
+// ── Que no se pierda ningún pago ─────────────────────────────────────
+// Los pagos no se borran nunca (las devoluciones solo se marcan) y la base (D1) se puede restaurar a cualquier
+// minuto de los últimos 30 días. Además: QvaPay guarda cada factura con nuestro identificador (remote_id) y
+// quién pagó, así que cada día se repasan con QvaPay, y cada día se deja una copia de las tablas de Pro en el KV
+
+const RECONCILE_PAGES = 5 // las 500 facturas más recientes
+const BACKUP_TTL_S = 120 * 86_400
+
+export interface Reconciled {
+	checked: number
+	activated: string[]
+	// Pagadas en QvaPay y que aquí no constan (p. ej. si se perdiera la base): para activarlas o devolverlas
+	unknown: { invoice: string; remoteId: string; amount: number; payer: string | null; paidAt: string | null }[]
+}
+
+export async function reconcile(env: ProEnv, now: number, fetcher: typeof fetch = fetch, pages = RECONCILE_PAGES): Promise<Reconciled> {
+	const db = env.DB
+	const out: Reconciled = { checked: 0, activated: [], unknown: [] }
+	for (let page = 1; page <= pages; page++) {
+		const { transactions = [] } = await qvapay<{ transactions?: Transaction[] }>(env, '/v2/transactions', { page, take: 100 }, fetcher)
+		for (const t of transactions) {
+			if (t.status !== 'paid' || !t.uuid || !t.remote_id?.startsWith('pro-')) continue
+			out.checked++
+			const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(t.remote_id).first<Checkout>()
+			if (c?.status === 'paid') continue
+			if (c) {
+				if (await settle(env, c, now, fetcher)) out.activated.push(c.id)
+				continue
+			}
+			const d = await qvapay<{ transaction?: Transaction }>(env, `/v2/transactions/${encodeURIComponent(t.uuid)}`, {}, fetcher)
+			out.unknown.push({ invoice: t.uuid, remoteId: t.remote_id, amount: Number(t.amount), payer: d.transaction?.PaidBy?.username ?? null, paidAt: t.created_at ?? null })
+		}
+		if (transactions.length < 100) break
+	}
+	return out
+}
+
+// Una factura pagada que aquí no consta: se recrea con lo que dice QvaPay (los días según el importe) y se
+// activa para quien pagó
+export async function recover(env: ProEnv, invoice: string, now: number, fetcher: typeof fetch = fetch) {
+	const { transaction: t } = await qvapay<{ transaction?: Transaction }>(env, `/v2/transactions/${encodeURIComponent(invoice)}`, {}, fetcher)
+	if (t?.status !== 'paid' || !t.remote_id?.startsWith('pro-') || !t.PaidBy?.username) throw new ProError(400, 'QvaPay no la da por pagada')
+	const plan = (Object.keys(PLANS) as Plan[]).find((p) => Math.abs(PLANS[p].usd - Number(t.amount)) < 0.005)
+	if (!plan) throw new ProError(400, `Importe sin días asociados: ${t.amount} USD`)
+	await env.DB.prepare("INSERT OR IGNORE INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at) VALUES (?, '', NULL, ?, ?, ?, 'pending', ?)")
+		.bind(t.remote_id, plan, PLANS[plan].usd, invoice, Date.parse(t.created_at ?? '') || now)
+		.run()
+	const c = (await env.DB.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(t.remote_id).first<Checkout>())!
+	await settle(env, c, now, fetcher)
+	return { username: t.PaidBy.username, plan }
+}
+
+// Todas las tablas de Pro (sin los códigos de respaldo por recoger, que se ven una sola vez)
+export async function proSnapshot(db: D1, now: number) {
+	const all = async (t: string) => (await db.prepare(`SELECT * FROM ${t}`).all<Record<string, unknown>>()).results
+	const checkouts = (await all('pro_checkouts')).map(({ backup_code: _, ...c }) => c)
+	return { at: new Date(now).toISOString(), licenses: await all('pro_licenses'), prints: await all('pro_prints'), checkouts, trials: await all('pro_trials') }
+}
+
+export async function backupPro(env: ProEnv, now: number) {
+	if (!env.PRO?.put) return null
+	const key = `backup/pro/${new Date(now).toISOString().slice(0, 10)}`
+	await env.PRO.put(key, JSON.stringify(await proSnapshot(env.DB, now)), { expirationTtl: BACKUP_TTL_S })
+	return key
 }
 
 // ── Compartido con el simulador ──────────────────────────────────────
@@ -458,9 +527,39 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 
 const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
+// Pagos en CSV (uno por fila, con quién pagó y su identificador en QvaPay) o copia completa de Pro en JSON
+async function proExport(db: D1, kind: string, now: number) {
+	const day = new Date(now).toISOString().slice(0, 10)
+	if (kind === 'copia')
+		return new Response(JSON.stringify(await proSnapshot(db, now), null, 1), {
+			headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="terminalp2p-pro-${day}.json"`, 'Cache-Control': 'no-store' },
+		})
+	const { results } = await db
+		.prepare(
+			`SELECT c.id, c.invoice, c.plan, c.amount, c.created_at, c.paid_at, c.refunded_at, COALESCE(c.payer, l.username) AS payer, c.payer_uuid, l.username AS owner, c.requester
+			FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license WHERE c.status = 'paid' ORDER BY COALESCE(c.paid_at, c.created_at)`,
+		)
+		.all<{ id: string; invoice: string | null; plan: Plan; amount: number; created_at: number; paid_at: number | null; refunded_at: number | null; payer: string | null; payer_uuid: string | null; owner: string | null; requester: string | null }>()
+	const cell = (v: unknown) => {
+		const t = v == null ? '' : String(v)
+		return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
+	}
+	const iso = (ms: number | null) => (ms ? new Date(ms).toISOString() : '')
+	const rows = [
+		['pagado', 'pago', 'pago_uuid', 'para', 'dias', 'importe_usd', 'factura_qvapay', 'id', 'devuelto'],
+		...results.map((r) => [iso(r.paid_at ?? r.created_at), r.payer, r.payer_uuid, r.owner ?? r.requester, PLANS[r.plan]?.days ?? r.plan, r.amount, r.invoice, r.id, iso(r.refunded_at)]),
+	]
+	return new Response(rows.map((r) => r.map(cell).join(',')).join('\n') + '\n', {
+		headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="terminalp2p-pagos-${day}.csv"`, 'Cache-Control': 'no-store' },
+	})
+}
+
 export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetcher: typeof fetch = fetch): Promise<Response> {
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const db = env.DB
+	// Descargas: los pagos en CSV (para devolver o cuadrar cuentas fuera de aquí) y la copia de todo Pro
+	const exp = new URL(req.url).searchParams.get('export')
+	if (req.method === 'GET' && exp) return proExport(db, exp, now)
 	let notice = ''
 	if (req.method === 'POST') {
 		const f = await req.formData()
@@ -501,6 +600,31 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 				notice = `<p class="ok">Licencia revocada. Ahora transfiere <b>${c.amount.toLocaleString('es')} USD</b> a <b>@${escHtml(c.username)}</b> desde tu cuenta de QvaPay.</p>`
 			}
 		}
+		// Repasar con QvaPay las facturas recientes: activa las pagadas que se quedaron sin activar y enseña las
+		// pagadas que aquí no constan
+		if (action === 'reconcile')
+			try {
+				const r = await reconcile(env, now, fetcher)
+				notice = `<p class="ok">Repasadas con QvaPay ${r.checked} facturas pagadas. ${r.activated.length ? `Activadas ahora: ${r.activated.length}.` : 'Todas estaban activadas.'}</p>${
+					r.unknown.length
+						? `<p class="note">Pagadas en QvaPay que aquí no constan:</p>${r.unknown
+								.map(
+									(u) =>
+										`<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(u.invoice)}"><span>${u.paidAt ? escHtml(u.paidAt.slice(0, 16).replace('T', ' ')) : ''} · @${escHtml(u.payer ?? '?')} · ${u.amount} USD · ${escHtml(u.invoice)}</span><button class="ghost" name="action" value="recover">Activar para @${escHtml(u.payer ?? '?')}</button></form>`,
+								)
+								.join('')}`
+						: ''
+				}`
+			} catch (err) {
+				notice = `<p class="note">No se pudo repasar con QvaPay: ${escHtml((err as Error).message)}</p>`
+			}
+		if (action === 'recover')
+			try {
+				const r = await recover(env, String(f.get('invoice') ?? ''), now, fetcher)
+				notice = `<p class="ok">Recuperada: ${escHtml(PLANS[r.plan].name)} para @${escHtml(r.username)}.</p>`
+			} catch (err) {
+				notice = `<p class="note">No se pudo recuperar: ${escHtml((err as Error).message)}</p>`
+			}
 		// Comprobar a mano una factura sin pagar (también las de hace más de una hora, que el cron ya no mira)
 		if (action === 'check') {
 			const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(String(f.get('checkout') ?? '')).first<Checkout>()
@@ -622,7 +746,10 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		'pro',
 		'Pro',
 		`<div class="top"><h1>Pro</h1><form method="get" class="row"><input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"><button>Buscar</button>${q ? ' <a href="/admin/pro" class="note">quitar filtro</a>' : ''}</form></div>
-		<p class="note">De cada usuario solo se guarda su usuario de QvaPay, su plan y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay. Horas de Cuba.</p>${notice}${cards}
+		<p class="note">De cada usuario solo se guarda su usuario de QvaPay, hasta cuándo tiene Pro y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay. Horas de Cuba.</p>${notice}${cards}
+		<div class="top" style="margin-top:16px"><form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y enseña las que aquí no constan">Repasar pagos con QvaPay</button></form>
+		<span class="row"><a class="note" href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a class="note" href="/admin/pro?export=copia">Copia completa (JSON)</a></span></div>
+		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
 		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Pagó</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
 		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
 		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Últimos días</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>

@@ -12,7 +12,7 @@ import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent 
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { adminPage, askKey } from './admin.ts'
-import { proAdmin, proApi, settlePending, type ProEnv } from './pro.ts'
+import { backupPro, proAdmin, proApi, reconcile, settlePending, type ProEnv } from './pro.ts'
 import { simApi, simCron, type SimEnv } from './sim.ts'
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
@@ -158,6 +158,8 @@ export default {
 			} catch (err) {
 				console.error(`pro: ${(err as Error).message}`)
 			}
+		// Una vez al día (09:00 UTC, las 5:00 en Cuba): los pagos se repasan con QvaPay y se guarda una copia de Pro
+		if (at % 86_400_000 === 9 * 3600_000) await dailyPro(env as unknown as ProEnv, at)
 		if (!tenth) return
 		try {
 			await collect(env.DB, at)
@@ -172,6 +174,23 @@ export default {
 		}
 	},
 } satisfies ExportedHandler<Env>
+
+async function dailyPro(env: ProEnv, at: number) {
+	if (env.PRO_KEY && env.QVAPAY_APP_SECRET)
+		try {
+			const r = await reconcile(env, at)
+			// Van como errores para que se vean en los registros de Cloudflare (los de cada petición están apagados)
+			if (r.activated.length) console.error(`pro: activados al repasar con QvaPay: ${r.activated.join(', ')}`)
+			if (r.unknown.length) console.error(`pro: pagados en QvaPay que no constan aquí: ${r.unknown.map((u) => `${u.invoice} (@${u.payer}, ${u.amount} USD)`).join('; ')}`)
+		} catch (err) {
+			console.error(`pro, repaso con QvaPay: ${(err as Error).message}`)
+		}
+	try {
+		await backupPro(env, at)
+	} catch (err) {
+		console.error(`pro, copia: ${(err as Error).message}`)
+	}
+}
 
 // Datos públicos y agregados: se cachean 2 minutos en el borde (si hay datos)
 async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
