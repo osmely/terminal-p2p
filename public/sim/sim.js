@@ -200,8 +200,12 @@ async function loadCandles(refresh = false) {
 		liveCandle = last ? { t: last[0], o: last[1], h: last[2], l: last[3], c: last[4] } : null
 		const tick = S.markets[sym].tick
 		candleSeries.applyOptions({ priceFormat: { type: 'price', precision: decimalsOf(tick), minMove: tick } })
-		// Se encuadra al cambiar de mercado o de intervalo; al refrescar se respeta el zoom
-		if (!refresh || candlesKey !== `${sym}:${iv}`) chart.timeScale().fitContent()
+		// Al cambiar de mercado o de intervalo se vuelve al encuadre automático (también del eje de precios, que
+		// deja de ajustarse solo si se arrastró); al refrescar el mismo se respeta el zoom
+		if (!refresh || candlesKey !== `${sym}:${iv}`) {
+			candleSeries.priceScale().applyOptions({ autoScale: true })
+			chart.timeScale().fitContent()
+		}
 		candlesKey = `${sym}:${iv}`
 		drawOrderLines()
 	} catch {
@@ -743,6 +747,7 @@ function bind() {
 		liveCandle = null
 		S.book = null
 		S.trades = null
+		candleSeries?.setData([])
 		loadCandles()
 		loadBook()
 		render()
@@ -754,6 +759,7 @@ function bind() {
 			store.set('sim.interval', S.interval)
 			for (const x of document.querySelectorAll('[data-iv]')) x.classList.toggle('active', x === b)
 			liveCandle = null
+			candleSeries?.setData([])
 			loadCandles()
 		}
 	}
