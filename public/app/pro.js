@@ -21,6 +21,7 @@ const PRO_PLANS = [
 ]
 const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
+	['🔀', 'Libro cruzado', 'cuando alguien vende más barato de lo que otro compra: si lo puedes aprovechar, cuántos USD encajan y cuánto te quedaría'],
 	['📊', 'Volumen en el gráfico', 'barras de compras y ventas de cada día bajo el histórico de la tasa, para ver cuánto se mueve el mercado'],
 	['📈', 'Todos los mercados del simulador', 'sin Pro, BTC y ETH; con Pro también SOL, XRP, BNB, DOGE, SUI, PEPE y TAO (sim.terminalp2p.com)'],
 ]

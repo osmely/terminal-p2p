@@ -414,7 +414,11 @@ function renderInsight(b, asks, bids) {
 	const ask = asks[0]
 	const bid = bids[0]
 	const unit = b.coin.unit
-	if (ask && bid && bid.price > ask.price) {
+	// Sin Pro solo se dice que está cruzado; con Pro, si lo puedes aprovechar y cuánto queda
+	const pro = window.TPPro
+	if (ask && bid && bid.price > ask.price && !pro?.active)
+		out.push(`<li class="warn">Libro cruzado: alguien vende más barato de lo que otro compra.${pro?.enabled ? ' Con <b>Pro</b> ves si puedes aprovecharlo y cuánto te quedaría.' : ''}</li>`)
+	else if (ask && bid && bid.price > ask.price) {
 		// Con tu comisión real (las cuentas GOLD no la pagan) y solo con ofertas que puedes tomar
 		const acct = typeof bk !== 'undefined' ? bk.acct : null
 		const fee = acct?.connected ? (acct.gold ? 0 : (acct.p2pFee ?? 0.0025)) : 0.0025
