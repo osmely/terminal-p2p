@@ -51,7 +51,7 @@ function applyPro(s) {
 	document.dispatchEvent(new CustomEvent('tp:pro', { detail: pro }))
 }
 
-// Al conectar la cuenta (y cada pocas horas, para renovar la licencia firmada de un día)
+// Al conectar la cuenta y luego cada pocos minutos (ver abajo)
 async function refreshPro() {
 	// Sin cuenta conectada, el simulador tampoco tiene sesión
 	if (!bk.acct.connected) {
@@ -261,4 +261,7 @@ function showClaim() {
 }
 
 document.addEventListener('click', (e) => e.target.closest('#proBtn') && showPro())
-setInterval(() => !document.hidden && bk.acct.connected && refreshPro(), 6 * 3_600_000)
+// Cada 5 minutos y al volver a la pestaña: si se apaga o enciende Pro en el panel, o se te acaban los días, se
+// nota sin recargar (y la licencia firmada de un día se renueva sola)
+setInterval(() => !document.hidden && bk.acct.connected && refreshPro(), 5 * 60_000)
+document.addEventListener('visibilitychange', () => !document.hidden && bk.acct.connected && refreshPro())

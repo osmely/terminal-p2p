@@ -704,16 +704,17 @@ async function showCreateOffer(preset = null) {
 		$('ofReview').textContent = smartActive ? 'Revisar orden inteligente' : 'Revisar'
 	}
 	// El módulo Pro (si estás en Pro) maneja la orden inteligente de este formulario; si llega después
-	// (por ejemplo, al volver de pagar), se engancha al momento
+	// (por ejemplo, al volver de pagar), se engancha al momento. Si Pro se apagó o venció, aunque el módulo
+	// siga cargado, no se usa
 	let smart = null
 	let smartActive = false
 	const ctx = { update: () => update(), read, fields, getType: () => type }
-	smart = window.TPProSmart?.open(ctx) ?? null
+	smart = window.TPPro?.active ? (window.TPProSmart?.open(ctx) ?? null) : null
 	renderDetails()
 	update()
 	const onSmartReady = () => {
 		if (!$('ofForm')) return document.removeEventListener('tp:smart-ready', onSmartReady)
-		smart ??= window.TPProSmart.open(ctx)
+		if (window.TPPro?.active) smart ??= window.TPProSmart.open(ctx)
 		if (!$('ofForm').hidden) update()
 	}
 	document.addEventListener('tp:smart-ready', onSmartReady)

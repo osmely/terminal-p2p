@@ -24,6 +24,7 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 // El terminal del mismo entorno (app.staging… desde sim.staging…; en desarrollo, app.localhost): la sesión y Pro vienen de allí
 const APP_URL = location.hostname.endsWith('localhost') ? `${location.protocol}//app.localhost:5177` : location.origin.replace('://sim.', '://app.')
 const POLL_MS = 15_000
+const SESSION_MS = 60_000
 // Precios cada 3 s y velas completas cada minuto, de este mismo dominio (que los trae de MEXC)
 const TICK_MS = 3000
 const CANDLES_MS = 60_000
@@ -778,23 +779,43 @@ function signedOut() {
 	render()
 }
 
+function selectSymbol(sym) {
+	S.symbol = sym
+	store.set('sim.symbol', S.symbol)
+	$('fAmount').value = ''
+	$('fPrice').value = ''
+	$('fStop').value = ''
+	liveCandle = null
+	S.book = null
+	S.trades = null
+	candleSeries?.setData([])
+	loadCandles()
+	loadBook()
+	render()
+}
+
+// La configuración (mercados y si Pro está encendido en el panel) y tu Pro se vuelven a leer cada minuto y al
+// volver a la pestaña: si se apaga o enciende Pro, o compras días en el terminal, se nota sin recargar
+async function loadSession() {
+	let cfg, me
+	try {
+		;[cfg, me] = await Promise.all([api('/config'), api('/me')])
+	} catch {
+		return
+	}
+	S.config = cfg
+	S.markets = Object.fromEntries(cfg.markets.map((m) => [m.symbol, m]))
+	S.user = me.player
+	S.pro = me.pro
+	if (!S.markets[S.symbol]) return selectSymbol('BTCUSDT')
+	render()
+}
+
 // ── Eventos ───────────────────────────────────────────────────────────
 function bind() {
 	$('markets').addEventListener('click', (e) => {
 		const b = e.target.closest('[data-sym]')
-		if (!b || b.dataset.sym === S.symbol) return
-		S.symbol = b.dataset.sym
-		store.set('sim.symbol', S.symbol)
-		$('fAmount').value = ''
-		$('fPrice').value = ''
-		$('fStop').value = ''
-		liveCandle = null
-		S.book = null
-		S.trades = null
-		candleSeries?.setData([])
-		loadCandles()
-		loadBook()
-		render()
+		if (b && b.dataset.sym !== S.symbol) selectSymbol(b.dataset.sym)
 	})
 	for (const b of document.querySelectorAll('[data-iv]')) {
 		b.classList.toggle('active', b.dataset.iv === S.interval)
@@ -1023,9 +1044,10 @@ async function start() {
 	setInterval(() => !document.hidden && loadCandles(true), CANDLES_MS)
 	await loadState()
 	setInterval(() => !document.hidden && loadState(), POLL_MS)
-	
+	setInterval(() => !document.hidden && loadSession(), SESSION_MS)
 	document.addEventListener('visibilitychange', () => {
 		if (document.hidden) return
+		loadSession()
 		loadState()
 		loadTickers()
 		loadCandles(true)
