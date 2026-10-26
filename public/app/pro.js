@@ -3,7 +3,8 @@
 // Quién pagó lo confirma QvaPay en el servidor. Las funciones Pro llegan en un módulo aparte (/pro/module.js)
 'use strict'
 
-const pro = { active: false, username: null, plan: null, expiresAt: null, license: null, print: null, loaded: false }
+// enabled: Pro encendido en el panel. Apagado, no se ofrece nada (ni botón ★, ni compras, ni orden inteligente)
+const pro = { enabled: false, active: false, username: null, plan: null, expiresAt: null, license: null, print: null, loaded: false }
 window.TPPro = pro
 
 // El simulador del mismo entorno (sim.staging… desde app.staging…; en desarrollo, el de sim.localhost)
@@ -38,7 +39,7 @@ const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
 const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
 
 function applyPro(s) {
-	Object.assign(pro, { active: !!s.pro, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
+	Object.assign(pro, { enabled: s.enabled === true, active: !!s.pro, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
 	
 	if (pro.active && !pro.loaded) {
 		pro.loaded = true
@@ -85,7 +86,7 @@ async function refreshPro() {
 function renderProChip() {
 	const b = $('proBtn')
 	if (!b) return
-	b.hidden = !bk.acct.connected
+	b.hidden = !bk.acct.connected || !pro.enabled
 	b.classList.toggle('on', pro.active)
 	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? daysText(daysLeft()) : 'Pro'}</span>`
 	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : 'Terminal P2P Pro'
@@ -190,6 +191,7 @@ function resumeCheckout() {
 		q.delete('pro')
 		history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
 	}
+	if (!pro.enabled) return
 	// El simulador manda aquí para hacerse Pro
 	if (back === 'open') return showPro()
 	if (back === 'cancel') {

@@ -8,6 +8,8 @@ import { PRO_DEVICES, proAdmin, proApi, type ProEnv } from '../worker/pro.ts'
 function memD1() {
 	const db = new DatabaseSync(':memory:')
 	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
+	// Pro encendido en el panel (las pruebas de Pro apagado lo apagan)
+	db.exec("INSERT INTO app_flags (key, value, updated_at) VALUES ('pro', '1', 0)")
 	const stmt = (sql: string, args: unknown[] = []) => ({
 		bind: (...a: unknown[]) => stmt(sql, a),
 		all: async () => ({ results: db.prepare(sql).all(...(args as never[])) as never[] }),

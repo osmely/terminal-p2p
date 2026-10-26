@@ -34,6 +34,7 @@ textarea{width:100%;min-height:260px;background:var(--surface);border:1px solid 
 button{padding:8px 14px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;font-size:14px;cursor:pointer}
 button.ghost{background:none;border:1px solid var(--line);color:var(--text2);padding:5px 10px;font-size:13px}
 form.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.flag{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.flag .note{flex:1 1 300px;margin:0}.flag.on b{color:var(--bid)}
 .ok{padding:10px 14px;border-radius:8px;background:color-mix(in srgb,var(--bid) 14%,transparent);color:var(--bid)}
 .code{display:inline-block;font:600 18px ui-monospace,Menlo,monospace;padding:10px 14px;border-radius:8px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
 `

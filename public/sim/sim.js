@@ -541,7 +541,8 @@ const proDays = () => {
 
 function renderProChip() {
 	const b = $('proBtn')
-	b.hidden = !S.user
+	// Con Pro apagado en el panel no hay botón ★ (y solo están BTC y ETH)
+	b.hidden = !S.user || !S.config?.pro
 	b.classList.toggle('on', !!S.pro)
 	b.innerHTML = `★ <span class="pro-label">${S.pro ? proDays() : 'Pro'}</span>`
 	b.title = S.pro ? `Te quedan ${proDays()} de Pro (hasta el ${proDate(S.pro.expiresAt)})` : 'Terminal P2P Pro'

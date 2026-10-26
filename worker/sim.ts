@@ -12,6 +12,7 @@
 import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle, type Quote, type SimState, type Symbol } from '../src/sim/engine.ts'
 import { licenseOfPrint, ProError, type ProEnv } from './pro.ts'
 import { readSession, sessionCookie, sessionToken } from './session.ts'
+import { proEnabled } from './flags.ts'
 import type { D1 } from './rates.ts'
 
 export interface SimEnv extends Omit<ProEnv, 'DB'> {
@@ -325,7 +326,11 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 	// Las escrituras solo desde nuestra propia página
 	if (req.method !== 'GET' && req.headers.get('origin') !== url.origin) return json(403, { error: 'Origen no permitido' })
 	try {
-		if (route === 'GET /api/config') return json(200, { dev: isDev(env, url), markets: SYMBOLS.map((s) => ({ symbol: s, ...MARKETS[s], free: FREE_MARKETS.has(s) })) })
+		// Con Pro apagado en el panel, solo los mercados de todos (BTC y ETH) y sin nada de Pro
+		if (route === 'GET /api/config') {
+			const pro = await proEnabled(env.DB)
+			return json(200, { dev: isDev(env, url), pro, markets: SYMBOLS.filter((s) => pro || FREE_MARKETS.has(s)).map((s) => ({ symbol: s, ...MARKETS[s], free: FREE_MARKETS.has(s) })) })
+		}
 		if (route === 'GET /api/tickers') {
 			const u = new URL('/api/tickers', url.origin)
 			return await cached(u, TICKERS_TTL_S, () => tickers(u))
@@ -351,7 +356,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		if (route === 'GET /api/me') {
 			if (!player || !print) return json(200, { player: null, pro: null })
 			await env.DB.prepare('UPDATE sim_players SET last_seen = ? WHERE id = ?').bind(now, player).run()
-			const l = await licenseOfPrint(env.DB, print, now)
+			const l = (await proEnabled(env.DB, now)) ? await licenseOfPrint(env.DB, print, now) : null
 			return json(200, { player: { id: player }, pro: l ? { username: l.username, plan: l.plan, expiresAt: l.expires_at } : null })
 		}
 		if (!player || !print) return json(401, { error: 'Conecta tu cuenta en Terminal P2P para jugar' })
@@ -362,7 +367,8 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		if (route === 'POST /api/orders') {
 			const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
 			const symbol = normSymbol(body.symbol)
-			if (!canTrade(!!(await licenseOfPrint(env.DB, print, now)), symbol, String(body.side ?? '').toUpperCase()))
+			const pro = (await proEnabled(env.DB, now)) && !!(await licenseOfPrint(env.DB, print, now))
+			if (!canTrade(pro, symbol, String(body.side ?? '').toUpperCase()))
 				return json(403, { error: `${MARKETS[symbol].base} es un mercado Pro. Sin Pro operas BTC y ETH; con Pro, todos.`, pro: true })
 			const { result, engine, prices } = await withAccount(env.DB, player, (e, qs) => {
 				const q = qs[symbol]

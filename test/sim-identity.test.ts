@@ -9,6 +9,8 @@ import { canTrade, simApi, type SimEnv } from '../worker/sim.ts'
 function memD1() {
 	const db = new DatabaseSync(':memory:')
 	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
+	// Pro encendido en el panel (las pruebas de Pro apagado lo apagan)
+	db.exec("INSERT INTO app_flags (key, value, updated_at) VALUES ('pro', '1', 0)")
 	const stmt = (sql: string, args: unknown[] = []) => ({
 		bind: (...a: unknown[]) => stmt(sql, a),
 		all: async () => ({ results: db.prepare(sql).all(...(args as never[])) as never[] }),
@@ -61,7 +63,7 @@ function setup() {
 		return { status: res.status, location: res.headers.get('location'), body: res.headers.get('content-type')?.includes('json') ? await res.json() : null }
 	}
 	const keys = () => (db.prepare('SELECT key, player FROM sim_ids ORDER BY key').all() as { key: string; player: number }[]).map((r) => `${r.key.slice(0, 12)}→${r.player}`)
-	return { db, q, terminal, sim, keys }
+	return { db, d1, q, terminal, sim, keys }
 }
 
 test('sin la sesión del terminal no se juega; con ella se entra sin otro login', async () => {
@@ -115,4 +117,21 @@ test('cambiar de token en el terminal: la cuenta del simulador pasa a la huella 
 	const fresh = (await s.terminal('/pro/status', { print: P4 })).cookie
 	assert.equal((await s.terminal('/pro/rotate', { from: P3, to: P4 })).body.pro, false)
 	assert.equal((await s.sim('GET', '/api/me', fresh)).body.player.id, id)
+})
+
+test('con Pro apagado en el panel: sin días gratis ni compras, y el simulador solo con BTC y ETH', async () => {
+	const { setProEnabled } = await import('../worker/flags.ts')
+	const s = setup()
+	await setProEnabled(s.d1, false)
+	const st = await s.terminal('/pro/status', { print: P1, username: 'Ana' })
+	assert.deepEqual([st.body.pro, st.body.enabled, st.body.started], [false, false, undefined])
+	assert.ok(st.cookie) // la sesión del simulador sí se deja
+	assert.equal((await s.terminal('/pro/checkout', { print: P1, plan: 'month' })).status, 404)
+	const cfg = (await s.sim('GET', '/api/config', null)).body
+	assert.deepEqual([cfg.pro, cfg.markets.map((m: { symbol: string }) => m.symbol)], [false, ['BTCUSDT', 'ETHUSDT']])
+	assert.equal((await s.sim('GET', '/api/me', st.cookie)).body.pro, null)
+	// Al encenderlo, la siguiente consulta da los 30 días gratis
+	await setProEnabled(s.d1, true)
+	assert.equal((await s.terminal('/pro/status', { print: P1, username: 'Ana' })).body.started, true)
+	assert.ok((await s.sim('GET', '/api/config', null)).body.markets.length > 2)
 })

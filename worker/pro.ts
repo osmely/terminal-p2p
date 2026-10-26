@@ -12,6 +12,7 @@ import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { sessionCookie, sessionToken } from './session.ts'
+import { proEnabled, setProEnabled } from './flags.ts'
 
 export interface ProEnv {
 	DB: D1
@@ -122,9 +123,9 @@ async function newBackup(db: D1, license: string, now: number) {
 
 // Lo que el terminal necesita saber: si eres Pro, hasta cuándo y la licencia firmada para recoger el módulo
 export async function statusOf(env: ProEnv, l: License | null, now: number) {
-	if (!l) return { pro: false }
+	if (!l) return { pro: false, enabled: true }
 	const license = await sign({ u: l.uuid, n: l.username, e: l.expires_at, x: now + LICENSE_MS }, env.PRO_KEY!)
-	return { pro: true, username: l.username, plan: l.plan, expiresAt: l.expires_at, license }
+	return { pro: true, enabled: true, username: l.username, plan: l.plan, expiresAt: l.expires_at, license }
 }
 
 // ── QvaPay: facturas y quién pagó ────────────────────────────────────
@@ -399,10 +400,18 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 	const db = env.DB
 	const route = `${req.method} ${path}`
 	try {
+		// Con Pro apagado en el panel: nadie es Pro ni puede comprar, y no empiezan los días gratis. La consulta de
+		// estado sigue dejando la sesión del simulador, y los avisos de pago de QvaPay se siguen atendiendo
+		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
 		// ¿Este dispositivo es Pro?
 		if (route === 'POST /pro/status') {
 			const b = await readBody(req)
 			const print = printOf(b.print)
+			if (!(await proEnabled(db, now))) {
+				const off = json(200, { pro: false, enabled: false })
+				off.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
+				return off
+			}
 			await settlePending(env, now, { print }, fetcher)
 			let l = await licenseOfPrint(db, print, now)
 			// Todos empiezan con 30 días gratis: se activan solos al conectar la cuenta, una vez por usuario de
@@ -462,6 +471,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			const to = printOf(b.to)
 			// La cuenta del simulador que iba con la huella vieja pasa a la nueva (si la nueva no tiene ya una)
 			await db.prepare('UPDATE sim_ids SET key = ? WHERE key = ? AND NOT EXISTS (SELECT 1 FROM sim_ids WHERE key = ?)').bind(`print:${to}`, `print:${from}`, `print:${to}`).run()
+			if (!(await proEnabled(db, now))) return json(200, { pro: false, enabled: false })
 			const l = await licenseOfPrint(db, from, now)
 			if (!l) return json(200, await statusOf(env, await licenseOfPrint(db, to, now), now))
 			const owner = await db.prepare('SELECT license FROM pro_prints WHERE print = ?').bind(to).first<{ license: string }>()
@@ -599,6 +609,11 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 				
 				notice = `<p class="ok">Licencia revocada. Ahora transfiere <b>${c.amount.toLocaleString('es')} USD</b> a <b>@${escHtml(c.username)}</b> desde tu cuenta de QvaPay.</p>`
 			}
+		}
+		// Encender o apagar Pro en la web, el terminal y el simulador
+		if (action === 'pro-on' || action === 'pro-off') {
+			await setProEnabled(db, action === 'pro-on', now)
+			notice = `<p class="ok">${action === 'pro-on' ? 'Pro encendido: ya se ve en la web, el terminal y el simulador' : 'Pro apagado: no se anuncia ni se ofrece en ningún sitio'} (en menos de un minuto en todas partes).</p>`
 		}
 		// Repasar con QvaPay las facturas recientes: activa las pagadas que se quedaron sin activar y enseña las
 		// pagadas que aquí no constan
@@ -746,7 +761,12 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		'pro',
 		'Pro',
 		`<div class="top"><h1>Pro</h1><form method="get" class="row"><input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"><button>Buscar</button>${q ? ' <a href="/admin/pro" class="note">quitar filtro</a>' : ''}</form></div>
-		<p class="note">De cada usuario solo se guarda su usuario de QvaPay, hasta cuándo tiene Pro y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay. Horas de Cuba.</p>${notice}${cards}
+		<p class="note">De cada usuario solo se guarda su usuario de QvaPay, hasta cuándo tiene Pro y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay. Horas de Cuba.</p>${notice}
+		${
+			(await proEnabled(db, now))
+				? `<form method="post" class="row flag on"><b>● Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis al conectar) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
+				: `<form method="post" class="row flag"><b>○ Pro está apagado</b><span class="note">No se anuncia ni se ofrece: la web no lo menciona, el terminal no tiene orden inteligente ni compras y el simulador solo tiene BTC y ETH.</span><button name="action" value="pro-on" onclick="return confirm('¿Encender Pro? Se anuncia en la web y todos los que conecten su cuenta reciben 30 días gratis.')">Encender Pro</button></form>`
+		}${cards}
 		<div class="top" style="margin-top:16px"><form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y enseña las que aquí no constan">Repasar pagos con QvaPay</button></form>
 		<span class="row"><a class="note" href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a class="note" href="/admin/pro?export=copia">Copia completa (JSON)</a></span></div>
 		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>

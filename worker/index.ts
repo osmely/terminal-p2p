@@ -14,6 +14,7 @@ import { RELAY_PREFIX, relay } from './relay.ts'
 import { adminPage, askKey } from './admin.ts'
 import { backupPro, proAdmin, proApi, reconcile, settlePending, type ProEnv } from './pro.ts'
 import { simApi, simCron, type SimEnv } from './sim.ts'
+import { proEnabled } from './flags.ts'
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	ASSETS: Fetcher
@@ -103,7 +104,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		if (req.method !== 'GET' && !(await underLimit(env.SIM_LIMIT, req))) return secure(jsonError(429, 'Demasiadas órdenes seguidas: espera unos segundos'))
 		return secure(await simApi(req, url, env as unknown as SimEnv))
 	}
-	return assets(req, url, env)
+	// Las páginas enseñan u ocultan lo de Pro según el interruptor del panel
+	const res = await assets(req, url, env)
+	return res.headers.get('Content-Type')?.includes('text/html') ? proMarkup(res, await proEnabled(env.DB)) : res
+}
+
+// En las páginas, lo marcado data-pro solo se ve con Pro encendido (en el panel) y lo marcado data-nopro solo con Pro apagado
+function proMarkup(res: Response, on: boolean) {
+	return new HTMLRewriter().on(on ? '[data-nopro]' : '[data-pro]', { element: (el) => void el.remove() }).transform(res)
 }
 
 // Staging: que ningún buscador lo indexe y que se vea a simple vista que no es producción

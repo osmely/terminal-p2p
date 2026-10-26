@@ -556,6 +556,7 @@ function bookRank(coin, type, price) {
 // hueco #ofSmart del formulario. Sin Pro, si tu precio ya cruza el libro se avisa de lo que haría.
 // Las rutas que mueven dinero (/smart…) son públicas y se pueden auditar
 function smartTeaser(f) {
+	if (!window.TPPro?.enabled) return ''
 	const b = state.book?.coin?.tick === f.coin ? state.book : null
 	if (!b || !(f.amount > 0 && f.price > 0)) return ''
 	const buy = f.type === 'buy'
