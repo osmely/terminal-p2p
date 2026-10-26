@@ -11,8 +11,9 @@ import { cubaDate, informalSince, latestInformal, syncInformal } from './informa
 import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
+import { sha256 } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
-import { backupPro, proAdmin, proApi, reconcile, settlePending, type ProEnv } from './pro.ts'
+import { backupPro, cleanupPro, proAdmin, proApi, reconcile, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 import { proEnabled } from './flags.ts'
 
@@ -30,6 +31,9 @@ interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	PANEL_LIMIT?: RateLimiter
 	SIM_LIMIT?: RateLimiter
 	PRO_LIMIT?: RateLimiter
+	STATUS_LIMIT?: RateLimiter
+	RELAY_LIMIT?: RateLimiter
+	PAIR_LIMIT?: RateLimiter
 	// «1» en el entorno de staging (wrangler deploy --env staging)
 	STAGING?: string
 }
@@ -39,10 +43,17 @@ interface RateLimiter {
 }
 
 // true si la petición pasa el tope; sin limitador configurado no se limita
-async function underLimit(limiter: RateLimiter | undefined, req: Request) {
+async function underLimit(limiter: RateLimiter | undefined, req: Request, key = req.headers.get('cf-connecting-ip') ?? 'sin-ip') {
 	if (!limiter) return true
-	const { success } = await limiter.limit({ key: req.headers.get('cf-connecting-ip') ?? 'sin-ip' })
+	const { success } = await limiter.limit({ key })
 	return success
+}
+
+// El relé se limita por cuenta (huella del token), no por IP: en Cuba muchos usuarios comparten IP. Sin token
+// (lo público, que además va en caché), por IP
+const relayKey = async (req: Request) => {
+	const auth = req.headers.get('authorization')
+	return auth ? `tok:${(await sha256(auth)).slice(0, 24)}` : `ip:${req.headers.get('cf-connecting-ip') ?? 'sin-ip'}`
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -71,7 +82,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		return Response.redirect(url.toString(), 301)
 	}
 
-	if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`))
+	if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`)) {
+		if (!(await underLimit(env.RELAY_LIMIT, req, await relayKey(req)))) return secure(jsonError(429, 'Demasiadas peticiones seguidas: espera unos segundos'))
 		return secure(
 			await relay(req, url, ctx, async (w) => {
 				if (!env.METRICS_SALT) return
@@ -79,6 +91,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 				if (e) await saveEvent(env.DB, e)
 			}),
 		)
+	}
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
 	// Panel único en el dominio del terminal
 	if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/')))
@@ -96,8 +109,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 	// Plan Pro, en el dominio del terminal. Canjear códigos tiene tope (que nadie los pruebe a ciegas)
 	if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
-		const guarded = ['/pro/claim', '/pro/pair', '/pro/checkout', '/pro/trial'].includes(url.pathname)
-		if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
+		const guarded = ['/pro/claim', '/pro/pair', '/pro/checkout'].includes(url.pathname)
+			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
+			// La consulta de estado da los días gratis y la sesión del simulador: con tope por IP (amplio)
+			if (url.pathname === '/pro/status' && !(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiadas consultas seguidas: espera un minuto'))
 		const r = await proApi(req, url, env as unknown as ProEnv)
 		if (r) return secure(r)
 	}
@@ -206,6 +221,7 @@ async function dailyPro(env: ProEnv, at: number) {
 		}
 	try {
 		await backupPro(env, at)
+		await cleanupPro(env.DB, at)
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
 	}

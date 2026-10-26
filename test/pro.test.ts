@@ -448,3 +448,29 @@ test('ningún código ni migración borra licencias, pagos o días gratis usados
 		assert.doesNotMatch(text, /DROP\s+TABLE\s+(IF\s+EXISTS\s+)?pro_/i, f)
 	}
 })
+
+test('topes contra abusos: días gratis por IP y día, facturas pendientes en total y códigos de 6 cifras por minuto', async () => {
+	const { TRIAL_PER_IP_DAY, PENDING_MAX } = await import('../worker/pro.ts')
+	const s = setup()
+	// Desde la misma IP, solo TRIAL_PER_IP_DAY cuentas nuevas reciben días gratis ese día
+	const got: boolean[] = []
+	for (let i = 0; i < TRIAL_PER_IP_DAY + 2; i++) got.push((await s.post('/pro/status', { print: i.toString(16).padStart(64, 'e'), username: `nuevo${i}` })).body.started)
+	assert.equal(got.filter(Boolean).length, TRIAL_PER_IP_DAY)
+	assert.deepEqual(got.slice(-2), [false, false])
+	// Al día siguiente, vuelve a haber cupo (y la limpieza borra las huellas viejas)
+	s.tick(86_400_000)
+	assert.equal((await s.post('/pro/status', { print: 'f'.repeat(64), username: 'otroDia' })).body.started, true)
+	const { cleanupPro } = await import('../worker/pro.ts')
+	s.tick(3 * 86_400_000)
+	await cleanupPro(s.env.DB, s.now())
+	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM pro_trial_ips').get() as { n: number }).n, 0)
+	// Con demasiadas facturas pendientes en la última hora, no se crean más
+	const ins = s.db.prepare("INSERT INTO pro_checkouts (id, print, plan, amount, invoice, status, created_at) VALUES (?, ?, 'month', 1.99, ?, 'pending', ?)")
+	for (let i = 0; i < PENDING_MAX; i++) ins.run(`pro-x${i}`, 'x', `inv-x${i}`, s.now())
+	const r = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	assert.equal(r.status, 503)
+	// Códigos de 6 cifras: el tope global corta los intentos; el de respaldo no cuenta
+	const capped = setup({ PAIR_LIMIT: { limit: async () => ({ success: false }) } })
+	assert.equal((await capped.post('/pro/claim', { print: P1, code: '123 456' })).status, 429)
+	assert.equal((await capped.post('/pro/claim', { print: P1, code: 'TP-AAAA-BBBB-CCCC' })).status, 400)
+})

@@ -7,7 +7,7 @@
 // Un dispositivo nuevo entra con un código de 6 cifras generado desde otro que ya es Pro, o con el
 // código de respaldo (que cambia cada vez que se usa).
 
-import { sha256, sign, verify } from './crypto.ts'
+import { hex, hmac, sha256, sign, verify } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
@@ -26,6 +26,8 @@ export interface ProEnv {
 	PRO?: { get(key: string): Promise<string | null>; put?(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void> }
 	// Clave del panel (la misma de las métricas)
 	METRICS_KEY?: string
+	// Tope global de códigos de 6 cifras por minuto (quien adivina prueba códigos que no existen: por IP no basta)
+	PAIR_LIMIT?: { limit(opts: { key: string }): Promise<{ success: boolean }> }
 }
 
 export const PLANS = {
@@ -38,6 +40,12 @@ export const PRO_DEVICES = 2
 // Devolución completa en los días siguientes al primer pago (a mano: QvaPay no tiene devoluciones por API)
 export const REFUND_DAYS = 7
 export const TRIAL_DAYS = 30
+// Topes de días gratis nuevos: por IP y día (amplio: muchos comparten IP en Cuba) y en total por día. No hacen
+// imposible inventar cuentas (el servidor no ve el token), pero lo vuelven lento y caro
+export const TRIAL_PER_IP_DAY = 10
+export const TRIAL_PER_DAY = 1000
+// Facturas pendientes de la última hora en total: más es un ataque, no compras
+export const PENDING_MAX = 300
 const DAY_MS = 86_400_000
 const LICENSE_MS = DAY_MS // la licencia firmada vale un día y el terminal la renueva sola
 const PAIR_MS = 5 * 60_000
@@ -285,9 +293,17 @@ export async function activeLicense(db: D1, uuid: string | null | undefined, now
 }
 
 
-// Los 30 días gratis de quien conecta su cuenta por primera vez (false si ese usuario o ese dispositivo ya los usó)
-async function freeDays(db: D1, username: string, print: string, now: number) {
+// Los 30 días gratis de quien conecta su cuenta por primera vez (false si ese usuario o ese dispositivo ya los
+// usó, o si se pasó el tope del día para su IP o en total). ip es la huella cifrada de la IP (ipPrint)
+async function freeDays(db: D1, username: string, print: string, now: number, ip: string) {
 	const license = `trial:qp:${username.toLowerCase()}`
+	const day = new Date(now).toISOString().slice(0, 10)
+	const n = async (sql: string, ...args: unknown[]) => (await db.prepare(sql).bind(...args).first<{ n: number | null }>())?.n ?? 0
+	if ((await n('SELECT n FROM pro_trial_ips WHERE day = ? AND ip = ?', day, ip)) >= TRIAL_PER_IP_DAY) return false
+	if ((await n('SELECT COALESCE(SUM(n), 0) AS n FROM pro_trial_ips WHERE day = ?', day)) >= TRIAL_PER_DAY) {
+		console.error(`pro: tope diario de días gratis (${TRIAL_PER_DAY}) alcanzado`)
+		return false
+	}
 	try {
 		await startTrial(db, license, username, [`qp:${username.toLowerCase()}`, `print:${print}`], now)
 	} catch (err) {
@@ -295,7 +311,16 @@ async function freeDays(db: D1, username: string, print: string, now: number) {
 		throw err
 	}
 	await attachPrint(db, license, print, now)
+	await db.prepare('INSERT INTO pro_trial_ips (day, ip, n) VALUES (?, ?, 1) ON CONFLICT(day, ip) DO UPDATE SET n = n + 1').bind(day, ip).run()
 	return true
+}
+
+// Huella de la IP para los topes: con la clave de Pro, así no se puede volver a la IP
+export const ipPrint = async (req: Request, key: string) => hex(await hmac(key, `ip:${req.headers.get('cf-connecting-ip') ?? 'local'}`)).slice(0, 32)
+
+// Limpieza diaria: las huellas de IP solo valen para el tope del día
+export async function cleanupPro(db: D1, now: number) {
+	await db.prepare('DELETE FROM pro_trial_ips WHERE day < ?').bind(new Date(now - 2 * DAY_MS).toISOString().slice(0, 10)).run()
 }
 
 // Los 30 días gratis. Las llaves dicen quién ya los usó (una sola vez cada una); si alguna ya se usó, no hay otro
@@ -321,6 +346,11 @@ export async function createCheckout(env: ProEnv, who: { print: string; username
 		.bind(now - REUSE_MS, plan, who.print)
 		.first<{ id: string; invoice: string }>()
 	if (open) return { id: open.id, url: `${PAY_URL}${open.invoice}` }
+	const pending = await db.prepare("SELECT COUNT(*) AS n FROM pro_checkouts WHERE status = 'pending' AND created_at > ?").bind(now - CHECKOUT_MS).first<{ n: number }>()
+	if ((pending?.n ?? 0) >= PENDING_MAX) {
+		console.error(`pro: ${pending?.n} facturas pendientes en la última hora; no se crean más`)
+		throw new ProError(503, 'Ahora mismo no se pueden pedir pagos. Inténtalo en unos minutos.')
+	}
 	const id = `pro-${crypto.randomUUID()}`
 	const p = PLANS[plan]
 	const inv = await qvapay<{ transaction_uuid?: string; url?: string }>(
@@ -417,7 +447,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			// Todos empiezan con 30 días gratis: se activan solos al conectar la cuenta, una vez por usuario de
 			// QvaPay y por dispositivo
 			const username = usernameOf(b.username)
-			const started = !l && !!username && (await freeDays(db, username, print, now))
+			const started = !l && !!username && (await freeDays(db, username, print, now, await ipPrint(req, env.PRO_KEY)))
 			if (started) l = await licenseOfPrint(db, print, now)
 			if (l) await db.prepare('UPDATE pro_prints SET seen_at = ? WHERE print = ?').bind(now, print).run()
 			// La sesión compartida con el simulador: con ella entra sin otro login y hereda tus días de Pro
@@ -500,6 +530,8 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		if (route === 'POST /pro/claim') {
 			const b = await readBody(req)
 			const print = printOf(b.print)
+			if (/^\d{3}[\s-]?\d{3}$/.test(String(b.code ?? '').trim()) && env.PAIR_LIMIT && !(await env.PAIR_LIMIT.limit({ key: 'global' })).success)
+				return json(429, { error: 'Demasiados intentos con códigos ahora mismo. Espera un minuto.' })
 			const got = await claimCode(db, String(b.code ?? ''), now)
 			if (!got) return json(400, { error: 'Código no válido o caducado' })
 			await attachPrint(db, got.license, print, now)
