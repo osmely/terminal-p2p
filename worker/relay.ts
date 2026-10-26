@@ -23,6 +23,8 @@ const PUBLIC_PATHS = new Set(['/p2p/averages', '/p2p/completed_pairs_average', '
 // Solo lo que usa la app; cualquier otra ruta se rechaza
 const RULES: [method: string, path: RegExp][] = [
 	['GET', /^\/user$/],
+	// Los métodos de pago que el usuario guardó en QvaPay, para rellenar sus datos al publicar
+	['GET', /^\/user\/payment-methods$/],
 	['GET', /^\/coins$/],
 	['GET', /^\/p2p$/],
 	['GET', /^\/p2p\/averages$/],

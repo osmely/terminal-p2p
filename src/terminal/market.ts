@@ -91,7 +91,11 @@ export interface HistoryPoint {
 	ask: number | null
 }
 
+// Precio raro: lejos de la referencia (mediana de lo completado). Hacia el lado bueno para quien la toma
+// (una venta muy barata o una compra muy cara) basta un 8 %: suele ser un error o un cebo de una cuenta nueva.
+// Hacia el lado malo no engaña a nadie y se tolera mucho más
 const OUTLIER_PCT = 0.35
+const OUTLIER_GOOD_PCT = 0.08
 const TAKE = 50
 // 15 lecturas/min mientras alguien mira: deja cupo libre a cada cuenta para sus operaciones.
 // Sin nadie mirando, una lectura por minuto (el histórico sigue avanzando, más lento).
@@ -316,7 +320,7 @@ export class Market {
 		const c = this.coins.get(tick)!.completed
 		if (c && c.count >= 3) return { buy: c.median_buy || c.average_buy, sell: c.median_sell || c.average_sell }
 		const a = this.averages?.[tick]
-		if (a && a.count >= 3) return { buy: a.average_buy || a.average, sell: a.average_sell || a.average }
+		if (a && a.count >= 3) return { buy: a.median_buy || a.average_buy || a.average, sell: a.median_sell || a.average_sell || a.average }
 		return null
 	}
 
@@ -365,6 +369,14 @@ function toLevel(o: P2POffer, promoted: boolean, ref: number | null): Level {
 		createdAt: ts(o.created_at) ?? ts(o.updated_at),
 		updatedAt: ts(o.updated_at) ?? ts(o.created_at),
 		promoted,
-		outlier: ref !== null && ref > 0 && Math.abs(price / ref - 1) > OUTLIER_PCT,
+		outlier: isOutlier(price, ref, o.type === 'sell' ? 'ask' : 'bid'),
 	}
+}
+
+// ¿Precio raro? Una venta (ask) es buena para quien la toma si es barata; una compra (bid), si es cara
+export function isOutlier(price: number, ref: number | null, side: 'ask' | 'bid') {
+	if (ref === null || !(ref > 0)) return false
+	const d = price / ref - 1
+	const good = side === 'ask' ? -d : d
+	return good > OUTLIER_GOOD_PCT || Math.abs(d) > OUTLIER_PCT
 }

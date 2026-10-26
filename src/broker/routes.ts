@@ -3,6 +3,7 @@
 // Usa Request/Response estándar, así que también se prueba en Node.
 
 import { P2P_FEE } from '../qvapay/fees.ts'
+import type { SavedMethod } from '../qvapay/types.ts'
 import { logger } from '../log.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
 import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
@@ -109,6 +110,8 @@ export class Broker {
 					return await this.action(ctx, acc)
 				case 'GET /coins':
 					return await this.coins(acc)
+				case 'GET /payment-methods':
+					return await this.paymentMethods(acc)
 				case 'GET /offer':
 					return await this.offer(ctx, acc)
 				case 'POST /offer/create':
@@ -285,6 +288,15 @@ export class Broker {
 			this.coinFields = fields
 		}
 		return json(200, { fields: this.coinFields })
+	}
+
+	// Lo que el usuario guardó en QvaPay para cobrar (tarjetas, cuentas): solo para rellenar su formulario
+	private async paymentMethods(acc: Account) {
+		const list = await acc.client.paymentMethods().catch(() => [])
+		const fields = (d: SavedMethod['details']) =>
+			typeof d === 'string' ? (d.trim() ? { '': d.trim() } : {}) : Object.fromEntries(Object.entries(d ?? {}).filter(([, v]) => typeof v === 'string' && v.trim()))
+		const methods = (Array.isArray(list) ? list : []).map((m) => ({ name: m.name, coin: m.coin?.tick ?? null, fields: fields(m.details) })).filter((m) => Object.keys(m.fields).length)
+		return json(200, { methods })
 	}
 
 	private async offer({ url }: Ctx, acc: Account) {
@@ -611,6 +623,9 @@ export function peerOffer(o: P2POffer) {
 		orderMax: flexible ? Math.min(o.order_max != null ? num(o.order_max) : usd, usd) : null,
 		vipOnly: !!o.only_vip,
 		requirements: o.requirements ?? null,
+		// Si los cumples (solo lo sabe el detalle, con tu cuenta): null cuando no pide nada
+		requirementsMet: o.requirements_met ?? null,
+		requirementsMissing: o.requirements_missing ?? [],
 		paused: !!o.pause,
 		createdAt: o.created_at ?? null,
 		updatedAt: o.updated_at ?? null,

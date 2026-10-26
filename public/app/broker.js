@@ -251,7 +251,7 @@ function renderTrades() {
 						(o) => `<tr data-offer="${o.offerUuid}">
 							<td class="c-side">${side(o)}</td><td class="c-mkt">${esc(nameOf(o.coin))}</td>
 							<td class="r num c-usd" data-l="USD">${fmtU(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(o.price)}</td><td class="r num c-total" data-l="Total">${fmtU((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
-							<td class="c-status">${o.pause ? '<span class="chip revision">Pausada</span>' : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}</td>
+							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? `Pausada hasta ${new Date(o.pause.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}` : 'Pausada'}</span>` : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}</td>
 							<td class="muted c-date">${o.updatedAt ? new Date(o.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
 							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}">Cancelar</button></td></tr>`,
 					)
@@ -610,7 +610,7 @@ async function showCreateOffer(preset = null) {
 				<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" type="number" step="0.01" inputmode="decimal" /></label>
 				<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" type="number" step="0.01" inputmode="decimal" /></label>
 			</div>
-			<div class="stack tight"><p class="hint" id="ofDetailsTitle"></p><div class="stack tight" id="ofDetails"><p class="muted small">Cargando campos…</p></div>
+			<div class="stack tight"><p class="hint" id="ofDetailsTitle"></p><div class="saved-methods" id="ofSaved" hidden></div><div class="stack tight" id="ofDetails"><p class="muted small">Cargando campos…</p></div>
 				<label class="check small"><input type="checkbox" id="ofRemember" /> Recordar estos datos en este navegador</label></div>
 			<details class="opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
 				${Object.entries(REQ_OPTIONS)
@@ -667,7 +667,48 @@ async function showCreateOffer(preset = null) {
 					})
 					.join('')
 			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Inténtalo de nuevo.</p>'
+		renderSaved()
 	}
+	// Lo que guardaste en QvaPay para este mercado (tarjetas, cuentas): un toque y se rellena el campo
+	let savedMethods = null
+	const renderSaved = () => {
+		const coin = $('ofCoin').value
+		const list = (savedMethods ?? []).filter((m) => m.coin === coin)
+		$('ofSaved').hidden = !list.length
+		// Cada método trae sus campos con los nombres del formulario: se rellenan todos, cada uno con lo suyo
+		const tail = (m) => {
+			const v = Object.values(m.fields).find((x) => /\d{4}/.test(x)) ?? ''
+			return v ? ` · <span class="mono">…${esc(v.replace(/\D/g, '').slice(-4))}</span>` : ''
+		}
+		$('ofSaved').innerHTML = list.length
+			? `<span class="muted small">Guardado en QvaPay:</span>${list.map((m, i) => `<button type="button" class="chip-btn" data-saved="${i}">${esc(m.name)}${tail(m)}</button>`).join('')}`
+			: ''
+		const norm = (x) => String(x ?? '').trim().toLowerCase()
+		for (const b of $('ofSaved').querySelectorAll('[data-saved]'))
+			b.onclick = () => {
+				const m = list[Number(b.dataset.saved)]
+				const inputs = [...$('ofDetails').querySelectorAll('[data-detail]')]
+				let filled = 0
+				for (const el of inputs) {
+					const [, v] = Object.entries(m.fields).find(([k]) => k && norm(k) === norm(el.dataset.detail)) ?? []
+					if (v == null) continue
+					el.value = v
+					el.dispatchEvent(new Event('input', { bubbles: true }))
+					filled++
+				}
+				// Si los nombres no coinciden (o es un método de un solo texto), al primer campo
+				if (!filled && inputs[0]) {
+					inputs[0].value = Object.values(m.fields)[0]
+					inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
+				}
+			}
+	}
+	api('/payment-methods')
+		.then((r) => {
+			savedMethods = r.methods ?? []
+			if ($('ofSaved')) renderSaved()
+		})
+		.catch(() => {})
 	// Vendiendo, nunca más que tu saldo: el monto se recorta a lo que tienes
 	const balance = () => Math.floor((bk.acct.balance ?? 0) * 100) / 100
 	const update = () => {
@@ -985,6 +1026,8 @@ async function showTakeOfferById(uuid) {
 		orderMin: o.orderMin,
 		orderMax: o.orderMax,
 		requirements: o.requirements,
+		requirementsMet: o.requirementsMet,
+		requirementsMissing: o.requirementsMissing,
 		vipOnly: o.onlyVip,
 		user: o.owner?.username ?? '—',
 		ops: o.owner?.ops ?? null,
@@ -992,6 +1035,26 @@ async function showTakeOfferById(uuid) {
 		kyc: false,
 	}
 	renderTake(o.offer, o.type === 'sell' ? 'ask' : 'bid', level, o.coin)
+}
+
+const REQ_NAMES = { min_completed: ['operaciones completadas', ''], min_rating: ['valoración', '★'], min_account_days: ['días de cuenta', ''], min_trustscore: ['trustscore', ''] }
+async function checkRequirements(uuid, l) {
+	let o = l.requirementsMet === false ? l : null
+	if (!o)
+		try {
+			o = await api(`/offer?offer=${encodeURIComponent(uuid)}`)
+		} catch {
+			return
+		}
+	if (o.requirementsMet !== false || !$('tkGo')) return
+	const why = (o.requirementsMissing ?? [])
+		.map((m) => {
+			const [name, unit] = REQ_NAMES[m.key] ?? [m.key, '']
+			return `${name}: pide ${m.required}${unit}, tienes ${m.actual}${unit}`
+		})
+		.join(' · ')
+	$('tkGo').insertAdjacentHTML('beforebegin', `<p class="notice warn">No cumples los requisitos de esta oferta${why ? ` (${esc(why)})` : ''}. QvaPay la rechazaría.</p>`)
+	$('tkGo').disabled = true
 }
 
 function renderTake(uuid, side, l, coin) {
@@ -1036,6 +1099,8 @@ function renderTake(uuid, side, l, coin) {
 	$('tkAmount')?.addEventListener('input', upd)
 	$('modalBody').querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer))
 	upd()
+	// Con requisitos, QvaPay dice si los cumples: si no, se avisa antes de gastar un intento de los 2 por minuto
+	if (req && bk.acct.connected) checkRequirements(uuid, l)
 	$('tkGo')?.addEventListener('click', async () => {
 		const a = amount()
 		if (flex && !(a >= min && a <= max)) return toast(`El monto debe estar entre ${fmtU(min)} y ${fmtU(max)} USD`, true)

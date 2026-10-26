@@ -728,3 +728,6 @@ a.icon-btn { text-decoration: none; }
 	.pro-chip { width: 32px; padding: 0; justify-content: center; }
 	.pro-chip .pro-label { display: none; }
 }
+
+/* Métodos de pago guardados en QvaPay, encima de los datos de pago al publicar */
+.saved-methods { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

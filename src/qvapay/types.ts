@@ -66,6 +66,8 @@ export interface P2POffer {
 	// Con my=true, en una oferta por rango de la que tomaste una parte
 	my_order?: { uuid: string; amount: Num; receive: Num; status: string; created_at?: string; payment_window_expires_at?: string | null } | null
 	requirements_met?: boolean
+	// Solo en el detalle, si no cumples alguno: cuál, cuánto pide y cuánto tienes
+	requirements_missing?: { key: string; required: number; actual: number }[]
 	// Solo en el detalle: calificaciones de la operación y el id numérico de quien consulta
 	Ratings?: { rater: string | number; rated: string | number; rating: string | number; editable_until?: string | null; order_id?: string | null }[]
 	currentUserId?: string | number
@@ -194,3 +196,12 @@ export interface Me {
 }
 
 export const num = (v: Num | null | undefined): number => (v == null ? 0 : typeof v === 'number' ? v : Number(v))
+
+// Método de pago guardado en QvaPay (GET /user/payment-methods)
+export interface SavedMethod {
+	id: string
+	name: string
+	// Los campos del método, con los mismos nombres que pide el formulario de esa moneda («Nro de tarjeta»…)
+	details: Record<string, string> | string
+	coin?: { tick?: string; name?: string } | null
+}

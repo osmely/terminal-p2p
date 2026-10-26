@@ -11,6 +11,7 @@ import type {
 	Me,
 	P2POffer,
 	Paginated,
+	SavedMethod,
 } from './types.ts'
 
 const log = logger('qvapay')
@@ -84,6 +85,11 @@ export class QvaPayClient {
 	listOffers(params: ListParams) {
 		const query: RequestOpts['query'] = { ...params, my: params.my ? 'true' : undefined }
 		return this.request<Paginated<P2POffer>>('GET', '/p2p', { bucket: 'list', query })
+	}
+
+	// Los métodos de pago que el usuario guardó en QvaPay (solo lectura)
+	paymentMethods() {
+		return this.request<SavedMethod[]>('GET', '/user/payment-methods', { bucket: 'general' })
 	}
 
 	async getOffer(uuid: string) {
