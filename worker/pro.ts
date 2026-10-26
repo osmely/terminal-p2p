@@ -7,7 +7,7 @@
 // módulo Pro, firmado para ti. Pro va con la cuenta: cualquier dispositivo donde la conectes entra solo.
 
 import { hex, hmac, sign, verify } from './crypto.ts'
-import { adminPage, askKey } from './admin.ts'
+import { adminPage, askKey, pageHead, panel, searchIcon, type AdminTab } from './admin.ts'
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
@@ -766,6 +766,10 @@ const copyBtn = (text: string, label = 'Copiar') =>
 const KIND_NAME: Record<string, string> = { trial: 'Días gratis', purchase: 'Compra', gift: 'Regalo', refund: 'Devolución', adjust: 'Ajuste', import: 'Saldo inicial' }
 const REFUND_STATUS: Record<RefundStatus, string> = { requested: 'Pedida', approved: 'Aprobada: falta transferir', transferred: 'Transferida', rejected: 'Rechazada' }
 
+// Devolver una compra desde una tabla: el motivo se pide al pulsar, para que la fila no lleve un formulario entero
+const refundButton = (checkout: string, amount: number, payer: string, back = '') =>
+	`<form method="post" style="display:inline" onsubmit="var m=prompt('¿Devolver ${amount} USD a @${escHtml(payer)}? Se le quitan los días de esta compra y luego haces tú la transferencia en QvaPay.\\n\\nMotivo (puede verlo el usuario en «Mi cuenta»):','');if(m===null)return false;this.note.value=m">${back}<input type="hidden" name="checkout" value="${escHtml(checkout)}"><input type="hidden" name="note"><button class="ghost" name="action" value="refund">Devolver</button></form>`
+
 // Una devolución con lo que toca hacer en su paso. `u`: volver a la ficha de ese usuario tras la acción
 function refundHtml(r: Refund & { username?: string }, u?: string) {
 	const back = u ? `<input type="hidden" name="u" value="${escHtml(u)}">` : ''
@@ -795,10 +799,11 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 	const name = l?.username ?? username
 	const u = escHtml(name)
 	if (!l)
-		return adminPage(
-			'pro',
+		return proPage(
+			env,
+			'pro-cuentas',
 			`@${u}`,
-			`<p><a href="/admin/pro">← Pro</a></p><h1>@${u}</h1>${notice}<p class="note">No tiene cuenta Pro todavía. Puedes darle días: se le activan al conectar su cuenta en el terminal.</p>${daysForm(name)}`,
+			`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>${pageHead(`@${u}`, 'No tiene cuenta Pro todavía. Puedes darle días: se le activan al conectar su cuenta en el terminal.')}${notice}${panel('Dar o quitar días', daysForm(name))}`,
 		)
 	const all = <T>(sql: string) => db.prepare(sql).bind(id).all<T>().then((r) => r.results)
 	const [refunds, pays, moves, devices, notes, trials] = await Promise.all([
@@ -822,23 +827,26 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 			const r = refundOf.get(p.id)
 			const act = r
 				? `<span class="pill ${r.status}">${REFUND_STATUS[r.status]}</span>`
-				: `<form method="post" class="row" onsubmit="return confirm('¿Devolver ${p.amount} USD a @${escHtml(p.payer ?? name)}? Se le quitan los días de esta compra y luego haces tú la transferencia.')">${back}<input type="hidden" name="checkout" value="${escHtml(p.id)}"><input name="note" placeholder="motivo" style="width:140px"><button class="ghost" name="action" value="refund">Devolver</button></form>`
-			return `<tr><td>${hWhen(p.paid_at ?? p.created_at)}</td><td>${escHtml(PLANS[p.plan]?.name ?? p.plan)}</td><td>${hUsd(p.amount)}</td><td>@${escHtml(p.payer ?? '?')}</td><td>${p.invoice ? hShort(p.invoice) : '—'}</td><td>${act}</td></tr>`
+				: refundButton(p.id, p.amount, p.payer ?? name, back)
+			return `<tr><td>${hWhen(p.paid_at ?? p.created_at)}</td><td>${escHtml(PLANS[p.plan]?.name ?? p.plan)}</td><td class="num">${hUsd(p.amount)}</td><td>@${escHtml(p.payer ?? '?')}</td><td>${p.invoice ? hShort(p.invoice) : '—'}</td><td>${act}</td></tr>`
 		})
 		.join('')
 	const moveRows = moves
 		.map(
 			(m) =>
-				`<tr><td>${hWhen(m.created_at)}</td><td>${KIND_NAME[m.kind] ?? escHtml(m.kind)}</td><td style="color:var(${m.days < 0 ? '--ask' : '--bid'})">${m.days > 0 ? '+' : ''}${m.days}</td><td>${hDay(m.expires_after)}</td><td>${m.note ? escHtml(m.note) : '<span class="note">—</span>'}${m.actor === 'admin' ? ' <span class="note">· tú</span>' : ''}</td></tr>`,
+				`<tr><td>${hWhen(m.created_at)}</td><td>${KIND_NAME[m.kind] ?? escHtml(m.kind)}</td><td class="num ${m.days < 0 ? 'ask' : 'bid'}">${m.days > 0 ? '+' : ''}${m.days}</td><td>${hDay(m.expires_after)}</td><td style="white-space:normal">${m.note ? escHtml(m.note) : '<span class="note">—</span>'}${m.actor === 'admin' ? ' <span class="note">· tú</span>' : ''}</td></tr>`,
 		)
 		.join('')
-	const deviceRows = devices.map((d) => `<tr><td>${hShort(d.print)}</td><td>${hDay(d.added_at)}</td><td>${hWhen(d.seen_at)}</td></tr>`).join('')
-	return adminPage(
-		'pro',
+	const deviceRows = devices.map((d) => `<tr><td class="mono">${hShort(d.print)}</td><td>${hDay(d.added_at)}</td><td>${hWhen(d.seen_at)}</td></tr>`).join('')
+	const suspend = `<form method="post" class="row">${back}<input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="${l.revoked ? '' : 'danger'}" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${u}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form>`
+	const table = (head: string, rows: string, cols: number, empty: string) =>
+		`<div class="wrap"><table class="left"><thead><tr>${head}</tr></thead><tbody>${rows || `<tr><td colspan="${cols}" class="empty">${empty}</td></tr>`}</tbody></table></div>`
+	return proPage(
+		env,
+		'pro-cuentas',
 		`@${u}`,
-		`<p><a href="/admin/pro">← Pro</a></p>
-		<div class="top"><h1>@${u} ${state}</h1>
-		<form method="post" class="row">${back}<input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${u}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></div>
+		`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>
+		${pageHead(`@${u} ${state}`, `Cuenta <span class="mono">${escHtml(l.uuid)}</span> · días gratis usados: ${trials.map((t) => `${escHtml(t.key.startsWith('print:') ? 'un dispositivo' : t.key)} (${hDay(t.created_at)})`).join(', ') || 'ninguno'}`, suspend)}
 		${notice}
 		<div class="cards">
 			<div class="card"><span>Pro hasta</span><b>${hDay(l.expires_at)}</b><small>${left > 0 ? `${left} días` : 'vencido'} · ${escHtml(({ month: 'comprados', year: 'comprados', trial: 'gratis', gift: 'regalados' } as Record<string, string>)[l.plan] ?? l.plan)}</small></div>
@@ -846,32 +854,21 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 			<div class="card"><span>Devolución</span><b>${first === null ? '—' : inTime ? 'En plazo' : 'Fuera'}</b><small>${first === null ? 'sin compras' : `hasta el ${hDay(first + REFUND_DAYS * DAY_MS)}`}</small></div>
 			<div class="card"><span>Cliente desde</span><b>${hDay(l.created_at)}</b><small>${devices.length} dispositivos${devices[0] ? ` · usado ${hDay(devices[0].seen_at)}` : ''}</small></div>
 		</div>
-		${refunds.length ? `<h2>Devoluciones</h2>${refunds.map((r) => refundHtml(r, name)).join('')}` : ''}
-		<h2>Dar o quitar días</h2>${daysForm(name)}
-		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Días</th><th>Importe</th><th>Pagó</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="6" class="empty">Sin pagos.</td></tr>'}</table></div>
-		<h2>Movimientos de días</h2><div class="wrap"><table class="left"><tr><th>Cuándo</th><th>Qué</th><th>Días</th><th>Pro hasta</th><th>Motivo</th></tr>${moveRows || '<tr><td colspan="5" class="empty">Sin movimientos.</td></tr>'}</table></div>
-		<h2>Notas</h2>
-		<form method="post" class="row">${back}<input type="hidden" name="license" value="${escHtml(l.uuid)}"><input name="text" placeholder="escribió por Telegram, le prometí…" required style="flex:1 1 300px"><button name="action" value="note">Guardar nota</button></form>
-		${notes.map((n) => `<p class="noteline"><span class="note">${hWhen(n.created_at)}</span> ${escHtml(n.text)}</p>`).join('') || '<p class="note">Sin notas. Solo las ves tú.</p>'}
-		<h2>Dispositivos</h2><div class="wrap"><table class="left"><tr><th>Huella</th><th>Desde</th><th>Último uso</th></tr>${deviceRows || '<tr><td colspan="3" class="empty">Ninguno.</td></tr>'}</table></div>
-		<p class="note">Días gratis usados: ${trials.map((t) => `${escHtml(t.key.startsWith('print:') ? 'un dispositivo' : t.key)} (${hDay(t.created_at)})`).join(', ') || 'ninguno'}.</p>`,
+		${refunds.length ? panel('Devoluciones', refunds.map((r) => refundHtml(r, name)).join(''), { flush: true }) : ''}
+		<div class="grid3">
+			${panel('Dar o quitar días', daysForm(name), { sub: 'Lo ve en su historial, con el motivo' })}
+			${panel('Notas', `<div class="panel-b"><form method="post" class="row">${back}<input type="hidden" name="license" value="${escHtml(l.uuid)}"><input name="text" placeholder="escribió por Telegram, le prometí…" required style="flex:1 1 160px"><button name="action" value="note">Guardar</button></form></div>${notes.map((n) => `<p class="noteline"><span class="note">${hWhen(n.created_at)}</span>${escHtml(n.text)}</p>`).join('')}`, { sub: 'Solo las ves tú', flush: true })}
+			${panel('Dispositivos', table('<th>Huella</th><th>Desde</th><th>Último uso</th>', deviceRows, 3, 'Ninguno.'), { flush: true })}
+		</div>
+		${panel('Pagos', table('<th>Pagado</th><th>Días</th><th class="num">Importe</th><th>Pagó</th><th>Factura</th><th>Devolución</th>', payRows, 6, 'Sin pagos.'), { flush: true })}
+		${panel('Movimientos de días', table('<th>Cuándo</th><th>Qué</th><th class="num">Días</th><th>Pro hasta</th><th>Motivo</th>', moveRows, 5, 'Sin movimientos.'), { flush: true })}`,
 	)
 }
 
 const daysForm = (username?: string) =>
-	`<form method="post" class="row"><input type="hidden" name="action" value="days">${username ? `<input type="hidden" name="u" value="${escHtml(username)}"><input type="hidden" name="username" value="${escHtml(username)}">` : '<input name="username" placeholder="usuario de QvaPay" required>'}<input name="days" type="number" value="7" style="width:90px" title="Negativo para quitar"> días <input name="note" placeholder="motivo (lo ve el usuario en su historial)" required style="flex:1 1 220px"><button>Apuntar</button></form>`
+	`<form method="post" class="row"><input type="hidden" name="action" value="days">${username ? `<input type="hidden" name="u" value="${escHtml(username)}"><input type="hidden" name="username" value="${escHtml(username)}">` : '<input name="username" placeholder="usuario de QvaPay" required style="flex:1 1 160px">'}<input name="days" type="number" value="7" style="width:80px" title="Negativo para quitar"> <span class="note">días (negativo para quitar)</span><input name="note" placeholder="motivo (lo ve el usuario en su historial)" required style="flex:1 1 220px"><button>Apuntar</button></form>`
 
 // Pagos en CSV (uno por fila, con quién pagó y su identificador en QvaPay) o copia completa de Pro en JSON
-// Secciones del panel de Pro
-const subnav = (on: string) =>
-	`<nav class="ranges" style="margin-bottom:16px">${[
-		['', 'Pendientes y cuentas'],
-		['informes', 'Informes'],
-		['registro', 'Registro'],
-	]
-		.map(([v, name]) => `<a href="/admin/pro${v ? `?view=${v}` : ''}" class="${v === on ? 'on' : ''}">${name}</a>`)
-		.join('')}</nav>`
-
 // Mes en hora de Cuba (AAAA-MM)
 const cubaMonth = (ms: number) => new Date(ms).toLocaleString('en-CA', { timeZone: 'America/Havana', year: 'numeric', month: '2-digit' }).slice(0, 7)
 
@@ -926,8 +923,8 @@ export async function proReport(db: D1, now: number) {
 	}
 }
 
-async function reportsPage(db: D1, notice: string, now: number) {
-	const r = await proReport(db, now)
+async function reportsPage(env: ProEnv, notice: string, now: number) {
+	const r = await proReport(env.DB, now)
 	const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)} %` : '—')
 	const thisMonth = r.months.find((x) => x.month === cubaMonth(now))
 	const lastMonth = r.months.find((x) => x.month === cubaMonth(Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 0, 12)))
@@ -937,14 +934,14 @@ async function reportsPage(db: D1, notice: string, now: number) {
 		.slice(0, 24)
 		.map(
 			(x) =>
-				`<tr><td>${name(x.month)}</td><td>${x.pays}</td><td>${hUsd(x.gross)}</td><td>${x.refunded ? `${hUsd(x.refunded)} <span class="note">(${x.refunds})</span>` : '—'}</td><td><b>${hUsd(x.net)}</b></td><td>${x.newPaying}</td><td>${x.renewals}</td><td>${x.trials}</td></tr>`,
+				`<tr><td style="text-transform:capitalize">${name(x.month)}</td><td>${x.pays}</td><td>${hUsd(x.gross)}</td><td>${x.refunded ? `<span class="ask">${hUsd(x.refunded)}</span> <span class="note">(${x.refunds})</span>` : '—'}</td><td><b>${hUsd(x.net)}</b></td><td>${x.newPaying}</td><td>${x.renewals}</td><td>${x.trials}</td></tr>`,
 		)
 		.join('')
-	return adminPage(
-		'pro',
+	return proPage(
+		env,
+		'pro-informes',
 		'Informes de Pro',
-		`${subnav('informes')}<div class="top"><h1>Informes</h1><a class="note" href="/admin/pro?export=informe">Descargar por meses (CSV)</a></div>${notice}
-		<p class="note">Meses en hora de Cuba. Las devoluciones cuentan en el mes en que se aprobaron.</p>
+		`${pageHead('Informes', 'Meses en hora de Cuba. Las devoluciones cuentan en el mes en que se aprobaron.', '<a class="btn" href="/admin/pro?export=informe">Descargar CSV</a>')}${notice}
 		<div class="cards">
 			${card('Neto este mes', hUsd(thisMonth?.net ?? 0), `${thisMonth?.pays ?? 0} pagos · devuelto ${hUsd(thisMonth?.refunded ?? 0)}`)}
 			${card('Neto el mes pasado', hUsd(lastMonth?.net ?? 0), `${lastMonth?.pays ?? 0} pagos`)}
@@ -953,8 +950,7 @@ async function reportsPage(db: D1, notice: string, now: number) {
 			${card('De gratis a pago', pct(r.converted, r.trialAccounts), `${r.converted} de ${r.trialAccounts} con días gratis`)}
 			${card('Devoluciones', pct(r.refundedCount, r.paidCount), `${r.refundedCount} de ${r.paidCount} pagos`)}
 		</div>
-		<h2>Por meses</h2><div class="wrap"><table><tr><th>Mes</th><th>Pagos</th><th>Cobrado</th><th>Devuelto</th><th>Neto</th><th>Nuevos</th><th>Repiten</th><th>Días gratis</th></tr>${rows || '<tr><td colspan="8" class="empty">Todavía no hay datos.</td></tr>'}</table></div>
-		<p class="note">«Nuevos»: su primera compra. «Repiten»: compras de quien ya había comprado. «Días gratis»: cuentas que empezaron sus 30 días ese mes.</p>`,
+		${panel('Por meses', `<div class="wrap"><table><thead><tr><th>Mes</th><th>Pagos</th><th>Cobrado</th><th>Devuelto</th><th>Neto</th><th>Nuevos</th><th>Repiten</th><th>Días gratis</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">Todavía no hay datos.</td></tr>'}</tbody></table></div>`, { flush: true, foot: '«Nuevos»: su primera compra. «Repiten»: compras de quien ya había comprado. «Días gratis»: cuentas que empezaron sus 30 días ese mes.' })}`,
 	)
 }
 
@@ -964,16 +960,17 @@ const AUDIT_NAME: Record<string, string> = {
 	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba',
 }
 
-async function auditPage(db: D1, now: number) {
-	const { results } = await db.prepare('SELECT * FROM pro_audit ORDER BY at DESC, id DESC LIMIT 300').all<{ at: number; action: string; target: string | null; detail: string | null }>()
+async function auditPage(env: ProEnv, notice: string, now: number) {
+	const { results } = await env.DB.prepare('SELECT * FROM pro_audit ORDER BY at DESC, id DESC LIMIT 300').all<{ at: number; action: string; target: string | null; detail: string | null }>()
 	const rows = results
-		.map((a) => `<tr><td>${hWhen(a.at)}</td><td>${escHtml(AUDIT_NAME[a.action] ?? a.action)}</td><td>${a.target ? escHtml(a.target) : '—'}</td><td style="white-space:normal">${escHtml(a.detail ?? '')}</td></tr>`)
+		.map((a) => `<tr><td>${hWhen(a.at)}</td><td><b>${escHtml(AUDIT_NAME[a.action] ?? a.action)}</b></td><td>${a.target ? escHtml(a.target) : '—'}</td><td style="white-space:normal">${escHtml(a.detail ?? '')}</td></tr>`)
 		.join('')
-	return adminPage(
-		'pro',
+	return proPage(
+		env,
+		'pro-registro',
 		'Registro de Pro',
-		`${subnav('registro')}<h1>Registro</h1><p class="note">Todo lo que se hace en este panel (las últimas 300 acciones). No se puede borrar ni editar. Horas de Cuba.</p>
-		<div class="wrap"><table class="left"><tr><th>Cuándo</th><th>Qué</th><th>Sobre</th><th>Detalle</th></tr>${rows || '<tr><td colspan="4" class="empty">Todavía no hay acciones.</td></tr>'}</table></div>`,
+		`${pageHead('Registro', 'Todo lo que se hace en este panel (las últimas 300 acciones). No se puede borrar ni editar.')}${notice}
+		${panel('Acciones', `<div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Qué</th><th>Sobre</th><th>Detalle</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="empty">Todavía no hay acciones.</td></tr>'}</tbody></table></div>`, { flush: true })}`,
 	)
 }
 
@@ -1039,12 +1036,12 @@ async function readFlash(req: Request, key: string, now: number) {
 }
 
 export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetcher: typeof fetch = fetch): Promise<Response> {
-	const res = await panel(req, env, now, fetcher)
+	const res = await panelResponse(req, env, now, fetcher)
 	if (req.method === 'GET' && hasFlash(req)) res.headers.append('Set-Cookie', flashSet(new URL(req.url), '', 0))
 	return res
 }
 
-async function panel(req: Request, env: ProEnv, now: number, fetcher: typeof fetch): Promise<Response> {
+async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: typeof fetch): Promise<Response> {
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const db = env.DB
 	// Descargas: los pagos en CSV (para devolver o cuadrar cuentas fuera de aquí) y la copia de todo Pro
@@ -1175,14 +1172,31 @@ async function panel(req: Request, env: ProEnv, now: number, fetcher: typeof fet
 		return new Response(null, { status: 303, headers })
 	}
 	notice = await readFlash(req, env.METRICS_KEY!, now)
+	const flash = notice ? `<div class="flash">${notice}</div>` : ''
 	const view = url.searchParams.get('view')
-	if (!client && view === 'informes') return reportsPage(db, notice, now)
-	if (!client && view === 'registro') return auditPage(db, now)
-	if (client && /^[A-Za-z0-9._-]{1,40}$/.test(client.replace(/^@/, ''))) return clientPage(env, client.replace(/^@/, ''), notice, now)
 	const q = (url.searchParams.get('q') ?? '').replace(/^@/, '').trim().toLowerCase()
-	const like = `%${q}%`
+	if (client && /^[A-Za-z0-9._-]{1,40}$/.test(client.replace(/^@/, ''))) return clientPage(env, client.replace(/^@/, ''), flash, now)
+	if (view === 'informes') return reportsPage(env, flash, now)
+	if (view === 'registro') return auditPage(env, flash, now)
+	if (view === 'pagos') return paymentsPage(env, flash, now)
+	if (view === 'cuentas') return accountsPage(env, flash, now)
+	if (q) return searchPage(env, flash, now, q)
+	return homePage(env, flash, now)
+}
 
-	// Resumen
+// Las páginas de Pro llevan en el menú cuántas cosas esperan algo de ti
+async function proPage(env: ProEnv, active: AdminTab, title: string, body: string) {
+	return adminPage(active, title, body, 200, { pro: (await pendingWork(env.DB)).count })
+}
+
+const proSearch = (q = '') => `<form method="get" class="row search" action="/admin/pro">${searchIcon}<input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"></form>`
+const proUsd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('es')} USD`
+const proShort = (s: string) => `<span class="mono" title="${escHtml(s)}">${escHtml(s.slice(0, 8))}…</span>`
+const like = (q: string) => `%${q}%`
+
+// Inicio: lo pendiente, las cifras del negocio, los interruptores y el repaso de pagos
+async function homePage(env: ProEnv, flash: string, now: number) {
+	const db = env.DB
 	const monthStart = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1)
 	const sum = await db
 		.prepare(
@@ -1200,134 +1214,182 @@ async function panel(req: Request, env: ProEnv, now: number, fetcher: typeof fet
 		)
 		.bind(now, monthStart, now - DAY_MS)
 		.first<Record<string, number>>()
-	const usd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('es')} USD`
 	const card = (label: string, value: string, small = '') => `<div class="card"><span>${label}</span><b>${value}</b>${small ? `<small>${small}</small>` : ''}</div>`
 	const cards = `<div class="cards">
 		${card('Pro con días pagados', String(sum?.paying ?? 0), `${sum?.trials ?? 0} con días gratis · ${sum?.gifts ?? 0} regalados`)}
-		${card('Ingresos este mes', usd(sum?.month ?? 0), `${sum?.monthCount ?? 0} pagos`)}
-		${card('Ingresos totales', usd(sum?.total ?? 0), `${sum?.paidCount ?? 0} pagos · devuelto ${usd(sum?.refunded ?? 0)}`)}
+		${card('Ingresos este mes', proUsd(sum?.month ?? 0), `${sum?.monthCount ?? 0} pagos`)}
+		${card('Ingresos totales', proUsd(sum?.total ?? 0), `${sum?.paidCount ?? 0} pagos · devuelto ${proUsd(sum?.refunded ?? 0)}`)}
 		${card('Facturas sin pagar', String(sum?.unpaid ?? 0), 'pedidas en las últimas 24 h')}
 		${card('Días gratis dados', String(sum?.trialKeys ?? 0), 'usuarios y dispositivos que ya los usaron')}
 	</div>`
-
-	// Hora de Cuba, como el resto del proyecto
-	const when = (ms: number) => new Date(ms).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-	const day = (ms: number) => new Date(ms).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric' })
-	const short = (s: string) => `<span title="${escHtml(s)}">${escHtml(s.slice(0, 8))}…</span>`
-	type Row = Checkout & { refunded_at: number | null; owner: string | null; first_paid: number | null; rstatus: string | null }
-	// De dónde se pidió: el simulador (con la cuenta de Telegram) o un dispositivo del terminal (solo su huella)
-	const origin = (c: Row) =>
-		c.tg ? 'Simulador' : `Terminal · ${c.requester ? `@${escHtml(c.requester)}` : short(c.print)}`
-	const checkouts = (where: string, order: string, limit: number) =>
-		db
-			.prepare(
-				`SELECT c.*, COALESCE(c.payer, l.username) AS payer, l.username AS owner, (SELECT r.status FROM pro_refunds r WHERE r.checkout = c.id) AS rstatus,
-					(SELECT MIN(COALESCE(f.paid_at, f.created_at)) FROM pro_checkouts f WHERE f.license = c.license AND f.status = 'paid') AS first_paid
-				FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license
-				WHERE ${where} ${q ? 'AND (LOWER(l.username) LIKE ? OR LOWER(c.payer) LIKE ? OR LOWER(c.requester) LIKE ? OR c.id LIKE ? OR c.invoice LIKE ?)' : ''}
-				ORDER BY ${order} LIMIT ${limit}`,
-			)
-			.bind(...(q ? [like, like, like, like, like] : []))
-			.all<Row>()
-
-	// Pagos: quién pagó (lo dice QvaPay), desde dónde se pidió y su factura
-	const paid = (await checkouts("c.status = 'paid'", 'COALESCE(c.paid_at, c.created_at) DESC', 300)).results
-	const payRows = paid
-		.map((c) => {
-			const at = c.paid_at ?? c.created_at
-			const inTime = c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS
-			const state = c.rstatus
-				? `<span class="pill ${c.rstatus}">${REFUND_STATUS[c.rstatus as RefundStatus]}</span>`
-				: c.refunded_at
-				? `<span class="note">devuelto el ${day(c.refunded_at)}</span>`
-				: `<form method="post" class="row" style="display:inline-flex" onsubmit="return confirm('¿Devolver ${c.amount} USD a @${escHtml(c.payer ?? '')}? Se le quitan los días de esta compra y luego haces tú la transferencia en QvaPay.')"><input type="hidden" name="checkout" value="${escHtml(c.id)}"><input name="note" placeholder="motivo" style="width:130px"><button class="ghost" name="action" value="refund">Devolver</button></form>${inTime ? ' <span class="note">en plazo</span>' : ' <span class="note">fuera de plazo</span>'}`
-			return `<tr><td>${when(at)}</td><td>${c.owner ? userLink(c.owner) : `<b>@${escHtml(c.payer ?? '?')}</b>`}${c.owner && c.owner.toLowerCase() !== (c.payer ?? '').toLowerCase() ? ` <span class="note">pagó @${escHtml(c.payer ?? '?')}</span>` : ''}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td>${usd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? short(c.invoice) : '—'}</td><td>${state}</td></tr>`
-		})
-		.join('')
-
-	// Facturas sin pagar de la última semana: si alguien dice que pagó y no se activó, se comprueba aquí
-	const pending = (await checkouts(`c.status = 'pending' AND c.created_at > ${now - 7 * DAY_MS}`, 'c.created_at DESC', 100)).results
-	const pendingRows = pending
-		.map(
-			(c) =>
-				`<tr><td>${when(c.created_at)}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td>${usd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? short(c.invoice) : '—'}</td><td>${now - c.created_at < CHECKOUT_MS ? 'esperando el pago' : '<span class="note">caducada</span>'}</td>
-				<td><form method="post"><input type="hidden" name="checkout" value="${escHtml(c.id)}"><button class="ghost" name="action" value="check" title="Preguntar a QvaPay si ya se pagó">Comprobar</button></form></td></tr>`,
-		)
-		.join('')
-
-	// Licencias: plan, vencimiento, dispositivos, cuentas del simulador y lo pagado
-	const { results } = await db
-		.prepare(
-			`SELECT l.uuid, l.username, l.plan, l.expires_at, l.revoked, l.created_at,
-				(SELECT COUNT(*) FROM pro_prints p WHERE p.license = l.uuid) AS devices,
-				(SELECT MAX(p.seen_at) FROM pro_prints p WHERE p.license = l.uuid) AS seen,
-				
-				(SELECT COUNT(*) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid') AS pays,
-				(SELECT COALESCE(SUM(c.amount), 0) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid' AND c.refunded_at IS NULL) AS paid
-			FROM pro_licenses l WHERE l.merged_into IS NULL ${q ? 'AND (LOWER(l.username) LIKE ? OR l.uuid LIKE ?)' : ''} ORDER BY l.revoked, l.expires_at DESC LIMIT 500`,
-		)
-		.bind(...(q ? [like, like] : []))
-		.all<License & { created_at: number; devices: number; seen: number | null; pays: number; paid: number }>()
-	const planName = (p: string) => ({ month: 'comprados (30)', year: 'comprados (365)', trial: 'gratis', gift: 'regalados' })[p] ?? p
-	const rows = results
-		.map((l) => {
-			const left = Math.ceil((l.expires_at - now) / DAY_MS)
-			const state = l.revoked ? ' <span class="note">(suspendida)</span>' : left <= 0 ? ' <span class="note">(vencida)</span>' : ` <span class="note">(${left} días)</span>`
-			
-			const who = userLink(l.username)
-			return `<tr><td>${who}</td><td>${planName(l.plan)}</td><td>${day(l.created_at)}</td><td>${day(l.expires_at)}${state}</td><td>${l.devices}${l.seen ? ` <span class="note">· usado ${day(l.seen)}</span>` : ''}</td><td>${!l.pays ? '<span class="note">sin pagos</span>' : l.paid ? `${l.pays} · ${usd(l.paid)}` : '<span class="note">devuelto</span>'}</td>
-			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${escHtml(l.username)}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></td></tr>`
-		})
-		.join('')
 	// Pendientes: lo que requiere que hagas algo (si está vacío, no hay nada que hacer)
 	const work = await pendingWork(db)
 	const issueRows = work.issues
 		.map(
 			(i) =>
-				`<div class="rf"><div class="rf-head"><span class="pill approved">Cobrado sin activar</span> @${escHtml(i.payer ?? '?')} · <b>${hUsd(i.amount)}</b>${i.paid_at ? ` · ${escHtml(i.paid_at.slice(0, 16).replace('T', ' '))}` : ''}</div>
+				`<div class="rf"><div class="rf-head"><span class="pill approved">Cobrado sin activar</span> @${escHtml(i.payer ?? '?')} · <b>${hUsd(i.amount)}</b>${i.paid_at ? ` <span class="note">· ${escHtml(i.paid_at.slice(0, 16).replace('T', ' '))}</span>` : ''}</div>
 				<p class="note">QvaPay lo cobró y aquí no consta (factura ${hShort(i.invoice)}). Actívalo para quien pagó, o devuélvele el dinero si no corresponde.</p>
 				<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(i.invoice)}"><button name="action" value="recover">Activar para @${escHtml(i.payer ?? '?')}</button></form></div>`,
 		)
 		.join('')
-	// Movimientos de días: todo lo que cambió los días de cada cuenta, con el motivo
+	const pending = panel(
+		`Pendientes ${work.count ? `<span class="count">${work.count}</span>` : ''}`,
+		work.count
+			? work.refunds.map((r) => refundHtml(r)).join('') + issueRows
+			: '<div class="panel-b"><p class="allclear"><i>✓</i>Nada pendiente: ni devoluciones por decidir o transferir, ni pagos sin activar.</p></div>',
+		{ sub: work.count ? 'Devoluciones por decidir o transferir y pagos que QvaPay cobró sin activarse' : '', flush: true },
+	)
+	const proOn = await proEnabled(db, now)
+	const paused = await ordersPaused(db, now)
+	const toggles = `<div class="toggles">${
+		proOn
+			? `<form method="post" class="flag on"><b>Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis al conectar) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
+			: `<form method="post" class="flag"><b>Pro está apagado</b><span class="note">No se anuncia ni se ofrece: la web no lo menciona, el terminal no tiene orden inteligente ni compras y el simulador solo tiene BTC y ETH.</span><button name="action" value="pro-on" onclick="return confirm('¿Encender Pro? Se anuncia en la web y todos los que conecten su cuenta reciben 30 días gratis.')">Encender</button></form>`
+	}${
+		paused
+			? `<form method="post" class="flag paused"><b>Publicar ofertas está en pausa</b><span class="note">Quien intente publicar desde el terminal ve: «${ORDERS_PAUSED_MSG}» Tomar ofertas y cerrar órdenes siguen funcionando.</span><button name="action" value="orders-resume" onclick="return confirm('¿Reanudar la publicación de ofertas desde el terminal?')">Reanudar</button></form>`
+			: `<form method="post" class="flag on"><b>Publicar ofertas funciona</b><span class="note">Para cortarlo al momento si aparece un fallo (tomar ofertas y cerrar órdenes siguen funcionando).</span><button class="ghost" name="action" value="orders-pause" onclick="return confirm('¿Pausar la publicación de ofertas desde el terminal? Quien lo intente verá un aviso de ajustes.')">Pausar</button></form>`
+	}<form method="post" class="flag${alertsReady(env) ? ' on' : ''}"><b>${alertsReady(env) ? 'Avisos de Telegram activados' : 'Avisos de Telegram sin configurar'}</b><span class="note">${alertsReady(env) ? 'Pagos nuevos, devoluciones pedidas y el repaso de cada mañana llegan a tu grupo.' : 'Falta el token del bot (TELEGRAM_BOT_TOKEN) o el chat del grupo (ALERT_CHAT).'}</span>${alertsReady(env) ? '<button class="ghost" name="action" value="alert-test">Probar</button>' : ''}</form></div>`
+	const upkeep = `<div class="stack">
+		<form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y apunta en Pendientes las que aquí no constan">Repasar pagos con QvaPay</button></form>
+		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
+		<p class="note"><a href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a href="/admin/pro?export=copia">Copia completa (JSON)</a></p></div>`
+	return proPage(
+		env,
+		'pro',
+		'Pro',
+		`${pageHead('Inicio', 'De cada usuario solo se guarda su usuario de QvaPay, hasta cuándo tiene Pro y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay.', proSearch())}
+		${flash}${cards}${pending}
+		<div class="grid2">${panel('Estado', toggles, { flush: true })}${panel('Pagos y copias', upkeep, { foot: `Política: se compran días, nada se cobra solo; devolución completa en los ${REFUND_DAYS} días siguientes a la primera compra. Si Pro falla por nuestra culpa, en vez de devolver se dan los días perdidos.` })}</div>`,
+	)
+}
+
+type PayRow = Checkout & { refunded_at: number | null; owner: string | null; first_paid: number | null; rstatus: string | null }
+// De dónde se pidió: el simulador (con la cuenta de Telegram) o un dispositivo del terminal (solo su huella)
+const origin = (c: PayRow) => (c.tg ? 'Simulador' : `Terminal · ${c.requester ? `@${escHtml(c.requester)}` : proShort(c.print)}`)
+const checkouts = (db: D1, where: string, order: string, limit: number, q: string) =>
+	db
+		.prepare(
+			`SELECT c.*, COALESCE(c.payer, l.username) AS payer, l.username AS owner, (SELECT r.status FROM pro_refunds r WHERE r.checkout = c.id) AS rstatus,
+				(SELECT MIN(COALESCE(f.paid_at, f.created_at)) FROM pro_checkouts f WHERE f.license = c.license AND f.status = 'paid') AS first_paid
+			FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license
+			WHERE ${where} ${q ? 'AND (LOWER(l.username) LIKE ? OR LOWER(c.payer) LIKE ? OR LOWER(c.requester) LIKE ? OR c.id LIKE ? OR c.invoice LIKE ?)' : ''}
+			ORDER BY ${order} LIMIT ${limit}`,
+		)
+		.bind(...(q ? [like(q), like(q), like(q), like(q), like(q)] : []))
+		.all<PayRow>()
+		.then((r) => r.results)
+
+// Pagos: quién pagó (lo dice QvaPay), desde dónde se pidió y su factura
+async function paymentsPanel(env: ProEnv, now: number, q = '') {
+	const paid = await checkouts(env.DB, "c.status = 'paid'", 'COALESCE(c.paid_at, c.created_at) DESC', 300, q)
+	const rows = paid
+		.map((c) => {
+			const inTime = c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS
+			const state = c.rstatus
+				? `<span class="pill ${c.rstatus}">${REFUND_STATUS[c.rstatus as RefundStatus]}</span>`
+				: c.refunded_at
+					? `<span class="note">devuelto el ${hDay(c.refunded_at)}</span>`
+					: `${refundButton(c.id, c.amount, c.payer ?? '')} <span class="note">${inTime ? 'en plazo' : 'fuera de plazo'}</span>`
+			return `<tr><td>${hWhen(c.paid_at ?? c.created_at)}</td><td>${c.owner ? userLink(c.owner) : `<b>@${escHtml(c.payer ?? '?')}</b>`}${c.owner && c.owner.toLowerCase() !== (c.payer ?? '').toLowerCase() ? ` <span class="note">pagó @${escHtml(c.payer ?? '?')}</span>` : ''}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td class="num">${proUsd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? proShort(c.invoice) : '—'}</td><td>${state}</td></tr>`
+		})
+		.join('')
+	return panel(
+		'Pagos',
+		`<div class="wrap"><table class="left"><thead><tr><th>Pagado</th><th>Cuenta</th><th>Días</th><th class="num">Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</tbody></table></div>`,
+		{ sub: q ? '' : 'Los últimos 300', flush: true, actions: '<a class="btn" href="/admin/pro?export=pagos">Descargar CSV</a>' },
+	)
+}
+
+// Facturas sin pagar de la última semana: si alguien dice que pagó y no se activó, se comprueba aquí
+async function unpaidPanel(env: ProEnv, now: number, q = '') {
+	const pending = await checkouts(env.DB, `c.status = 'pending' AND c.created_at > ${now - 7 * DAY_MS}`, 'c.created_at DESC', 100, q)
+	const rows = pending
+		.map(
+			(c) =>
+				`<tr><td>${hWhen(c.created_at)}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td class="num">${proUsd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? proShort(c.invoice) : '—'}</td><td>${now - c.created_at < CHECKOUT_MS ? '<span class="pill requested">esperando el pago</span>' : '<span class="pill">caducada</span>'}</td>
+				<td class="num"><form method="post"><input type="hidden" name="checkout" value="${escHtml(c.id)}"><button class="ghost" name="action" value="check" title="Preguntar a QvaPay si ya se pagó">Comprobar</button></form></td></tr>`,
+		)
+		.join('')
+	return panel(
+		'Facturas sin pagar',
+		`<div class="wrap"><table class="left"><thead><tr><th>Pedida</th><th>Días</th><th class="num">Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</tbody></table></div>`,
+		{ sub: 'De la última semana. Si alguien dice que pagó y no se le activó, «Comprobar» le pregunta a QvaPay', flush: true },
+	)
+}
+
+// Cuentas: días, vencimiento, dispositivos y lo pagado
+async function accountsPanel(env: ProEnv, now: number, q = '') {
+	const { results } = await env.DB
+		.prepare(
+			`SELECT l.uuid, l.username, l.plan, l.expires_at, l.revoked, l.created_at,
+				(SELECT COUNT(*) FROM pro_prints p WHERE p.license = l.uuid) AS devices,
+				(SELECT MAX(p.seen_at) FROM pro_prints p WHERE p.license = l.uuid) AS seen,
+				(SELECT COUNT(*) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid') AS pays,
+				(SELECT COALESCE(SUM(c.amount), 0) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid' AND c.refunded_at IS NULL) AS paid
+			FROM pro_licenses l WHERE l.merged_into IS NULL ${q ? 'AND (LOWER(l.username) LIKE ? OR l.uuid LIKE ?)' : ''} ORDER BY l.revoked, l.expires_at DESC LIMIT 500`,
+		)
+		.bind(...(q ? [like(q), like(q)] : []))
+		.all<License & { created_at: number; devices: number; seen: number | null; pays: number; paid: number }>()
+	const planName = (p: string) => ({ month: 'comprados (30)', year: 'comprados (365)', trial: 'gratis', gift: 'regalados' })[p] ?? p
+	const rows = results
+		.map((l) => {
+			const left = Math.ceil((l.expires_at - now) / DAY_MS)
+			const state = l.revoked ? '<span class="pill rejected">Suspendida</span>' : left <= 0 ? '<span class="pill">Vencida</span>' : `<span class="pill approved-ok">${left} días</span>`
+			return `<tr><td>${userLink(l.username)}</td><td>${state}</td><td>${planName(l.plan)}</td><td>${hDay(l.expires_at)}</td><td>${hDay(l.created_at)}</td><td>${l.devices}${l.seen ? ` <span class="note">· usado ${hDay(l.seen)}</span>` : ''}</td><td class="num">${!l.pays ? '<span class="note">sin pagos</span>' : l.paid ? `${proUsd(l.paid)} <span class="note">· ${l.pays}</span>` : '<span class="note">devuelto</span>'}</td>
+			<td class="num"><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${escHtml(l.username)}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></td></tr>`
+		})
+		.join('')
+	return panel(
+		'Cuentas',
+		`<div class="wrap"><table class="left"><thead><tr><th>Usuario</th><th>Estado</th><th>Últimos días</th><th>Pro hasta</th><th>Desde</th><th>Dispositivos</th><th class="num">Pagado</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</tbody></table></div>`,
+		{ sub: q ? '' : `${results.length} cuentas · haz clic en un usuario para ver su ficha`, flush: true },
+	)
+}
+
+// Movimientos de días: todo lo que cambió los días de cada cuenta, con el motivo
+async function movesPanel(env: ProEnv, q = '') {
 	const moves = (
-		await db
+		await env.DB
 			.prepare(
 				`SELECT d.*, l.username FROM pro_days d JOIN pro_licenses l ON l.uuid = d.license ${q ? 'WHERE LOWER(l.username) LIKE ? OR d.checkout LIKE ?' : ''} ORDER BY d.created_at DESC, d.id DESC LIMIT ${q ? 300 : 100}`,
 			)
-			.bind(...(q ? [like, like] : []))
-			.all<{ id: number; license: string; username: string; kind: string; days: number; expires_before: number | null; expires_after: number; checkout: string | null; note: string | null; actor: string; created_at: number }>()
+			.bind(...(q ? [like(q), like(q)] : []))
+			.all<{ username: string; kind: string; days: number; expires_after: number; note: string | null; actor: string; created_at: number }>()
 	).results
-	const kindName: Record<string, string> = { trial: 'Días gratis', purchase: 'Compra', gift: 'Regalo', refund: 'Devolución', adjust: 'Ajuste', import: 'Saldo inicial' }
-	const moveRows = moves
+	const rows = moves
 		.map(
 			(m) =>
-				`<tr><td>${when(m.created_at)}</td><td>${userLink(m.username)}</td><td>${kindName[m.kind] ?? escHtml(m.kind)}</td><td style="color:var(${m.days < 0 ? '--ask' : '--bid'})">${m.days > 0 ? '+' : ''}${m.days}</td><td>${day(m.expires_after)}</td><td>${m.note ? escHtml(m.note) : '<span class="note">—</span>'}${m.actor === 'admin' ? ' <span class="note">· tú</span>' : ''}</td></tr>`,
+				`<tr><td>${hWhen(m.created_at)}</td><td>${userLink(m.username)}</td><td>${KIND_NAME[m.kind] ?? escHtml(m.kind)}</td><td class="num ${m.days < 0 ? 'ask' : 'bid'}">${m.days > 0 ? '+' : ''}${m.days}</td><td>${hDay(m.expires_after)}</td><td style="white-space:normal">${m.note ? escHtml(m.note) : '<span class="note">—</span>'}${m.actor === 'admin' ? ' <span class="note">· tú</span>' : ''}</td></tr>`,
 		)
 		.join('')
-	return adminPage(
+	return panel(
+		'Movimientos de días',
+		`<div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Usuario</th><th>Qué</th><th class="num">Días</th><th>Pro hasta</th><th>Motivo</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">Todavía no hay movimientos.</td></tr>'}</tbody></table></div>`,
+		{ sub: q ? '' : 'Los últimos 100', flush: true },
+	)
+}
+
+async function paymentsPage(env: ProEnv, flash: string, now: number) {
+	return proPage(env, 'pro-pagos', 'Pagos de Pro', `${pageHead('Pagos', 'Quién pagó lo confirma QvaPay. Desde aquí se devuelve una compra: se le quitan sus días y luego haces tú la transferencia.', proSearch())}${flash}${await paymentsPanel(env, now)}${await unpaidPanel(env, now)}`)
+}
+
+async function accountsPage(env: ProEnv, flash: string, now: number) {
+	return proPage(
+		env,
+		'pro-cuentas',
+		'Cuentas de Pro',
+		`${pageHead('Cuentas', 'Una cuenta por usuario de QvaPay, con todos sus dispositivos.', proSearch())}${flash}${await accountsPanel(env, now)}
+		${panel('Dar o quitar días', daysForm(), { sub: 'Un regalo, una compensación por un fallo o una corrección. Si aún no ha conectado su cuenta, se le activan al conectarla' })}
+		${await movesPanel(env)}`,
+	)
+}
+
+async function searchPage(env: ProEnv, flash: string, now: number, q: string) {
+	return proPage(
+		env,
 		'pro',
-		'Pro',
-		`${subnav('')}<div class="top"><h1>Pro</h1><form method="get" class="row"><input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"><button>Buscar</button>${q ? ' <a href="/admin/pro" class="note">quitar filtro</a>' : ''}</form></div>
-		<p class="note">De cada usuario solo se guarda su usuario de QvaPay, hasta cuándo tiene Pro y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay. Horas de Cuba.</p>${notice}
-		<h2 class="first">Pendientes ${work.count ? `<span class="pill requested">${work.count}</span>` : ''}</h2>${work.count ? work.refunds.map((r) => refundHtml(r)).join('') + issueRows : '<p class="ok">✅ Nada pendiente: ni devoluciones por decidir o transferir, ni pagos sin activar.</p>'}
-		${
-			(await proEnabled(db, now))
-				? `<form method="post" class="row flag on"><b>● Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis al conectar) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
-				: `<form method="post" class="row flag"><b>○ Pro está apagado</b><span class="note">No se anuncia ni se ofrece: la web no lo menciona, el terminal no tiene orden inteligente ni compras y el simulador solo tiene BTC y ETH.</span><button name="action" value="pro-on" onclick="return confirm('¿Encender Pro? Se anuncia en la web y todos los que conecten su cuenta reciben 30 días gratis.')">Encender Pro</button></form>`
-		}${
-			(await ordersPaused(db, now))
-				? `<form method="post" class="row flag"><b>⏸ Publicar ofertas está en pausa</b><span class="note">Quien intente publicar desde el terminal ve: «${ORDERS_PAUSED_MSG}» Tomar ofertas y cerrar órdenes siguen funcionando.</span><button name="action" value="orders-resume" onclick="return confirm('¿Reanudar la publicación de ofertas desde el terminal?')">Reanudar</button></form>`
-				: `<form method="post" class="row flag on"><b>● Publicar ofertas funciona</b><span class="note">Para cortarlo al momento si aparece un fallo (tomar ofertas y cerrar órdenes siguen funcionando).</span><button class="ghost" name="action" value="orders-pause" onclick="return confirm('¿Pausar la publicación de ofertas desde el terminal? Quien lo intente verá un aviso de ajustes.')">Pausar</button></form>`
-		}<form method="post" class="row flag${alertsReady(env) ? ' on' : ''}"><b>${alertsReady(env) ? '● Avisos de Telegram activados' : '○ Avisos de Telegram sin configurar'}</b><span class="note">${alertsReady(env) ? 'Pagos nuevos, devoluciones pedidas y el repaso de cada mañana llegan a tu grupo.' : 'Falta el token del bot (TELEGRAM_BOT_TOKEN) o el chat del grupo (ALERT_CHAT).'}</span>${alertsReady(env) ? '<button class="ghost" name="action" value="alert-test">Enviar aviso de prueba</button>' : ''}</form>${cards}
-		<div class="top" style="margin-top:16px"><form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y enseña las que aquí no constan">Repasar pagos con QvaPay</button></form>
-		<span class="row"><a class="note" href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a class="note" href="/admin/pro?export=copia">Copia completa (JSON)</a></span></div>
-		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
-		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Cuenta</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
-		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
-		<h2>Cuentas</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Últimos días</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
-		<h2>Movimientos de días ${q ? '' : '<span class="note">(los últimos 100)</span>'}</h2><div class="wrap"><table class="left"><tr><th>Cuándo</th><th>Usuario</th><th>Qué</th><th>Días</th><th>Pro hasta</th><th>Motivo</th></tr>${moveRows || '<tr><td colspan="6" class="empty">Todavía no hay movimientos.</td></tr>'}</table></div>
-		<h2>Dar o quitar días</h2>${daysForm()}
-		<p class="note">Política: se compran días, nada se cobra solo; devolución completa en los ${REFUND_DAYS} días siguientes a la primera compra. Si Pro falla por nuestra culpa, en vez de devolver se dan los días perdidos (Dar o quitar días).</p>`,
+		`Buscar «${escHtml(q)}»`,
+		`${pageHead(`Resultados para «${escHtml(q)}»`, '<a href="/admin/pro">Quitar la búsqueda</a>', proSearch(q))}${flash}${await accountsPanel(env, now, q)}${await paymentsPanel(env, now, q)}${await unpaidPanel(env, now, q)}${await movesPanel(env, q)}`,
 	)
 }

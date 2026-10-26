@@ -362,17 +362,16 @@ test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobab
 			s.now(),
 			s.q.fetcher,
 		).then((r) => r.text())
-	let html = await panel()
+	let html = await panel(undefined, '?view=pagos')
 	assert.match(html, /Facturas sin pagar/)
 	assert.match(html, /Terminal · @leo/)
 	assert.match(html, /Terminal · <span/)
 	assert.match(html, /caducada/)
 	// Comprobar a mano: QvaPay la da por pagada y se activa
 	const id = (s.db.prepare("SELECT id FROM pro_checkouts WHERE invoice = 'inv-1'").get() as { id: string }).id
-	assert.match(await panel({ action: 'check', checkout: id }), /ya está activada/)
-	html = await panel()
-	assert.match(html, /<b>@leo<\/b><\/a> <span class="note">pagó @pepe<\/span>/)
-	assert.match(html, /Ingresos totales<\/span><b>1,99 USD/)
+	assert.match(await panel({ action: 'check', checkout: id }, '?view=pagos'), /ya está activada/)
+	assert.match(await panel(undefined, '?view=pagos'), /<b>@leo<\/b><\/a> <span class="note">pagó @pepe<\/span>/)
+	assert.match(await panel(), /Ingresos totales<\/span><b>1,99 USD/)
 	// Buscar por usuario
 	assert.doesNotMatch(await panel(undefined, '?q=nadie'), /pagó @pepe/)
 	assert.match(await panel(undefined, '?q=PEPE'), /pagó @pepe/)
@@ -394,7 +393,7 @@ test('paga otra cuenta (otra sesión abierta en qvapay.com): Pro queda a nombre 
 	// En el panel: pagó @pepe para @Ana; devolver el primer pago es transferir a @pepe
 	const form = (fields?: Record<string, string>) =>
 		proAdmin(
-			new Request('https://app.terminalp2p.com/admin/pro', { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+			new Request('https://app.terminalp2p.com/admin/pro?view=pagos', { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
 			s.env,
 			s.now(),
 		).then((x) => x.text())
@@ -587,7 +586,7 @@ test('devolución en pasos: la pide el usuario desde «Mi cuenta», la apruebas 
 	// Otro usuario no puede pedir la devolución de una compra ajena
 	assert.equal((await s.post('/pro/refund', { print: P2, username: 'leo', checkout: checkout.id, reason: 'mía no' })).status, 404)
 	// En el panel aparece abierta; al aprobarla se le quitan esos 30 días (le quedan los gratis)
-	assert.match(await admin(), /Pendientes <span class="pill requested">1<\/span>/)
+	assert.match(await admin(), /Pendientes <span class="count">1<\/span>/)
 	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
 	assert.match(await admin({ action: 'refund-approve', id, note: 'ok' }), /transfiere <b>1,99 USD<\/b> a <b>@ana<\/b>/)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.expiresAt, T0 + 30 * 86_400_000)

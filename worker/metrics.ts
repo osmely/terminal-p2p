@@ -9,6 +9,7 @@
 
 import { p2pFee } from '../src/qvapay/fees.ts'
 import { COINS } from '../src/terminal/market.ts'
+import { pageHead, panel } from './admin.ts'
 import { cubaDate } from './informal.ts'
 import type { D1 } from './rates.ts'
 
@@ -300,7 +301,9 @@ export function panelHtml(s: Summary) {
 	const step = (label: string, value: number, of: number | null) => `<li><b>${n(value)}</b><span>${label}</span>${of != null ? `<em>${pct(value, of)}</em>` : ''}</li>`
 	const ranges = [7, 30, 90, 365].map((d) => `<a href="?days=${d}" class="${d === s.days ? 'on' : ''}">${d === 365 ? '1 año' : `${d} días`}</a>`).join('')
 	const errors = Object.entries(s.errors)
-	return `<div class="top"><div><h1>Métricas de Terminal P2P</h1><p class="note">Acciones del P2P hechas desde el terminal. Anónimas: sin usuario, token ni IP.</p></div><nav class="ranges">${ranges}</nav></div>
+	const table = (head: string[], rows: string) =>
+		rows ? `<div class="wrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="empty">Aún no hay acciones en este periodo.</p>'
+	return `${pageHead('Métricas', 'Acciones del P2P hechas desde el terminal. Anónimas: sin usuario, token ni IP.', `<nav class="ranges">${ranges}</nav>`)}
 <div class="cards">
 ${card('Ofertas publicadas aquí', n(s.created))}
 ${card('Operaciones tomadas aquí', n(s.taken))}
@@ -308,7 +311,6 @@ ${card('Operaciones completadas', n(s.completed), 'liberadas aquí o vistas comp
 ${card('Volumen completado', `${n(s.volume)} USD`)}
 ${card('Vender ya', n(s.swaps), `${n(s.swapsCompleted)} completadas · ${n(s.swapVolume)} USD`)}
 </div>
-<h2>Embudos</h2>
 <div class="funnels">
 <div class="funnel"><h3>Ofertas publicadas desde el terminal</h3><p>De las ofertas creadas aquí, cuántas tuvieron contraparte y cuántas llegaron a completar al menos una operación.</p><ol>
 ${step('publicadas', s.created, null)}${step('con contraparte', s.createdTaken, s.created)}${step('con al menos una operación completada', s.createdCompleted, s.created)}</ol></div>
@@ -317,23 +319,19 @@ ${step('tomadas', s.taken, null)}${step('pagadas', s.takenPaid, s.taken)}${step(
 <div class="funnel"><h3>Vender ya</h3><p>Ventas de saldo a ofertas VIP hechas con «Vender ya», y cuántas se completaron.</p><ol>
 ${step('ventas empezadas', s.swaps, null)}${step('completadas', s.swapsCompleted, s.swaps)}</ol></div>
 </div>
-<h2>Por mercado</h2>
-<div class="wrap">${
-		s.byCoin.length
-			? `<table><thead><tr><th>Mercado</th><th>Publicadas</th><th>Tomadas</th><th>Completadas</th><th>Volumen (USD)</th></tr></thead><tbody>${s.byCoin
-					.map((c) => `<tr><td>${esc(coinName(c.coin))}</td><td>${n(c.created)}</td><td>${n(c.taken)}</td><td>${n(c.completed)}</td><td>${n(c.volume)}</td></tr>`)
-					.join('')}</tbody></table>`
-			: '<p class="empty">Aún no hay acciones en este periodo.</p>'
-	}</div>
-<h2>Por día (hora de Cuba)</h2>
-<div class="wrap">${
-		s.byDay.length
-			? `<table><thead><tr><th>Día</th><th>Publicadas</th><th>Tomadas</th><th>Pagadas</th><th>Completadas</th><th>Volumen (USD)</th></tr></thead><tbody>${s.byDay
-					.map((d) => `<tr><td>${d.day}</td><td>${n(d.created)}</td><td>${n(d.taken)}</td><td>${n(d.paid)}</td><td>${n(d.completed)}</td><td>${n(d.volume)}</td></tr>`)
-					.join('')}</tbody></table>`
-			: '<p class="empty">Aún no hay acciones en este periodo.</p>'
-	}</div>
-<h2>Errores de QvaPay</h2>
-<p class="note">${errors.length ? errors.map(([k, v]) => `${EVENT_NAMES[k] ?? k}: ${n(v)}`).join(' · ') : 'Ninguno en este periodo.'}</p>
-<p class="note">Una operación completada se cuenta si se liberó desde el terminal o si quien la empezó aquí la vio completada en «Mis operaciones». Las acciones hechas en la web de QvaPay no se ven.</p>`
+${panel(
+	'Por mercado',
+	table(['Mercado', 'Publicadas', 'Tomadas', 'Completadas', 'Volumen (USD)'], s.byCoin.map((c) => `<tr><td>${esc(coinName(c.coin))}</td><td>${n(c.created)}</td><td>${n(c.taken)}</td><td>${n(c.completed)}</td><td>${n(c.volume)}</td></tr>`).join('')),
+	{ flush: true },
+)}
+${panel(
+	'Por día',
+	table(['Día', 'Publicadas', 'Tomadas', 'Pagadas', 'Completadas', 'Volumen (USD)'], s.byDay.map((d) => `<tr><td>${d.day}</td><td>${n(d.created)}</td><td>${n(d.taken)}</td><td>${n(d.paid)}</td><td>${n(d.completed)}</td><td>${n(d.volume)}</td></tr>`).join('')),
+	{ sub: 'Hora de Cuba', flush: true },
+)}
+${panel(
+	'Errores de QvaPay',
+	`<p class="note" style="margin:0">${errors.length ? errors.map(([k, v]) => `${EVENT_NAMES[k] ?? k}: <b>${n(v)}</b>`).join(' · ') : 'Ninguno en este periodo.'}</p>`,
+	{ foot: 'Una operación completada se cuenta si se liberó desde el terminal o si quien la empezó aquí la vio completada en «Mis operaciones». Las acciones hechas en la web de QvaPay no se ven.' },
+)}`
 }

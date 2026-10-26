@@ -11,7 +11,7 @@
 
 import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle, type Quote, type SimState, type Symbol } from '../src/sim/engine.ts'
 import { licenseOfPrint, ProError, type ProEnv } from './pro.ts'
-import { adminPage, askKey } from './admin.ts'
+import { adminPage, askKey, pageHead, panel } from './admin.ts'
 import { cubaDate } from './informal.ts'
 import { authorized } from './metrics.ts'
 import { readSession, readWho, sessionCookie, sessionToken } from './session.ts'
@@ -532,7 +532,7 @@ export async function simAdmin(req: Request, env: SimEnv, now = Date.now()): Pro
 	return adminPage(
 		'sim',
 		'Simulador',
-		`<h1>Simulador</h1><p class="note">Uso de Terminal Trading. «Entró» es abrir el simulador con sesión; cuenta una vez por jugador y día (hora de Cuba). Sin datos personales: solo el número de jugador.</p>
+		`${pageHead('Simulador', 'Uso de Terminal Trading. «Entró» es abrir el simulador con sesión; cuenta una vez por jugador y día (hora de Cuba). Sin datos personales: solo el número de jugador.', '<a class="btn" href="https://sim.terminalp2p.com" target="_blank" rel="noopener">Abrir el simulador ↗</a>')}
 		<div class="cards">
 			${card('Jugadores', String(players), `${new7} nuevos en 7 días · ${withPro} con Pro`)}
 			${card('Entraron hoy', String(a1), `${a7} en 7 días · ${a30} en 30 días`)}
@@ -540,7 +540,7 @@ export async function simAdmin(req: Request, env: SimEnv, now = Date.now()): Pro
 			${card('Operaciones', String(trades), `${orders7} órdenes en 7 días · ${open} abiertas ahora`)}
 			${card('Resultado mediano', median == null ? '—' : fmtPct(median), `${winners} de ${pnls.length} ganan`)}
 		</div>
-		<h2>Día a día <span class="note">(últimos 30)</span></h2><div class="wrap"><table class="left"><tr><th>Día</th><th>Nuevos</th><th>Entraron</th><th>Operaron</th><th>Órdenes</th></tr>${dayRows || '<tr><td colspan="5" class="empty">Todavía no hay uso registrado.</td></tr>'}</table></div>
-		<h2>Mercados</h2><div class="wrap"><table class="left"><tr><th>Mercado</th><th>Operaciones</th><th>Jugadores</th></tr>${symRows || '<tr><td colspan="3" class="empty">Nadie ha operado todavía.</td></tr>'}</table></div>`,
+		<div class="grid2">${panel('Día a día', `<div class="wrap"><table><thead><tr><th>Día</th><th>Nuevos</th><th>Entraron</th><th>Operaron</th><th>Órdenes</th></tr></thead><tbody>${dayRows || '<tr><td colspan="5" class="empty">Todavía no hay uso registrado.</td></tr>'}</tbody></table></div>`, { sub: 'Los últimos 30 días', flush: true })}
+		${panel('Mercados', `<div class="wrap"><table><thead><tr><th>Mercado</th><th>Operaciones</th><th>Jugadores</th></tr></thead><tbody>${symRows || '<tr><td colspan="3" class="empty">Nadie ha operado todavía.</td></tr>'}</tbody></table></div>`, { sub: 'Por número de operaciones', flush: true })}</div>`,
 	)
 }
