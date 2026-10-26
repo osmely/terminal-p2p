@@ -397,9 +397,8 @@ function renderBook(b, asks, bids) {
 	if (ask && bid) {
 		const crossed = bid > ask
 		el.className = `spread ${crossed ? 'crossed' : ''}`
-		// Cruzado: sin Pro solo el aviso; la diferencia bruta (sin comisión ni filtros) tienta a algo que quizá no puedes hacer
 		el.innerHTML = crossed
-			? `<span class="lbl">Libro cruzado</span>${window.TPPro?.active ? `<span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>` : ''}`
+			? `<span class="lbl">Libro cruzado</span><span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>`
 			: `<span class="lbl">Diferencial</span><span>${fmtP(ask - bid)} · ${pct(ask / bid - 1)}</span>`
 	} else {
 		el.className = 'spread'
@@ -415,11 +414,19 @@ function renderInsight(b, asks, bids) {
 	const ask = asks[0]
 	const bid = bids[0]
 	const unit = b.coin.unit
-	// Sin Pro solo se dice que está cruzado; con Pro, si lo puedes aprovechar y cuánto queda
+	// Sin Pro, la primera venta y la primera compra del libro; con Pro, solo lo que puedes tomar, cuántos USD
+	// encajan y cuánto te queda
 	const pro = window.TPPro
-	if (ask && bid && bid.price > ask.price && !pro?.active)
-		out.push(`<li class="warn">Libro cruzado: alguien vende más barato de lo que otro compra.${pro?.enabled ? ' Con <b>Pro</b> ves si puedes aprovecharlo y cuánto te quedaría.' : ''}</li>`)
-	else if (ask && bid && bid.price > ask.price) {
+	if (ask && bid && bid.price > ask.price && !pro?.active) {
+		const net = bid.price / ask.price - 1 - 0.0025
+		const legs = `comprar a <b>${fmtP(ask.price)}</b> (@${esc(ask.user)}, ${ask.ops} ops) y vender a <b>${fmtP(bid.price)}</b> (@${esc(bid.user)}, ${bid.ops} ops)`
+		const more = pro?.enabled ? ' Con <b>Pro</b> ves si puedes aprovecharlo, cuántos USD encajan y cuánto te quedaría.' : ''
+		out.push(
+			net > 0
+				? `<li class="warn">Libro cruzado: ${legs} deja <b>${pct(net)}</b> tras la comisión de 0,25%.${more}</li>`
+				: `<li>Libro cruzado, pero no compensa: ${legs} da <b>${pct(net)}</b> tras la comisión de 0,25%.</li>`,
+		)
+	} else if (ask && bid && bid.price > ask.price) {
 		// Con tu comisión real (las cuentas GOLD no la pagan) y solo con ofertas que puedes tomar
 		const acct = typeof bk !== 'undefined' ? bk.acct : null
 		const fee = acct?.connected ? (acct.gold ? 0 : (acct.p2pFee ?? 0.0025)) : 0.0025
