@@ -2,6 +2,7 @@
 // propio token: el dinero nunca pasa por aquí, sigue en el escrow de QvaPay.
 // Usa Request/Response estándar, así que también se prueba en Node.
 
+import { P2P_FEE } from '../qvapay/fees.ts'
 import { logger } from '../log.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
 import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
@@ -150,6 +151,8 @@ export class Broker {
 			kyc: me.kyc,
 			p2pEnabled: me.p2p_enabled,
 			gold: me.golden_check,
+			// La comisión al liberar (la paga quien compra; GOLD no): el terminal muestra los netos con ella
+			p2pFee: P2P_FEE,
 		})
 	}
 

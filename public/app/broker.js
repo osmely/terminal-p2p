@@ -555,6 +555,14 @@ function bookRank(coin, type, price) {
 // La orden inteligente llega en el módulo Pro (/pro/module.js, de un repositorio privado), que rellena el
 // hueco #ofSmart del formulario. Sin Pro, si tu precio ya cruza el libro se avisa de lo que haría.
 // Las rutas que mueven dinero (/smart…) son públicas y se pueden auditar
+// La comisión de QvaPay al liberar la paga quien compra USD (las cuentas GOLD no): la fija llega con tu cuenta
+// (src/qvapay/fees.ts). Al comprar se muestra lo que te llega de verdad
+const feeOf = (usd) => (bk.acct?.gold || !(bk.acct?.p2pFee > 0) ? 0 : Math.round(usd * bk.acct.p2pFee * 100) / 100)
+const netNote = (usd) => {
+	const fee = feeOf(usd)
+	return fee ? ` · te llegan <b>${fmtU(usd - fee)} USD</b> <span class="muted" title="QvaPay cobra un ${(bk.acct.p2pFee * 100).toLocaleString('es')} % al liberar; las cuentas GOLD no lo pagan">(comisión de QvaPay ${fmtU(fee)})</span>` : ''
+}
+
 function smartTeaser(f) {
 	if (!window.TPPro?.enabled) return ''
 	const b = state.book?.coin?.tick === f.coin ? state.book : null
@@ -681,7 +689,7 @@ async function showCreateOffer(preset = null) {
 		const total = f.amount > 0 && f.price > 0 ? f.amount * f.price : 0
 		const rank = bookRank(f.coin, type, f.price)
 		$('ofTotal').innerHTML = total
-			? `${type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtU(total)} ${unit}</b>${rank ? ` · serías la <b>${rank}ª</b> ${type === 'sell' ? 'venta' : 'compra'} del libro` : ''}`
+			? `${type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtU(total)} ${unit}</b>${type === 'buy' ? netNote(f.amount) : ''}${rank ? ` · serías la <b>${rank}ª</b> ${type === 'sell' ? 'venta' : 'compra'} del libro` : ''}`
 			: ''
 		const w = priceWarning(type, f.price, mid)
 		// La orden inteligente (módulo Pro) rellena su hueco y dice si está activa; sin Pro, el aviso de lo que haría
@@ -768,6 +776,7 @@ async function showCreateOffer(preset = null) {
 				<span>${type === 'sell' ? 'Vendes' : 'Compras'}</span><b>${fmtU(f.amount)} USD</b><span></span>
 				<span>Precio</span><b>${fmtP(f.price)} ${unit}</b><span></span>
 				<span>${type === 'sell' ? 'Recibes' : 'Pagas'}</span><b>${fmtU(total)} ${unit}</b><span></span>
+				${type === 'buy' && feeOf(f.amount) ? `<span>Te llegan</span><b>${fmtU(f.amount - feeOf(f.amount))} USD</b><span class="muted">tras la comisión de QvaPay</span>` : ''}
 				<span>Mercado</span><b>${esc(nameOf(f.coin))}</b><span></span>
 				${f.kind === 'flexible' ? `<span>Por partes</span><b>${fmtU(f.orderMin)}–${fmtU(f.orderMax)} USD</b><span></span>` : ''}
 				${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
@@ -890,7 +899,7 @@ function renderManage(o) {
 		const upd = () => {
 			const a = num2($('edAmount').value)
 			const p = Number($('edPrice').value)
-			$('edTotal').innerHTML = a > 0 && p > 0 ? `${o.type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtU(a * p)} ${unit}</b>` : ''
+			$('edTotal').innerHTML = a > 0 && p > 0 ? `${o.type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtU(a * p)} ${unit}</b>${o.type === 'buy' ? netNote(a) : ''}` : ''
 			const w = priceWarning(o.type, p, marketRefs(o.coin).mid)
 			$('edWarn').innerHTML = w ? `<p class="notice warn">${w}</p>` : ''
 		}
@@ -1021,7 +1030,7 @@ function renderTake(uuid, side, l, coin) {
 	const upd = () => {
 		const a = amount()
 		const total = a * l.price
-		$('tkTotal').innerHTML = a > 0 ? `${youBuy ? 'Pagas' : 'Recibes'} <b>${fmtU(total)} ${unit}</b> por <b>${fmtU(a)} USD</b>` : ''
+		$('tkTotal').innerHTML = a > 0 ? `${youBuy ? 'Pagas' : 'Recibes'} <b>${fmtU(total)} ${unit}</b> por <b>${fmtU(a)} USD</b>${youBuy ? netNote(a) : ''}` : ''
 		if ($('tkGo')) $('tkGo').textContent = `Tomar: ${youBuy ? 'comprar' : 'vender'} ${fmtU(a)} USD`
 	}
 	$('tkAmount')?.addEventListener('input', upd)

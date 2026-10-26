@@ -7,6 +7,7 @@
 // secreta (METRICS_SALT), que sirven para unir "publicada" con "completada" pero no para saber
 // de qué oferta se trata, ni siquiera teniendo la base y una lista de ofertas.
 
+import { p2pFee } from '../src/qvapay/fees.ts'
 import { COINS } from '../src/terminal/market.ts'
 import { cubaDate } from './informal.ts'
 import type { D1 } from './rates.ts'
@@ -75,6 +76,17 @@ const tryJson = (s: string | undefined) => {
 	}
 }
 
+// La comisión que cobró QvaPay al liberar, comparada con la que mostramos (la fija de src/qvapay/fees.ts). Un 0
+// es una cuenta GOLD, que no paga. Si no cuadra, el aviso (sin datos de nadie: solo importes) va a los registros
+export function feeMismatch(res: Record<string, unknown>): string | null {
+	const gross = Number(res.gross_amount)
+	const fee = Number(res.fee)
+	if (!(gross > 0) || !Number.isFinite(fee) || fee === 0) return null
+	const expected = p2pFee(gross)
+	if (Math.abs(fee - expected) <= 0.011) return null
+	return `comisión del P2P distinta de la esperada: cobró ${fee} de ${gross} USD (${((fee / gross) * 100).toFixed(3)} %), mostramos ${expected}. Revisa P2P_FEE en src/qvapay/fees.ts`
+}
+
 // Evento de una escritura que pasó por el relé: la petición, la respuesta de QvaPay y X-TP-Meta
 export async function relayEvent(
 	a: { method: string; path: string; query: URLSearchParams; body?: string; meta: string | null; response: Response },
@@ -97,7 +109,11 @@ export async function relayEvent(
 	}
 	if (action.event === 'take') usd ||= cleanUsd(req.amount)
 	// Al liberar, QvaPay devuelve el monto bruto de la operación
-	if (action.event === 'release') usd = cleanUsd(res.gross_amount) || usd
+	if (action.event === 'release') {
+		usd = cleanUsd(res.gross_amount) || usd
+		const odd = feeMismatch(res)
+		if (odd) console.error(odd)
+	}
 	return {
 		t: now,
 		event: action.event,

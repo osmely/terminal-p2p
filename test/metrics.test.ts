@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { actionOf, authorized, clientEvent, fingerprint, parseMeta, relayEvent, sameSecret, summarize, type MetricEvent } from '../worker/metrics.ts'
+import { actionOf, authorized, clientEvent, feeMismatch, fingerprint, parseMeta, relayEvent, sameSecret, summarize, type MetricEvent } from '../worker/metrics.ts'
+import { netUsd, p2pFee } from '../src/qvapay/fees.ts'
 
 const OFFER = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d'
 const ORDER = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
@@ -132,4 +133,14 @@ test('Vender ya: ventas empezadas y completadas, también en ofertas por partes'
 	)
 	assert.deepEqual([s.swaps, s.swapsCompleted, s.swapVolume], [2, 1, 40])
 	assert.deepEqual([s.taken, s.completed, s.volume], [3, 2, 50])
+})
+
+test('comisión del P2P: 0,25 % de lo que recibe quien compra (GOLD no paga), y aviso si QvaPay cobra otra cosa', () => {
+	assert.deepEqual([p2pFee(100), netUsd(100), p2pFee(100, true), netUsd(100, true)], [0.25, 99.75, 0, 100])
+	assert.deepEqual([p2pFee(48), netUsd(48)], [0.12, 47.88])
+	// Lo que devuelve QvaPay al liberar
+	assert.equal(feeMismatch({ gross_amount: 48, fee: 0.12, amount: 47.88 }), null)
+	assert.equal(feeMismatch({ gross_amount: 48, fee: 0 }), null) // cuenta GOLD
+	assert.equal(feeMismatch({ gross_amount: 0, fee: 1 }), null)
+	assert.match(feeMismatch({ gross_amount: 100, fee: 0.5, amount: 99.5 })!, /cobró 0.5 de 100 USD \(0.500 %\), mostramos 0.25/)
 })
