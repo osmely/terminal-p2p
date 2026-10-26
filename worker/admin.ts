@@ -37,6 +37,12 @@ button.ghost{background:none;border:1px solid var(--line);color:var(--text2);pad
 form.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .flag{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.flag .note{flex:1 1 300px;margin:0}.flag.on b{color:var(--bid)}
 .ok{padding:10px 14px;border-radius:8px;background:color-mix(in srgb,var(--bid) 14%,transparent);color:var(--bid)}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:color-mix(in srgb,var(--muted) 18%,transparent);color:var(--text2);vertical-align:middle}
+.pill.requested{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}.pill.approved{background:color-mix(in srgb,var(--ask) 16%,transparent);color:var(--ask)}
+.pill.transferred,.pill.approved-ok{background:color-mix(in srgb,var(--bid) 16%,transparent);color:var(--bid)}.pill.rejected{background:color-mix(in srgb,var(--ask) 12%,transparent);color:var(--ask)}
+.rf{padding:12px 14px;margin-bottom:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.rf p{margin:6px 0 0}.rf form{margin-top:8px}
+.noteline{margin:6px 0;padding:8px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--line)}
+a{color:var(--accent)}td a{text-decoration:none}
 .code{display:inline-block;font:600 18px ui-monospace,Menlo,monospace;padding:10px 14px;border-radius:8px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
 `
 

@@ -10,6 +10,7 @@ import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, 
 import { COINS, type Market } from '../terminal/market.ts'
 import { reputationScore } from '../terminal/ranking.ts'
 import { pendingCount, tradeAlerts } from './alerts.ts'
+import { tradeStats } from './stats.ts'
 import { orderTrades, paymentDetails, toTrades, type Trade } from './trades.ts'
 
 export interface Account {
@@ -104,6 +105,8 @@ export class Broker {
 			switch (route) {
 				case 'GET /trades':
 					return await this.trades(acc)
+				case 'GET /stats':
+					return await this.stats(acc)
 				case 'GET /trade':
 					return await this.trade(ctx, acc)
 				case 'POST /trade/action':
@@ -200,6 +203,19 @@ export class Broker {
 	}
 
 	// ── Operaciones ─────────────────────────────────────────────────────
+
+	// «Mi cuenta»: estadísticas con tus últimas ofertas y tomas (hasta STATS_PAGES páginas de QvaPay)
+	private async stats(acc: Account) {
+		const trades: Trade[] = []
+		let pages = 0
+		let more = true
+		while (more && pages < STATS_PAGES) {
+			const list = await acc.client.listOffers({ my: true, take: 50, page: ++pages })
+			trades.push(...toTrades(list.data, acc.me.uuid).trades)
+			more = list.data.length === 50 && pages * 50 < list.total
+		}
+		return json(200, { stats: tradeStats(trades), partial: more })
+	}
 
 	private async trades(acc: Account) {
 		const list = await acc.client.listOffers({ my: true, take: 50 })
@@ -726,6 +742,9 @@ function payDetails(v: unknown) {
 		.filter((d) => d.label && d.value)
 		.slice(0, 10)
 }
+
+// Páginas de 50 que lee «Mi cuenta» para las estadísticas
+const STATS_PAGES = 4
 
 // Orden inteligente: hasta 2 tomas (QvaPay deja tomar 2 por minuto)
 export const SMART_TAKES = 2

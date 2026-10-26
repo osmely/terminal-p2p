@@ -121,8 +121,10 @@ function renderAccount() {
 		? `${a.dryRun ? '<span class="badge warn" title="Modo simulación: no se envía nada a QvaPay">Simulación</span>' : ''}
 			<button class="pro-chip" id="proBtn" hidden></button>
 			<div class="acct">
-				<span class="avatar" aria-hidden="true">${esc((a.username ?? '?').slice(0, 2))}</span>
-				<div><div class="acct-name">@${esc(a.username)}${a.gold ? ' <span class="badge warn">GOLD</span>' : ''}</div><div class="acct-bal">${fmtM(a.balance ?? 0)} USD</div></div>
+				<button type="button" class="acct-open" id="acctOpen" title="Mi cuenta">
+					<span class="avatar" aria-hidden="true">${esc((a.username ?? '?').slice(0, 2))}</span>
+					<div><div class="acct-name">@${esc(a.username)}${a.gold ? ' <span class="badge warn">GOLD</span>' : ''}</div><div class="acct-bal">${fmtM(a.balance ?? 0)} USD</div></div>
+				</button>
 				<button class="icon-btn small" id="disconnectBtn" title="Desconectar cuenta" aria-label="Desconectar cuenta">
 					<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 				</button>

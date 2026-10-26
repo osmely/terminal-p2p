@@ -190,7 +190,7 @@ test('el módulo Pro sale firmado con el usuario, y nunca sin licencia válida o
 test('panel: dar días con motivo (se activan al conectar su cuenta), quitarlos, suspender y reactivar', async () => {
 	const s = setup()
 	const form = (fields: Record<string, string>, auth = 'panel') =>
-		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa(`x:${auth}`)}` }, body: new URLSearchParams(fields) }), s.env, T0)
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa(`x:${auth}`)}` }, body: new URLSearchParams(fields) }), s.env, T0)
 	assert.equal((await form({ action: 'days', username: 'leo', days: '7', note: 'x' }, 'mala')).status, 401)
 	// Sin motivo no se apunta
 	assert.match(await (await form({ action: 'days', username: '@leo', days: '7' })).text(), /Escribe el motivo/)
@@ -221,7 +221,7 @@ test('panel: dar días con motivo (se activan al conectar su cuenta), quitarlos,
 test('devolver una compra quita solo los días de esa compra; el resto y los dispositivos se quedan', async () => {
 	const s = setup()
 	const form = (fields: Record<string, string>) =>
-		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now())
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now())
 	await buy(s, P1, 'month')
 	s.tick(26 * 86_400_000)
 	const { checkout } = await buy(s, P1, 'year')
@@ -277,7 +277,7 @@ test('panel: devolver el único pago deja sin Pro y dice cuánto transferir', as
 	const s = setup()
 	const { checkout } = await buy(s)
 	const form = (fields: Record<string, string>) =>
-		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, T0)
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, T0)
 	const html = await (await form({ action: 'refund', checkout: checkout.id })).text()
 	assert.match(html, /transfiere <b>1,99 USD<\/b> a <b>@ana<\/b>/)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
@@ -342,7 +342,7 @@ test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobab
 	s.tick(2 * 60 * 60_000)
 	const panel = (fields?: Record<string, string>, query = '') =>
 		proAdmin(
-			new Request(`https://app.terminalp2p.com/admin/pro${query}`, { method: fields ? 'POST' : 'GET', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+			new Request(`https://app.terminalp2p.com/admin/pro${query}`, { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
 			s.env,
 			s.now(),
 			s.q.fetcher,
@@ -356,11 +356,11 @@ test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobab
 	const id = (s.db.prepare("SELECT id FROM pro_checkouts WHERE invoice = 'inv-1'").get() as { id: string }).id
 	assert.match(await panel({ action: 'check', checkout: id }), /ya está activada/)
 	html = await panel()
-	assert.match(html, /<b>@pepe<\/b> <span class="note">para @leo<\/span>/)
+	assert.match(html, /<b>@leo<\/b><\/a> <span class="note">pagó @pepe<\/span>/)
 	assert.match(html, /Ingresos totales<\/span><b>1,99 USD/)
 	// Buscar por usuario
-	assert.doesNotMatch(await panel(undefined, '?q=nadie'), /<b>@pepe<\/b>/)
-	assert.match(await panel(undefined, '?q=PEPE'), /<b>@pepe<\/b>/)
+	assert.doesNotMatch(await panel(undefined, '?q=nadie'), /pagó @pepe/)
+	assert.match(await panel(undefined, '?q=PEPE'), /pagó @pepe/)
 })
 
 test('paga otra cuenta (otra sesión abierta en qvapay.com): Pro queda a nombre de la conectada y la devolución va a quien pagó', async () => {
@@ -379,11 +379,11 @@ test('paga otra cuenta (otra sesión abierta en qvapay.com): Pro queda a nombre 
 	// En el panel: pagó @pepe para @Ana; devolver el primer pago es transferir a @pepe
 	const form = (fields?: Record<string, string>) =>
 		proAdmin(
-			new Request('https://app.terminalp2p.com/admin/pro', { method: fields ? 'POST' : 'GET', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+			new Request('https://app.terminalp2p.com/admin/pro', { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
 			s.env,
 			s.now(),
 		).then((x) => x.text())
-	assert.match(await form(), /<b>@pepe<\/b> <span class="note">para @Ana<\/span>/)
+	assert.match(await form(), /<b>@Ana<\/b><\/a> <span class="note">pagó @pepe<\/span>/)
 	assert.match(await form({ action: 'refund', checkout: c.id }), /transfiere <b>1,99 USD<\/b> a <b>@pepe<\/b>/)
 })
 
@@ -548,4 +548,80 @@ test('migración al libro de movimientos: las licencias sueltas de un usuario se
 			{ license: 'qp:leo', kind: 'import', days: 3 },
 		],
 	)
+})
+
+test('devolución en pasos: la pide el usuario desde «Mi cuenta», la apruebas (se le quitan los días) y la marcas transferida', async () => {
+	const s = setup()
+	const admin = (fields?: Record<string, string>, query = '') =>
+		proAdmin(
+			new Request(`https://app.terminalp2p.com/admin/pro${query}`, { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+			s.env,
+			s.now(),
+		).then((r) => r.text())
+	await s.post('/pro/status', { print: P1, username: 'ana' }) // 30 días gratis
+	const { checkout } = await buy(s, P1, 'month', 'ana')
+	// «Mi cuenta»: su compra se puede devolver
+	let acc = (await s.post('/pro/account', { print: P1, username: 'ana' })).body
+	assert.deepEqual([acc.account.username, acc.purchases.length, acc.purchases[0].canRefund], ['ana', 1, true])
+	assert.deepEqual(acc.moves.map((m: { kind: string; days: number }) => [m.kind, m.days]), [['purchase', 30], ['trial', 30]])
+	// Sin motivo no; con motivo queda pedida (y no dos veces)
+	assert.equal((await s.post('/pro/refund', { print: P1, username: 'ana', checkout: checkout.id, reason: '' })).status, 400)
+	acc = (await s.post('/pro/refund', { print: P1, username: 'ana', checkout: checkout.id, reason: 'no la uso' })).body
+	assert.deepEqual([acc.purchases[0].refund.status, acc.purchases[0].canRefund], ['requested', false])
+	assert.equal((await s.post('/pro/refund', { print: P1, username: 'ana', checkout: checkout.id, reason: 'otra vez' })).status, 409)
+	// Otro usuario no puede pedir la devolución de una compra ajena
+	assert.equal((await s.post('/pro/refund', { print: P2, username: 'leo', checkout: checkout.id, reason: 'mía no' })).status, 404)
+	// En el panel aparece abierta; al aprobarla se le quitan esos 30 días (le quedan los gratis)
+	assert.match(await admin(), /Devoluciones abiertas <span class="pill requested">1<\/span>/)
+	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
+	assert.match(await admin({ action: 'refund-approve', id, note: 'ok' }), /transfiere <b>1,99 USD<\/b> a <b>@ana<\/b>/)
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.expiresAt, T0 + 30 * 86_400_000)
+	// No se aprueba dos veces
+	assert.match(await admin({ action: 'refund-approve', id }), /no está pendiente de aprobar/)
+	assert.match(await admin({ action: 'refund-transfer', id, ref: 'TX-123' }), /transferida/)
+	assert.deepEqual({ ...s.db.prepare('SELECT status, transfer_ref FROM pro_refunds').get() }, { status: 'transferred', transfer_ref: 'TX-123' })
+	acc = (await s.post('/pro/account', { print: P1, username: 'ana' })).body
+	assert.equal(acc.purchases[0].refund.status, 'transferred')
+	assert.doesNotMatch(await admin(), /Devoluciones abiertas <span/)
+})
+
+test('devolución rechazada (el usuario ve el motivo) y fuera de plazo no se puede pedir desde el terminal', async () => {
+	const s = setup()
+	const admin = (fields: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now()).then((r) => r.text())
+	const { checkout } = await buy(s, P1, 'month', 'ana')
+	await s.post('/pro/refund', { print: P1, username: 'ana', checkout: checkout.id, reason: 'quiero' })
+	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
+	assert.match(await admin({ action: 'refund-reject', id }), /Escribe el motivo del rechazo/)
+	await admin({ action: 'refund-reject', id, note: 'ya usaste la orden inteligente 20 veces' })
+	const acc = (await s.post('/pro/account', { print: P1, username: 'ana' })).body
+	assert.deepEqual(acc.purchases[0].refund, { status: 'rejected', note: 'ya usaste la orden inteligente 20 veces', at: T0 })
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
+	// Otra cuenta, a los 8 días de su primera compra: fuera de plazo
+	const b = await buy(s, P2, 'month', 'leo')
+	s.tick(8 * 86_400_000)
+	const late = await s.post('/pro/refund', { print: P2, username: 'leo', checkout: b.checkout.id, reason: 'tarde' })
+	assert.deepEqual([late.status, /7 días/.test(late.body.error)], [409, true])
+})
+
+test('panel: la ficha del cliente lo reúne todo, guarda notas y no acepta formularios de otra web', async () => {
+	const s = setup()
+	const req = (init: RequestInit, query = '') => proAdmin(new Request(`https://app.terminalp2p.com/admin/pro${query}`, init), s.env, s.now())
+	const auth = { Authorization: `Basic ${btoa('x:panel')}` }
+	await s.post('/pro/status', { print: P1, username: 'ana' })
+	await buy(s, P1, 'month', 'ana')
+	// Desde otra web (o sin origen), nada
+	assert.equal((await req({ method: 'POST', headers: { ...auth, Origin: 'https://malo.example' }, body: new URLSearchParams({ action: 'days', username: 'ana', days: '999', note: 'x' }) })).status, 403)
+	assert.equal((await req({ method: 'POST', headers: auth, body: new URLSearchParams({ action: 'pro-off' }) })).status, 403)
+	const r = await req({ method: 'POST', headers: { ...auth, Origin: 'https://app.terminalp2p.com' }, body: new URLSearchParams({ action: 'note', license: 'qp:ana', text: 'escribió por Telegram', u: 'ana' }) })
+	const html = await r.text()
+	assert.match(html, /<h1>@ana <span class="pill approved-ok">Pro · 60 días<\/span><\/h1>/)
+	assert.match(html, /Nota guardada/)
+	assert.match(html, /escribió por Telegram/)
+	assert.match(html, /<h2>Movimientos de días<\/h2>/)
+	assert.match(html, /Días gratis/)
+	assert.match(html, /Compra/)
+	assert.match(html, /En plazo/)
+	// Un usuario sin cuenta: se le pueden dar días
+	assert.match(await (await req({ headers: auth }, '?u=nadie')).text(), /No tiene cuenta Pro todavía/)
 })

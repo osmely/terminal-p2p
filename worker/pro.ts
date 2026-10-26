@@ -170,6 +170,91 @@ export async function statusOf(env: ProEnv, l: License | null, now: number) {
 	return { pro: true, enabled: true, username: l.username, plan: l.plan, expiresAt: l.expires_at, license }
 }
 
+// ── Devoluciones en pasos ────────────────────────────────────────────
+// Pedida (por el usuario desde «Mi cuenta», o por ti) → aprobada (se le quitan los días de esa compra) →
+// transferida (la haces tú en QvaPay y apuntas la referencia). O rechazada, con un motivo que el usuario ve
+
+export type RefundStatus = 'requested' | 'approved' | 'transferred' | 'rejected'
+export interface Refund {
+	id: string
+	checkout: string
+	license: string
+	amount: number
+	payee: string
+	status: RefundStatus
+	reason: string | null
+	requested_by: 'user' | 'admin'
+	requested_at: number
+	decided_at: number | null
+	decision_note: string | null
+	transferred_at: number | null
+	transfer_ref: string | null
+}
+
+// Una compra se puede devolver si está pagada, no devuelta y dentro del plazo desde la primera compra de la cuenta
+export async function refundable(db: D1, checkout: string, now: number) {
+	const c = await db
+		.prepare(
+			`SELECT c.id, c.plan, c.amount, c.license, COALESCE(c.payer, l.username) AS payee, c.refunded_at,
+				(SELECT MIN(COALESCE(f.paid_at, f.created_at)) FROM pro_checkouts f WHERE f.license = c.license AND f.status = 'paid') AS first_paid
+			FROM pro_checkouts c JOIN pro_licenses l ON l.uuid = c.license WHERE c.id = ? AND c.status = 'paid'`,
+		)
+		.bind(checkout)
+		.first<{ id: string; plan: Plan; amount: number; license: string; payee: string; refunded_at: number | null; first_paid: number | null }>()
+	if (!c) return null
+	return { ...c, inTime: c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS }
+}
+
+export async function requestRefund(db: D1, license: string, checkout: string, reason: string, by: 'user' | 'admin', now: number) {
+	const c = await refundable(db, checkout, now)
+	if (!c || c.license !== license) throw new ProError(404, 'Esa compra no es tuya o no existe')
+	if (c.refunded_at) throw new ProError(409, 'Esa compra ya se devolvió')
+	if (await db.prepare('SELECT 1 FROM pro_refunds WHERE checkout = ?').bind(checkout).first()) throw new ProError(409, 'Ya pediste la devolución de esa compra')
+	if (by === 'user' && !c.inTime) throw new ProError(409, `La devolución se pide en los ${REFUND_DAYS} días siguientes a tu primera compra. Escríbenos a @terminalp2p si es otra cosa.`)
+	const id = `rf-${crypto.randomUUID()}`
+	await db
+		.prepare("INSERT INTO pro_refunds (id, checkout, license, amount, payee, status, reason, requested_by, requested_at) VALUES (?, ?, ?, ?, ?, 'requested', ?, ?, ?)")
+		.bind(id, checkout, license, c.amount, c.payee, reason.slice(0, 300) || null, by, now)
+		.run()
+	return id
+}
+
+const refundRow = (db: D1, id: string) => db.prepare('SELECT * FROM pro_refunds WHERE id = ?').bind(id).first<Refund>()
+
+// Aprobar: se le quitan los días de esa compra. Queda pendiente que transfieras el dinero
+export async function approveRefund(db: D1, id: string, note: string | null, now: number) {
+	const r = await refundRow(db, id)
+	if (!r || r.status !== 'requested') throw new ProError(409, 'Esa devolución no está pendiente de aprobar')
+	const moved = await db.prepare("UPDATE pro_refunds SET status = 'approved', decided_at = ?, decision_note = ? WHERE id = ? AND status = 'requested'").bind(now, note, id).run()
+	if (!moved.meta?.changes) throw new ProError(409, 'Esa devolución ya se decidió')
+	await refundCheckout(db, r.checkout, note ?? r.reason, now)
+	return (await refundRow(db, id))!
+}
+
+// Devolver directamente desde el panel (te lo pidió por Telegram): se apunta como pedida por ti y aprobada
+export async function adminRefund(db: D1, checkout: string, note: string | null, now: number) {
+	const c = await refundable(db, checkout, now)
+	if (!c || c.refunded_at) throw new ProError(409, 'Ese pago no existe o ya se devolvió')
+	const old = await db.prepare('SELECT id, status FROM pro_refunds WHERE checkout = ?').bind(checkout).first<{ id: string; status: RefundStatus }>()
+	if (old && old.status !== 'requested') throw new ProError(409, 'Esa compra ya tiene una devolución decidida')
+	const id = old?.id ?? (await requestRefund(db, c.license, checkout, note ?? '', 'admin', now))
+	return approveRefund(db, id, note, now)
+}
+
+export async function transferRefund(db: D1, id: string, ref: string | null, now: number) {
+	const moved = await db.prepare("UPDATE pro_refunds SET status = 'transferred', transferred_at = ?, transfer_ref = ? WHERE id = ? AND status = 'approved'").bind(now, ref, id).run()
+	if (!moved.meta?.changes) throw new ProError(409, 'Esa devolución no está aprobada pendiente de transferir')
+	return (await refundRow(db, id))!
+}
+
+// Rechazar: no se toca nada; el motivo lo ve el usuario en «Mi cuenta»
+export async function rejectRefund(db: D1, id: string, note: string, now: number) {
+	if (!note) throw new ProError(400, 'Escribe el motivo del rechazo: lo verá el usuario')
+	const moved = await db.prepare("UPDATE pro_refunds SET status = 'rejected', decided_at = ?, decision_note = ? WHERE id = ? AND status = 'requested'").bind(now, note, id).run()
+	if (!moved.meta?.changes) throw new ProError(409, 'Esa devolución no está pendiente de aprobar')
+	return (await refundRow(db, id))!
+}
+
 // ── QvaPay: facturas y quién pagó ────────────────────────────────────
 
 async function qvapay<T>(env: ProEnv, path: string, body: unknown, fetcher: typeof fetch): Promise<T> {
@@ -403,6 +488,57 @@ export async function checkoutStatus(env: ProEnv, id: string, owner: { print: st
 	return { checkout: fresh, body: { status: 'paid', ...(await statusOf(env, l, now)) } }
 }
 
+// ── «Mi cuenta» en el terminal ───────────────────────────────────────
+
+// La cuenta de este dispositivo: la que confirmó QvaPay o, si no, la de su huella (aunque esté suspendida o vencida)
+async function deviceAccount(req: Request, db: D1, print: string, key: string, now: number) {
+	const who = await readWho(req.headers.get('cookie'), print, key, now)
+	if (who) return accountOf(who.username)
+	return (await db.prepare('SELECT license FROM pro_prints WHERE print = ?').bind(print).first<{ license: string }>())?.license ?? null
+}
+
+// Lo que el usuario ve de su cuenta: días, su historial (sin tus notas internas) y sus compras con la devolución
+export async function accountView(db: D1, license: string | null, now: number) {
+	const l = license ? await db.prepare('SELECT uuid, username, plan, expires_at, revoked FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first<License>() : null
+	if (!l) return { account: null, moves: [], purchases: [], refundDays: REFUND_DAYS }
+	const moves = (
+		await db.prepare('SELECT kind, days, expires_after, checkout, note, created_at FROM pro_days WHERE license = ? ORDER BY created_at DESC, id DESC LIMIT 100').bind(l.uuid).all<{ kind: string; days: number; expires_after: number; checkout: string | null; note: string | null; created_at: number }>()
+	).results.map((m) => ({
+		at: m.created_at,
+		kind: m.kind,
+		days: m.days,
+		until: m.expires_after,
+		// Tus motivos de regalos, ajustes y devoluciones los ve; las compras ya dicen qué fueron
+		note: ['gift', 'adjust', 'refund'].includes(m.kind) ? m.note : null,
+	}))
+	const paid = (
+		await db
+			.prepare(
+				`SELECT c.id, c.plan, c.amount, COALESCE(c.paid_at, c.created_at) AS at, c.refunded_at, r.status AS rstatus, r.decision_note, r.requested_at AS rat
+				FROM pro_checkouts c LEFT JOIN pro_refunds r ON r.checkout = c.id WHERE c.license = ? AND c.status = 'paid' ORDER BY at DESC`,
+			)
+			.bind(l.uuid)
+			.all<{ id: string; plan: Plan; amount: number; at: number; refunded_at: number | null; rstatus: RefundStatus | null; decision_note: string | null; rat: number | null }>()
+	).results
+	const first = paid.length ? Math.min(...paid.map((p) => p.at)) : null
+	const inTime = first !== null && now - first < REFUND_DAYS * DAY_MS
+	const purchases = paid.map((p) => ({
+		id: p.id,
+		at: p.at,
+		days: PLANS[p.plan]?.days ?? 0,
+		amount: p.amount,
+		refund: p.rstatus ? { status: p.rstatus, note: p.rstatus === 'rejected' ? p.decision_note : null, at: p.rat } : null,
+		canRefund: inTime && !p.refunded_at && !p.rstatus,
+	}))
+	return {
+		account: { username: l.username, plan: l.plan, expiresAt: l.expires_at, suspended: !!l.revoked, active: !l.revoked && l.expires_at > now },
+		moves,
+		purchases,
+		refundDays: REFUND_DAYS,
+		refundUntil: first !== null ? first + REFUND_DAYS * DAY_MS : null,
+	}
+}
+
 // ── Rutas ────────────────────────────────────────────────────────────
 
 const readBody = async (req: Request) => (await req.json().catch(() => ({}))) as Record<string, unknown>
@@ -475,6 +611,24 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			return json(200, (await checkoutStatus(env, String(b.id ?? ''), { print: printOf(b.print) }, now, fetcher)).body)
 		}
 
+		// «Mi cuenta»: días, historial y compras de la cuenta de este dispositivo
+		if (route === 'POST /pro/account') {
+			const print = printOf((await readBody(req)).print)
+			return json(200, await accountView(db, await deviceAccount(req, db, print, env.PRO_KEY, now), now))
+		}
+
+		// Pedir la devolución de una compra (en plazo): queda pendiente de que la apruebes
+		if (route === 'POST /pro/refund') {
+			const b = await readBody(req)
+			const print = printOf(b.print)
+			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			if (!license) return json(403, { error: 'Conecta tu cuenta para pedir la devolución' })
+			const reason = String(b.reason ?? '').trim()
+			if (reason.length < 3) return json(400, { error: 'Cuéntanos en pocas palabras por qué la pides' })
+			await requestRefund(db, license, String(b.checkout ?? ''), reason, 'user', now)
+			return json(200, await accountView(db, license, now))
+		}
+
 		// Aviso de QvaPay: solo dice qué factura mirar; se confirma consultándola
 		if (req.method === 'POST' && (path === '/pro/webhook' || path === '/api/pro/webhook')) {
 			const text = await req.text()
@@ -535,6 +689,113 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 
 const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
+// ── Panel: piezas compartidas ────────────────────────────────────────
+// Horas de Cuba, como el resto del proyecto
+const hUsd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('es')} USD`
+const hWhen = (ms: number) => new Date(ms).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+const hDay = (ms: number) => new Date(ms).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric' })
+const hShort = (s: string) => `<span title="${escHtml(s)}">${escHtml(s.slice(0, 8))}…</span>`
+const userLink = (u: string) => `<a href="/admin/pro?u=${encodeURIComponent(u)}"><b>@${escHtml(u)}</b></a>`
+const copyBtn = (text: string, label = 'Copiar') =>
+	`<button type="button" class="ghost" onclick="navigator.clipboard.writeText(${escHtml(JSON.stringify(text))});this.textContent='Copiado'">${label}</button>`
+const KIND_NAME: Record<string, string> = { trial: 'Días gratis', purchase: 'Compra', gift: 'Regalo', refund: 'Devolución', adjust: 'Ajuste', import: 'Saldo inicial' }
+const REFUND_STATUS: Record<RefundStatus, string> = { requested: 'Pedida', approved: 'Aprobada: falta transferir', transferred: 'Transferida', rejected: 'Rechazada' }
+
+// Una devolución con lo que toca hacer en su paso. `u`: volver a la ficha de ese usuario tras la acción
+function refundHtml(r: Refund & { username?: string }, u?: string) {
+	const back = u ? `<input type="hidden" name="u" value="${escHtml(u)}">` : ''
+	const head = `<div class="rf-head"><span class="pill ${r.status}">${REFUND_STATUS[r.status]}</span>${r.username ? ` ${userLink(r.username)}` : ''} · <b>${hUsd(r.amount)}</b> · pedida ${r.requested_by === 'user' ? 'por el usuario' : 'por ti'} el ${hWhen(r.requested_at)}</div>`
+	const reason = r.reason ? `<p class="note">Motivo: «${escHtml(r.reason)}»</p>` : ''
+	let act = ''
+	if (r.status === 'requested')
+		act = `<form method="post" class="row">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><input name="note" placeholder="nota (al rechazar, el motivo: lo ve el usuario)" style="flex:1 1 240px">
+			<button name="action" value="refund-approve" onclick="return confirm('¿Aprobar? Se le quitan los días de esa compra. Luego le transfieres ${hUsd(r.amount)} a @${escHtml(r.payee)}.')">Aprobar</button>
+			<button class="ghost" name="action" value="refund-reject">Rechazar</button></form>`
+	else if (r.status === 'approved')
+		act = `<p>Transfiere <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> desde tu cuenta de QvaPay ${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')}</p>
+			<form method="post" class="row">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><input name="ref" placeholder="referencia de la transferencia en QvaPay" style="flex:1 1 240px"><button name="action" value="refund-transfer">Marcar transferida</button></form>`
+	else if (r.status === 'transferred') act = `<p class="note">Transferida el ${hWhen(r.transferred_at ?? r.decided_at ?? r.requested_at)}${r.transfer_ref ? ` · ref. ${escHtml(r.transfer_ref)}` : ''}</p>`
+	else act = `<p class="note">Rechazada el ${hWhen(r.decided_at ?? r.requested_at)}: «${escHtml(r.decision_note ?? '')}»</p>`
+	return `<div class="rf">${head}${reason}${r.decision_note && r.status !== 'rejected' ? `<p class="note">Tu nota: ${escHtml(r.decision_note)}</p>` : ''}${act}</div>`
+}
+
+// La ficha de un cliente: todo lo suyo en una página y lo que se puede hacer con su cuenta
+async function clientPage(env: ProEnv, username: string, notice: string, now: number) {
+	const db = env.DB
+	const id = accountOf(username)
+	const l = await db
+		.prepare('SELECT uuid, username, plan, expires_at, revoked, created_at FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL')
+		.bind(id)
+		.first<License & { created_at: number }>()
+	const name = l?.username ?? username
+	const u = escHtml(name)
+	if (!l)
+		return adminPage(
+			'pro',
+			`@${u}`,
+			`<p><a href="/admin/pro">← Pro</a></p><h1>@${u}</h1>${notice}<p class="note">No tiene cuenta Pro todavía. Puedes darle días: se le activan al conectar su cuenta en el terminal.</p>${daysForm(name)}`,
+		)
+	const all = <T>(sql: string) => db.prepare(sql).bind(id).all<T>().then((r) => r.results)
+	const [refunds, pays, moves, devices, notes, trials] = await Promise.all([
+		all<Refund>('SELECT * FROM pro_refunds WHERE license = ? ORDER BY requested_at DESC'),
+		all<Checkout & { refunded_at: number | null }>("SELECT * FROM pro_checkouts WHERE license = ? AND status = 'paid' ORDER BY COALESCE(paid_at, created_at) DESC"),
+		all<{ kind: string; days: number; expires_after: number; note: string | null; actor: string; created_at: number; checkout: string | null }>('SELECT * FROM pro_days WHERE license = ? ORDER BY created_at DESC, id DESC'),
+		all<{ print: string; added_at: number; seen_at: number }>('SELECT print, added_at, seen_at FROM pro_prints WHERE license = ? ORDER BY seen_at DESC'),
+		all<{ text: string; created_at: number }>('SELECT text, created_at FROM pro_notes WHERE license = ? ORDER BY created_at DESC'),
+		all<{ key: string; created_at: number }>('SELECT key, created_at FROM pro_trials WHERE license = ? ORDER BY created_at'),
+	])
+	const left = Math.ceil((l.expires_at - now) / DAY_MS)
+	const state = l.revoked ? '<span class="pill rejected">Suspendida</span>' : left > 0 ? `<span class="pill approved-ok">Pro · ${left} días</span>` : '<span class="pill">Vencida</span>'
+	const paidTotal = pays.filter((p) => !p.refunded_at).reduce((t, p) => t + p.amount, 0)
+	const refundedTotal = pays.filter((p) => p.refunded_at).reduce((t, p) => t + p.amount, 0)
+	const first = pays.length ? Math.min(...pays.map((p) => p.paid_at ?? p.created_at)) : null
+	const inTime = first !== null && now - first < REFUND_DAYS * DAY_MS
+	const refundOf = new Map(refunds.map((r) => [r.checkout, r]))
+	const back = `<input type="hidden" name="u" value="${u}">`
+	const payRows = pays
+		.map((p) => {
+			const r = refundOf.get(p.id)
+			const act = r
+				? `<span class="pill ${r.status}">${REFUND_STATUS[r.status]}</span>`
+				: `<form method="post" class="row" onsubmit="return confirm('¿Devolver ${p.amount} USD a @${escHtml(p.payer ?? name)}? Se le quitan los días de esta compra y luego haces tú la transferencia.')">${back}<input type="hidden" name="checkout" value="${escHtml(p.id)}"><input name="note" placeholder="motivo" style="width:140px"><button class="ghost" name="action" value="refund">Devolver</button></form>`
+			return `<tr><td>${hWhen(p.paid_at ?? p.created_at)}</td><td>${escHtml(PLANS[p.plan]?.name ?? p.plan)}</td><td>${hUsd(p.amount)}</td><td>@${escHtml(p.payer ?? '?')}</td><td>${p.invoice ? hShort(p.invoice) : '—'}</td><td>${act}</td></tr>`
+		})
+		.join('')
+	const moveRows = moves
+		.map(
+			(m) =>
+				`<tr><td>${hWhen(m.created_at)}</td><td>${KIND_NAME[m.kind] ?? escHtml(m.kind)}</td><td style="color:var(${m.days < 0 ? '--ask' : '--bid'})">${m.days > 0 ? '+' : ''}${m.days}</td><td>${hDay(m.expires_after)}</td><td>${m.note ? escHtml(m.note) : '<span class="note">—</span>'}${m.actor === 'admin' ? ' <span class="note">· tú</span>' : ''}</td></tr>`,
+		)
+		.join('')
+	const deviceRows = devices.map((d) => `<tr><td>${hShort(d.print)}</td><td>${hDay(d.added_at)}</td><td>${hWhen(d.seen_at)}</td></tr>`).join('')
+	return adminPage(
+		'pro',
+		`@${u}`,
+		`<p><a href="/admin/pro">← Pro</a></p>
+		<div class="top"><h1>@${u} ${state}</h1>
+		<form method="post" class="row">${back}<input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${u}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></div>
+		${notice}
+		<div class="cards">
+			<div class="card"><span>Pro hasta</span><b>${hDay(l.expires_at)}</b><small>${left > 0 ? `${left} días` : 'vencido'} · ${escHtml(({ month: 'comprados', year: 'comprados', trial: 'gratis', gift: 'regalados' } as Record<string, string>)[l.plan] ?? l.plan)}</small></div>
+			<div class="card"><span>Pagado</span><b>${hUsd(paidTotal)}</b><small>${pays.length} pagos${refundedTotal ? ` · devuelto ${hUsd(refundedTotal)}` : ''}</small></div>
+			<div class="card"><span>Devolución</span><b>${first === null ? '—' : inTime ? 'En plazo' : 'Fuera'}</b><small>${first === null ? 'sin compras' : `hasta el ${hDay(first + REFUND_DAYS * DAY_MS)}`}</small></div>
+			<div class="card"><span>Cliente desde</span><b>${hDay(l.created_at)}</b><small>${devices.length} dispositivos${devices[0] ? ` · usado ${hDay(devices[0].seen_at)}` : ''}</small></div>
+		</div>
+		${refunds.length ? `<h2>Devoluciones</h2>${refunds.map((r) => refundHtml(r, name)).join('')}` : ''}
+		<h2>Dar o quitar días</h2>${daysForm(name)}
+		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Días</th><th>Importe</th><th>Pagó</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="6" class="empty">Sin pagos.</td></tr>'}</table></div>
+		<h2>Movimientos de días</h2><div class="wrap"><table class="left"><tr><th>Cuándo</th><th>Qué</th><th>Días</th><th>Pro hasta</th><th>Motivo</th></tr>${moveRows || '<tr><td colspan="5" class="empty">Sin movimientos.</td></tr>'}</table></div>
+		<h2>Notas</h2>
+		<form method="post" class="row">${back}<input type="hidden" name="license" value="${escHtml(l.uuid)}"><input name="text" placeholder="escribió por Telegram, le prometí…" required style="flex:1 1 300px"><button name="action" value="note">Guardar nota</button></form>
+		${notes.map((n) => `<p class="noteline"><span class="note">${hWhen(n.created_at)}</span> ${escHtml(n.text)}</p>`).join('') || '<p class="note">Sin notas. Solo las ves tú.</p>'}
+		<h2>Dispositivos</h2><div class="wrap"><table class="left"><tr><th>Huella</th><th>Desde</th><th>Último uso</th></tr>${deviceRows || '<tr><td colspan="3" class="empty">Ninguno.</td></tr>'}</table></div>
+		<p class="note">Días gratis usados: ${trials.map((t) => `${escHtml(t.key.startsWith('print:') ? 'un dispositivo' : t.key)} (${hDay(t.created_at)})`).join(', ') || 'ninguno'}.</p>`,
+	)
+}
+
+const daysForm = (username?: string) =>
+	`<form method="post" class="row"><input type="hidden" name="action" value="days">${username ? `<input type="hidden" name="u" value="${escHtml(username)}"><input type="hidden" name="username" value="${escHtml(username)}">` : '<input name="username" placeholder="usuario de QvaPay" required>'}<input name="days" type="number" value="7" style="width:90px" title="Negativo para quitar"> días <input name="note" placeholder="motivo (lo ve el usuario en su historial)" required style="flex:1 1 220px"><button>Apuntar</button></form>`
+
 // Pagos en CSV (uno por fila, con quién pagó y su identificador en QvaPay) o copia completa de Pro en JSON
 async function proExport(db: D1, kind: string, now: number) {
 	const day = new Date(now).toISOString().slice(0, 10)
@@ -569,86 +830,118 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 	const exp = new URL(req.url).searchParams.get('export')
 	if (req.method === 'GET' && exp) return proExport(db, exp, now)
 	let notice = ''
+	const url = new URL(req.url)
+	// La ficha de un usuario (?u=), también al volver de una acción hecha desde ella
+	let client = url.searchParams.get('u')
 	if (req.method === 'POST') {
+		// Solo desde el propio panel: el navegador recuerda la clave y otra web podría mandar formularios aquí
+		const from = req.headers.get('origin') ?? (req.headers.get('sec-fetch-site') === 'same-origin' ? url.origin : null)
+		if (from !== url.origin) return new Response('Origen no permitido', { status: 403 })
 		const f = await req.formData()
 		const action = String(f.get('action') ?? '')
 		const uuid = String(f.get('uuid') ?? '')
-		// Dar o quitar días a un usuario, con el motivo (un regalo, una compensación por un fallo, una corrección).
-		// Si aún no ha conectado su cuenta, se le activan al conectarla
-		if (action === 'days') {
-			const username = String(f.get('username') ?? '').replace(/^@/, '').trim()
-			const days = Math.trunc(Number(f.get('days')))
-			const note = String(f.get('note') ?? '').trim().slice(0, 200)
-			if (!/^[A-Za-z0-9._-]{1,40}$/.test(username)) notice = '<p class="note">Usuario no válido.</p>'
-			else if (!days || Math.abs(days) > 3650) notice = '<p class="note">Pon cuántos días das (por ejemplo 7) o quitas (−7).</p>'
-			else if (!note) notice = '<p class="note">Escribe el motivo: queda en su historial.</p>'
-			else {
-				const r = await addDays(db, username, { kind: days > 0 ? 'gift' : 'adjust', days, note, actor: 'admin' }, now)
-				notice = `<p class="ok">${days > 0 ? `${days} días para` : `${-days} días menos a`} <b>@${escHtml(username)}</b>: tiene Pro hasta el ${new Date(r.after).toLocaleDateString('es')}.</p>`
-			}
-		}
-		// Devolver un pago: se restan solo los días de esa compra y se apunta; el dinero se transfiere a mano desde
-		// QvaPay a quien pagó
-		if (action === 'refund') {
-			const r = await refundCheckout(db, String(f.get('checkout') ?? ''), String(f.get('note') ?? '').trim().slice(0, 200) || null, now)
-			notice = r
-				? `<p class="ok">Devolución apuntada: se le quitaron los días de esa compra a @${escHtml(r.username)}. Ahora transfiere <b>${r.amount.toLocaleString('es')} USD</b> a <b>@${escHtml(r.payer)}</b> desde tu cuenta de QvaPay.</p>`
-				: '<p class="note">Ese pago no existe o ya se devolvió.</p>'
-		}
-		// Encender o apagar Pro en la web, el terminal y el simulador
-		if (action === 'pro-on' || action === 'pro-off') {
-			await setProEnabled(db, action === 'pro-on', now)
-			notice = `<p class="ok">${action === 'pro-on' ? 'Pro encendido: ya se ve en la web, el terminal y el simulador' : 'Pro apagado: no se anuncia ni se ofrece en ningún sitio'} (en menos de un minuto en todas partes).</p>`
-		}
-		// Pausar o reanudar la publicación de ofertas desde el terminal
-		if (action === 'orders-pause' || action === 'orders-resume') {
-			await setOrdersPaused(db, action === 'orders-pause', now)
-			notice = `<p class="ok">${action === 'orders-pause' ? 'Publicar ofertas desde el terminal queda en pausa: quien lo intente ve el aviso de ajustes' : 'Publicar ofertas desde el terminal vuelve a funcionar'} (en menos de un minuto en todas partes).</p>`
-		}
-		// Repasar con QvaPay las facturas recientes: activa las pagadas que se quedaron sin activar y enseña las
-		// pagadas que aquí no constan
-		if (action === 'reconcile')
-			try {
-				const r = await reconcile(env, now, fetcher)
-				notice = `<p class="ok">Repasadas con QvaPay ${r.checked} facturas pagadas. ${r.activated.length ? `Activadas ahora: ${r.activated.length}.` : 'Todas estaban activadas.'}</p>${
-					r.unknown.length
-						? `<p class="note">Pagadas en QvaPay que aquí no constan:</p>${r.unknown
-								.map(
-									(u) =>
-										`<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(u.invoice)}"><span>${u.paidAt ? escHtml(u.paidAt.slice(0, 16).replace('T', ' ')) : ''} · @${escHtml(u.payer ?? '?')} · ${u.amount} USD · ${escHtml(u.invoice)}</span><button class="ghost" name="action" value="recover">Activar para @${escHtml(u.payer ?? '?')}</button></form>`,
-								)
-								.join('')}`
-						: ''
-				}`
-			} catch (err) {
-				notice = `<p class="note">No se pudo repasar con QvaPay: ${escHtml((err as Error).message)}</p>`
-			}
-		if (action === 'recover')
-			try {
-				const r = await recover(env, String(f.get('invoice') ?? ''), now, fetcher)
-				notice = `<p class="ok">Recuperada: ${escHtml(PLANS[r.plan].name)} para @${escHtml(r.username)}.</p>`
-			} catch (err) {
-				notice = `<p class="note">No se pudo recuperar: ${escHtml((err as Error).message)}</p>`
-			}
-		// Comprobar a mano una factura sin pagar (también las de hace más de una hora, que el cron ya no mira)
-		if (action === 'check') {
-			const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(String(f.get('checkout') ?? '')).first<Checkout>()
-			if (!c) notice = '<p class="note">Esa factura no existe.</p>'
-			else
-				try {
-					const paid = await settle(env, c, now, fetcher)
-					notice = paid ? '<p class="ok">QvaPay la da por pagada: ya está activada.</p>' : '<p class="note">QvaPay dice que sigue sin pagar.</p>'
-				} catch (err) {
-					notice = `<p class="note">No se pudo consultar: ${escHtml((err as Error).message)}</p>`
+		client = String(f.get('u') ?? '') || client
+		try {
+			// Dar o quitar días a un usuario, con el motivo (un regalo, una compensación por un fallo, una corrección).
+			// Si aún no ha conectado su cuenta, se le activan al conectarla
+			if (action === 'days') {
+				const username = String(f.get('username') ?? '').replace(/^@/, '').trim()
+				const days = Math.trunc(Number(f.get('days')))
+				const note = String(f.get('note') ?? '').trim().slice(0, 200)
+				if (!/^[A-Za-z0-9._-]{1,40}$/.test(username)) notice = '<p class="note">Usuario no válido.</p>'
+				else if (!days || Math.abs(days) > 3650) notice = '<p class="note">Pon cuántos días das (por ejemplo 7) o quitas (−7).</p>'
+				else if (!note) notice = '<p class="note">Escribe el motivo: queda en su historial.</p>'
+				else {
+					const r = await addDays(db, username, { kind: days > 0 ? 'gift' : 'adjust', days, note, actor: 'admin' }, now)
+					notice = `<p class="ok">${days > 0 ? `${days} días para` : `${-days} días menos a`} <b>@${escHtml(username)}</b>: tiene Pro hasta el ${new Date(r.after).toLocaleDateString('es')}.</p>`
 				}
-		}
-		// Suspender corta Pro sin tocar sus días ni sus dispositivos: al reactivarla, todo sigue como estaba
-		if (action === 'revoke' || action === 'restore') {
-			await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ? AND merged_into IS NULL').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
-			notice = `<p class="ok">${action === 'revoke' ? 'Cuenta suspendida: deja de ser Pro (sus días y dispositivos se guardan)' : 'Cuenta reactivada: vuelve a ser Pro con sus días'}.</p>`
+			}
+			// Devolver un pago (te lo pidió por otro lado): queda aprobada, se restan solo los días de esa compra y falta
+			// que transfieras el dinero a quien pagó
+			const note = String(f.get('note') ?? '').trim().slice(0, 300) || null
+			if (action === 'refund') {
+				const r = await adminRefund(db, String(f.get('checkout') ?? ''), note, now)
+				notice = `<p class="ok">Devolución aprobada: se le quitaron los días de esa compra. Ahora transfiere <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> desde tu cuenta de QvaPay ${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')} y márcala como transferida.</p>`
+			}
+			if (action === 'refund-approve') {
+				const r = await approveRefund(db, String(f.get('id') ?? ''), note, now)
+				notice = `<p class="ok">Aprobada: se le quitaron los días de esa compra. Ahora transfiere <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> ${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')} y márcala como transferida.</p>`
+			}
+			if (action === 'refund-reject') {
+				await rejectRefund(db, String(f.get('id') ?? ''), note ?? '', now)
+				notice = '<p class="ok">Rechazada. El usuario ve el motivo en «Mi cuenta».</p>'
+			}
+			if (action === 'refund-transfer') {
+				await transferRefund(db, String(f.get('id') ?? ''), String(f.get('ref') ?? '').trim().slice(0, 120) || null, now)
+				notice = '<p class="ok">Devolución cerrada: transferida.</p>'
+			}
+			// Nota interna sobre un cliente
+			if (action === 'note') {
+				const text = String(f.get('text') ?? '').trim().slice(0, 1000)
+				const license = String(f.get('license') ?? '')
+				if (text && license.startsWith('qp:')) {
+					await db.prepare('INSERT INTO pro_notes (license, text, created_at) VALUES (?, ?, ?)').bind(license, text, now).run()
+					notice = '<p class="ok">Nota guardada.</p>'
+				}
+			}
+			// Encender o apagar Pro en la web, el terminal y el simulador
+			if (action === 'pro-on' || action === 'pro-off') {
+				await setProEnabled(db, action === 'pro-on', now)
+				notice = `<p class="ok">${action === 'pro-on' ? 'Pro encendido: ya se ve en la web, el terminal y el simulador' : 'Pro apagado: no se anuncia ni se ofrece en ningún sitio'} (en menos de un minuto en todas partes).</p>`
+			}
+			// Pausar o reanudar la publicación de ofertas desde el terminal
+			if (action === 'orders-pause' || action === 'orders-resume') {
+				await setOrdersPaused(db, action === 'orders-pause', now)
+				notice = `<p class="ok">${action === 'orders-pause' ? 'Publicar ofertas desde el terminal queda en pausa: quien lo intente ve el aviso de ajustes' : 'Publicar ofertas desde el terminal vuelve a funcionar'} (en menos de un minuto en todas partes).</p>`
+			}
+			// Repasar con QvaPay las facturas recientes: activa las pagadas que se quedaron sin activar y enseña las
+			// pagadas que aquí no constan
+			if (action === 'reconcile')
+				try {
+					const r = await reconcile(env, now, fetcher)
+					notice = `<p class="ok">Repasadas con QvaPay ${r.checked} facturas pagadas. ${r.activated.length ? `Activadas ahora: ${r.activated.length}.` : 'Todas estaban activadas.'}</p>${
+						r.unknown.length
+							? `<p class="note">Pagadas en QvaPay que aquí no constan:</p>${r.unknown
+									.map(
+										(u) =>
+											`<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(u.invoice)}"><span>${u.paidAt ? escHtml(u.paidAt.slice(0, 16).replace('T', ' ')) : ''} · @${escHtml(u.payer ?? '?')} · ${u.amount} USD · ${escHtml(u.invoice)}</span><button class="ghost" name="action" value="recover">Activar para @${escHtml(u.payer ?? '?')}</button></form>`,
+									)
+									.join('')}`
+							: ''
+					}`
+				} catch (err) {
+					notice = `<p class="note">No se pudo repasar con QvaPay: ${escHtml((err as Error).message)}</p>`
+				}
+			if (action === 'recover')
+				try {
+					const r = await recover(env, String(f.get('invoice') ?? ''), now, fetcher)
+					notice = `<p class="ok">Recuperada: ${escHtml(PLANS[r.plan].name)} para @${escHtml(r.username)}.</p>`
+				} catch (err) {
+					notice = `<p class="note">No se pudo recuperar: ${escHtml((err as Error).message)}</p>`
+				}
+			// Comprobar a mano una factura sin pagar (también las de hace más de una hora, que el cron ya no mira)
+			if (action === 'check') {
+				const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(String(f.get('checkout') ?? '')).first<Checkout>()
+				if (!c) notice = '<p class="note">Esa factura no existe.</p>'
+				else
+					try {
+						const paid = await settle(env, c, now, fetcher)
+						notice = paid ? '<p class="ok">QvaPay la da por pagada: ya está activada.</p>' : '<p class="note">QvaPay dice que sigue sin pagar.</p>'
+					} catch (err) {
+						notice = `<p class="note">No se pudo consultar: ${escHtml((err as Error).message)}</p>`
+					}
+			}
+			// Suspender corta Pro sin tocar sus días ni sus dispositivos: al reactivarla, todo sigue como estaba
+			if (action === 'revoke' || action === 'restore') {
+				await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ? AND merged_into IS NULL').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
+				notice = `<p class="ok">${action === 'revoke' ? 'Cuenta suspendida: deja de ser Pro (sus días y dispositivos se guardan)' : 'Cuenta reactivada: vuelve a ser Pro con sus días'}.</p>`
+			}
+		} catch (err) {
+			if (!(err instanceof ProError)) throw err
+			notice = `<p class="note">${escHtml(err.message)}</p>`
 		}
 	}
-	const url = new URL(req.url)
+	if (client && /^[A-Za-z0-9._-]{1,40}$/.test(client.replace(/^@/, ''))) return clientPage(env, client.replace(/^@/, ''), notice, now)
 	const q = (url.searchParams.get('q') ?? '').replace(/^@/, '').trim().toLowerCase()
 	const like = `%${q}%`
 
@@ -684,14 +977,14 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 	const when = (ms: number) => new Date(ms).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 	const day = (ms: number) => new Date(ms).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric' })
 	const short = (s: string) => `<span title="${escHtml(s)}">${escHtml(s.slice(0, 8))}…</span>`
-	type Row = Checkout & { refunded_at: number | null; owner: string | null; first_paid: number | null }
+	type Row = Checkout & { refunded_at: number | null; owner: string | null; first_paid: number | null; rstatus: string | null }
 	// De dónde se pidió: el simulador (con la cuenta de Telegram) o un dispositivo del terminal (solo su huella)
 	const origin = (c: Row) =>
 		c.tg ? 'Simulador' : `Terminal · ${c.requester ? `@${escHtml(c.requester)}` : short(c.print)}`
 	const checkouts = (where: string, order: string, limit: number) =>
 		db
 			.prepare(
-				`SELECT c.*, COALESCE(c.payer, l.username) AS payer, l.username AS owner,
+				`SELECT c.*, COALESCE(c.payer, l.username) AS payer, l.username AS owner, (SELECT r.status FROM pro_refunds r WHERE r.checkout = c.id) AS rstatus,
 					(SELECT MIN(COALESCE(f.paid_at, f.created_at)) FROM pro_checkouts f WHERE f.license = c.license AND f.status = 'paid') AS first_paid
 				FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license
 				WHERE ${where} ${q ? 'AND (LOWER(l.username) LIKE ? OR LOWER(c.payer) LIKE ? OR LOWER(c.requester) LIKE ? OR c.id LIKE ? OR c.invoice LIKE ?)' : ''}
@@ -706,10 +999,12 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		.map((c) => {
 			const at = c.paid_at ?? c.created_at
 			const inTime = c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS
-			const state = c.refunded_at
+			const state = c.rstatus
+				? `<span class="pill ${c.rstatus}">${REFUND_STATUS[c.rstatus as RefundStatus]}</span>`
+				: c.refunded_at
 				? `<span class="note">devuelto el ${day(c.refunded_at)}</span>`
 				: `<form method="post" class="row" style="display:inline-flex" onsubmit="return confirm('¿Devolver ${c.amount} USD a @${escHtml(c.payer ?? '')}? Se le quitan los días de esta compra y luego haces tú la transferencia en QvaPay.')"><input type="hidden" name="checkout" value="${escHtml(c.id)}"><input name="note" placeholder="motivo" style="width:130px"><button class="ghost" name="action" value="refund">Devolver</button></form>${inTime ? ' <span class="note">en plazo</span>' : ' <span class="note">fuera de plazo</span>'}`
-			return `<tr><td>${when(at)}</td><td><b>@${escHtml(c.payer ?? '?')}</b>${c.owner && c.owner.toLowerCase() !== (c.payer ?? '').toLowerCase() ? ` <span class="note">para @${escHtml(c.owner)}</span>` : ''}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td>${usd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? short(c.invoice) : '—'}</td><td>${state}</td></tr>`
+			return `<tr><td>${when(at)}</td><td>${c.owner ? userLink(c.owner) : `<b>@${escHtml(c.payer ?? '?')}</b>`}${c.owner && c.owner.toLowerCase() !== (c.payer ?? '').toLowerCase() ? ` <span class="note">pagó @${escHtml(c.payer ?? '?')}</span>` : ''}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td>${usd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? short(c.invoice) : '—'}</td><td>${state}</td></tr>`
 		})
 		.join('')
 
@@ -742,11 +1037,17 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 			const left = Math.ceil((l.expires_at - now) / DAY_MS)
 			const state = l.revoked ? ' <span class="note">(suspendida)</span>' : left <= 0 ? ' <span class="note">(vencida)</span>' : ` <span class="note">(${left} días)</span>`
 			
-			const who = `<b>@${escHtml(l.username)}</b>`
+			const who = userLink(l.username)
 			return `<tr><td>${who}</td><td>${planName(l.plan)}</td><td>${day(l.created_at)}</td><td>${day(l.expires_at)}${state}</td><td>${l.devices}${l.seen ? ` <span class="note">· usado ${day(l.seen)}</span>` : ''}</td><td>${!l.pays ? '<span class="note">sin pagos</span>' : l.paid ? `${l.pays} · ${usd(l.paid)}` : '<span class="note">devuelto</span>'}</td>
 			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${escHtml(l.username)}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></td></tr>`
 		})
 		.join('')
+	// Devoluciones abiertas: pedidas (falta decidir) y aprobadas (falta transferir)
+	const openRefunds = (
+		await db
+			.prepare("SELECT r.*, l.username FROM pro_refunds r JOIN pro_licenses l ON l.uuid = r.license WHERE r.status IN ('requested', 'approved') ORDER BY r.status DESC, r.requested_at")
+			.all<Refund & { username: string }>()
+	).results
 	// Movimientos de días: todo lo que cambió los días de cada cuenta, con el motivo
 	const moves = (
 		await db
@@ -760,7 +1061,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 	const moveRows = moves
 		.map(
 			(m) =>
-				`<tr><td>${when(m.created_at)}</td><td><b>@${escHtml(m.username)}</b></td><td>${kindName[m.kind] ?? escHtml(m.kind)}</td><td style="color:var(${m.days < 0 ? '--ask' : '--bid'})">${m.days > 0 ? '+' : ''}${m.days}</td><td>${day(m.expires_after)}</td><td>${m.note ? escHtml(m.note) : '<span class="note">—</span>'}${m.actor === 'admin' ? ' <span class="note">· tú</span>' : ''}</td></tr>`,
+				`<tr><td>${when(m.created_at)}</td><td>${userLink(m.username)}</td><td>${kindName[m.kind] ?? escHtml(m.kind)}</td><td style="color:var(${m.days < 0 ? '--ask' : '--bid'})">${m.days > 0 ? '+' : ''}${m.days}</td><td>${day(m.expires_after)}</td><td>${m.note ? escHtml(m.note) : '<span class="note">—</span>'}${m.actor === 'admin' ? ' <span class="note">· tú</span>' : ''}</td></tr>`,
 		)
 		.join('')
 	return adminPage(
@@ -780,11 +1081,12 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		<div class="top" style="margin-top:16px"><form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y enseña las que aquí no constan">Repasar pagos con QvaPay</button></form>
 		<span class="row"><a class="note" href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a class="note" href="/admin/pro?export=copia">Copia completa (JSON)</a></span></div>
 		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
-		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Pagó</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
+		<h2>Devoluciones abiertas ${openRefunds.length ? `<span class="pill requested">${openRefunds.length}</span>` : ''}</h2>${openRefunds.map((r) => refundHtml(r)).join('') || '<p class="note">Ninguna: no hay devoluciones por decidir ni por transferir.</p>'}
+		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Cuenta</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
 		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
 		<h2>Cuentas</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Últimos días</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
 		<h2>Movimientos de días ${q ? '' : '<span class="note">(los últimos 100)</span>'}</h2><div class="wrap"><table class="left"><tr><th>Cuándo</th><th>Usuario</th><th>Qué</th><th>Días</th><th>Pro hasta</th><th>Motivo</th></tr>${moveRows || '<tr><td colspan="6" class="empty">Todavía no hay movimientos.</td></tr>'}</table></div>
-		<h2>Dar o quitar días</h2><form method="post" class="row"><input type="hidden" name="action" value="days"><input name="username" placeholder="usuario de QvaPay" required><input name="days" type="number" value="7" style="width:90px" title="Negativo para quitar"> días <input name="note" placeholder="motivo (queda en su historial)" required style="flex:1 1 220px"><button>Apuntar</button></form>
+		<h2>Dar o quitar días</h2>${daysForm()}
 		<p class="note">Política: se compran días, nada se cobra solo; devolución completa en los ${REFUND_DAYS} días siguientes a la primera compra. Si Pro falla por nuestra culpa, en vez de devolver se dan los días perdidos (Dar o quitar días).</p>`,
 	)
 }
