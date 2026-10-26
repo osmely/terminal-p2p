@@ -38,7 +38,11 @@ const INFORMAL_MARKETS = new Set(['BANK_CUP', 'CUPCASH', 'BOLSATM'])
 // ── Formato ───────────────────────────────────────────────────────────
 const decimals = (p) => (p >= 100 ? 2 : 4)
 const fmtP = (p) => (p == null || !isFinite(p) ? '—' : p.toLocaleString('es', { minimumFractionDigits: decimals(p), maximumFractionDigits: decimals(p) }))
+// Para el libro, gráficos y estadísticas: desde 1.000, sin decimales
 const fmtU = (n) => (n >= 1000 ? Math.round(n).toLocaleString('es') : n.toLocaleString('es', { maximumFractionDigits: 2 }))
+// El dinero de una operación (lo que publicas, pagas o recibes) siempre exacto, con sus céntimos: 22.999,82 CUP
+// no puede salir como 23.000, porque eso es lo que se transfiere
+const fmtM = (n) => n.toLocaleString('es', { minimumFractionDigits: Math.round(n * 100) % 100 ? 2 : 0, maximumFractionDigits: 2 })
 const pct = (x) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(2)}%`
 const ago = (ms) =>
 	ms < 60_000
