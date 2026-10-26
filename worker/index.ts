@@ -13,7 +13,7 @@ import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { adminPage, askKey } from './admin.ts'
 import { backupPro, proAdmin, proApi, reconcile, settlePending, type ProEnv } from './pro.ts'
-import { simApi, simCron, type SimEnv } from './sim.ts'
+import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 import { proEnabled } from './flags.ts'
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
@@ -88,6 +88,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		if (url.pathname === '/admin') return Response.redirect(`${url.origin}/admin/metrics`, 302)
 		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
 		if (url.pathname === '/admin/pro') return secure(await proAdmin(req, env as unknown as ProEnv))
+			if (url.pathname === '/admin/sim' && req.method === 'GET') return secure(await simAdmin(req, env as unknown as SimEnv))
 		
 		return secure(jsonError(404, 'no encontrado'))
 	}

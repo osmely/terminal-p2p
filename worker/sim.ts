@@ -11,12 +11,17 @@
 
 import { Engine, freshState, MARKETS, normSymbol, SimError, SYMBOLS, type Candle, type Quote, type SimState, type Symbol } from '../src/sim/engine.ts'
 import { licenseOfPrint, ProError, type ProEnv } from './pro.ts'
+import { adminPage, askKey } from './admin.ts'
+import { cubaDate } from './informal.ts'
+import { authorized } from './metrics.ts'
 import { readSession, sessionCookie, sessionToken } from './session.ts'
 import { proEnabled } from './flags.ts'
 import type { D1 } from './rates.ts'
 
 export interface SimEnv extends Omit<ProEnv, 'DB'> {
 	DB: D1
+	// Clave del panel: también abre las estadísticas del simulador (/admin/sim)
+	METRICS_KEY?: string
 	// Solo en desarrollo (.dev.vars): entrar sin el terminal (la cookie del terminal no cruza a sim.localhost)
 	SIM_DEV_LOGIN?: string
 }
@@ -304,6 +309,14 @@ export async function playerOf(db: D1, print: string, now: number) {
 }
 
 
+// Uso del día (hora de Cuba) para las estadísticas: entró, y cuántas órdenes puso
+async function used(db: D1, player: number, now: number, orders = 0) {
+	await db
+		.prepare('INSERT INTO sim_days (day, player, orders) VALUES (?, ?, ?) ON CONFLICT(day, player) DO UPDATE SET orders = orders + excluded.orders')
+		.bind(cubaDate(now), player, orders)
+		.run()
+}
+
 // ── Rutas (/api/* en sim.terminalp2p.com) ─────────────────────────────
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
@@ -356,6 +369,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		if (route === 'GET /api/me') {
 			if (!player || !print) return json(200, { player: null, pro: null })
 			await env.DB.prepare('UPDATE sim_players SET last_seen = ? WHERE id = ?').bind(now, player).run()
+			await used(env.DB, player, now)
 			const l = (await proEnabled(env.DB, now)) ? await licenseOfPrint(env.DB, print, now) : null
 			return json(200, { player: { id: player }, pro: l ? { username: l.username, plan: l.plan, expiresAt: l.expires_at } : null })
 		}
@@ -388,6 +402,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 					q,
 				)
 			}, symbol)
+			await used(env.DB, player, now, 1)
 			return json(200, { order: result, ...view(engine, prices) })
 		}
 		const edit = /^PATCH \/api\/orders\/(\d+)$/.exec(route)
@@ -421,6 +436,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 				},
 				symbol,
 			)
+			await used(env.DB, player, now, 1)
 			return json(200, { order: result, ...view(engine, prices) })
 		}
 		if (route === 'DELETE /api/orders') {
@@ -451,3 +467,75 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 }
 
 const num = (v: unknown) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null)
+
+// ── Estadísticas del simulador (/admin/sim, con la clave del panel) ──
+
+export async function simAdmin(req: Request, env: SimEnv, now = Date.now()): Promise<Response> {
+	if (!env.METRICS_KEY) return new Response('no encontrado', { status: 404 })
+	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
+	const db = env.DB
+	const DAY = 86_400_000
+	const today = cubaDate(now)
+	const since = (days: number) => cubaDate(now - (days - 1) * DAY)
+	const n = async (sql: string, ...args: unknown[]) => (await db.prepare(sql).bind(...args).first<{ n: number | null }>())?.n ?? 0
+	const players = await n('SELECT COUNT(*) AS n FROM sim_players')
+	const new7 = await n('SELECT COUNT(*) AS n FROM sim_players WHERE created_at > ?', now - 7 * DAY)
+	const active = async (days: number) => n('SELECT COUNT(DISTINCT player) AS n FROM sim_days WHERE day >= ?', since(days))
+	const [a1, a7, a30] = [await active(1), await active(7), await active(30)]
+	const traders = await n('SELECT COUNT(*) AS n FROM sim_accounts WHERE trades > 0')
+	const trades = await n('SELECT COALESCE(SUM(trades), 0) AS n FROM sim_accounts')
+	const open = await n('SELECT COALESCE(SUM(open_orders), 0) AS n FROM sim_accounts')
+	const orders7 = await n('SELECT COALESCE(SUM(orders), 0) AS n FROM sim_days WHERE day >= ?', since(7))
+	const withPro = await n("SELECT COUNT(DISTINCT player) AS n FROM sim_ids WHERE key LIKE 'user:%'")
+	const pct = (x: number, of: number) => (of ? `${Math.round((x / of) * 100)} %` : '—')
+
+	// Día a día, los últimos 30: jugadores nuevos, jugadores que entraron y órdenes puestas
+	const { results: days } = await db
+		.prepare('SELECT day, COUNT(*) AS active, SUM(orders) AS orders, SUM(orders > 0) AS traders FROM sim_days WHERE day >= ? GROUP BY day ORDER BY day DESC')
+		.bind(since(30))
+		.all<{ day: string; active: number; orders: number; traders: number }>()
+	const { results: born } = await db.prepare('SELECT created_at FROM sim_players WHERE created_at > ?').bind(now - 31 * DAY).all<{ created_at: number }>()
+	const newBy = new Map<string, number>()
+	for (const b of born) newBy.set(cubaDate(b.created_at), (newBy.get(cubaDate(b.created_at)) ?? 0) + 1)
+	const dayRows = days
+		.map((d) => `<tr><td>${d.day === today ? 'hoy' : d.day}</td><td>${newBy.get(d.day) ?? 0}</td><td>${d.active}</td><td>${d.traders}</td><td>${d.orders}</td></tr>`)
+		.join('')
+
+	// Mercados y resultados, de las cuentas (sus operaciones, con su mercado)
+	const { results: accs } = await db.prepare('SELECT state, pnl_pct, trades FROM sim_accounts WHERE trades > 0 LIMIT 5000').all<{ state: string; pnl_pct: number; trades: number }>()
+	const bySym = new Map<string, { trades: number; players: number }>()
+	for (const a of accs) {
+		const seen = new Set<string>()
+		for (const t of (JSON.parse(a.state) as SimState).trades) {
+			const m = bySym.get(t.symbol) ?? { trades: 0, players: 0 }
+			m.trades++
+			if (!seen.has(t.symbol)) m.players++
+			seen.add(t.symbol)
+			bySym.set(t.symbol, m)
+		}
+	}
+	const symRows = [...bySym]
+		.sort((x, y) => y[1].trades - x[1].trades)
+		.map(([s, m]) => `<tr><td>${MARKETS[s as Symbol]?.base ?? s}</td><td>${m.trades}</td><td>${m.players}</td></tr>`)
+		.join('')
+	const pnls = accs.map((a) => a.pnl_pct).sort((x, y) => x - y)
+	const median = pnls.length ? pnls[Math.floor(pnls.length / 2)] : null
+	const winners = pnls.filter((p) => p > 0).length
+	const fmtPct = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')} %`
+
+	const card = (label: string, value: string, small = '') => `<div class="card"><span>${label}</span><b>${value}</b>${small ? `<small>${small}</small>` : ''}</div>`
+	return adminPage(
+		'sim',
+		'Simulador',
+		`<h1>Simulador</h1><p class="note">Uso de Terminal Trading. «Entró» es abrir el simulador con sesión; cuenta una vez por jugador y día (hora de Cuba). Sin datos personales: solo el número de jugador.</p>
+		<div class="cards">
+			${card('Jugadores', String(players), `${new7} nuevos en 7 días · ${withPro} con Pro`)}
+			${card('Entraron hoy', String(a1), `${a7} en 7 días · ${a30} en 30 días`)}
+			${card('Han operado', String(traders), `${pct(traders, players)} de los jugadores`)}
+			${card('Operaciones', String(trades), `${orders7} órdenes en 7 días · ${open} abiertas ahora`)}
+			${card('Resultado mediano', median == null ? '—' : fmtPct(median), `${winners} de ${pnls.length} ganan`)}
+		</div>
+		<h2>Día a día <span class="note">(últimos 30)</span></h2><div class="wrap"><table class="left"><tr><th>Día</th><th>Nuevos</th><th>Entraron</th><th>Operaron</th><th>Órdenes</th></tr>${dayRows || '<tr><td colspan="5" class="empty">Todavía no hay uso registrado.</td></tr>'}</table></div>
+		<h2>Mercados</h2><div class="wrap"><table class="left"><tr><th>Mercado</th><th>Operaciones</th><th>Jugadores</th></tr>${symRows || '<tr><td colspan="3" class="empty">Nadie ha operado todavía.</td></tr>'}</table></div>`,
+	)
+}

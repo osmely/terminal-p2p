@@ -135,3 +135,24 @@ test('con Pro apagado en el panel: sin días gratis ni compras, y el simulador s
 	assert.equal((await s.terminal('/pro/status', { print: P1, username: 'Ana' })).body.started, true)
 	assert.ok((await s.sim('GET', '/api/config', null)).body.markets.length > 2)
 })
+
+test('estadísticas del simulador en el panel: jugadores, quién entró cada día, operaciones y mercados', async () => {
+	const { simAdmin } = await import('../worker/sim.ts')
+	const { freshState } = await import('../src/sim/engine.ts')
+	const s = setup()
+	for (const p of [P1, P2, P3]) await s.sim('GET', '/api/me', (await s.terminal('/pro/status', { print: p })).cookie)
+	// Una cuenta que operó BTC dos veces y ETH una
+	const st = freshState(Date.now())
+	st.trades = [{ symbol: 'BTCUSDT' }, { symbol: 'BTCUSDT' }, { symbol: 'ETHUSDT' }] as never
+	s.db.prepare('INSERT OR REPLACE INTO sim_accounts (player, state, equity, pnl_pct, trades, open_orders, checked_at, updated_at, version) VALUES (1, ?, 10100, 1, 3, 1, 0, 0, 0)').run(JSON.stringify(st))
+	s.db.prepare("UPDATE sim_days SET orders = 3 WHERE player = 1").run()
+	const page = (key = 'panel') =>
+		simAdmin(new Request('https://app.terminalp2p.com/admin/sim', { headers: { Authorization: `Basic ${btoa(`x:${key}`)}` } }), { DB: s.d1, METRICS_KEY: 'panel' } as never).then(async (r) => ({ status: r.status, html: await r.text() }))
+	assert.equal((await page('mala')).status, 401)
+	const { html } = await page()
+	assert.match(html, /<span>Jugadores<\/span><b>3<\/b>/)
+	assert.match(html, /<span>Entraron hoy<\/span><b>3<\/b>/)
+	assert.match(html, /<span>Han operado<\/span><b>1<\/b><small>33 % de los jugadores/)
+	assert.match(html, /<tr><td>hoy<\/td><td>3<\/td><td>3<\/td><td>1<\/td><td>3<\/td><\/tr>/)
+	assert.match(html, /<tr><td>BTC<\/td><td>2<\/td><td>1<\/td><\/tr><tr><td>ETH<\/td><td>1<\/td><td>1<\/td><\/tr>/)
+})
