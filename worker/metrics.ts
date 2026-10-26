@@ -263,7 +263,10 @@ export async function authorized(req: Request, key: string | undefined) {
 	if (!h.startsWith('Basic ')) return false
 	let pass = ''
 	try {
-		pass = atob(h.slice(6)).split(/:(.*)/s)[1] ?? ''
+		// El navegador manda usuario:contraseña en UTF-8 (pedimos charset="UTF-8"): con tildes o eñes, atob solo
+		// da los bytes sueltos y hay que decodificarlos, si no la contraseña nunca coincide
+		const bytes = Uint8Array.from(atob(h.slice(6)), (c) => c.charCodeAt(0))
+		pass = new TextDecoder().decode(bytes).split(/:(.*)/s)[1] ?? ''
 	} catch {
 		return false
 	}

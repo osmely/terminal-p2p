@@ -38,6 +38,10 @@ test('clave del panel: comparación en tiempo constante y HTTP Basic', async () 
 	assert.equal(await authorized(basic('mala'), 's3creta'), false)
 	assert.equal(await authorized(new Request('https://x'), 's3creta'), false)
 	assert.equal(await authorized(basic('x'), undefined), false)
+	// Con tildes o eñes el navegador la manda en UTF-8 (como pide charset="UTF-8")
+	const utf8 = (pass: string) => new Request('https://x/admin', { headers: { Authorization: `Basic ${Buffer.from(`yo:${pass}`, 'utf8').toString('base64')}` } })
+	assert.equal(await authorized(utf8('contraseña-ñandú'), 'contraseña-ñandú'), true)
+	assert.equal(await authorized(utf8('contrasena-nandu'), 'contraseña-ñandú'), false)
 })
 
 test('X-TP-Meta: solo valores válidos', () => {
