@@ -3,7 +3,15 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { readWho, tokenPrint, whoCookie, whoToken } from '../worker/session.ts'
-import { proAdmin, proApi, type ProEnv } from '../worker/pro.ts'
+import { proAdmin as proAdminRaw, proApi, type ProEnv } from '../worker/pro.ts'
+
+// El panel responde a cada acción con una redirección (303) y lo que dijo en una cookie: se sigue como el navegador
+async function proAdmin(req: Request, env: ProEnv, now?: number, fetcher?: typeof fetch) {
+	const res = await proAdminRaw(req, env, now, fetcher)
+	if (res.status !== 303) return res
+	const cookie = res.headers.get('set-cookie')?.split(';')[0]
+	return proAdminRaw(new Request(new URL(res.headers.get('location')!, req.url), { headers: { Authorization: req.headers.get('authorization')!, ...(cookie ? { Cookie: cookie } : {}) } }), env, now, fetcher)
+}
 
 // La cookie que deja el relé cuando QvaPay devuelve el perfil de ese token: aquí, del `username` del cuerpo
 async function whoHeader(body: unknown, now = Date.now()): Promise<Record<string, string>> {
@@ -703,4 +711,27 @@ test('informes por meses (cobrado, devuelto, neto, nuevos y los que repiten) y r
 		{ action: 'note', target: 'ana' },
 	])
 	assert.match(await (await admin(undefined, '?view=registro')).text(), /Nota[\s\S]*Devolución \(directa\)/)
+})
+
+test('panel: tras una acción redirige a la página y el aviso sale una sola vez (recargar no repite nada)', async () => {
+	const s = setup()
+	const auth = { Authorization: `Basic ${btoa('x:panel')}` }
+	const res = await proAdminRaw(
+		new Request('https://app.terminalp2p.com/admin/pro?u=ana', { method: 'POST', headers: { ...auth, Origin: 'https://app.terminalp2p.com' }, body: new URLSearchParams({ action: 'days', username: 'ana', days: '7', note: 'regalo', u: 'ana' }) }),
+		s.env,
+		s.now(),
+	)
+	assert.equal(res.status, 303)
+	assert.equal(res.headers.get('location'), '/admin/pro?u=ana')
+	const cookie = res.headers.get('set-cookie')!
+	assert.match(cookie, /^tpflash=.+; HttpOnly; SameSite=Strict; Path=\/admin; Max-Age=60; Secure$/)
+	const get = (headers: Record<string, string>) => proAdminRaw(new Request('https://app.terminalp2p.com/admin/pro?u=ana', { headers: { ...auth, ...headers } }), s.env, s.now())
+	const page = await get({ Cookie: cookie.split(';')[0] })
+	assert.match(await page.text(), /7 días para <b>@ana<\/b>/)
+	assert.match(page.headers.get('set-cookie')!, /^tpflash=; .*Max-Age=0/)
+	assert.doesNotMatch(await (await get({})).text(), /7 días para/)
+	// Una cookie inventada no mete nada en la página
+	assert.doesNotMatch(await (await get({ Cookie: 'tpflash=eyJrIjoiZmxhc2gifQ.falsa' })).text(), /class="ok"/)
+	// Y la acción se hizo una sola vez
+	assert.equal((s.db.prepare("SELECT COUNT(*) AS n FROM pro_days WHERE license = 'qp:ana'").get() as { n: number }).n, 1)
 })

@@ -1012,7 +1012,39 @@ async function proExport(db: D1, kind: string, now: number) {
 	)
 }
 
+// Tras cada acción el panel redirige a la página (POST → 303 → GET): así recargar no la repite ni el navegador
+// pregunta si reenviar el formulario. Lo que dijo el panel viaja en una cookie firmada de un minuto y se enseña
+// una sola vez
+const FLASH = 'tpflash'
+const hasFlash = (req: Request) => (req.headers.get('cookie') ?? '').split(';').some((p) => p.trim().startsWith(`${FLASH}=`))
+const flashSet = (url: URL, value: string, maxAgeS: number) =>
+	`${FLASH}=${value}; HttpOnly; SameSite=Strict; Path=/admin; Max-Age=${maxAgeS}${url.protocol === 'https:' ? '; Secure' : ''}`
+
+async function flashCookie(url: URL, notice: string, key: string, now: number) {
+	// Una cookie no llega a 4 KB: un aviso muy largo se queda en su texto
+	const text = notice.replace(/<button[\s\S]*?<\/button>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+	const short = notice.length > 1500 ? `<p class="${notice.startsWith('<p class="ok">') ? 'ok' : 'note'}">${escHtml(text.slice(0, 600))}</p>` : notice
+	return flashSet(url, await sign({ k: 'flash', n: encodeURIComponent(short), e: now + 60_000 }, key), 60)
+}
+
+async function readFlash(req: Request, key: string, now: number) {
+	const raw = (req.headers.get('cookie') ?? '').split(';').map((p) => p.trim()).find((p) => p.startsWith(`${FLASH}=`))
+	const f = raw ? await verify<{ k: string; n: string; e: number }>(raw.slice(FLASH.length + 1), key) : null
+	if (!f || f.k !== 'flash' || f.e < now) return ''
+	try {
+		return decodeURIComponent(f.n)
+	} catch {
+		return ''
+	}
+}
+
 export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetcher: typeof fetch = fetch): Promise<Response> {
+	const res = await panel(req, env, now, fetcher)
+	if (req.method === 'GET' && hasFlash(req)) res.headers.append('Set-Cookie', flashSet(new URL(req.url), '', 0))
+	return res
+}
+
+async function panel(req: Request, env: ProEnv, now: number, fetcher: typeof fetch): Promise<Response> {
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const db = env.DB
 	// Descargas: los pagos en CSV (para devolver o cuadrar cuentas fuera de aquí) y la copia de todo Pro
@@ -1089,15 +1121,9 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 				try {
 					const r = await reconcile(env, now, fetcher)
 					await recordIssues(db, r, now)
+					// Las pagadas que aquí no constan quedan en «Pendientes», con su botón para activarlas
 					notice = `<p class="ok">Repasadas con QvaPay ${r.checked} facturas pagadas. ${r.activated.length ? `Activadas ahora: ${r.activated.length}.` : 'Todas estaban activadas.'}</p>${
-						r.unknown.length
-							? `<p class="note">Pagadas en QvaPay que aquí no constan:</p>${r.unknown
-									.map(
-										(u) =>
-											`<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(u.invoice)}"><span>${u.paidAt ? escHtml(u.paidAt.slice(0, 16).replace('T', ' ')) : ''} · @${escHtml(u.payer ?? '?')} · ${u.amount} USD · ${escHtml(u.invoice)}</span><button class="ghost" name="action" value="recover">Activar para @${escHtml(u.payer ?? '?')}</button></form>`,
-									)
-									.join('')}`
-							: ''
+						r.unknown.length ? `<p class="note">${r.unknown.length === 1 ? 'Una pagada en QvaPay no consta aquí' : `${r.unknown.length} pagadas en QvaPay no constan aquí`}: está${r.unknown.length === 1 ? '' : 'n'} en «Pendientes» para activarla${r.unknown.length === 1 ? '' : 's'}.</p>` : ''
 					}`
 				} catch (err) {
 					notice = `<p class="note">No se pudo repasar con QvaPay: ${escHtml((err as Error).message)}</p>`
@@ -1141,7 +1167,14 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 			if (!(err instanceof ProError)) throw err
 			notice = `<p class="note">${escHtml(err.message)}</p>`
 		}
+		// De vuelta a la página desde la que se hizo (la ficha del cliente si venía de ella)
+		const back = new URL(url)
+		if (client) back.searchParams.set('u', client)
+		const headers = new Headers({ Location: back.pathname + back.search, 'Cache-Control': 'no-store' })
+		if (notice) headers.set('Set-Cookie', await flashCookie(url, notice, env.METRICS_KEY!, now))
+		return new Response(null, { status: 303, headers })
 	}
+	notice = await readFlash(req, env.METRICS_KEY!, now)
 	const view = url.searchParams.get('view')
 	if (!client && view === 'informes') return reportsPage(db, notice, now)
 	if (!client && view === 'registro') return auditPage(db, now)
