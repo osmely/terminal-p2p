@@ -187,20 +187,51 @@ test('el módulo Pro sale firmado con el usuario, y nunca sin licencia válida o
 	assert.equal((await s.get(`/pro/module.js?l=${encodeURIComponent(result.license)}`)).status, 403)
 })
 
-test('panel: regalar una licencia (se activa sola al conectar su cuenta), revocarla y restaurarla', async () => {
+test('panel: dar días con motivo (se activan al conectar su cuenta), quitarlos, suspender y reactivar', async () => {
 	const s = setup()
 	const form = (fields: Record<string, string>, auth = 'panel') =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa(`x:${auth}`)}` }, body: new URLSearchParams(fields) }), s.env, T0)
-	assert.equal((await form({ action: 'gift', username: 'leo' }, 'mala')).status, 401)
-	const html = await (await form({ action: 'gift', username: '@leo', days: '7' })).text()
-	assert.match(html, /Se activa sola cuando conecte su cuenta/)
+	assert.equal((await form({ action: 'days', username: 'leo', days: '7', note: 'x' }, 'mala')).status, 401)
+	// Sin motivo no se apunta
+	assert.match(await (await form({ action: 'days', username: '@leo', days: '7' })).text(), /Escribe el motivo/)
+	assert.match(await (await form({ action: 'days', username: '@leo', days: '7', note: 'compensación por el fallo del 3/11' })).text(), /7 días para <b>@leo<\/b>/)
 	const st = (await s.post('/pro/status', { print: P1, username: 'leo' })).body
-	assert.deepEqual([st.pro, st.plan, st.started], [true, 'gift', false])
-	await form({ action: 'revoke', uuid: 'gift:leo' })
+	assert.deepEqual([st.pro, st.plan, st.started, st.expiresAt], [true, 'gift', false, T0 + 7 * 86_400_000])
+	// Quitar días: no lo deja antes de hoy
+	await form({ action: 'days', username: 'leo', days: '-3', note: 'me pasé' })
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.expiresAt, T0 + 4 * 86_400_000)
+	await form({ action: 'days', username: 'leo', days: '-30', note: 'quitar todo' })
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
-	// Restaurar la deja como estaba: el mismo dispositivo vuelve a ser Pro sin hacer nada
-	await form({ action: 'restore', uuid: 'gift:leo' })
-	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
+	await form({ action: 'days', username: 'leo', days: '10', note: 'otra vez' })
+	// Suspender corta Pro sin tocar sus días ni dispositivos; reactivar lo deja igual
+	await form({ action: 'revoke', uuid: 'qp:leo' })
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
+	await form({ action: 'restore', uuid: 'qp:leo' })
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.expiresAt, T0 + 10 * 86_400_000)
+	// Todo queda en el libro, con motivo y saldo de antes y después
+	const moves = s.db.prepare("SELECT kind, days, note, actor FROM pro_days WHERE license = 'qp:leo' ORDER BY id").all().map((r) => ({ ...r }))
+	assert.deepEqual(moves, [
+		{ kind: 'gift', days: 7, note: 'compensación por el fallo del 3/11', actor: 'admin' },
+		{ kind: 'adjust', days: -3, note: 'me pasé', actor: 'admin' },
+		{ kind: 'adjust', days: -30, note: 'quitar todo', actor: 'admin' },
+		{ kind: 'gift', days: 10, note: 'otra vez', actor: 'admin' },
+	])
+})
+
+test('devolver una compra quita solo los días de esa compra; el resto y los dispositivos se quedan', async () => {
+	const s = setup()
+	const form = (fields: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now())
+	await buy(s, P1, 'month')
+	s.tick(26 * 86_400_000)
+	const { checkout } = await buy(s, P1, 'year')
+	// 4 días del mes + 365 del año; devuelve el año: le quedan sus 4 días
+	assert.match(await (await form({ action: 'refund', checkout: checkout.id, note: 'no le convenció' })).text(), /transfiere <b>20 USD<\/b> a <b>@ana<\/b>/)
+	const st = (await s.post('/pro/status', { print: P1 })).body
+	assert.deepEqual([st.pro, st.expiresAt], [true, T0 + 30 * 86_400_000])
+	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM pro_prints WHERE license = ?').get('qp:ana') as { n: number }).n, 1)
+	const last = { ...s.db.prepare("SELECT kind, days, checkout, note FROM pro_days WHERE license = 'qp:ana' ORDER BY id DESC LIMIT 1").get() }
+	assert.deepEqual(last, { kind: 'refund', days: -365, checkout: checkout.id, note: 'no le convenció' })
 })
 
 test('sin credenciales de QvaPay no se puede comprar, y una huella mal formada se rechaza', async () => {
@@ -242,7 +273,7 @@ test('30 días gratis al conectar la cuenta: una vez por usuario de QvaPay y por
 	assert.equal(paid.expiresAt, T0 + 30 * 86_400_000 + 30 * 86_400_000)
 })
 
-test('panel: devolver un pago revoca la licencia y dice cuánto transferir', async () => {
+test('panel: devolver el único pago deja sin Pro y dice cuánto transferir', async () => {
 	const s = setup()
 	const { checkout } = await buy(s)
 	const form = (fields: Record<string, string>) =>
@@ -478,4 +509,43 @@ test('el relé deja firmada la cuenta del perfil de QvaPay junto a la huella de 
 	// Sin token o con una respuesta que no es un perfil, nada
 	assert.equal(await whoCookie(url, null, { uuid: '9d7c6f2e-1111-4222-8333-944455556666', username: 'Ana' }, 'clave'), null)
 	assert.equal(await whoCookie(url, `Bearer ${token}`, { error: 'Unauthenticated' }, 'clave'), null)
+})
+
+test('migración al libro de movimientos: las licencias sueltas de un usuario se juntan sumando lo que les quedaba', () => {
+	const db = new DatabaseSync(':memory:')
+	const files = readdirSync('migrations').sort()
+	for (const f of files.filter((f) => f < '0019')) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
+	const now = Date.now()
+	const ins = db.prepare('INSERT INTO pro_licenses (uuid, username, plan, expires_at, revoked, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, 0)')
+	ins.run('qp:ana', 'Ana', 'month', now + 20 * 86_400_000, 0)
+	ins.run('trial:qp:ana', 'Ana', 'trial', now + 10 * 86_400_000, 0)
+	ins.run('gift:ana', 'ana', 'gift', now + 5 * 86_400_000, 0)
+	ins.run('trial:qp:leo', 'Leo', 'trial', now + 3 * 86_400_000, 0)
+	ins.run('gift:eva', 'eva', 'gift', now - 86_400_000, 0) // vencida
+	db.prepare('INSERT INTO pro_prints (print, license, added_at, seen_at) VALUES (?, ?, 0, 0)').run('p1', 'trial:qp:ana')
+	db.prepare('INSERT INTO pro_prints (print, license, added_at, seen_at) VALUES (?, ?, 0, 0)').run('p2', 'trial:qp:leo')
+	db.prepare('INSERT INTO pro_trials (key, license, created_at) VALUES (?, ?, 0)').run('qp:leo', 'trial:qp:leo')
+	db.exec(readFileSync(`migrations/${files.find((f) => f.startsWith('0019'))}`, 'utf8'))
+	const acc = (id: string) => db.prepare('SELECT expires_at, merged_into, revoked FROM pro_licenses WHERE uuid = ?').get(id) as { expires_at: number; merged_into: string | null; revoked: number }
+	const days = (id: string) => Math.round((acc(id).expires_at - now) / 86_400_000)
+	assert.equal(days('qp:ana'), 35)
+	assert.equal(days('qp:leo'), 3)
+	assert.ok(acc('qp:eva').expires_at < now) // nada que sumar: queda vencida
+	// Las viejas no se borran: apuntan a la cuenta y ya no cuentan
+	assert.deepEqual({ ...acc('trial:qp:ana') }.merged_into, 'qp:ana')
+	assert.equal(acc('gift:ana').revoked, 1)
+	assert.deepEqual(db.prepare('SELECT print, license FROM pro_prints ORDER BY print').all().map((r) => ({ ...r })), [
+		{ print: 'p1', license: 'qp:ana' },
+		{ print: 'p2', license: 'qp:leo' },
+	])
+	assert.equal((db.prepare("SELECT license FROM pro_trials WHERE key = 'qp:leo'").get() as { license: string }).license, 'qp:leo')
+	// Cada cuenta empieza el libro con su saldo
+	assert.deepEqual(
+		db.prepare("SELECT license, kind, days FROM pro_days ORDER BY license").all().map((r) => ({ ...r })),
+		[
+			{ license: 'qp:ana', kind: 'import', days: 35 },
+			{ license: 'qp:eva', kind: 'import', days: 0 },
+			{ license: 'qp:leo', kind: 'import', days: 3 },
+		],
+	)
 })

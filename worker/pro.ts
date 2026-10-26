@@ -108,11 +108,59 @@ export async function attachPrint(db: D1, license: string, print: string, now: n
 		.run()
 }
 
-// El Pro de una cuenta de QvaPay: comprado, regalado o de los días gratis (el que dure más)
-async function licenseOfUser(db: D1, username: string, now: number) {
-	const u = username.toLowerCase()
-	const all = await Promise.all([`qp:${u}`, `gift:${u}`, `trial:qp:${u}`].map((id) => activeLicense(db, id, now)))
-	return all.filter((l) => l !== null).sort((a, b) => b.expires_at - a.expires_at)[0] ?? null
+// ── Libro de movimientos de días ─────────────────────────────────────
+// Cada usuario de QvaPay tiene una sola cuenta Pro (qp:usuario). Todo lo que cambia sus días (los gratis, una
+// compra, un regalo, una devolución, un ajuste) pasa por aquí y queda apuntado en pro_days con el motivo y el
+// saldo de antes y de después. Nada se borra: una devolución resta los días de esa compra y ya
+
+export const accountOf = (username: string) => `qp:${username.toLowerCase()}`
+export type DayKind = 'trial' | 'purchase' | 'gift' | 'refund' | 'adjust'
+
+export async function addDays(
+	db: D1,
+	username: string,
+	m: { kind: DayKind; days: number; plan?: string; checkout?: string | null; note?: string | null; actor: 'system' | 'admin' },
+	now: number,
+) {
+	const id = accountOf(username)
+	const old = await db.prepare('SELECT expires_at, plan FROM pro_licenses WHERE uuid = ?').bind(id).first<{ expires_at: number; plan: string }>()
+	const before = old?.expires_at ?? null
+	const days = Math.trunc(m.days)
+	// Sumar cuenta desde hoy si ya había vencido; restar nunca deja la cuenta antes de hoy (ni toca una ya vencida)
+	const after =
+		days >= 0 ? Math.max(now, before ?? 0) + days * DAY_MS : before !== null && before > now ? Math.max(now, before + days * DAY_MS) : (before ?? now)
+	// El tipo de días que tiene ahora: el de lo último que sumó (los gratis permiten comprar más cuando quiera)
+	const plan = days > 0 && m.kind !== 'adjust' ? (m.plan ?? m.kind) : (old?.plan ?? m.plan ?? m.kind)
+	if (old)
+		await db
+			// Pagar reactiva una cuenta suspendida
+			.prepare(`UPDATE pro_licenses SET username = ?, plan = ?, expires_at = ?, updated_at = ?${m.kind === 'purchase' ? ', revoked = 0' : ''} WHERE uuid = ?`)
+			.bind(username, plan, after, now, id)
+			.run()
+	else
+		await db
+			.prepare('INSERT INTO pro_licenses (uuid, username, plan, expires_at, backup_hash, revoked, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 0, ?, ?)')
+			.bind(id, username, plan, after, now, now)
+			.run()
+	await db
+		.prepare('INSERT INTO pro_days (license, kind, days, expires_before, expires_after, checkout, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+		.bind(id, m.kind, days, before, after, m.checkout ?? null, m.note ?? null, m.actor, now)
+		.run()
+	return { license: id, before, after }
+}
+
+// Devolver una compra: se restan sus días (los que queden, si ya gastó parte) y se apunta. Los dispositivos y el
+// resto de sus días siguen igual. El dinero lo transfieres tú desde QvaPay a quien pagó
+export async function refundCheckout(db: D1, checkout: string, note: string | null, now: number) {
+	const c = await db
+		.prepare("SELECT c.id, c.plan, c.amount, c.license, COALESCE(c.payer, l.username) AS payer, l.username FROM pro_checkouts c JOIN pro_licenses l ON l.uuid = c.license WHERE c.id = ? AND c.status = 'paid' AND c.refunded_at IS NULL")
+		.bind(checkout)
+		.first<{ id: string; plan: Plan; amount: number; license: string; payer: string; username: string }>()
+	if (!c) return null
+	const marked = await db.prepare('UPDATE pro_checkouts SET refunded_at = ? WHERE id = ? AND refunded_at IS NULL').bind(now, c.id).run()
+	if (!marked.meta?.changes) return null
+	const r = await addDays(db, c.username, { kind: 'refund', days: -(PLANS[c.plan]?.days ?? 0), checkout: c.id, note, actor: 'admin' }, now)
+	return { ...c, ...r }
 }
 
 // Lo que el terminal necesita saber: si eres Pro, hasta cuándo y la licencia firmada para recoger el módulo
@@ -159,25 +207,13 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	// Pro queda a nombre de la cuenta conectada al terminal aunque pague otra (p. ej. con otra sesión abierta
 	// en qvapay.com). Desde el simulador no hay cuenta de QvaPay conectada: a nombre de quien paga
 	const owner = c.requester ?? payer.username
-	const key = `qp:${owner.toLowerCase()}`
+	const key = accountOf(owner)
 	const marked = await db
 		.prepare("UPDATE pro_checkouts SET status = 'paid', license = ?, paid_at = ?, payer = ?, payer_uuid = ? WHERE id = ? AND status = 'pending'")
 		.bind(key, now, payer.username, payer.uuid, c.id)
 		.run()
 	if (!marked.meta?.changes) return true
-	const plan = PLANS[c.plan]
-	const old = await db.prepare('SELECT uuid, expires_at, backup_hash, revoked FROM pro_licenses WHERE uuid = ?').bind(key).first<License>()
-	// Lo que le quedaba a quien la pidió (sus días gratis, un regalo u otra licencia) se suma
-	const mine = c.print ? await licenseOfPrint(db, c.print, now) : null
-	const left = mine && mine.uuid !== key ? mine.expires_at : 0
-	// Renovar suma el periodo a lo que quedaba (lo devuelto no cuenta)
-	const expires = Math.max(now, old && !old.revoked ? old.expires_at : 0, left) + plan.days * DAY_MS
-	if (old) await db.prepare('UPDATE pro_licenses SET username = ?, plan = ?, expires_at = ?, revoked = 0, updated_at = ? WHERE uuid = ?').bind(owner, c.plan, expires, now, key).run()
-	else
-		await db
-			.prepare('INSERT INTO pro_licenses (uuid, username, plan, expires_at, backup_hash, revoked, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 0, ?, ?)')
-			.bind(key, owner, c.plan, expires, now, now)
-			.run()
+	await addDays(db, owner, { kind: 'purchase', days: PLANS[c.plan].days, plan: c.plan, checkout: c.id, note: `${PLANS[c.plan].name} · ${c.amount} USD · pagó @${payer.username}`, actor: 'system' }, now)
 	if (c.print) await attachPrint(db, key, c.print, now)
 	return true
 }
@@ -255,7 +291,7 @@ export async function recover(env: ProEnv, invoice: string, now: number, fetcher
 export async function proSnapshot(db: D1, now: number) {
 	const all = async (t: string) => (await db.prepare(`SELECT * FROM ${t}`).all<Record<string, unknown>>()).results
 	const checkouts = (await all('pro_checkouts')).map(({ backup_code: _, ...c }) => c)
-	return { at: new Date(now).toISOString(), licenses: await all('pro_licenses'), prints: await all('pro_prints'), checkouts, trials: await all('pro_trials') }
+	return { at: new Date(now).toISOString(), licenses: await all('pro_licenses'), days: await all('pro_days'), prints: await all('pro_prints'), checkouts, trials: await all('pro_trials') }
 }
 
 export async function backupPro(env: ProEnv, now: number) {
@@ -277,7 +313,6 @@ export async function activeLicense(db: D1, uuid: string | null | undefined, now
 // Los 30 días gratis de quien conecta su cuenta por primera vez (false si ese usuario o ese dispositivo ya los
 // usó, o si se pasó el tope del día para su IP o en total). ip es la huella cifrada de la IP (ipPrint)
 async function freeDays(db: D1, username: string, print: string, now: number, ip: string) {
-	const license = `trial:qp:${username.toLowerCase()}`
 	const day = new Date(now).toISOString().slice(0, 10)
 	const n = async (sql: string, ...args: unknown[]) => (await db.prepare(sql).bind(...args).first<{ n: number | null }>())?.n ?? 0
 	if ((await n('SELECT n FROM pro_trial_ips WHERE day = ? AND ip = ?', day, ip)) >= TRIAL_PER_IP_DAY) return false
@@ -285,8 +320,9 @@ async function freeDays(db: D1, username: string, print: string, now: number, ip
 		console.error(`pro: tope diario de días gratis (${TRIAL_PER_DAY}) alcanzado`)
 		return false
 	}
+	let license: string
 	try {
-		await startTrial(db, license, username, [`qp:${username.toLowerCase()}`, `print:${print}`], now)
+		license = await startTrial(db, username, [`qp:${username.toLowerCase()}`, `print:${print}`], now)
 	} catch (err) {
 		if (err instanceof ProError) return false
 		throw err
@@ -305,14 +341,11 @@ export async function cleanupPro(db: D1, now: number) {
 }
 
 // Los 30 días gratis. Las llaves dicen quién ya los usó (una sola vez cada una); si alguna ya se usó, no hay otro
-export async function startTrial(db: D1, license: string, username: string, keys: string[], now: number) {
+export async function startTrial(db: D1, username: string, keys: string[], now: number) {
 	for (const k of keys) if (await db.prepare('SELECT 1 FROM pro_trials WHERE key = ?').bind(k).first()) throw new ProError(409, 'Ya usaste tus 30 días gratis')
-	if (await activeLicense(db, license, now)) throw new ProError(409, 'Ya tienes tus días gratis activos')
-	await db
-		.prepare("INSERT INTO pro_licenses (uuid, username, plan, expires_at, revoked, created_at, updated_at) VALUES (?, ?, 'trial', ?, 0, ?, ?) ON CONFLICT(uuid) DO UPDATE SET plan = 'trial', expires_at = excluded.expires_at, updated_at = excluded.updated_at")
-		.bind(license, username, now + TRIAL_DAYS * DAY_MS, now, now)
-		.run()
+	const { license } = await addDays(db, username, { kind: 'trial', days: TRIAL_DAYS, note: 'Días gratis al conectar la cuenta', actor: 'system' }, now)
 	for (const k of keys) await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(k, license, now).run()
+	return license
 }
 
 // Factura para comprar días de Pro desde el terminal (con la huella del dispositivo)
@@ -405,7 +438,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			const username = who?.username
 			// Un dispositivo nuevo con tu cuenta entra solo en tu Pro (comprado o de los días gratis)
 			if (!l && username) {
-				l = await licenseOfUser(db, username, now)
+				l = await activeLicense(db, accountOf(username), now)
 				if (l) await attachPrint(db, l.uuid, print, now)
 			}
 			// Todos empiezan con 30 días gratis: se activan solos al conectar la cuenta, una vez por usuario de
@@ -540,39 +573,27 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		const f = await req.formData()
 		const action = String(f.get('action') ?? '')
 		const uuid = String(f.get('uuid') ?? '')
-		// Regalo: una licencia sin pago, que se activa sola cuando esa persona conecta su cuenta en el terminal
-		if (action === 'gift') {
+		// Dar o quitar días a un usuario, con el motivo (un regalo, una compensación por un fallo, una corrección).
+		// Si aún no ha conectado su cuenta, se le activan al conectarla
+		if (action === 'days') {
 			const username = String(f.get('username') ?? '').replace(/^@/, '').trim()
-			const days = Math.min(3650, Math.max(1, Number(f.get('days')) || 30))
+			const days = Math.trunc(Number(f.get('days')))
+			const note = String(f.get('note') ?? '').trim().slice(0, 200)
 			if (!/^[A-Za-z0-9._-]{1,40}$/.test(username)) notice = '<p class="note">Usuario no válido.</p>'
+			else if (!days || Math.abs(days) > 3650) notice = '<p class="note">Pon cuántos días das (por ejemplo 7) o quitas (−7).</p>'
+			else if (!note) notice = '<p class="note">Escribe el motivo: queda en su historial.</p>'
 			else {
-				const id = `gift:${username.toLowerCase()}`
-				const old = await db.prepare('SELECT expires_at FROM pro_licenses WHERE uuid = ?').bind(id).first<{ expires_at: number }>()
-				const expires = Math.max(now, old?.expires_at ?? 0) + days * DAY_MS
-				await db
-					.prepare("INSERT INTO pro_licenses (uuid, username, plan, expires_at, revoked, created_at, updated_at) VALUES (?, ?, 'gift', ?, 0, ?, ?) ON CONFLICT(uuid) DO UPDATE SET expires_at = excluded.expires_at, revoked = 0, updated_at = excluded.updated_at")
-					.bind(id, username, expires, now, now)
-					.run()
-				notice = `<p>Licencia para <b>@${escHtml(username)}</b> hasta ${new Date(expires).toLocaleDateString('es')}. Se activa sola cuando conecte su cuenta en el terminal.</p>`
+				const r = await addDays(db, username, { kind: days > 0 ? 'gift' : 'adjust', days, note, actor: 'admin' }, now)
+				notice = `<p class="ok">${days > 0 ? `${days} días para` : `${-days} días menos a`} <b>@${escHtml(username)}</b>: tiene Pro hasta el ${new Date(r.after).toLocaleDateString('es')}.</p>`
 			}
 		}
-		// Devolver un pago: se revoca la licencia (también en el simulador) y se apunta; el dinero se
-		// transfiere a mano desde QvaPay a quien pagó
+		// Devolver un pago: se restan solo los días de esa compra y se apunta; el dinero se transfiere a mano desde
+		// QvaPay a quien pagó
 		if (action === 'refund') {
-			const id = String(f.get('checkout') ?? '')
-			// El dinero vuelve a quien pagó (según QvaPay), aunque la licencia esté a nombre de otra cuenta
-			const c = await db
-				.prepare("SELECT c.id, c.amount, c.license, COALESCE(c.payer, l.username) AS username FROM pro_checkouts c JOIN pro_licenses l ON l.uuid = c.license WHERE c.id = ? AND c.status = 'paid' AND c.refunded_at IS NULL")
-				.bind(id)
-				.first<{ id: string; amount: number; license: string; username: string }>()
-			if (!c) notice = '<p class="note">Ese pago no existe o ya se devolvió.</p>'
-			else {
-				await db.prepare('UPDATE pro_checkouts SET refunded_at = ? WHERE id = ?').bind(now, c.id).run()
-				await db.prepare('UPDATE pro_licenses SET revoked = 1, updated_at = ? WHERE uuid = ?').bind(now, c.license).run()
-				await db.prepare('DELETE FROM pro_prints WHERE license = ?').bind(c.license).run()
-				
-				notice = `<p class="ok">Licencia revocada. Ahora transfiere <b>${c.amount.toLocaleString('es')} USD</b> a <b>@${escHtml(c.username)}</b> desde tu cuenta de QvaPay.</p>`
-			}
+			const r = await refundCheckout(db, String(f.get('checkout') ?? ''), String(f.get('note') ?? '').trim().slice(0, 200) || null, now)
+			notice = r
+				? `<p class="ok">Devolución apuntada: se le quitaron los días de esa compra a @${escHtml(r.username)}. Ahora transfiere <b>${r.amount.toLocaleString('es')} USD</b> a <b>@${escHtml(r.payer)}</b> desde tu cuenta de QvaPay.</p>`
+				: '<p class="note">Ese pago no existe o ya se devolvió.</p>'
 		}
 		// Encender o apagar Pro en la web, el terminal y el simulador
 		if (action === 'pro-on' || action === 'pro-off') {
@@ -621,10 +642,10 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 					notice = `<p class="note">No se pudo consultar: ${escHtml((err as Error).message)}</p>`
 				}
 		}
-		// Revocar suspende la licencia sin soltar sus dispositivos: al restaurarla, siguen siendo Pro
+		// Suspender corta Pro sin tocar sus días ni sus dispositivos: al reactivarla, todo sigue como estaba
 		if (action === 'revoke' || action === 'restore') {
-			await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ?').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
-			notice = `<p class="ok">${action === 'revoke' ? 'Licencia revocada: sus dispositivos dejan de ser Pro' : 'Licencia restaurada: sus dispositivos vuelven a ser Pro'}.</p>`
+			await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ? AND merged_into IS NULL').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
+			notice = `<p class="ok">${action === 'revoke' ? 'Cuenta suspendida: deja de ser Pro (sus días y dispositivos se guardan)' : 'Cuenta reactivada: vuelve a ser Pro con sus días'}.</p>`
 		}
 	}
 	const url = new URL(req.url)
@@ -636,9 +657,9 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 	const sum = await db
 		.prepare(
 			`SELECT
-				(SELECT COUNT(*) FROM pro_licenses WHERE revoked = 0 AND expires_at > ?1 AND plan IN ('month', 'year')) AS paying,
-				(SELECT COUNT(*) FROM pro_licenses WHERE revoked = 0 AND expires_at > ?1 AND plan = 'trial') AS trials,
-				(SELECT COUNT(*) FROM pro_licenses WHERE revoked = 0 AND expires_at > ?1 AND plan = 'gift') AS gifts,
+				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan IN ('month', 'year')) AS paying,
+				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan = 'trial') AS trials,
+				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan = 'gift') AS gifts,
 				(SELECT COUNT(*) FROM pro_trials) AS trialKeys,
 				(SELECT COALESCE(SUM(amount), 0) FROM pro_checkouts WHERE status = 'paid' AND refunded_at IS NULL AND COALESCE(paid_at, created_at) >= ?2) AS month,
 				(SELECT COUNT(*) FROM pro_checkouts WHERE status = 'paid' AND refunded_at IS NULL AND COALESCE(paid_at, created_at) >= ?2) AS monthCount,
@@ -687,7 +708,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 			const inTime = c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS
 			const state = c.refunded_at
 				? `<span class="note">devuelto el ${day(c.refunded_at)}</span>`
-				: `<form method="post" style="display:inline" onsubmit="return confirm('¿Devolver ${c.amount} USD a @${escHtml(c.payer ?? '')}? Se revoca su licencia y luego haces tú la transferencia en QvaPay.')"><input type="hidden" name="checkout" value="${escHtml(c.id)}"><button class="ghost" name="action" value="refund">Devolver</button></form>${inTime ? ' <span class="note">en plazo</span>' : ' <span class="note">fuera de plazo</span>'}`
+				: `<form method="post" class="row" style="display:inline-flex" onsubmit="return confirm('¿Devolver ${c.amount} USD a @${escHtml(c.payer ?? '')}? Se le quitan los días de esta compra y luego haces tú la transferencia en QvaPay.')"><input type="hidden" name="checkout" value="${escHtml(c.id)}"><input name="note" placeholder="motivo" style="width:130px"><button class="ghost" name="action" value="refund">Devolver</button></form>${inTime ? ' <span class="note">en plazo</span>' : ' <span class="note">fuera de plazo</span>'}`
 			return `<tr><td>${when(at)}</td><td><b>@${escHtml(c.payer ?? '?')}</b>${c.owner && c.owner.toLowerCase() !== (c.payer ?? '').toLowerCase() ? ` <span class="note">para @${escHtml(c.owner)}</span>` : ''}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td>${usd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? short(c.invoice) : '—'}</td><td>${state}</td></tr>`
 		})
 		.join('')
@@ -711,20 +732,36 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 				
 				(SELECT COUNT(*) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid') AS pays,
 				(SELECT COALESCE(SUM(c.amount), 0) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid' AND c.refunded_at IS NULL) AS paid
-			FROM pro_licenses l ${q ? 'WHERE LOWER(l.username) LIKE ? OR l.uuid LIKE ?' : ''} ORDER BY l.revoked, l.expires_at DESC LIMIT 500`,
+			FROM pro_licenses l WHERE l.merged_into IS NULL ${q ? 'AND (LOWER(l.username) LIKE ? OR l.uuid LIKE ?)' : ''} ORDER BY l.revoked, l.expires_at DESC LIMIT 500`,
 		)
 		.bind(...(q ? [like, like] : []))
 		.all<License & { created_at: number; devices: number; seen: number | null; pays: number; paid: number }>()
-	const planName = (p: string) => ({ month: '30 días', year: '365 días', trial: '30 días gratis', gift: 'regalo' })[p] ?? p
+	const planName = (p: string) => ({ month: 'comprados (30)', year: 'comprados (365)', trial: 'gratis', gift: 'regalados' })[p] ?? p
 	const rows = results
 		.map((l) => {
 			const left = Math.ceil((l.expires_at - now) / DAY_MS)
-			const state = l.revoked ? ' <span class="note">(revocada)</span>' : left <= 0 ? ' <span class="note">(vencida)</span>' : ` <span class="note">(${left} días)</span>`
+			const state = l.revoked ? ' <span class="note">(suspendida)</span>' : left <= 0 ? ' <span class="note">(vencida)</span>' : ` <span class="note">(${left} días)</span>`
 			
 			const who = `<b>@${escHtml(l.username)}</b>`
 			return `<tr><td>${who}</td><td>${planName(l.plan)}</td><td>${day(l.created_at)}</td><td>${day(l.expires_at)}${state}</td><td>${l.devices}${l.seen ? ` <span class="note">· usado ${day(l.seen)}</span>` : ''}</td><td>${!l.pays ? '<span class="note">sin pagos</span>' : l.paid ? `${l.pays} · ${usd(l.paid)}` : '<span class="note">devuelto</span>'}</td>
-			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}">${l.revoked ? 'Restaurar' : 'Revocar'}</button></form></td></tr>`
+			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${escHtml(l.username)}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></td></tr>`
 		})
+		.join('')
+	// Movimientos de días: todo lo que cambió los días de cada cuenta, con el motivo
+	const moves = (
+		await db
+			.prepare(
+				`SELECT d.*, l.username FROM pro_days d JOIN pro_licenses l ON l.uuid = d.license ${q ? 'WHERE LOWER(l.username) LIKE ? OR d.checkout LIKE ?' : ''} ORDER BY d.created_at DESC, d.id DESC LIMIT ${q ? 300 : 100}`,
+			)
+			.bind(...(q ? [like, like] : []))
+			.all<{ id: number; license: string; username: string; kind: string; days: number; expires_before: number | null; expires_after: number; checkout: string | null; note: string | null; actor: string; created_at: number }>()
+	).results
+	const kindName: Record<string, string> = { trial: 'Días gratis', purchase: 'Compra', gift: 'Regalo', refund: 'Devolución', adjust: 'Ajuste', import: 'Saldo inicial' }
+	const moveRows = moves
+		.map(
+			(m) =>
+				`<tr><td>${when(m.created_at)}</td><td><b>@${escHtml(m.username)}</b></td><td>${kindName[m.kind] ?? escHtml(m.kind)}</td><td style="color:var(${m.days < 0 ? '--ask' : '--bid'})">${m.days > 0 ? '+' : ''}${m.days}</td><td>${day(m.expires_after)}</td><td>${m.note ? escHtml(m.note) : '<span class="note">—</span>'}${m.actor === 'admin' ? ' <span class="note">· tú</span>' : ''}</td></tr>`,
+		)
 		.join('')
 	return adminPage(
 		'pro',
@@ -745,8 +782,9 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
 		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Pagó</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
 		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
-		<h2>Licencias</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Últimos días</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
-		<h2>Regalar una licencia</h2><form method="post" class="row"><input type="hidden" name="action" value="gift"><input name="username" placeholder="usuario de QvaPay" required><input name="days" type="number" value="30" min="1" style="width:90px"> días <button>Crear</button></form>
-		<p class="note">Política: se compran días, nada se cobra solo; devolución completa en los ${REFUND_DAYS} días siguientes a la primera compra. Si Pro falla por nuestra culpa, en vez de devolver se regalan los días perdidos (Regalar una licencia).</p>`,
+		<h2>Cuentas</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Últimos días</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>
+		<h2>Movimientos de días ${q ? '' : '<span class="note">(los últimos 100)</span>'}</h2><div class="wrap"><table class="left"><tr><th>Cuándo</th><th>Usuario</th><th>Qué</th><th>Días</th><th>Pro hasta</th><th>Motivo</th></tr>${moveRows || '<tr><td colspan="6" class="empty">Todavía no hay movimientos.</td></tr>'}</table></div>
+		<h2>Dar o quitar días</h2><form method="post" class="row"><input type="hidden" name="action" value="days"><input name="username" placeholder="usuario de QvaPay" required><input name="days" type="number" value="7" style="width:90px" title="Negativo para quitar"> días <input name="note" placeholder="motivo (queda en su historial)" required style="flex:1 1 220px"><button>Apuntar</button></form>
+		<p class="note">Política: se compran días, nada se cobra solo; devolución completa en los ${REFUND_DAYS} días siguientes a la primera compra. Si Pro falla por nuestra culpa, en vez de devolver se dan los días perdidos (Dar o quitar días).</p>`,
 	)
 }
