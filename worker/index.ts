@@ -116,6 +116,10 @@ function proMarkup(res: Response, on: boolean) {
 }
 
 const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook'])
+// El relé a QvaPay lleva el token del usuario en Authorization, la misma cabecera que la contraseña de
+// staging: pidiéndola ahí, el navegador volvía a sacar el diálogo al conectar la cuenta. No expone nada de
+// staging (solo reenvía a QvaPay con el token del usuario, como en producción)
+const stagingOpen = (path: string) => STAGING_OPEN.has(path) || path === RELAY_PREFIX || path.startsWith(`${RELAY_PREFIX}/`)
 
 // Staging: que ningún buscador lo indexe y que se vea a simple vista que no es producción
 const STAGING_BADGE =
@@ -150,7 +154,7 @@ export default {
 		if (path === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: { 'Content-Type': 'text/plain' } })
 		// Staging pide la contraseña del panel en todo (la misma de /admin, así basta con escribirla una vez);
 		// solo queda abierto el aviso de pago de QvaPay. Sin contraseña configurada, no entra nadie
-		if (!STAGING_OPEN.has(path) && !(await authorized(req, env.METRICS_KEY))) return askKey()
+		if (!stagingOpen(path) && !(await authorized(req, env.METRICS_KEY))) return askKey()
 		return staged(await handle(req, env, ctx))
 	},
 
