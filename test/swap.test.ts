@@ -166,7 +166,7 @@ async function smartSetup(failApply?: string, failCreate = false) {
 		const res = (await broker.handle(new Request(`https://app.terminalp2p.com/api/broker${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Broker': '1' }, body: JSON.stringify(body) })))!
 		return res.json()
 	}
-	return { fake, post: to('/smart'), check: to('/smart/check'), add: to('/smart/add') }
+	return { fake, post: to('/smart') }
 }
 
 const rest = { amount: 210, price: 1050, kind: 'fixed', details: [{ name: 'Tarjeta', value: '9200' }] }
@@ -263,20 +263,6 @@ test('orden inteligente vendiendo: dos tomas, tus datos a cada comprador y nunca
 	assert.match(fake.calls[3], /^chat:b2:Hola\. Vendo 30 USD/)
 	assert.equal(fake.calls[4], 'create:20')
 	noCancels(fake.calls)
-})
-
-test('aviso de toma caída: estado de cada toma y sumar lo caído a tu oferta, con su mismo precio', async () => {
-	const { fake, post, check, add } = await smartSetup()
-	await post(buyOrder)
-	assert.deepEqual((await check({ takes: [{ offer: 's1' }, { offer: 's2', order: 'ord-s2' }, { offer: 'nada' }] })).states, ['active', 'active', 'unknown'])
-	Object.assign(fake.offers.s1, { status: 'open', Peer: null })
-	fake.offers.s2.Orders![0].status = 'completed'
-	assert.deepEqual((await check({ takes: [{ offer: 's1' }, { offer: 's2', order: 'ord-s2' }] })).states, ['cancelled', 'done'])
-	fake.offers.nueva = { uuid: 'nueva', type: 'buy', coin: 'BANK_CUP', amount: '210', receive: '220500', status: 'open', User: { uuid: 'me', username: 'yo' } }
-	assert.equal((await add({ offer: 'nueva', add: 20 })).ok, true)
-	assert.equal(fake.calls.at(-1), 'edit:nueva:{"amount":230,"receive":241500}')
-	fake.offers.nueva.status = 'processing'
-	assert.match((await add({ offer: 'nueva', add: 20 })).error, /ya no está publicada/)
 })
 
 test('orden inteligente: el resto se publica siempre entero, aunque se pida por partes', async () => {

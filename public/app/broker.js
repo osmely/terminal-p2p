@@ -184,7 +184,6 @@ async function loadTrades() {
 		bk.openOffers = r.openOffers
 		document.title = r.pending ? `(${r.pending}) ${BASE_TITLE}` : BASE_TITLE
 		deliver(r.alerts ?? [])
-		window.TPProSmart?.onTrades?.()
 	} catch (e) {
 		bk.trades = []
 		bk.openOffers = []

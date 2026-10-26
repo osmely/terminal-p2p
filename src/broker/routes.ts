@@ -120,10 +120,6 @@ export class Broker {
 					return await this.applyOffer(ctx, acc)
 				case 'POST /smart':
 					return await this.smart(ctx, acc)
-				case 'POST /smart/check':
-					return await this.smartCheck(ctx, acc)
-				case 'POST /smart/add':
-					return await this.smartAdd(ctx, acc)
 				case 'GET /peer':
 					return await this.peer(ctx, acc)
 				case 'GET /swap/quote':
@@ -419,41 +415,6 @@ export class Broker {
 			}
 		}
 		return json(200, { ok: true, steps, published, rest, publishError, chatSent, notes })
-	}
-
-	// Cómo siguen las tomas de una orden inteligente: para avisar si la contraparte canceló alguna
-	private async smartCheck({ req }: Ctx, acc: Account) {
-		const b = await readJson(req)
-		const takes = (Array.isArray(b.takes) ? b.takes : []).slice(0, 4) as { offer?: unknown; order?: unknown }[]
-		const states: TakeState[] = []
-		for (const t of takes) states.push(takeState(await acc.client.getOffer(String(t?.offer ?? '')).catch(() => null), t?.order ? String(t.order) : null, acc.me.uuid))
-		return json(200, { states })
-	}
-
-	// Suma USD a tu oferta publicada de una orden inteligente (cuando una toma se cayó), con su mismo precio
-	private async smartAdd({ req }: Ctx, acc: Account) {
-		const b = await readJson(req)
-		const add = round2(Number(b.add))
-		if (!(add > 0)) return json(400, { error: 'Monto no válido' })
-		const o = await acc.client.getOffer(String(b.offer ?? ''))
-		if (o.User?.uuid !== acc.me.uuid) return json(403, { error: 'Solo puedes cambiar tus ofertas' })
-		if (o.status !== 'open') return json(409, { error: 'Tu oferta ya no está publicada' })
-		const flexible = o.offer_kind === 'flexible'
-		const price = num(o.amount) > 0 ? num(o.receive) / num(o.amount) : 0
-		const amount = round2((flexible ? num(o.available_amount ?? o.amount) : num(o.amount)) + add)
-		if (o.type === 'sell') {
-			// Vendiendo, lo que sumas se reserva de tu saldo
-			const me = await acc.client.me()
-			acc.me = me
-			if (add > num(me.balance) + 1e-9) return json(400, { error: `No tienes saldo suficiente: tienes ${num(me.balance).toLocaleString('es')} USD` })
-		}
-		const terms = offerTerms({ amount, price, orderMin: o.order_min, orderMax: o.order_max }, flexible, true)
-		if (terms.error !== undefined) return json(400, { error: terms.error })
-		await acc.client.editOffer(
-			o.uuid,
-			flexible ? { available_amount: terms.amount, receive: terms.receive, order_min: terms.orderMin, order_max: terms.orderMax } : { amount: terms.amount, receive: terms.receive },
-		)
-		return json(200, { ok: true, amount: terms.amount, message: `Tu oferta ahora es de ${terms.amount.toLocaleString('es')} USD` })
 	}
 
 	private async editOffer({ req }: Ctx, acc: Account) {
@@ -765,20 +726,6 @@ export function heldTake(o: P2POffer, flexible: boolean, before: Set<string>, or
 	}
 	if (o.Peer?.uuid !== me || o.status === 'open' || o.status === 'cancelled') return null
 	return { order: null, price: offerPrice }
-}
-
-// Cómo sigue una toma vista desde quien la tomó: en marcha, terminada, caída (la contraparte canceló o se
-// venció el plazo y ya no participas) o sin saber (no se pudo leer)
-export type TakeState = 'active' | 'done' | 'cancelled' | 'unknown'
-export function takeState(o: P2POffer | null, order: string | null, me: string): TakeState {
-	if (!o) return 'unknown'
-	if (order) {
-		const ord = o.Orders?.find((x) => x.uuid === order)
-		if (!ord) return 'unknown'
-		return ord.status === 'completed' ? 'done' : ord.status === 'cancelled' ? 'cancelled' : 'active'
-	}
-	if (o.Peer?.uuid !== me) return 'cancelled'
-	return o.status === 'completed' ? 'done' : o.status === 'cancelled' || o.status === 'open' ? 'cancelled' : 'active'
 }
 
 // Por qué una oferta ya no sirve para la orden inteligente (null si sirve tal cual se planeó)
