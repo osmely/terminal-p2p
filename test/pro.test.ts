@@ -430,7 +430,7 @@ test('copias: CSV de pagos con quién pagó, copia completa sin códigos de resp
 	const get = (q: string) => proAdmin(new Request(`https://app.terminalp2p.com/admin/pro?${q}`, { headers: { Authorization: `Basic ${btoa('x:panel')}` } }), s.env, s.now())
 	const csv = await (await get('export=pagos')).text()
 	const [head, row] = csv.trim().split('\n')
-	assert.equal(head, 'pagado,pago,pago_uuid,para,dias,importe_usd,factura_qvapay,id,devuelto')
+	assert.equal(head, 'pagado,pago,pago_uuid,para,dias,importe_usd,factura_qvapay,id,devuelto,devolucion,transferido,ref_transferencia')
 	assert.match(row, /,pepe,u-pepe,Ana,30,1.99,inv-1,pro-/)
 	const copy = JSON.parse(await (await get('export=copia')).text())
 	assert.equal(copy.checkouts.length, 1)
@@ -672,4 +672,35 @@ test('pagos cobrados sin activar: quedan en «Pendientes» hasta activarlos, y e
 	// El botón del panel manda un aviso de prueba
 	assert.match(await admin({ action: 'alert-test' }), /Aviso de prueba enviado/)
 	assert.match(s.q.telegram.at(-1)!.text, /Aviso de prueba/)
+})
+
+test('informes por meses (cobrado, devuelto, neto, nuevos y los que repiten) y registro de lo hecho en el panel', async () => {
+	const s = setup()
+	const admin = (fields?: Record<string, string>, query = '') =>
+		proAdmin(new Request(`https://app.terminalp2p.com/admin/pro${query}`, { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }), s.env, s.now(), s.q.fetcher)
+	await s.post('/pro/status', { print: P1, username: 'ana' }) // días gratis
+	await buy(s, P1, 'month', 'ana')
+	s.tick(56 * 86_400_000) // le quedan 4 días (30 gratis + 30 comprados): ya puede comprar más
+	const second = await buy(s, P1, 'month', 'ana') // repite
+	await buy(s, P2, 'year', 'leo') // nuevo, sin días gratis
+	await admin({ action: 'refund', checkout: second.checkout.id, note: 'se equivocó' })
+	const { proReport } = await import('../worker/pro.ts')
+	const r = await proReport(s.env.DB, s.now())
+	assert.deepEqual([r.buyers, r.repeat, r.trialAccounts, r.converted, r.paidCount, r.refundedCount], [2, 1, 1, 1, 3, 1])
+	const total = r.months.reduce((t, m) => ({ gross: t.gross + m.gross, refunded: t.refunded + m.refunded, newPaying: t.newPaying + m.newPaying, renewals: t.renewals + m.renewals }), { gross: 0, refunded: 0, newPaying: 0, renewals: 0 })
+	assert.deepEqual([Math.round(total.gross * 100) / 100, total.refunded, total.newPaying, total.renewals], [23.98, 1.99, 2, 1])
+	const page = await (await admin(undefined, '?view=informes')).text()
+	assert.match(page, /<h1>Informes<\/h1>/)
+	assert.match(page, /Repiten compra<\/span><b>50 %/)
+	const csv = await (await admin(undefined, '?export=informe')).text()
+	assert.match(csv.split('\n')[0], /^mes,pagos,cobrado_usd,devoluciones,devuelto_usd,neto_usd,nuevos,repiten,dias_gratis$/)
+	// El registro: la devolución y una nota quedan; lo que falla no
+	await admin({ action: 'note', license: 'qp:ana', text: 'le escribí', u: 'ana' })
+	await admin({ action: 'refund', checkout: second.checkout.id })
+	const log = s.db.prepare('SELECT action, target FROM pro_audit ORDER BY id').all().map((x) => ({ ...x }))
+	assert.deepEqual(log, [
+		{ action: 'refund', target: second.checkout.id },
+		{ action: 'note', target: 'ana' },
+	])
+	assert.match(await (await admin(undefined, '?view=registro')).text(), /Nota[\s\S]*Devolución \(directa\)/)
 })

@@ -862,30 +862,154 @@ const daysForm = (username?: string) =>
 	`<form method="post" class="row"><input type="hidden" name="action" value="days">${username ? `<input type="hidden" name="u" value="${escHtml(username)}"><input type="hidden" name="username" value="${escHtml(username)}">` : '<input name="username" placeholder="usuario de QvaPay" required>'}<input name="days" type="number" value="7" style="width:90px" title="Negativo para quitar"> días <input name="note" placeholder="motivo (lo ve el usuario en su historial)" required style="flex:1 1 220px"><button>Apuntar</button></form>`
 
 // Pagos en CSV (uno por fila, con quién pagó y su identificador en QvaPay) o copia completa de Pro en JSON
+// Secciones del panel de Pro
+const subnav = (on: string) =>
+	`<nav class="ranges" style="margin-bottom:16px">${[
+		['', 'Pendientes y cuentas'],
+		['informes', 'Informes'],
+		['registro', 'Registro'],
+	]
+		.map(([v, name]) => `<a href="/admin/pro${v ? `?view=${v}` : ''}" class="${v === on ? 'on' : ''}">${name}</a>`)
+		.join('')}</nav>`
+
+// Mes en hora de Cuba (AAAA-MM)
+const cubaMonth = (ms: number) => new Date(ms).toLocaleString('en-CA', { timeZone: 'America/Havana', year: 'numeric', month: '2-digit' }).slice(0, 7)
+
+// Las cuentas del negocio, mes a mes: lo cobrado, lo devuelto, el neto, clientes nuevos y los que repiten
+export async function proReport(db: D1, now: number) {
+	const pays = (
+		await db
+			.prepare("SELECT license, amount, COALESCE(paid_at, created_at) AS at, refunded_at FROM pro_checkouts WHERE status = 'paid' AND license IS NOT NULL ORDER BY at")
+			.all<{ license: string; amount: number; at: number; refunded_at: number | null }>()
+	).results
+	const trials = (await db.prepare("SELECT license, created_at FROM pro_days WHERE kind = 'trial'").all<{ license: string; created_at: number }>()).results
+	type Month = { month: string; pays: number; gross: number; refunded: number; refunds: number; newPaying: number; renewals: number; trials: number }
+	const months = new Map<string, Month>()
+	const m = (k: string) => {
+		let x = months.get(k)
+		if (!x) months.set(k, (x = { month: k, pays: 0, gross: 0, refunded: 0, refunds: 0, newPaying: 0, renewals: 0, trials: 0 }))
+		return x
+	}
+	const seen = new Map<string, number>()
+	for (const p of pays) {
+		const x = m(cubaMonth(p.at))
+		x.pays++
+		x.gross += p.amount
+		const n = (seen.get(p.license) ?? 0) + 1
+		seen.set(p.license, n)
+		if (n === 1) x.newPaying++
+		else x.renewals++
+		if (p.refunded_at) {
+			const r = m(cubaMonth(p.refunded_at))
+			r.refunds++
+			r.refunded += p.amount
+		}
+	}
+	for (const t of trials) m(cubaMonth(t.created_at)).trials++
+	const list = [...months.values()].sort((a, b) => b.month.localeCompare(a.month)).map((x) => ({ ...x, gross: Math.round(x.gross * 100) / 100, refunded: Math.round(x.refunded * 100) / 100, net: Math.round((x.gross - x.refunded) * 100) / 100 }))
+	const buyers = [...seen.values()]
+	const trialAccounts = new Set(trials.map((t) => t.license))
+	const converted = [...trialAccounts].filter((l) => seen.has(l)).length
+	const active = await db
+		.prepare("SELECT COUNT(*) AS n FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ? AND plan IN ('month', 'year')")
+		.bind(now)
+		.first<{ n: number }>()
+	return {
+		months: list,
+		buyers: buyers.length,
+		repeat: buyers.filter((n) => n > 1).length,
+		trialAccounts: trialAccounts.size,
+		converted,
+		paidCount: pays.length,
+		refundedCount: pays.filter((p) => p.refunded_at).length,
+		activePaid: active?.n ?? 0,
+	}
+}
+
+async function reportsPage(db: D1, notice: string, now: number) {
+	const r = await proReport(db, now)
+	const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)} %` : '—')
+	const thisMonth = r.months.find((x) => x.month === cubaMonth(now))
+	const lastMonth = r.months.find((x) => x.month === cubaMonth(Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 0, 12)))
+	const name = (ym: string) => new Date(`${ym}-15T12:00:00Z`).toLocaleDateString('es', { month: 'long', year: 'numeric' })
+	const card = (label: string, value: string, small = '') => `<div class="card"><span>${label}</span><b>${value}</b>${small ? `<small>${small}</small>` : ''}</div>`
+	const rows = r.months
+		.slice(0, 24)
+		.map(
+			(x) =>
+				`<tr><td>${name(x.month)}</td><td>${x.pays}</td><td>${hUsd(x.gross)}</td><td>${x.refunded ? `${hUsd(x.refunded)} <span class="note">(${x.refunds})</span>` : '—'}</td><td><b>${hUsd(x.net)}</b></td><td>${x.newPaying}</td><td>${x.renewals}</td><td>${x.trials}</td></tr>`,
+		)
+		.join('')
+	return adminPage(
+		'pro',
+		'Informes de Pro',
+		`${subnav('informes')}<div class="top"><h1>Informes</h1><a class="note" href="/admin/pro?export=informe">Descargar por meses (CSV)</a></div>${notice}
+		<p class="note">Meses en hora de Cuba. Las devoluciones cuentan en el mes en que se aprobaron.</p>
+		<div class="cards">
+			${card('Neto este mes', hUsd(thisMonth?.net ?? 0), `${thisMonth?.pays ?? 0} pagos · devuelto ${hUsd(thisMonth?.refunded ?? 0)}`)}
+			${card('Neto el mes pasado', hUsd(lastMonth?.net ?? 0), `${lastMonth?.pays ?? 0} pagos`)}
+			${card('Con días pagados ahora', String(r.activePaid), 'cuentas con Pro comprado activo')}
+			${card('Repiten compra', pct(r.repeat, r.buyers), `${r.repeat} de ${r.buyers} que compraron`)}
+			${card('De gratis a pago', pct(r.converted, r.trialAccounts), `${r.converted} de ${r.trialAccounts} con días gratis`)}
+			${card('Devoluciones', pct(r.refundedCount, r.paidCount), `${r.refundedCount} de ${r.paidCount} pagos`)}
+		</div>
+		<h2>Por meses</h2><div class="wrap"><table><tr><th>Mes</th><th>Pagos</th><th>Cobrado</th><th>Devuelto</th><th>Neto</th><th>Nuevos</th><th>Repiten</th><th>Días gratis</th></tr>${rows || '<tr><td colspan="8" class="empty">Todavía no hay datos.</td></tr>'}</table></div>
+		<p class="note">«Nuevos»: su primera compra. «Repiten»: compras de quien ya había comprado. «Días gratis»: cuentas que empezaron sus 30 días ese mes.</p>`,
+	)
+}
+
+const AUDIT_NAME: Record<string, string> = {
+	days: 'Días', refund: 'Devolución (directa)', 'refund-approve': 'Devolución aprobada', 'refund-reject': 'Devolución rechazada', 'refund-transfer': 'Devolución transferida', note: 'Nota',
+	revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
+	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba',
+}
+
+async function auditPage(db: D1, now: number) {
+	const { results } = await db.prepare('SELECT * FROM pro_audit ORDER BY at DESC, id DESC LIMIT 300').all<{ at: number; action: string; target: string | null; detail: string | null }>()
+	const rows = results
+		.map((a) => `<tr><td>${hWhen(a.at)}</td><td>${escHtml(AUDIT_NAME[a.action] ?? a.action)}</td><td>${a.target ? escHtml(a.target) : '—'}</td><td style="white-space:normal">${escHtml(a.detail ?? '')}</td></tr>`)
+		.join('')
+	return adminPage(
+		'pro',
+		'Registro de Pro',
+		`${subnav('registro')}<h1>Registro</h1><p class="note">Todo lo que se hace en este panel (las últimas 300 acciones). No se puede borrar ni editar. Horas de Cuba.</p>
+		<div class="wrap"><table class="left"><tr><th>Cuándo</th><th>Qué</th><th>Sobre</th><th>Detalle</th></tr>${rows || '<tr><td colspan="4" class="empty">Todavía no hay acciones.</td></tr>'}</table></div>`,
+	)
+}
+
 async function proExport(db: D1, kind: string, now: number) {
 	const day = new Date(now).toISOString().slice(0, 10)
 	if (kind === 'copia')
 		return new Response(JSON.stringify(await proSnapshot(db, now), null, 1), {
 			headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="terminalp2p-pro-${day}.json"`, 'Cache-Control': 'no-store' },
 		})
-	const { results } = await db
-		.prepare(
-			`SELECT c.id, c.invoice, c.plan, c.amount, c.created_at, c.paid_at, c.refunded_at, COALESCE(c.payer, l.username) AS payer, c.payer_uuid, l.username AS owner, c.requester
-			FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license WHERE c.status = 'paid' ORDER BY COALESCE(c.paid_at, c.created_at)`,
-		)
-		.all<{ id: string; invoice: string | null; plan: Plan; amount: number; created_at: number; paid_at: number | null; refunded_at: number | null; payer: string | null; payer_uuid: string | null; owner: string | null; requester: string | null }>()
 	const cell = (v: unknown) => {
 		const t = v == null ? '' : String(v)
 		return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
 	}
+	const csv = (rows: unknown[][], name: string) =>
+		new Response(rows.map((r) => r.map(cell).join(',')).join('\n') + '\n', {
+			headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="terminalp2p-${name}-${day}.csv"`, 'Cache-Control': 'no-store' },
+		})
+	if (kind === 'informe') {
+		const r = await proReport(db, now)
+		return csv([['mes', 'pagos', 'cobrado_usd', 'devoluciones', 'devuelto_usd', 'neto_usd', 'nuevos', 'repiten', 'dias_gratis'], ...r.months.map((x) => [x.month, x.pays, x.gross, x.refunds, x.refunded, x.net, x.newPaying, x.renewals, x.trials])], 'informe')
+	}
+	const { results } = await db
+		.prepare(
+			`SELECT c.id, c.invoice, c.plan, c.amount, c.created_at, c.paid_at, c.refunded_at, COALESCE(c.payer, l.username) AS payer, c.payer_uuid, l.username AS owner, c.requester,
+				r.status AS refund_status, r.transferred_at, r.transfer_ref
+			FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license LEFT JOIN pro_refunds r ON r.checkout = c.id WHERE c.status = 'paid' ORDER BY COALESCE(c.paid_at, c.created_at)`,
+		)
+		.all<{ id: string; invoice: string | null; plan: Plan; amount: number; created_at: number; paid_at: number | null; refunded_at: number | null; payer: string | null; payer_uuid: string | null; owner: string | null; requester: string | null; refund_status: string | null; transferred_at: number | null; transfer_ref: string | null }>()
 	const iso = (ms: number | null) => (ms ? new Date(ms).toISOString() : '')
-	const rows = [
-		['pagado', 'pago', 'pago_uuid', 'para', 'dias', 'importe_usd', 'factura_qvapay', 'id', 'devuelto'],
-		...results.map((r) => [iso(r.paid_at ?? r.created_at), r.payer, r.payer_uuid, r.owner ?? r.requester, PLANS[r.plan]?.days ?? r.plan, r.amount, r.invoice, r.id, iso(r.refunded_at)]),
-	]
-	return new Response(rows.map((r) => r.map(cell).join(',')).join('\n') + '\n', {
-		headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="terminalp2p-pagos-${day}.csv"`, 'Cache-Control': 'no-store' },
-	})
+	return csv(
+		[
+			['pagado', 'pago', 'pago_uuid', 'para', 'dias', 'importe_usd', 'factura_qvapay', 'id', 'devuelto', 'devolucion', 'transferido', 'ref_transferencia'],
+			...results.map((r) => [iso(r.paid_at ?? r.created_at), r.payer, r.payer_uuid, r.owner ?? r.requester, PLANS[r.plan]?.days ?? r.plan, r.amount, r.invoice, r.id, iso(r.refunded_at), r.refund_status, iso(r.transferred_at), r.transfer_ref]),
+		],
+		'pagos',
+	)
 }
 
 export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetcher: typeof fetch = fetch): Promise<Response> {
@@ -1007,11 +1131,20 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 				await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ? AND merged_into IS NULL').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
 				notice = `<p class="ok">${action === 'revoke' ? 'Cuenta suspendida: deja de ser Pro (sus días y dispositivos se guardan)' : 'Cuenta reactivada: vuelve a ser Pro con sus días'}.</p>`
 			}
+			// Todo lo que sale bien queda en el registro: qué, sobre quién y lo que dijo el panel
+			if (action && notice.startsWith('<p class="ok">')) {
+				const target = ['username', 'u', 'checkout', 'id', 'invoice', 'uuid', 'license'].map((k) => String(f.get(k) ?? '')).find(Boolean) ?? null
+				const detail = notice.replace(/<button[\s\S]*?<\/button>/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 300)
+				await db.prepare('INSERT INTO pro_audit (at, action, target, detail) VALUES (?, ?, ?, ?)').bind(now, action, target, detail).run()
+			}
 		} catch (err) {
 			if (!(err instanceof ProError)) throw err
 			notice = `<p class="note">${escHtml(err.message)}</p>`
 		}
 	}
+	const view = url.searchParams.get('view')
+	if (!client && view === 'informes') return reportsPage(db, notice, now)
+	if (!client && view === 'registro') return auditPage(db, now)
 	if (client && /^[A-Za-z0-9._-]{1,40}$/.test(client.replace(/^@/, ''))) return clientPage(env, client.replace(/^@/, ''), notice, now)
 	const q = (url.searchParams.get('q') ?? '').replace(/^@/, '').trim().toLowerCase()
 	const like = `%${q}%`
@@ -1142,8 +1275,9 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 	return adminPage(
 		'pro',
 		'Pro',
-		`<div class="top"><h1>Pro</h1><form method="get" class="row"><input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"><button>Buscar</button>${q ? ' <a href="/admin/pro" class="note">quitar filtro</a>' : ''}</form></div>
+		`${subnav('')}<div class="top"><h1>Pro</h1><form method="get" class="row"><input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"><button>Buscar</button>${q ? ' <a href="/admin/pro" class="note">quitar filtro</a>' : ''}</form></div>
 		<p class="note">De cada usuario solo se guarda su usuario de QvaPay, hasta cuándo tiene Pro y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay. Horas de Cuba.</p>${notice}
+		<h2 class="first">Pendientes ${work.count ? `<span class="pill requested">${work.count}</span>` : ''}</h2>${work.count ? work.refunds.map((r) => refundHtml(r)).join('') + issueRows : '<p class="ok">✅ Nada pendiente: ni devoluciones por decidir o transferir, ni pagos sin activar.</p>'}
 		${
 			(await proEnabled(db, now))
 				? `<form method="post" class="row flag on"><b>● Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis al conectar) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
@@ -1156,7 +1290,6 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		<div class="top" style="margin-top:16px"><form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y enseña las que aquí no constan">Repasar pagos con QvaPay</button></form>
 		<span class="row"><a class="note" href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a class="note" href="/admin/pro?export=copia">Copia completa (JSON)</a></span></div>
 		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
-		<h2>Pendientes ${work.count ? `<span class="pill requested">${work.count}</span>` : ''}</h2>${work.count ? work.refunds.map((r) => refundHtml(r)).join('') + issueRows : '<p class="ok">✅ Nada pendiente: ni devoluciones por decidir o transferir, ni pagos sin activar.</p>'}
 		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Cuenta</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
 		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
 		<h2>Cuentas</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Últimos días</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>

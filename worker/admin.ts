@@ -43,6 +43,16 @@ form.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .rf{padding:12px 14px;margin-bottom:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.rf p{margin:6px 0 0}.rf form{margin-top:8px}
 .noteline{margin:6px 0;padding:8px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--line)}
 a{color:var(--accent)}td a{text-decoration:none}
+h2.first{margin-top:18px}
+@media (max-width:640px){
+main{width:calc(100% - 24px);margin:14px auto 48px}h1{font-size:20px}h2{margin:24px 0 10px;font-size:16px}
+.bar{gap:8px;padding-bottom:12px;margin-bottom:14px}.ranges{overflow-x:auto;scrollbar-width:none}.ranges a{white-space:nowrap}
+.cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:14px}.card{padding:12px}.card b{font-size:19px}
+.flag{padding:10px 12px;margin-top:10px}.flag .note{font-size:12px}
+.top form.row{flex:1 1 100%}.top form.row input{flex:1}
+.rf form.row input,.rf form.row button{flex:1 1 100%}.rf form.row button.ghost{flex:1 1 40%}
+table{font-size:13px}th,td{padding:7px 8px}
+}
 .code{display:inline-block;font:600 18px ui-monospace,Menlo,monospace;padding:10px 14px;border-radius:8px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
 `
 
