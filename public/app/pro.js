@@ -23,6 +23,25 @@ const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
 	['📈', 'Todos los mercados del simulador', 'sin Pro, BTC y ETH; con Pro también SOL, XRP, BNB, DOGE, SUI, PEPE y TAO (sim.terminalp2p.com)'],
 ]
+// El simulador manda aquí para entrar (?connect=sim): se abre la ventana del token y, en cuanto la sesión
+// compartida está lista, se vuelve al simulador. Se recuerda unos minutos en esta pestaña por si tardas
+const SIM_BACK_MS = 10 * 60_000
+if (new URLSearchParams(location.search).get('connect') === 'sim') {
+	const q = new URLSearchParams(location.search)
+	q.delete('connect')
+	history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
+	try {
+		sessionStorage.setItem('tp.backToSim', String(Date.now()))
+	} catch {}
+}
+const wantsSim = () => {
+	try {
+		return Date.now() - Number(sessionStorage.getItem('tp.backToSim') ?? 0) < SIM_BACK_MS
+	} catch {
+		return false
+	}
+}
+let simConnectShown = false
 const CHECKOUT_POLL_MS = 4000
 const CHECKOUT_MAX_MS = 60 * 60_000
 const RENEW_SOON_MS = 5 * 86_400_000
@@ -56,6 +75,10 @@ async function refreshPro() {
 	// Sin cuenta conectada, el simulador tampoco tiene sesión
 	if (!bk.acct.connected) {
 		fetch('/pro/leave', { method: 'POST', cache: 'no-store' }).catch(() => {})
+		if (wantsSim() && !simConnectShown && typeof showConnect === 'function') {
+			simConnectShown = true
+			showConnect()
+		}
 		return applyPro({ pro: false })
 	}
 	try {
@@ -72,6 +95,13 @@ async function refreshPro() {
 		}
 		store.set('pro.print', pro.print)
 		applyPro(s)
+		// Venías del simulador: la sesión ya está, de vuelta allí
+		if (wantsSim()) {
+			try {
+				sessionStorage.removeItem('tp.backToSim')
+			} catch {}
+			return location.assign(SIM_URL)
+		}
 		if (s.started) showFreeDays()
 		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && store.get('pro.renewTold', '') !== new Date().toDateString()) {
 			store.set('pro.renewTold', new Date().toDateString())

@@ -1021,7 +1021,7 @@ async function start() {
 	} catch {
 		S.user = null
 	}
-	$('appLink').href = APP_URL
+	$('appLink').href = `${APP_URL}/?connect=sim`
 	$('devLogin').hidden = !S.config.dev
 	render()
 	// Paneles redimensionables en escritorio (cuando los cuatro paneles están lado a lado)
