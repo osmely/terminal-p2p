@@ -115,6 +115,8 @@ function proMarkup(res: Response, on: boolean) {
 	return new HTMLRewriter().on(on ? '[data-nopro]' : '[data-pro]', { element: (el) => void el.remove() }).transform(res)
 }
 
+const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook'])
+
 // Staging: que ningún buscador lo indexe y que se vea a simple vista que no es producción
 const STAGING_BADGE =
 	'<div style="position:fixed;left:8px;bottom:8px;z-index:99999;padding:3px 8px;border-radius:6px;background:#f0b93a;color:#000;font:700 11px/1.4 system-ui,sans-serif;letter-spacing:.06em;pointer-events:none">STAGING</div>'
@@ -144,7 +146,11 @@ function staged(res: Response) {
 export default {
 	async fetch(req, env, ctx) {
 		if (!env.STAGING) return handle(req, env, ctx)
-		if (new URL(req.url).pathname === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: { 'Content-Type': 'text/plain' } })
+		const path = new URL(req.url).pathname
+		if (path === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: { 'Content-Type': 'text/plain' } })
+		// Staging pide la contraseña del panel en todo (la misma de /admin, así basta con escribirla una vez);
+		// solo queda abierto el aviso de pago de QvaPay. Sin contraseña configurada, no entra nadie
+		if (!STAGING_OPEN.has(path) && !(await authorized(req, env.METRICS_KEY))) return askKey()
 		return staged(await handle(req, env, ctx))
 	},
 
