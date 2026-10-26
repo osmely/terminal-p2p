@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { readWho, tokenPrint, whoCookie, whoToken } from '../worker/session.ts'
-import { PRO_DEVICES, proAdmin, proApi, type ProEnv } from '../worker/pro.ts'
+import { proAdmin, proApi, type ProEnv } from '../worker/pro.ts'
 
 // La cookie que deja el relé cuando QvaPay devuelve el perfil de ese token: aquí, del `username` del cuerpo
 async function whoHeader(body: unknown, now = Date.now()): Promise<Record<string, string>> {
@@ -96,7 +96,7 @@ async function buy(s: ReturnType<typeof setup>, print = P1, plan = 'month', user
 	return { checkout: c.body, result: (await s.status(c.body.id, print)).body }
 }
 
-test('comprar: factura de QvaPay, quién pagó lo confirma QvaPay y el código de respaldo se entrega una vez', async () => {
+test('comprar: factura de QvaPay y quién pagó lo confirma QvaPay', async () => {
 	const s = setup()
 	const c = await s.post('/pro/checkout', { print: P1, plan: 'month' })
 	assert.equal(c.status, 200)
@@ -110,23 +110,21 @@ test('comprar: factura de QvaPay, quién pagó lo confirma QvaPay y el código d
 	assert.equal(r.status, 'paid')
 	assert.equal(r.pro, true)
 	assert.equal(r.username, 'ana')
-	assert.match(r.backupCode, /^TP-[2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}$/)
 	assert.equal(r.expiresAt, T0 + 30 * 86_400_000)
-	// Una segunda consulta ya no devuelve el código (solo lo tiene quien compró)
-	assert.equal((await s.status(c.body.id)).body.backupCode, null)
+	// Ya no hay códigos de respaldo: Pro va con la cuenta
+	assert.equal('backupCode' in r, false)
 	const st = (await s.post('/pro/status', { print: P1 })).body
 	assert.deepEqual([st.pro, st.username, st.plan], [true, 'ana', 'month'])
 	// En la base: el usuario y la huella, nunca un token
 	assert.deepEqual({ ...s.db.prepare('SELECT username, plan FROM pro_licenses').get() }, { username: 'ana', plan: 'month' })
 })
 
-test('renovar suma el periodo y no cambia el código de respaldo', async () => {
+test('renovar suma el periodo', async () => {
 	const s = setup()
 	await buy(s)
 	s.tick(26 * 86_400_000)
 	const { result } = await buy(s, P1, 'year')
 	assert.equal(result.expiresAt, T0 + (30 + 365) * 86_400_000)
-	assert.equal(result.backupCode, null)
 })
 
 test('con días de Pro de sobra no se compran más hasta que queden 5; una factura pendiente de los mismos días se reutiliza', async () => {
@@ -174,49 +172,6 @@ test('cambiar de token: la huella vieja autoriza a la nueva y deja de valer', as
 	assert.equal((await s.post('/pro/rotate', { from: P3, to: P4 })).body.pro, false)
 })
 
-test('añadir dispositivo con un código de 6 cifras: un solo uso y 5 minutos', async () => {
-	const s = setup()
-	await buy(s)
-	assert.equal((await s.post('/pro/pair', { print: P3 })).status, 403)
-	const { code } = (await s.post('/pro/pair', { print: P1 })).body
-	assert.match(code, /^\d{6}$/)
-	const ok = await s.post('/pro/claim', { print: P2, code })
-	assert.equal(ok.body.pro, true)
-	// Ya usado
-	assert.equal((await s.post('/pro/claim', { print: P3, code })).status, 400)
-	// Caducado
-	const late = (await s.post('/pro/pair', { print: P1 })).body.code
-	s.tick(5 * 60_000 + 1)
-	assert.equal((await s.post('/pro/claim', { print: P3, code: late })).status, 400)
-})
-
-test(`como mucho ${PRO_DEVICES} dispositivos: el que entra expulsa al que lleva más tiempo sin usarse`, async () => {
-	const s = setup()
-	await buy(s)
-	s.tick(1000)
-	await s.post('/pro/claim', { print: P2, code: (await s.post('/pro/pair', { print: P1 })).body.code })
-	s.tick(1000)
-	await s.post('/pro/status', { print: P1 }) // P1 se usa: P2 queda como el más antiguo
-	s.tick(1000)
-	await s.post('/pro/claim', { print: P3, code: (await s.post('/pro/pair', { print: P1 })).body.code })
-	const pro = async (p: string) => (await s.post('/pro/status', { print: p })).body.pro
-	assert.deepEqual([await pro(P1), await pro(P2), await pro(P3)], [true, false, true])
-})
-
-test('código de respaldo: entra un dispositivo nuevo y el código cambia (uno compartido sirve una vez)', async () => {
-	const s = setup()
-	const { result } = await buy(s)
-	const first = result.backupCode as string
-	const r = await s.post('/pro/claim', { print: P2, code: first.toLowerCase().replace(/-/g, ' ') })
-	assert.equal(r.body.pro, true)
-	assert.notEqual(r.body.backupCode, first)
-	assert.equal((await s.post('/pro/claim', { print: P3, code: first })).status, 400)
-	// Desde un dispositivo Pro se puede pedir otro (y el anterior deja de valer)
-	const next = (await s.post('/pro/backup', { print: P2 })).body.backupCode
-	assert.equal((await s.post('/pro/claim', { print: P4, code: r.body.backupCode })).status, 400)
-	assert.equal((await s.post('/pro/claim', { print: P4, code: next })).body.pro, true)
-})
-
 test('el módulo Pro sale firmado con el usuario, y nunca sin licencia válida o revocada', async () => {
 	const store = new Map([['module.js', 'console.log("pro")']])
 	const s = setup({ PRO: { get: async (k) => store.get(k) ?? null } })
@@ -232,14 +187,15 @@ test('el módulo Pro sale firmado con el usuario, y nunca sin licencia válida o
 	assert.equal((await s.get(`/pro/module.js?l=${encodeURIComponent(result.license)}`)).status, 403)
 })
 
-test('panel: regalar una licencia (con código para activarla), revocarla y restaurarla', async () => {
+test('panel: regalar una licencia (se activa sola al conectar su cuenta), revocarla y restaurarla', async () => {
 	const s = setup()
 	const form = (fields: Record<string, string>, auth = 'panel') =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Authorization: `Basic ${btoa(`x:${auth}`)}` }, body: new URLSearchParams(fields) }), s.env, T0)
 	assert.equal((await form({ action: 'gift', username: 'leo' }, 'mala')).status, 401)
 	const html = await (await form({ action: 'gift', username: '@leo', days: '7' })).text()
-	const code = html.match(/TP-[2-9A-Z]{4}-[2-9A-Z]{4}-[2-9A-Z]{4}/)![0]
-	assert.equal((await s.post('/pro/claim', { print: P1, code })).body.pro, true)
+	assert.match(html, /Se activa sola cuando conecte su cuenta/)
+	const st = (await s.post('/pro/status', { print: P1, username: 'leo' })).body
+	assert.deepEqual([st.pro, st.plan, st.started], [true, 'gift', false])
 	await form({ action: 'revoke', uuid: 'gift:leo' })
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
 	// Restaurar la deja como estaba: el mismo dispositivo vuelve a ser Pro sin hacer nada
@@ -328,21 +284,19 @@ test('pide una factura, luego otra, y paga la primera: la pantalla que espera la
 	s.q.pay('inv-1', 'ana')
 	const r = (await s.status(second.id)).body
 	assert.deepEqual([r.status, r.pro], ['paid', true])
-	assert.match(r.backupCode, /^TP-/)
-	assert.equal((await s.status(first.id)).body.backupCode, null)
+	assert.equal((await s.status(first.id)).body.status, 'paid')
 	// Al renovar, el pago anterior (de antes de pedir esta) no cuenta como pago de esta
 	s.tick(26 * 86_400_000)
 	const renewal = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
 	assert.equal((await s.status(renewal.id)).body.status, 'pending')
 })
 
-test('el estado de una factura solo se lo da a quien la pidió: otro no se lleva el código de respaldo', async () => {
+test('el estado de una factura solo se lo da a quien la pidió', async () => {
 	const s = setup()
 	const c = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
 	s.q.pay('inv-1', 'ana')
 	assert.equal((await s.status(c.id, P2)).status, 404)
-	// El dueño sigue recibiendo su código
-	assert.match((await s.status(c.id)).body.backupCode, /^TP-/)
+	assert.equal((await s.status(c.id)).body.status, 'paid')
 	// Ya no hay consulta por GET con solo el identificador
 	assert.equal((await s.get(`/pro/checkout?id=${c.id}`)).status, 404)
 })
@@ -461,7 +415,7 @@ test('ningún código ni migración borra licencias, pagos o días gratis usados
 	}
 })
 
-test('topes contra abusos: días gratis por IP y día, facturas pendientes en total y códigos de 6 cifras por minuto', async () => {
+test('topes contra abusos: días gratis por IP y día y facturas pendientes en total', async () => {
 	const { TRIAL_PER_IP_DAY, PENDING_MAX } = await import('../worker/pro.ts')
 	const s = setup()
 	// Desde la misma IP, solo TRIAL_PER_IP_DAY cuentas nuevas reciben días gratis ese día
@@ -481,10 +435,8 @@ test('topes contra abusos: días gratis por IP y día, facturas pendientes en to
 	for (let i = 0; i < PENDING_MAX; i++) ins.run(`pro-x${i}`, 'x', `inv-x${i}`, s.now())
 	const r = await s.post('/pro/checkout', { print: P1, plan: 'month' })
 	assert.equal(r.status, 503)
-	// Códigos de 6 cifras: el tope global corta los intentos; el de respaldo no cuenta
-	const capped = setup({ PAIR_LIMIT: { limit: async () => ({ success: false }) } })
-	assert.equal((await capped.post('/pro/claim', { print: P1, code: '123 456' })).status, 429)
-	assert.equal((await capped.post('/pro/claim', { print: P1, code: 'TP-AAAA-BBBB-CCCC' })).status, 400)
+	// Las rutas de códigos ya no existen
+	assert.deepEqual([(await s.post('/pro/claim', { print: P1, code: '123 456' })).status, (await s.post('/pro/pair', { print: P1 })).status], [404, 404])
 })
 
 test('la cuenta la confirma QvaPay: el usuario que diga el navegador no cuenta, y un dispositivo nuevo con tu cuenta entra solo en tu Pro', async () => {

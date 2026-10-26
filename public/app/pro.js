@@ -1,5 +1,5 @@
-// Plan Pro: si este dispositivo es Pro, comprar o renovar con QvaPay, añadir otro dispositivo y el código
-// de respaldo. El token nunca sale del navegador: el servidor solo ve su huella, que calcula data.js.
+// Plan Pro: si eres Pro y comprar o añadir días con QvaPay. Pro va con tu cuenta de QvaPay: cualquier
+// dispositivo donde la conectes ya es Pro. El token no se guarda en el servidor: solo ve su huella (data.js).
 // Quién pagó lo confirma QvaPay en el servidor. Las funciones Pro llegan en un módulo aparte (/pro/module.js)
 'use strict'
 
@@ -137,23 +137,18 @@ function showPro() {
 			? `<div class="stack pro-box"><h3>★ Te quedan ${daysText(daysLeft())} de Pro</h3>
 				<p class="muted">@${esc(pro.username)} · ${{ trial: 'días gratis', gift: 'días regalados' }[pro.plan] ?? 'días comprados'} · hasta el <b>${proDate(pro.expiresAt)}</b></p>
 				<ul class="pro-feats">${feats}</ul>
-				<div class="row-btns"><button class="btn" id="proPair">Añadir dispositivo</button><button class="btn" id="proBackup">Código de respaldo</button></div>
 				${
 					canRenew()
-						? `<p class="hint">Hasta 2 dispositivos a la vez. Compra más días cuando quieras: se suman a los que te quedan.</p><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. Nada se cobra solo. ${refund}</p>`
-						: `<p class="hint">Hasta 2 dispositivos a la vez. Podrás comprar más días cuando te queden 5 o menos, desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>. Nada se cobra solo.</p>`
+						? `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Compra más días cuando quieras: se suman a los que te quedan.</p><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. Nada se cobra solo. ${refund}</p>`
+						: `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Podrás comprar más días cuando te queden 5 o menos, desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>. Nada se cobra solo.</p>`
 				}</div>`
 			: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
 				<p class="muted">Ya usaste tus 30 días gratis. Compra días de Pro:</p>
 				<div class="pro-plans">${plans}</div>
-				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Nada se cobra solo: cada compra la haces tú. ${refund}</p>
-				<button class="link small" id="proClaim">Ya tengo Pro en otro dispositivo</button></div>`,
+				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Nada se cobra solo: cada compra la haces tú. ${refund}</p></div>`,
 	)
 	for (const b of $('modalBody').querySelectorAll('[data-plan]')) b.onclick = () => startCheckout(b.dataset.plan)
-	$('proPair')?.addEventListener('click', () => showPair())
-	$('proBackup')?.addEventListener('click', showBackup)
-	$('proClaim')?.addEventListener('click', showClaim)
 }
 
 // Al conectar la cuenta por primera vez: los 30 días gratis ya están activos
@@ -201,7 +196,7 @@ function pollCheckout() {
 				proPolling = null
 				store.set('pro.checkout', null)
 				applyPro(r)
-				return showWelcome(r.backupCode)
+				return showWelcome()
 			}
 			if (r.status === 'expired') {
 				proPolling = null
@@ -232,63 +227,11 @@ function resumeCheckout() {
 	if (store.get('pro.checkout', null)) back === 'ok' && $('modal').hidden ? showWaiting() : pollCheckout()
 }
 
-function backupHtml(code, title) {
-	return `<div class="pro-code-box"><p class="muted">${title}</p><div class="pro-code mono">${esc(code)}</div>${copyBtn(code, 'código de respaldo')}</div>`
-}
-
-function showWelcome(backupCode) {
+function showWelcome() {
 	openModal(`<div class="stack pro-box"><h3>★ Días añadidos</h3>
-		<p class="muted">Ahora te quedan <b>${daysText(daysLeft())}</b> de Pro, hasta el <b>${proDate(pro.expiresAt)}</b>.</p>
-		${backupCode ? `${backupHtml(backupCode, 'Tu código de respaldo. Guárdalo: sirve para recuperar Pro si pierdes este dispositivo y cambias de token.')}` : ''}
+		<p class="muted">Ahora te quedan <b>${daysText(daysLeft())}</b> de Pro, hasta el <b>${proDate(pro.expiresAt)}</b>. Funcionan en cualquier dispositivo donde conectes tu cuenta.</p>
 		<button class="btn primary block" id="proOk">Listo</button></div>`)
-	bindCopy($('modalBody'))
 	$('proOk').onclick = closeModal
-}
-
-// El mismo código de 6 cifras sirve para otro dispositivo del terminal o para la cuenta del simulador
-async function showPair() {
-	try {
-		const { code, expiresAt } = await proFetch('/pro/pair', { print: pro.print })
-		openModal(`<div class="stack pro-box"><h3>Añadir dispositivo</h3>
-			<p class="muted">En el otro móvil u ordenador, conecta tu cuenta, pulsa <b>★</b> y luego <b>Ya tengo Pro en otro dispositivo</b>. Escribe este código:</p>
-			<div class="pro-code mono big">${code.slice(0, 3)} ${code.slice(3)}</div>
-			<p class="hint">Caduca en <span class="countdown" data-expires="${new Date(expiresAt).toISOString()}"></span> y sirve una sola vez.</p></div>`)
-		tickClocks()
-	} catch (e) {
-		toast(e.message, true)
-	}
-}
-
-async function showBackup() {
-	if (!(await confirmDialog('Código de respaldo', '<p class="muted">Se crea un código nuevo y el anterior deja de valer. Guárdalo en un sitio seguro.</p>', 'Crear código'))) return
-	try {
-		const { backupCode } = await proFetch('/pro/backup', { print: pro.print })
-		openModal(`<div class="stack pro-box"><h3>Código de respaldo</h3>${backupHtml(backupCode, 'Sirve para activar Pro en un dispositivo nuevo si no tienes otro a mano. Cada vez que se usa, cambia.')}<button class="btn primary block" id="proOk">Listo</button></div>`)
-		bindCopy($('modalBody'))
-		$('proOk').onclick = closeModal
-	} catch (e) {
-		toast(e.message, true)
-	}
-}
-
-function showClaim() {
-	openModal(`<div class="stack pro-box"><h3>Ya tengo Pro</h3>
-		<p class="muted">Escribe el código de 6 cifras que te muestra tu otro dispositivo Pro (en <b>Pro › Añadir dispositivo</b>) o tu código de respaldo.</p>
-		<label class="field">Código<input class="input mono" id="proCode" placeholder="482 913 o TP-XXXX-XXXX-XXXX" autocomplete="off" /></label>
-		<button class="btn primary block" id="proGo">Activar Pro aquí</button></div>`)
-	$('proGo').onclick = async () => {
-		try {
-			const r = await proFetch('/pro/claim', { print: pro.print, code: $('proCode').value })
-			applyPro(r)
-			if (r.backupCode)
-				openModal(`<div class="stack pro-box"><h3>★ Pro activado</h3>${backupHtml(r.backupCode, 'Usaste tu código de respaldo, así que ahora tienes uno nuevo (el anterior ya no vale). Guárdalo:')}<button class="btn primary block" id="proOk">Listo</button></div>`)
-			else openModal('<div class="stack pro-box"><h3>★ Pro activado</h3><p class="muted">Las funciones Pro ya están activas en este dispositivo.</p><button class="btn primary block" id="proOk">Listo</button></div>')
-			bindCopy($('modalBody'))
-			$('proOk').onclick = closeModal
-		} catch (e) {
-			toast(e.message, true)
-		}
-	}
 }
 
 document.addEventListener('click', (e) => e.target.closest('#proBtn') && showPro())

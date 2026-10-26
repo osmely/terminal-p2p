@@ -29,11 +29,9 @@
 		{ "name": "PANEL_LIMIT", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } },
 		{ "name": "SIM_LIMIT", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } },
 		{ "name": "PRO_LIMIT", "namespace_id": "1004", "simple": { "limit": 10, "period": 60 } },
-		// Consulta de estado de Pro (por IP: muchos comparten IP en Cuba, por eso amplio), relé (por cuenta) y
-		// códigos de 6 cifras (global: quien adivina prueba códigos que no existen)
+		// Consulta de estado de Pro (por IP: muchos comparten IP en Cuba, por eso amplio) y relé (por cuenta)
 		{ "name": "STATUS_LIMIT", "namespace_id": "1005", "simple": { "limit": 60, "period": 60 } },
-		{ "name": "RELAY_LIMIT", "namespace_id": "1006", "simple": { "limit": 300, "period": 60 } },
-		{ "name": "PAIR_LIMIT", "namespace_id": "1007", "simple": { "limit": 60, "period": 60 } }
+		{ "name": "RELAY_LIMIT", "namespace_id": "1006", "simple": { "limit": 300, "period": 60 } }
 	],
 	// Plan Pro: la app de comerciante de QvaPay (facturas y quién pagó). El app-id no es secreto; el
 	// app-secret y la clave de las licencias sí (npx wrangler secret put QVAPAY_APP_SECRET / PRO_KEY)
@@ -67,8 +65,7 @@
 				{ "name": "SIM_LIMIT", "namespace_id": "2003", "simple": { "limit": 60, "period": 60 } },
 				{ "name": "PRO_LIMIT", "namespace_id": "2004", "simple": { "limit": 10, "period": 60 } },
 				{ "name": "STATUS_LIMIT", "namespace_id": "2005", "simple": { "limit": 60, "period": 60 } },
-				{ "name": "RELAY_LIMIT", "namespace_id": "2006", "simple": { "limit": 300, "period": 60 } },
-				{ "name": "PAIR_LIMIT", "namespace_id": "2007", "simple": { "limit": 60, "period": 60 } }
+				{ "name": "RELAY_LIMIT", "namespace_id": "2006", "simple": { "limit": 300, "period": 60 } }
 			],
 			"vars": { "STAGING": "1", "QVAPAY_APP_ID": "<app-id de la app de comerciante de staging>" },
 			"routes": [

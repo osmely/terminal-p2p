@@ -4,10 +4,9 @@
 // devuelve quién la pagó (PaidBy); y al conectar la cuenta, el perfil que el relé trae de QvaPay deja
 // firmado de quién es la huella de ese token (session.ts: readWho). El token nunca se guarda: de cada
 // dispositivo solo vemos su huella (HMAC del token). Con ella se pregunta si eres Pro y se recoge el
-// módulo Pro, firmado para ti. Un dispositivo nuevo con tu cuenta entra solo; los códigos de 6 cifras
-// y de respaldo quedan para pasar Pro a un dispositivo sin esa identidad.
+// módulo Pro, firmado para ti. Pro va con la cuenta: cualquier dispositivo donde la conectes entra solo.
 
-import { hex, hmac, sha256, sign, verify } from './crypto.ts'
+import { hex, hmac, sign, verify } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
@@ -26,8 +25,6 @@ export interface ProEnv {
 	PRO?: { get(key: string): Promise<string | null>; put?(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void> }
 	// Clave del panel (la misma de las métricas)
 	METRICS_KEY?: string
-	// Tope global de códigos de 6 cifras por minuto (quien adivina prueba códigos que no existen: por IP no basta)
-	PAIR_LIMIT?: { limit(opts: { key: string }): Promise<{ success: boolean }> }
 }
 
 export const PLANS = {
@@ -36,7 +33,6 @@ export const PLANS = {
 } as const
 export type Plan = keyof typeof PLANS
 
-export const PRO_DEVICES = 2
 // Devolución completa en los días siguientes al primer pago (a mano: QvaPay no tiene devoluciones por API)
 export const REFUND_DAYS = 7
 export const TRIAL_DAYS = 30
@@ -48,7 +44,6 @@ export const TRIAL_PER_DAY = 1000
 export const PENDING_MAX = 300
 const DAY_MS = 86_400_000
 const LICENSE_MS = DAY_MS // la licencia firmada vale un día y el terminal la renueva sola
-const PAIR_MS = 5 * 60_000
 const CHECKOUT_MS = 60 * 60_000
 // Con días de Pro (pagados o regalados) solo se compran más cuando quedan pocos; con los días gratis, siempre
 export const RENEW_DAYS = 5
@@ -57,8 +52,6 @@ const REUSE_MS = 45 * 60_000
 const PAY_URL = 'https://www.qvapay.com/pay/'
 const QVAPAY = 'https://api.qvapay.com'
 const PRINT = /^[0-9a-f]{64}$/
-// Sin caracteres que se confundan al copiarlos a mano (0/O, 1/I/L)
-const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'
 
 export interface License {
 	uuid: string
@@ -96,10 +89,6 @@ export class ProError extends Error {
 const json = (status: number, body: unknown) =>
 	new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } })
 
-const random = (n: number, alphabet = ALPHABET) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => alphabet[b % alphabet.length]).join('')
-export const newBackupCode = () => `TP-${random(4)}-${random(4)}-${random(4)}`
-const normCode = (c: string) => c.toUpperCase().replace(/[^0-9A-Z]/g, '')
-const backupHash = (code: string) => sha256(`pro-backup:${normCode(code)}`)
 
 // ── Licencias y dispositivos ─────────────────────────────────────────
 
@@ -111,24 +100,19 @@ export async function licenseOfPrint(db: D1, print: string, now: number): Promis
 	return l && !l.revoked && l.expires_at > now ? l : null
 }
 
-// Añade un dispositivo a una licencia; si ya tiene PRO_DEVICES, sale el que lleva más tiempo sin usarse.
-// Sin tope (evict = false) cuando QvaPay confirmó que el dispositivo es de esa misma cuenta
-export async function attachPrint(db: D1, license: string, print: string, now: number, evict = true) {
+// Añade un dispositivo a una licencia. Sin tope: solo se añaden los de la propia cuenta (o el que pagó)
+export async function attachPrint(db: D1, license: string, print: string, now: number) {
 	await db
 		.prepare('INSERT INTO pro_prints (print, license, added_at, seen_at) VALUES (?, ?, ?, ?) ON CONFLICT(print) DO UPDATE SET license = excluded.license, seen_at = excluded.seen_at')
 		.bind(print, license, now, now)
 		.run()
-	if (!evict) return
-	await db
-		.prepare('DELETE FROM pro_prints WHERE license = ? AND print NOT IN (SELECT print FROM pro_prints WHERE license = ? ORDER BY seen_at DESC, rowid DESC LIMIT ?)')
-		.bind(license, license, PRO_DEVICES)
-		.run()
 }
 
-async function newBackup(db: D1, license: string, now: number) {
-	const code = newBackupCode()
-	await db.prepare('UPDATE pro_licenses SET backup_hash = ?, updated_at = ? WHERE uuid = ?').bind(await backupHash(code), now, license).run()
-	return code
+// El Pro de una cuenta de QvaPay: comprado, regalado o de los días gratis (el que dure más)
+async function licenseOfUser(db: D1, username: string, now: number) {
+	const u = username.toLowerCase()
+	const all = await Promise.all([`qp:${u}`, `gift:${u}`, `trial:qp:${u}`].map((id) => activeLicense(db, id, now)))
+	return all.filter((l) => l !== null).sort((a, b) => b.expires_at - a.expires_at)[0] ?? null
 }
 
 // Lo que el terminal necesita saber: si eres Pro, hasta cuándo y la licencia firmada para recoger el módulo
@@ -194,11 +178,6 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 			.prepare('INSERT INTO pro_licenses (uuid, username, plan, expires_at, backup_hash, revoked, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 0, ?, ?)')
 			.bind(key, owner, c.plan, expires, now, now)
 			.run()
-	// El código de respaldo se crea al comprar por primera vez; el navegador que pagó lo recoge una vez
-	if (!old?.backup_hash) {
-		const code = await newBackup(db, key, now)
-		await db.prepare('UPDATE pro_checkouts SET backup_code = ? WHERE id = ?').bind(code, c.id).run()
-	}
 	if (c.print) await attachPrint(db, key, c.print, now)
 	return true
 }
@@ -374,10 +353,8 @@ export async function createCheckout(env: ProEnv, who: { print: string; username
 	return { id, url: inv.url }
 }
 
-// Cómo va una factura (y se comprueba con QvaPay si sigue pendiente). El código de respaldo nuevo se
-// entrega una sola vez, a quien la pidió
-// Solo responde al dispositivo que pidió la factura: la respuesta lleva
-// el código de respaldo y el identificador de la factura lo ve también quien la paga
+// Cómo va una factura (y se comprueba con QvaPay si sigue pendiente). Solo responde al dispositivo que la
+// pidió: el identificador de la factura lo ve también quien la paga
 export async function checkoutStatus(env: ProEnv, id: string, owner: { print: string }, now: number, fetcher: typeof fetch = fetch) {
 	const db = env.DB
 	const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(id).first<Checkout>()
@@ -389,26 +366,8 @@ export async function checkoutStatus(env: ProEnv, id: string, owner: { print: st
 		.bind(owner.print, c.id, c.created_at)
 		.first<Checkout>())!
 	if (fresh.status !== 'paid') return { checkout: fresh, body: { status: now - c.created_at < CHECKOUT_MS ? 'pending' : 'expired' } }
-	if (fresh.backup_code) await db.prepare('UPDATE pro_checkouts SET backup_code = NULL WHERE id = ?').bind(fresh.id).run()
 	const l = await licenseOfPrint(db, fresh.print, now)
-	return { checkout: fresh, body: { status: 'paid', backupCode: fresh.backup_code ?? null, ...(await statusOf(env, l, now)) } }
-}
-
-// Un código para entrar en Pro: el de 6 cifras (desde un dispositivo Pro, un uso, 5 min) o el de
-// respaldo (que cambia cada vez que se usa). Devuelve la licencia y, si se usó el de respaldo, el nuevo
-export async function claimCode(db: D1, raw: string, now: number): Promise<{ license: string; backupCode: string | null } | null> {
-	const code = raw.trim()
-	if (/^\d{3}[\s-]?\d{3}$/.test(code)) {
-		const pairing = code.replace(/\D/g, '')
-		const row = await db.prepare('SELECT license FROM pro_pairings WHERE code = ? AND expires_at > ?').bind(pairing, now).first<{ license: string }>()
-		if (!row) return null
-		await db.prepare('DELETE FROM pro_pairings WHERE code = ?').bind(pairing).run()
-		return { license: row.license, backupCode: null }
-	}
-	if (normCode(code).length < 14) return null
-	const row = await db.prepare('SELECT uuid FROM pro_licenses WHERE backup_hash = ? AND revoked = 0').bind(await backupHash(code)).first<{ uuid: string }>()
-	if (!row) return null
-	return { license: row.uuid, backupCode: await newBackup(db, row.uuid, now) }
+	return { checkout: fresh, body: { status: 'paid', ...(await statusOf(env, l, now)) } }
 }
 
 // ── Rutas ────────────────────────────────────────────────────────────
@@ -446,11 +405,8 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			const username = who?.username
 			// Un dispositivo nuevo con tu cuenta entra solo en tu Pro (comprado o de los días gratis)
 			if (!l && username) {
-				const own = (await activeLicense(db, `qp:${username.toLowerCase()}`, now)) ?? (await activeLicense(db, `trial:qp:${username.toLowerCase()}`, now))
-				if (own) {
-					await attachPrint(db, own.uuid, print, now, false)
-					l = own
-				}
+				l = await licenseOfUser(db, username, now)
+				if (l) await attachPrint(db, l.uuid, print, now)
 			}
 			// Todos empiezan con 30 días gratis: se activan solos al conectar la cuenta, una vez por usuario de
 			// QvaPay y por dispositivo
@@ -522,40 +478,6 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			return json(200, await statusOf(env, l, now))
 		}
 
-		// Desde un dispositivo Pro: código de 6 cifras para añadir otro (un solo uso, 5 minutos)
-		if (route === 'POST /pro/pair') {
-			const l = await licenseOfPrint(db, printOf((await readBody(req)).print), now)
-			if (!l) return json(403, { error: 'Este dispositivo no es Pro' })
-			await db.prepare('DELETE FROM pro_pairings WHERE expires_at < ?').bind(now).run()
-			let code = ''
-			for (let i = 0; i < 5 && !code; i++) {
-				const c = random(6, '0123456789')
-				const r = await db.prepare('INSERT OR IGNORE INTO pro_pairings (code, license, expires_at) VALUES (?, ?, ?)').bind(c, l.uuid, now + PAIR_MS).run()
-				if (r.meta?.changes) code = c
-			}
-			if (!code) throw new ProError(503, 'Inténtalo de nuevo')
-			return json(200, { code, expiresAt: now + PAIR_MS })
-		}
-
-		// Un dispositivo nuevo entra con el código de 6 cifras o con el de respaldo
-		if (route === 'POST /pro/claim') {
-			const b = await readBody(req)
-			const print = printOf(b.print)
-			if (/^\d{3}[\s-]?\d{3}$/.test(String(b.code ?? '').trim()) && env.PAIR_LIMIT && !(await env.PAIR_LIMIT.limit({ key: 'global' })).success)
-				return json(429, { error: 'Demasiados intentos con códigos ahora mismo. Espera un minuto.' })
-			const got = await claimCode(db, String(b.code ?? ''), now)
-			if (!got) return json(400, { error: 'Código no válido o caducado' })
-			await attachPrint(db, got.license, print, now)
-			return json(200, { backupCode: got.backupCode, ...(await statusOf(env, await licenseOfPrint(db, print, now), now)) })
-		}
-
-		// Desde un dispositivo Pro: un código de respaldo nuevo (el anterior deja de valer)
-		if (route === 'POST /pro/backup') {
-			const l = await licenseOfPrint(db, printOf((await readBody(req)).print), now)
-			if (!l) return json(403, { error: 'Este dispositivo no es Pro' })
-			return json(200, { backupCode: await newBackup(db, l.uuid, now) })
-		}
-
 		// El módulo Pro, firmado con el usuario de la licencia (si aparece una copia, se sabe de quién salió)
 		if (route === 'GET /pro/module.js') {
 			const lic = await verify<{ u: string; n: string; e: number; x: number }>(String(url.searchParams.get('l') ?? ''), env.PRO_KEY)
@@ -618,7 +540,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 		const f = await req.formData()
 		const action = String(f.get('action') ?? '')
 		const uuid = String(f.get('uuid') ?? '')
-		// Regalo: una licencia sin pago, que la persona activa en su dispositivo con el código que se muestra
+		// Regalo: una licencia sin pago, que se activa sola cuando esa persona conecta su cuenta en el terminal
 		if (action === 'gift') {
 			const username = String(f.get('username') ?? '').replace(/^@/, '').trim()
 			const days = Math.min(3650, Math.max(1, Number(f.get('days')) || 30))
@@ -631,8 +553,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 					.prepare("INSERT INTO pro_licenses (uuid, username, plan, expires_at, revoked, created_at, updated_at) VALUES (?, ?, 'gift', ?, 0, ?, ?) ON CONFLICT(uuid) DO UPDATE SET expires_at = excluded.expires_at, revoked = 0, updated_at = excluded.updated_at")
 					.bind(id, username, expires, now, now)
 					.run()
-				const code = await newBackup(db, id, now)
-				notice = `<p>Licencia para <b>@${escHtml(username)}</b> hasta ${new Date(expires).toLocaleDateString('es')}. Pásale este código para que lo pegue en «Ya tengo Pro en otro dispositivo»:</p><p class="code">${code}</p>`
+				notice = `<p>Licencia para <b>@${escHtml(username)}</b> hasta ${new Date(expires).toLocaleDateString('es')}. Se activa sola cuando conecte su cuenta en el terminal.</p>`
 			}
 		}
 		// Devolver un pago: se revoca la licencia (también en el simulador) y se apunta; el dinero se

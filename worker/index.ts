@@ -34,7 +34,6 @@ interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	PRO_LIMIT?: RateLimiter
 	STATUS_LIMIT?: RateLimiter
 	RELAY_LIMIT?: RateLimiter
-	PAIR_LIMIT?: RateLimiter
 	// «1» en el entorno de staging (wrangler deploy --env staging)
 	STAGING?: string
 }
@@ -112,9 +111,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	}
 	if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
-	// Plan Pro, en el dominio del terminal. Canjear códigos tiene tope (que nadie los pruebe a ciegas)
+	// Plan Pro, en el dominio del terminal. Pedir facturas tiene tope
 	if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
-		const guarded = ['/pro/claim', '/pro/pair', '/pro/checkout'].includes(url.pathname)
+		const guarded = url.pathname === '/pro/checkout'
 			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 			// La consulta de estado da los días gratis y la sesión del simulador: con tope por IP (amplio)
 			if (url.pathname === '/pro/status' && !(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiadas consultas seguidas: espera un minuto'))

@@ -112,10 +112,8 @@ test('Pro se hereda del terminal; la cuenta pasa al dueño de la licencia y sigu
 	await s.terminal('/pro/status', { print: P1 })
 	me = (await s.sim('GET', '/api/me', c1)).body
 	assert.deepEqual([me.player.id, me.pro.plan], [id, 'month'])
-	// Otro dispositivo de Ana, añadido con el código de 6 cifras: la misma cuenta
-	const { code } = (await s.terminal('/pro/pair', { print: P1 })).body
-	await s.terminal('/pro/claim', { print: P2, code })
-	const c2 = (await s.terminal('/pro/status', { print: P2 })).cookie
+	// Otro dispositivo de Ana: al conectar su cuenta entra solo en su Pro, con la misma cuenta del simulador
+	const c2 = (await s.terminal('/pro/status', { print: P2, username: 'Ana' })).cookie
 	assert.equal((await s.sim('GET', '/api/me', c2)).body.player.id, id)
 })
 
