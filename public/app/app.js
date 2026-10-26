@@ -397,8 +397,9 @@ function renderBook(b, asks, bids) {
 	if (ask && bid) {
 		const crossed = bid > ask
 		el.className = `spread ${crossed ? 'crossed' : ''}`
+		// Cruzado: sin Pro solo el aviso; la diferencia bruta (sin comisión ni filtros) tienta a algo que quizá no puedes hacer
 		el.innerHTML = crossed
-			? `<span class="lbl">Libro cruzado</span><span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>`
+			? `<span class="lbl">Libro cruzado</span>${window.TPPro?.active ? `<span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>` : ''}`
 			: `<span class="lbl">Diferencial</span><span>${fmtP(ask - bid)} · ${pct(ask / bid - 1)}</span>`
 	} else {
 		el.className = 'spread'
