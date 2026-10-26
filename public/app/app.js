@@ -668,6 +668,9 @@ let historyChart = null
 let bidSeries = null
 let askSeries = null
 let opsSeries = null
+// Pro: volumen por día con compras (verde) y ventas (rojo) apiladas, en vez de una sola barra
+let opsSellSeries = null
+let opsBuySeries = null
 let usdSeries = null
 let usdtSeries = null
 // Los datos ya dibujados y el mercado y rango del último encuadre: el libro se refresca cada pocos
@@ -713,6 +716,8 @@ function drawHistory() {
 		askSeries = historyChart.addLineSeries({ color: css('--ask'), lineWidth: 2, title: 'venta' })
 		// Operaciones por día: barras en una escala propia, en la franja de abajo
 		opsSeries = historyChart.addHistogramSeries({ priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
+		opsSellSeries = historyChart.addHistogramSeries({ priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
+		opsBuySeries = historyChart.addHistogramSeries({ priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
 		// Referencia del mercado informal (elTOQUE): una mediana por día, en líneas discontinuas
 		usdSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USD informal' })
 		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT' })
@@ -731,9 +736,17 @@ function drawHistory() {
 		bidSeries.setData(series('buy'))
 		askSeries.setData(series('sell'))
 		const accent = css('--accent')
-		opsSeries.setData(
-			(state.history?.daily ?? []).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d.ops, color: `${accent}${d.partial ? '40' : '80'}` })),
-		)
+		const daily = state.history?.daily ?? []
+		const pro = proVolume()
+		opsSeries.setData(pro ? [] : daily.map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d.ops, color: `${accent}${d.partial ? '40' : '80'}` })))
+		// Pro: cada punto del gráfico lleva el volumen de su día, así las barras forman un bloque por día que se ve
+		// también en la vista de 7 días (con una barra por día quedaban como rayas finas). La roja es el total
+		// (compras + ventas) y la verde, encima, las compras: queda apilado
+		const dayOf = (t) => daily.find((d) => Math.abs(t - d.t) <= 12 * 3_600_000)
+		const stacked = pro ? (points.length ? points : daily).map((p) => ({ p, d: dayOf(p.t) })).filter(({ d }) => d && d.buy != null && d.sell != null) : []
+		const fade = (d) => (d.partial ? '55' : '99')
+		opsSellSeries.setData(stacked.map(({ p, d }) => ({ time: Math.floor(p.t / 1000) + tz, value: d.buy + d.sell, color: `${css('--ask')}${fade(d)}` })))
+		opsBuySeries.setData(stacked.map(({ p, d }) => ({ time: Math.floor(p.t / 1000) + tz, value: d.buy, color: `${css('--bid')}${fade(d)}` })))
 		const ref = (key) => informal.filter((d) => d[key] != null).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d[key] }))
 		usdSeries.setData(ref('usd'))
 		usdtSeries.setData(ref('usdt'))
@@ -744,7 +757,7 @@ function drawHistory() {
 	const step = { 600000: 'cada 10 min', 3600000: 'por hora', 86400000: 'por día' }[state.history?.bucketMs] ?? ''
 	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
 	$('chartNote').textContent = first
-		? `Mediana de lo completado (24 h), ${step} · barras: operaciones por día${src} · QvaPay desde ${new Date(first).toLocaleDateString('es')}`
+		? `Mediana de lo completado (24 h), ${step} · barras: ${proVolume() ? 'volumen por día (compras en verde, ventas en rojo)' : 'operaciones por día'}${src} · QvaPay desde ${new Date(first).toLocaleDateString('es')}`
 		: informal.length
 			? `Mercado informal según elTOQUE, por día · QvaPay se registra cada 10 minutos`
 			: 'Se registra cada 10 minutos: vuelve en un rato'
@@ -752,6 +765,14 @@ function drawHistory() {
 		'Líneas continuas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.' +
 		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
 }
+
+// El volumen con compras y ventas por separado es de Pro (con Pro encendido en el panel y activo en este dispositivo)
+const proVolume = () => !!(window.TPPro?.enabled && window.TPPro?.active)
+// Al cambiar Pro (al conectar, comprar o apagarse), se vuelve a dibujar con o sin el volumen de Pro
+document.addEventListener('tp:pro', () => {
+	historyDrawn = null
+	if (historyChart && state.chart === 'history') drawHistory()
+})
 
 // Se encuadra al abrir un mercado o un rango; con datos nuevos del mismo, se respeta el zoom.
 // Con el gráfico oculto (en el móvil, otra sección a la vista) no tiene ancho: se encuadra al mostrarse
