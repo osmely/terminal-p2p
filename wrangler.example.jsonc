@@ -37,7 +37,9 @@
 	// app-secret y la clave de las licencias sí (npx wrangler secret put QVAPAY_APP_SECRET / PRO_KEY)
 	// Módulo Pro (de un repositorio privado): se sube aquí y el Worker lo entrega solo con licencia
 	"kv_namespaces": [{ "binding": "PRO", "id": "<id de tu espacio KV para el módulo Pro>" }],
-	"vars": { "QVAPAY_APP_ID": "<app-id de tu app de comerciante de QvaPay>" },
+	// ALERT_CHAT: el chat del grupo privado de avisos de Pro (con el bot dentro); el token del bot es secreto
+	// (npx wrangler secret put TELEGRAM_BOT_TOKEN)
+	"vars": { "QVAPAY_APP_ID": "<app-id de tu app de comerciante de QvaPay>", "ALERT_CHAT": "<id del grupo de avisos, p. ej. -100123…>" },
 	"triggers": { "crons": ["* * * * *"] },
 	// Opcional: la referencia del mercado informal de elTOQUE necesita su clave como secreto
 	// (npx wrangler secret put ELTOQUE_TOKEN). Sin ella, el cron solo guarda lo de QvaPay.

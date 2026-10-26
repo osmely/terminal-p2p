@@ -14,7 +14,7 @@ import { RELAY_PREFIX, relay } from './relay.ts'
 import { whoCookie } from './session.ts'
 import { sha256 } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
-import { backupPro, cleanupPro, proAdmin, proApi, reconcile, settlePending, type ProEnv } from './pro.ts'
+import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 
@@ -36,6 +36,9 @@ interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	RELAY_LIMIT?: RateLimiter
 	// «1» en el entorno de staging (wrangler deploy --env staging)
 	STAGING?: string
+	// Avisos al grupo privado de Telegram (ver alerts.ts): el token es secreto, el chat una variable
+	TELEGRAM_BOT_TOKEN?: string
+	ALERT_CHAT?: string
 }
 
 interface RateLimiter {
@@ -218,9 +221,11 @@ export default {
 } satisfies ExportedHandler<Env>
 
 async function dailyPro(env: ProEnv, at: number) {
+	let r = null
 	if (env.PRO_KEY && env.QVAPAY_APP_SECRET)
 		try {
-			const r = await reconcile(env, at)
+			r = await reconcile(env, at)
+			await recordIssues(env.DB, r, at)
 			// Van como errores para que se vean en los registros de Cloudflare (los de cada petición están apagados)
 			if (r.activated.length) console.error(`pro: activados al repasar con QvaPay: ${r.activated.join(', ')}`)
 			if (r.unknown.length) console.error(`pro: pagados en QvaPay que no constan aquí: ${r.unknown.map((u) => `${u.invoice} (@${u.payer}, ${u.amount} USD)`).join('; ')}`)
@@ -232,6 +237,12 @@ async function dailyPro(env: ProEnv, at: number) {
 		await cleanupPro(env.DB, at)
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
+	}
+	// El repaso, a tu grupo de avisos (solo con Pro encendido: apagado no hay nada que vigilar)
+	try {
+		if (await proEnabled(env.DB, at)) await dailyDigest(env, r, at)
+	} catch (err) {
+		console.error(`pro, repaso diario: ${(err as Error).message}`)
 	}
 }
 

@@ -11,9 +11,10 @@ import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
+import { alertsReady, notify, tgEsc, type AlertEnv } from './alerts.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 
-export interface ProEnv {
+export interface ProEnv extends AlertEnv {
 	DB: D1
 	// App de comerciante de QvaPay: facturas y quién pagó. Sin ellas no se puede comprar
 	QVAPAY_APP_ID?: string
@@ -298,7 +299,9 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 		.bind(key, now, payer.username, payer.uuid, c.id)
 		.run()
 	if (!marked.meta?.changes) return true
-	await addDays(db, owner, { kind: 'purchase', days: PLANS[c.plan].days, plan: c.plan, checkout: c.id, note: `${PLANS[c.plan].name} · ${c.amount} USD · pagó @${payer.username}`, actor: 'system' }, now)
+	const r = await addDays(db, owner, { kind: 'purchase', days: PLANS[c.plan].days, plan: c.plan, checkout: c.id, note: `${PLANS[c.plan].name} · ${c.amount} USD · pagó @${payer.username}`, actor: 'system' }, now)
+	const other = owner.toLowerCase() !== payer.username.toLowerCase() ? ` (pagó @${tgEsc(payer.username)})` : ''
+	await notify(env, `💰 <b>Pago nuevo</b>\n@${tgEsc(owner)} compró <b>${PLANS[c.plan].name}</b> · ${c.amount} USD${other}\nTiene Pro hasta el ${hDay(r.after)}`, `/admin/pro?u=${encodeURIComponent(owner)}`, fetcher)
 	if (c.print) await attachPrint(db, key, c.print, now)
 	return true
 }
@@ -357,6 +360,58 @@ export async function reconcile(env: ProEnv, now: number, fetcher: typeof fetch 
 	return out
 }
 
+// Lo que el repaso no supo activar queda en «Pendientes» hasta que lo actives (y sale de ahí si ya consta)
+export async function recordIssues(db: D1, r: Reconciled, now: number) {
+	for (const u of r.unknown)
+		await db
+			.prepare('INSERT INTO pro_issues (invoice, remote_id, payer, amount, paid_at, found_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(invoice) DO NOTHING')
+			.bind(u.invoice, u.remoteId, u.payer, u.amount, u.paidAt, now)
+			.run()
+	await db.prepare("UPDATE pro_issues SET resolved_at = ? WHERE resolved_at IS NULL AND remote_id IN (SELECT id FROM pro_checkouts WHERE status = 'paid')").bind(now).run()
+}
+
+// Lo que requiere que hagas algo: devoluciones por decidir y por transferir, y pagos cobrados sin activar
+export async function pendingWork(db: D1) {
+	const [refunds, issues] = await Promise.all([
+		db
+			.prepare("SELECT r.*, l.username FROM pro_refunds r JOIN pro_licenses l ON l.uuid = r.license WHERE r.status IN ('requested', 'approved') ORDER BY r.status DESC, r.requested_at")
+			.all<Refund & { username: string }>()
+			.then((x) => x.results),
+		db
+			.prepare('SELECT * FROM pro_issues WHERE resolved_at IS NULL ORDER BY found_at')
+			.all<{ invoice: string; remote_id: string | null; payer: string | null; amount: number; paid_at: string | null; found_at: number }>()
+			.then((x) => x.results),
+	])
+	return { refunds, issues, count: refunds.length + issues.length }
+}
+
+// El repaso de cada mañana, al grupo de avisos: lo de ayer y lo que queda pendiente
+export async function dailyDigest(env: ProEnv, r: Reconciled | null, now: number, fetcher: typeof fetch = fetch) {
+	const db = env.DB
+	const day = await db
+		.prepare(
+			`SELECT (SELECT COUNT(*) FROM pro_checkouts WHERE status = 'paid' AND paid_at > ?1) AS pays,
+				(SELECT COALESCE(SUM(amount), 0) FROM pro_checkouts WHERE status = 'paid' AND paid_at > ?1) AS usd,
+				(SELECT COUNT(*) FROM pro_days WHERE kind = 'trial' AND created_at > ?1) AS trials`,
+		)
+		.bind(now - DAY_MS)
+		.first<{ pays: number; usd: number; trials: number }>()
+	const p = await pendingWork(db)
+	const asked = p.refunds.filter((x) => x.status === 'requested')
+	const owed = p.refunds.filter((x) => x.status === 'approved')
+	const oldest = owed.length ? Math.floor((now - Math.min(...owed.map((x) => x.decided_at ?? x.requested_at))) / DAY_MS) : 0
+	const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`
+	const yesterday = `Últimas 24 h: ${n(day?.pays ?? 0, 'pago', 'pagos')} (${hUsd(day?.usd ?? 0)}) · ${n(day?.trials ?? 0, 'cuenta nueva', 'cuentas nuevas')} con días gratis`
+	const lines = [
+		asked.length ? `↩️ ${n(asked.length, 'devolución por decidir', 'devoluciones por decidir')}` : '',
+		owed.length ? `⏳ ${n(owed.length, 'devolución aprobada', 'devoluciones aprobadas')} sin transferir${oldest ? ` (la más antigua, hace ${n(oldest, 'día', 'días')})` : ''}: debes ${hUsd(owed.reduce((t, x) => t + x.amount, 0))}` : '',
+		p.issues.length ? `⚠️ ${n(p.issues.length, 'pago cobrado', 'pagos cobrados')} en QvaPay sin activar` : '',
+		r?.activated.length ? `🔧 Activados al repasar con QvaPay: ${r.activated.length}` : '',
+	].filter(Boolean)
+	const text = lines.length ? `📋 <b>Repaso diario</b>\n${yesterday}\n\n${lines.join('\n')}` : `✅ <b>Repaso diario: todo en orden</b>\n${yesterday}\nNada pendiente.`
+	return notify(env, text, '/admin/pro', fetcher)
+}
+
 // Una factura pagada que aquí no consta: se recrea con lo que dice QvaPay (los días según el importe) y se
 // activa para quien pagó
 export async function recover(env: ProEnv, invoice: string, now: number, fetcher: typeof fetch = fetch) {
@@ -369,6 +424,7 @@ export async function recover(env: ProEnv, invoice: string, now: number, fetcher
 		.run()
 	const c = (await env.DB.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(t.remote_id).first<Checkout>())!
 	await settle(env, c, now, fetcher)
+	await env.DB.prepare('UPDATE pro_issues SET resolved_at = ? WHERE invoice = ? AND resolved_at IS NULL').bind(now, invoice).run()
 	return { username: t.PaidBy.username, plan }
 }
 
@@ -626,6 +682,15 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			const reason = String(b.reason ?? '').trim()
 			if (reason.length < 3) return json(400, { error: 'Cuéntanos en pocas palabras por qué la pides' })
 			await requestRefund(db, license, String(b.checkout ?? ''), reason, 'user', now)
+			const c = await refundable(db, String(b.checkout ?? ''), now)
+			const user = license.slice(3)
+			if (c)
+				await notify(
+					env,
+					`↩️ <b>Devolución pedida</b>\n@${tgEsc(user)} pide devolver <b>${PLANS[c.plan]?.name ?? c.plan}</b> · ${c.amount} USD\nMotivo: «${tgEsc(reason.slice(0, 300))}»\n${c.inTime ? 'En plazo' : 'Fuera de plazo'} · se transfiere a @${tgEsc(c.payee)}`,
+					`/admin/pro?u=${encodeURIComponent(user)}`,
+					fetcher,
+				)
 			return json(200, await accountView(db, license, now))
 		}
 
@@ -899,6 +964,7 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 			if (action === 'reconcile')
 				try {
 					const r = await reconcile(env, now, fetcher)
+					await recordIssues(db, r, now)
 					notice = `<p class="ok">Repasadas con QvaPay ${r.checked} facturas pagadas. ${r.activated.length ? `Activadas ahora: ${r.activated.length}.` : 'Todas estaban activadas.'}</p>${
 						r.unknown.length
 							? `<p class="note">Pagadas en QvaPay que aquí no constan:</p>${r.unknown
@@ -931,6 +997,11 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 						notice = `<p class="note">No se pudo consultar: ${escHtml((err as Error).message)}</p>`
 					}
 			}
+			// Probar el grupo de avisos de Telegram
+			if (action === 'alert-test')
+				notice = (await notify(env, '🔔 <b>Aviso de prueba</b>\nSi lo ves, los avisos de Pro llegan bien a este grupo.', '/admin/pro', fetcher))
+					? '<p class="ok">Aviso de prueba enviado: míralo en el grupo.</p>'
+					: '<p class="note">No salió. Revisa el token del bot (TELEGRAM_BOT_TOKEN), el chat (ALERT_CHAT) y que el bot esté en el grupo.</p>'
 			// Suspender corta Pro sin tocar sus días ni sus dispositivos: al reactivarla, todo sigue como estaba
 			if (action === 'revoke' || action === 'restore') {
 				await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ? AND merged_into IS NULL').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
@@ -1042,12 +1113,16 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 			<td><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${escHtml(l.username)}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></td></tr>`
 		})
 		.join('')
-	// Devoluciones abiertas: pedidas (falta decidir) y aprobadas (falta transferir)
-	const openRefunds = (
-		await db
-			.prepare("SELECT r.*, l.username FROM pro_refunds r JOIN pro_licenses l ON l.uuid = r.license WHERE r.status IN ('requested', 'approved') ORDER BY r.status DESC, r.requested_at")
-			.all<Refund & { username: string }>()
-	).results
+	// Pendientes: lo que requiere que hagas algo (si está vacío, no hay nada que hacer)
+	const work = await pendingWork(db)
+	const issueRows = work.issues
+		.map(
+			(i) =>
+				`<div class="rf"><div class="rf-head"><span class="pill approved">Cobrado sin activar</span> @${escHtml(i.payer ?? '?')} · <b>${hUsd(i.amount)}</b>${i.paid_at ? ` · ${escHtml(i.paid_at.slice(0, 16).replace('T', ' '))}` : ''}</div>
+				<p class="note">QvaPay lo cobró y aquí no consta (factura ${hShort(i.invoice)}). Actívalo para quien pagó, o devuélvele el dinero si no corresponde.</p>
+				<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(i.invoice)}"><button name="action" value="recover">Activar para @${escHtml(i.payer ?? '?')}</button></form></div>`,
+		)
+		.join('')
 	// Movimientos de días: todo lo que cambió los días de cada cuenta, con el motivo
 	const moves = (
 		await db
@@ -1077,11 +1152,11 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 			(await ordersPaused(db, now))
 				? `<form method="post" class="row flag"><b>⏸ Publicar ofertas está en pausa</b><span class="note">Quien intente publicar desde el terminal ve: «${ORDERS_PAUSED_MSG}» Tomar ofertas y cerrar órdenes siguen funcionando.</span><button name="action" value="orders-resume" onclick="return confirm('¿Reanudar la publicación de ofertas desde el terminal?')">Reanudar</button></form>`
 				: `<form method="post" class="row flag on"><b>● Publicar ofertas funciona</b><span class="note">Para cortarlo al momento si aparece un fallo (tomar ofertas y cerrar órdenes siguen funcionando).</span><button class="ghost" name="action" value="orders-pause" onclick="return confirm('¿Pausar la publicación de ofertas desde el terminal? Quien lo intente verá un aviso de ajustes.')">Pausar</button></form>`
-		}${cards}
+		}<form method="post" class="row flag${alertsReady(env) ? ' on' : ''}"><b>${alertsReady(env) ? '● Avisos de Telegram activados' : '○ Avisos de Telegram sin configurar'}</b><span class="note">${alertsReady(env) ? 'Pagos nuevos, devoluciones pedidas y el repaso de cada mañana llegan a tu grupo.' : 'Falta el token del bot (TELEGRAM_BOT_TOKEN) o el chat del grupo (ALERT_CHAT).'}</span>${alertsReady(env) ? '<button class="ghost" name="action" value="alert-test">Enviar aviso de prueba</button>' : ''}</form>${cards}
 		<div class="top" style="margin-top:16px"><form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y enseña las que aquí no constan">Repasar pagos con QvaPay</button></form>
 		<span class="row"><a class="note" href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a class="note" href="/admin/pro?export=copia">Copia completa (JSON)</a></span></div>
 		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
-		<h2>Devoluciones abiertas ${openRefunds.length ? `<span class="pill requested">${openRefunds.length}</span>` : ''}</h2>${openRefunds.map((r) => refundHtml(r)).join('') || '<p class="note">Ninguna: no hay devoluciones por decidir ni por transferir.</p>'}
+		<h2>Pendientes ${work.count ? `<span class="pill requested">${work.count}</span>` : ''}</h2>${work.count ? work.refunds.map((r) => refundHtml(r)).join('') + issueRows : '<p class="ok">✅ Nada pendiente: ni devoluciones por decidir o transferir, ni pagos sin activar.</p>'}
 		<h2>Pagos</h2><div class="wrap"><table class="left"><tr><th>Pagado</th><th>Cuenta</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr>${payRows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</table></div>
 		<h2>Facturas sin pagar <span class="note">(última semana)</span></h2><div class="wrap"><table class="left"><tr><th>Pedida</th><th>Días</th><th>Importe</th><th>Pedido desde</th><th>Factura</th><th>Estado</th><th></th></tr>${pendingRows || '<tr><td colspan="7" class="empty">Ninguna.</td></tr>'}</table></div>
 		<h2>Cuentas</h2><div class="wrap"><table class="left"><tr><th>Usuario</th><th>Últimos días</th><th>Desde</th><th>Hasta</th><th>Dispositivos</th><th>Pagado</th><th></th></tr>${rows || '<tr><td colspan="7" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</table></div>

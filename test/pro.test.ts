@@ -33,8 +33,15 @@ function memD1() {
 function fakeQvaPay() {
 	const invoices = new Map<string, { remote_id: string; amount: number; status: string; PaidBy: { uuid: string; username: string } | null }>()
 	const calls: string[] = []
+	// Avisos a Telegram: se apuntan aquí
+	const telegram: { chat_id: string; text: string; url: string }[] = []
 	const fetcher = (async (input: string | URL, init?: RequestInit) => {
 		const url = String(input)
+		if (url.startsWith('https://api.telegram.org/')) {
+			const b = JSON.parse(String(init?.body))
+			telegram.push({ chat_id: b.chat_id, text: b.text, url: b.reply_markup?.inline_keyboard?.[0]?.[0]?.url })
+			return Response.json({ ok: true })
+		}
 		const h = new Headers(init?.headers)
 		calls.push(url.replace('https://api.qvapay.com', ''))
 		if (h.get('app-id') !== 'app' || h.get('app-secret') !== 'secreto') return new Response('{"error":"credenciales"}', { status: 401 })
@@ -55,7 +62,7 @@ function fakeQvaPay() {
 		return new Response('{}', { status: 404 })
 	}) as typeof fetch
 	const pay = (uuid: string, username = 'ana', amount?: number) => Object.assign(invoices.get(uuid)!, { status: 'paid', PaidBy: { uuid: `u-${username}`, username }, ...(amount ? { amount } : {}) })
-	return { fetcher, pay, calls, invoices }
+	return { fetcher, pay, calls, invoices, telegram }
 }
 
 const T0 = Date.parse('2026-10-25T12:00:00Z')
@@ -572,7 +579,7 @@ test('devolución en pasos: la pide el usuario desde «Mi cuenta», la apruebas 
 	// Otro usuario no puede pedir la devolución de una compra ajena
 	assert.equal((await s.post('/pro/refund', { print: P2, username: 'leo', checkout: checkout.id, reason: 'mía no' })).status, 404)
 	// En el panel aparece abierta; al aprobarla se le quitan esos 30 días (le quedan los gratis)
-	assert.match(await admin(), /Devoluciones abiertas <span class="pill requested">1<\/span>/)
+	assert.match(await admin(), /Pendientes <span class="pill requested">1<\/span>/)
 	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
 	assert.match(await admin({ action: 'refund-approve', id, note: 'ok' }), /transfiere <b>1,99 USD<\/b> a <b>@ana<\/b>/)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.expiresAt, T0 + 30 * 86_400_000)
@@ -582,7 +589,7 @@ test('devolución en pasos: la pide el usuario desde «Mi cuenta», la apruebas 
 	assert.deepEqual({ ...s.db.prepare('SELECT status, transfer_ref FROM pro_refunds').get() }, { status: 'transferred', transfer_ref: 'TX-123' })
 	acc = (await s.post('/pro/account', { print: P1, username: 'ana' })).body
 	assert.equal(acc.purchases[0].refund.status, 'transferred')
-	assert.doesNotMatch(await admin(), /Devoluciones abiertas <span/)
+	assert.match(await admin(), /Nada pendiente/)
 })
 
 test('devolución rechazada (el usuario ve el motivo) y fuera de plazo no se puede pedir desde el terminal', async () => {
@@ -624,4 +631,45 @@ test('panel: la ficha del cliente lo reúne todo, guarda notas y no acepta formu
 	assert.match(html, /En plazo/)
 	// Un usuario sin cuenta: se le pueden dar días
 	assert.match(await (await req({ headers: auth }, '?u=nadie')).text(), /No tiene cuenta Pro todavía/)
+})
+
+test('avisos a Telegram: pago nuevo y devolución pedida, con el botón a la ficha; sin configurar no se manda nada', async () => {
+	const quiet = setup()
+	await buy(quiet, P1, 'month', 'ana')
+	assert.equal(quiet.q.telegram.length, 0)
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100' })
+	const { checkout } = await buy(s, P1, 'month', 'ana')
+	assert.equal(s.q.telegram.length, 1)
+	assert.match(s.q.telegram[0].text, /Pago nuevo[\s\S]*@ana compró <b>30 días<\/b> · 1.99 USD/)
+	assert.deepEqual([s.q.telegram[0].chat_id, s.q.telegram[0].url], ['-100', 'https://app.terminalp2p.com/admin/pro?u=ana'])
+	await s.post('/pro/refund', { print: P1, username: 'ana', checkout: checkout.id, reason: 'no me <sirve>' })
+	assert.match(s.q.telegram[1].text, /Devolución pedida[\s\S]*Motivo: «no me &lt;sirve&gt;»[\s\S]*En plazo/)
+	// Staging avisa con su etiqueta y lleva al panel de staging
+	const st = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100', STAGING: '1' })
+	await buy(st, P1, 'month', 'ana')
+	assert.match(st.q.telegram[0].text, /^🧪 <b>STAGING<\/b>/)
+	assert.equal(st.q.telegram[0].url, 'https://app.staging.terminalp2p.com/admin/pro?u=ana')
+})
+
+test('pagos cobrados sin activar: quedan en «Pendientes» hasta activarlos, y el repaso diario lo cuenta', async () => {
+	const { recordIssues, dailyDigest, pendingWork } = await import('../worker/pro.ts')
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100' })
+	// Una factura pagada en QvaPay que aquí no consta (p. ej. se perdió la base)
+	s.q.invoices.set('inv-x', { remote_id: 'pro-perdida', amount: 1.99, status: 'paid', PaidBy: { uuid: 'u-leo', username: 'leo' } })
+	await recordIssues(s.env.DB, { checked: 1, activated: [], unknown: [{ invoice: 'inv-x', remoteId: 'pro-perdida', amount: 1.99, payer: 'leo', paidAt: null }] }, s.now())
+	assert.equal((await pendingWork(s.env.DB)).count, 1)
+	await dailyDigest(s.env, null, s.now(), s.q.fetcher)
+	assert.match(s.q.telegram.at(-1)!.text, /Repaso diario[\s\S]*1 pago cobrado en QvaPay sin activar/)
+	const admin = (fields?: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }), s.env, s.now(), s.q.fetcher).then((r) => r.text())
+	assert.match(await admin(), /Cobrado sin activar/)
+	assert.match(await admin({ action: 'recover', invoice: 'inv-x' }), /Recuperada/)
+	assert.equal((await pendingWork(s.env.DB)).count, 0)
+	assert.equal((await s.post('/pro/status', { print: P2, username: 'leo' })).body.plan, 'month')
+	// Sin nada pendiente, el repaso dice que todo está en orden
+	await dailyDigest(s.env, null, s.now(), s.q.fetcher)
+	assert.match(s.q.telegram.at(-1)!.text, /todo en orden[\s\S]*Últimas 24 h: 1 pago \(1,99 USD\)/)
+	// El botón del panel manda un aviso de prueba
+	assert.match(await admin({ action: 'alert-test' }), /Aviso de prueba enviado/)
+	assert.match(s.q.telegram.at(-1)!.text, /Aviso de prueba/)
 })
