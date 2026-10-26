@@ -789,10 +789,14 @@ export function takeProblem(o: P2POffer | null, amount: number, side: 'buy' | 's
 	if (o.status !== 'open' || o.pause) return 'ya no está disponible'
 	if (o.only_vip) return 'es solo para cuentas VIP'
 	if (o.requirements_met === false) return 'pide requisitos que no cumples'
+	// El detalle de una oferta no trae el historial de su dueño (solo el listado del mercado lo trae): si no
+	// viene, vale el que se comprobó al hacer el plan con el libro. Si viene, se vuelve a mirar
 	const u = o.User
-	const ops = u?._count ? (u._count.P2P ?? 0) + (u._count.P2P_Peer ?? 0) : 0
-	const rating = u?.rating_count ? (u.rating_avg ?? 0) : 0
-	if (ops < SMART_MIN_OPS || rating < SMART_MIN_RATING) return `tiene poco historial (necesita ${SMART_MIN_OPS} operaciones y ${SMART_MIN_RATING} ★)`
+	if (u?._count || u?.rating_count != null) {
+		const ops = (u._count?.P2P ?? 0) + (u._count?.P2P_Peer ?? 0)
+		const rating = u.rating_count ? (u.rating_avg ?? 0) : 0
+		if (ops < SMART_MIN_OPS || rating < SMART_MIN_RATING) return `tiene poco historial (necesita ${SMART_MIN_OPS} operaciones y ${SMART_MIN_RATING} ★)`
+	}
 	const price = num(o.amount) > 0 ? num(o.receive) / num(o.amount) : 0
 	if (side === 'buy' ? price > limit * (1 + 1e-9) : price < limit * (1 - 1e-9)) return `cambió de precio (${price.toLocaleString('es')}) y ya no cruza con el tuyo`
 	if (o.offer_kind === 'flexible') {

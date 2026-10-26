@@ -122,7 +122,8 @@ test('Vender ya: no vende si el precio bajó, si no cabe el monto o si no es VIP
 function smartQvaPay(failApply?: string, failCreate = false) {
 	const calls: string[] = []
 	const created: unknown[] = []
-	const seller = (u: string) => ({ uuid: `u-${u}`, username: u, rating_avg: 4.9, rating_count: 40, _count: { P2P: 30, P2P_Peer: 20 } })
+	// Como el detalle real de QvaPay: el dueño viene sin su historial (operaciones y ★ solo salen en el listado)
+	const seller = (u: string) => ({ uuid: `u-${u}`, username: u, kyc: true, vip: false })
 	const offers: Record<string, P2POffer> = {
 		s1: { uuid: 's1', type: 'sell', coin: 'BANK_CUP', amount: '20', receive: '20960', status: 'open', User: seller('ana'), details: [{ name: 'Tarjeta', value: '9200 2222' }], payment_window_expires_at: '2026-10-25T03:30:00Z' },
 		s2: { uuid: 's2', type: 'sell', coin: 'BANK_CUP', amount: '100', receive: '105000', available_amount: '70', order_min: '10', order_max: '70', offer_kind: 'flexible', status: 'open', User: seller('leo') },
