@@ -14,7 +14,7 @@ import { licenseOfPrint, ProError, type ProEnv } from './pro.ts'
 import { adminPage, askKey } from './admin.ts'
 import { cubaDate } from './informal.ts'
 import { authorized } from './metrics.ts'
-import { readSession, sessionCookie, sessionToken } from './session.ts'
+import { readSession, readWho, sessionCookie, sessionToken } from './session.ts'
 import { proEnabled } from './flags.ts'
 import type { D1 } from './rates.ts'
 
@@ -283,15 +283,19 @@ export async function simCron(db: D1, now: number) {
 
 // ── Jugadores: la sesión del terminal ─────────────────────────────────
 
-// Quién juega con esta huella del terminal. Con licencia (aunque haya vencido), la cuenta va con su dueño:
-// la misma en todos sus dispositivos, y sigue al pasar de los días gratis a los comprados. Sin licencia, con la
-// huella; al hacerse Pro, esa cuenta pasa al dueño de la licencia con su saldo y su historial
-export async function playerOf(db: D1, print: string, now: number) {
-	const lic = await db
-		.prepare('SELECT l.username FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?')
-		.bind(print)
-		.first<{ username: string }>()
-	const userKey = lic ? `user:${lic.username.toLowerCase()}` : null
+// Quién juega con esta huella del terminal. Con la cuenta de QvaPay confirmada (username, ver session.ts:
+// readWho) o con licencia (aunque haya vencido), la cuenta va con su dueño: la misma en todos sus dispositivos,
+// y sigue al pasar de los días gratis a los comprados. Si no, con la huella; en cuanto se sabe el dueño, esa
+// cuenta pasa a él con su saldo y su historial
+export async function playerOf(db: D1, print: string, now: number, username?: string) {
+	const lic = username
+		? null
+		: await db
+				.prepare('SELECT l.username FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?')
+				.bind(print)
+				.first<{ username: string }>()
+	const owner = username ?? lic?.username
+	const userKey = owner ? `user:${owner.toLowerCase()}` : null
 	const printKey = `print:${print}`
 	const find = (key: string) => db.prepare('SELECT player FROM sim_ids WHERE key = ?').bind(key).first<{ player: number }>()
 	let id = (userKey && (await find(userKey))?.player) || null
@@ -364,7 +368,8 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 
 		const now = Date.now()
 		const print = await readSession(req.headers.get('cookie'), env.PRO_KEY, now)
-		const player = print ? await playerOf(env.DB, print, now) : null
+		const who = print ? await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now) : null
+		const player = print ? await playerOf(env.DB, print, now, who?.username) : null
 		
 		if (route === 'GET /api/me') {
 			if (!player || !print) return json(200, { player: null, pro: null })

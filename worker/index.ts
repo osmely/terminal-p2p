@@ -11,6 +11,7 @@ import { cubaDate, informalSince, latestInformal, syncInformal } from './informa
 import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
+import { whoCookie } from './session.ts'
 import { sha256 } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { backupPro, cleanupPro, proAdmin, proApi, reconcile, settlePending, type ProEnv } from './pro.ts'
@@ -84,13 +85,17 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 
 	if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`)) {
 		if (!(await underLimit(env.RELAY_LIMIT, req, await relayKey(req)))) return secure(jsonError(429, 'Demasiadas peticiones seguidas: espera unos segundos'))
-		return secure(
-			await relay(req, url, ctx, async (w) => {
-				if (!env.METRICS_SALT) return
-				const e = await relayEvent(w, env.METRICS_SALT)
-				if (e) await saveEvent(env.DB, e)
-			}),
-		)
+		const res = await relay(req, url, ctx, async (w) => {
+			if (!env.METRICS_SALT) return
+			const e = await relayEvent(w, env.METRICS_SALT)
+			if (e) await saveEvent(env.DB, e)
+		})
+		// El perfil que devuelve QvaPay dice de verdad quién es el dueño de ese token: queda firmado con su huella
+		if (req.method === 'GET' && url.pathname === `${RELAY_PREFIX}/user` && res.ok && env.PRO_KEY) {
+			const set = await whoCookie(url, req.headers.get('authorization'), await res.clone().json().catch(() => null), env.PRO_KEY)
+			if (set) res.headers.append('Set-Cookie', set)
+		}
+		return secure(res)
 	}
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
 	// Panel único en el dominio del terminal

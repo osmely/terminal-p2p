@@ -2,8 +2,18 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
+import { whoToken } from '../worker/session.ts'
 import { proApi, type ProEnv } from '../worker/pro.ts'
 import { canTrade, simApi, type SimEnv } from '../worker/sim.ts'
+
+// La cookie que deja el relé cuando QvaPay devuelve el perfil de ese token: aquí, del `username` del cuerpo
+async function whoHeader(body: unknown, now = Date.now()): Promise<Record<string, string>> {
+	const b = (body ?? {}) as { print?: string; username?: string }
+	if (!b.print || !b.username) return {}
+	const n = b.username.replace(/^@/, '')
+	return { Cookie: `tpw=${await whoToken(b.print, `u-${n.toLowerCase()}`, n, 'clave', now)}` }
+}
+
 
 // D1 sobre SQLite en memoria, con las migraciones del proyecto
 function memD1() {
@@ -49,7 +59,7 @@ function setup() {
 	const env = { DB: d1, QVAPAY_APP_ID: 'app', QVAPAY_APP_SECRET: 'secreto', PRO_KEY: 'clave', METRICS_KEY: 'panel' }
 	// El terminal (app.terminalp2p.com): devuelve el cuerpo y la cookie de sesión que deja
 	const terminal = async (path: string, body: unknown) => {
-		const req = new Request(`https://app.terminalp2p.com${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+		const req = new Request(`https://app.terminalp2p.com${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(await whoHeader(body)) }, body: JSON.stringify(body) })
 		const res = (await proApi(req, new URL(req.url), env as ProEnv, Date.now(), q.fetcher))!
 		const cookie = res.headers.get('set-cookie')?.match(/^tpid=([^;]*)/)?.[1] ?? null
 		return { status: res.status, body: await res.json(), cookie }
@@ -155,4 +165,21 @@ test('estadísticas del simulador en el panel: jugadores, quién entró cada dí
 	assert.match(html, /<span>Han operado<\/span><b>1<\/b><small>33 % de los jugadores/)
 	assert.match(html, /<tr><td>hoy<\/td><td>3<\/td><td>3<\/td><td>1<\/td><td>3<\/td><\/tr>/)
 	assert.match(html, /<tr><td>BTC<\/td><td>2<\/td><td>1<\/td><\/tr><tr><td>ETH<\/td><td>1<\/td><td>1<\/td><\/tr>/)
+})
+
+test('con la cuenta confirmada por QvaPay, la misma cuenta del simulador en todos sus dispositivos aunque no sea Pro', async () => {
+	const s = setup()
+	await s.d1.prepare("UPDATE app_flags SET value = '0' WHERE key = 'pro'").run()
+	// Primer dispositivo, aún sin identidad: va con la huella; al confirmarse la cuenta pasa a @ana con su saldo
+	const c1 = (await s.terminal('/pro/status', { print: P1 })).cookie
+	const id = (await s.sim('GET', '/api/me', c1)).body.player.id
+	const who1 = await whoToken(P1, 'u-ana', 'ana', 'clave')
+	const withWho = (c: string | null, who: string) => `${c};tpw=${who}`
+	assert.equal((await s.sim('GET', '/api/me', withWho(c1, who1))).body.player.id, id)
+	assert.deepEqual(s.keys(), [`user:ana→${id}`])
+	// Otro dispositivo con la misma cuenta: la misma partida
+	const c2 = (await s.terminal('/pro/status', { print: P2 })).cookie
+	assert.equal((await s.sim('GET', '/api/me', withWho(c2, await whoToken(P2, 'u-ana', 'ana', 'clave')))).body.player.id, id)
+	// La identidad de otra huella no vale: ese dispositivo sigue con la suya
+	assert.notEqual((await s.sim('GET', '/api/me', withWho(c2, who1))).body.player.id, id)
 })

@@ -87,7 +87,7 @@ async function refreshPro() {
 		if (!pro.print) return applyPro({ pro: false })
 		// Además de decir si eres Pro, deja la sesión compartida con el simulador y, si es la primera vez
 		// que conectas esta cuenta, activa tus 30 días gratis
-		let s = await proFetch('/pro/status', { print: pro.print, username: bk.acct.username })
+		let s = await proFetch('/pro/status', { print: pro.print })
 		// Si cambiaste de token en este navegador, la huella vieja pasa su Pro y su cuenta del simulador a la nueva
 		const old = store.get('pro.print', null)
 		if (old && old !== pro.print) {
@@ -166,7 +166,7 @@ function showFreeDays() {
 
 async function startCheckout(plan) {
 	try {
-		const c = await proFetch('/pro/checkout', { print: pro.print, plan, username: bk.acct.username })
+		const c = await proFetch('/pro/checkout', { print: pro.print, plan })
 		store.set('pro.checkout', { id: c.id, url: c.url, at: Date.now() })
 		window.open(c.url, '_blank', 'noopener')
 		showWaiting()

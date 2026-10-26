@@ -2,7 +2,17 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
+import { readWho, tokenPrint, whoCookie, whoToken } from '../worker/session.ts'
 import { PRO_DEVICES, proAdmin, proApi, type ProEnv } from '../worker/pro.ts'
+
+// La cookie que deja el relé cuando QvaPay devuelve el perfil de ese token: aquí, del `username` del cuerpo
+async function whoHeader(body: unknown, now = Date.now()): Promise<Record<string, string>> {
+	const b = (body ?? {}) as { print?: string; username?: string }
+	if (!b.print || !b.username) return {}
+	const n = b.username.replace(/^@/, '')
+	return { Cookie: `tpw=${await whoToken(b.print, `u-${n.toLowerCase()}`, n, 'clave', now)}` }
+}
+
 
 // D1 sobre SQLite en memoria, con las migraciones del proyecto
 function memD1() {
@@ -59,8 +69,9 @@ function setup(extra: Partial<ProEnv> = {}) {
 	const q = fakeQvaPay()
 	const env: ProEnv = { DB: d1, QVAPAY_APP_ID: 'app', QVAPAY_APP_SECRET: 'secreto', PRO_KEY: 'clave', METRICS_KEY: 'panel', ...extra }
 	let now = T0
+	// `username` en el cuerpo hace de la cuenta que QvaPay confirmó al pasar el perfil por el relé (cookie tpw)
 	const call = async (method: string, path: string, body?: unknown) => {
-		const req = new Request(`https://app.terminalp2p.com${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+		const req = new Request(`https://app.terminalp2p.com${path}`, { method, headers: { 'Content-Type': 'application/json', ...(await whoHeader(body, now)) }, body: body === undefined ? undefined : JSON.stringify(body) })
 		const res = (await proApi(req, new URL(req.url), env, now, q.fetcher))!
 		return { status: res.status, body: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() }
 	}
@@ -260,8 +271,9 @@ test('30 días gratis al conectar la cuenta: una vez por usuario de QvaPay y por
 	assert.deepEqual([r.body.pro, r.body.plan, r.body.expiresAt, r.body.started], [true, 'trial', T0 + 30 * 86_400_000, true])
 	// La siguiente consulta ya no los vuelve a dar
 	assert.equal((await s.post('/pro/status', { print: P1, username: 'Ana' })).body.started, false)
-	// Otro token (otro dispositivo) con el mismo usuario: no hay otros 30 días
-	assert.deepEqual([(await s.post('/pro/status', { print: P2, username: 'ana' })).body.pro], [false])
+	// Otro token (otro dispositivo) con la misma cuenta: entra solo en sus mismos días, sin otros 30
+	const other = (await s.post('/pro/status', { print: P2, username: 'ana' })).body
+	assert.deepEqual([other.pro, other.started, other.expiresAt], [true, false, T0 + 30 * 86_400_000])
 	// Ni otro usuario desde el mismo dispositivo (que además ya tiene sus días)
 	assert.equal((await s.post('/pro/status', { print: P3, username: 'leo' })).body.started, true)
 	assert.equal((await s.post('/pro/status', { print: P3, username: 'eva' })).body.started, false)
@@ -473,4 +485,45 @@ test('topes contra abusos: días gratis por IP y día, facturas pendientes en to
 	const capped = setup({ PAIR_LIMIT: { limit: async () => ({ success: false }) } })
 	assert.equal((await capped.post('/pro/claim', { print: P1, code: '123 456' })).status, 429)
 	assert.equal((await capped.post('/pro/claim', { print: P1, code: 'TP-AAAA-BBBB-CCCC' })).status, 400)
+})
+
+test('la cuenta la confirma QvaPay: el usuario que diga el navegador no cuenta, y un dispositivo nuevo con tu cuenta entra solo en tu Pro', async () => {
+	const s = setup()
+	// Un usuario escrito en el cuerpo, sin la cookie del relé, no activa días gratis ni gasta los de nadie
+	const req = new Request('https://app.terminalp2p.com/pro/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ print: P4, username: 'ana' }) })
+	assert.equal((await (await proApi(req, new URL(req.url), s.env, s.now(), s.q.fetcher))!.json()).started, false)
+	assert.equal((await s.post('/pro/status', { print: P1, username: 'ana' })).body.started, true)
+	// Una cookie de identidad de otra huella (otro token) no vale para esta
+	const stolen = await whoToken(P1, 'u-ana', 'ana', 'clave', s.now())
+	const req2 = new Request('https://app.terminalp2p.com/pro/status', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: `tpw=${stolen}` }, body: JSON.stringify({ print: P3 }) })
+	assert.equal((await (await proApi(req2, new URL(req2.url), s.env, s.now(), s.q.fetcher))!.json()).pro, false)
+	// Ana compra en P1; en P2 conecta su cuenta y ya es Pro, sin código de 6 cifras
+	await buy(s, P1, 'month', 'ana')
+	const p2 = (await s.post('/pro/status', { print: P2, username: 'ana' })).body
+	assert.deepEqual([p2.pro, p2.plan], [true, 'month'])
+	// Sin tope de dispositivos para los suyos: P1 sigue dentro, y un tercero también
+	assert.equal((await s.post('/pro/status', { print: P4, username: 'Ana' })).body.pro, true)
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
+	// Comprar «para otra cuenta» ya no se puede: la factura va a la cuenta confirmada de quien la pide
+	const c = (await s.post('/pro/checkout', { print: P3, plan: 'month', username: 'leo' })).body
+	s.q.pay([...s.q.invoices.keys()].at(-1)!, 'leo')
+	await s.status(c.id, P3)
+	assert.deepEqual({ ...s.db.prepare("SELECT license FROM pro_prints WHERE print = ?").get(P3) }, { license: "qp:leo" })
+})
+
+test('el relé deja firmada la cuenta del perfil de QvaPay junto a la huella de ese mismo token', async () => {
+	const url = new URL('https://app.terminalp2p.com/qp/user')
+	const token = '123|tokenDePrueba'
+	const set = (await whoCookie(url, `Bearer ${token}`, { uuid: '9d7c6f2e-1111-4222-8333-944455556666', username: 'Ana', balance: 5 }, 'clave', T0))!
+	assert.match(set, /^tpw=[^;]+; HttpOnly; SameSite=Lax; Path=\/; Max-Age=\d+; Domain=terminalp2p\.com; Secure$/)
+	const cookie = set.split(';')[0]
+	const print = await tokenPrint(token)
+	assert.deepEqual(await readWho(cookie, print, 'clave', T0), { print, uuid: '9d7c6f2e-1111-4222-8333-944455556666', username: 'Ana' })
+	// Ni con otra huella, ni firmada con otra clave (staging/producción), ni caducada
+	assert.equal(await readWho(cookie, P1, 'clave', T0), null)
+	assert.equal(await readWho(cookie, print, 'otra', T0), null)
+	assert.equal(await readWho(cookie, print, 'clave', T0 + 31 * 86_400_000), null)
+	// Sin token o con una respuesta que no es un perfil, nada
+	assert.equal(await whoCookie(url, null, { uuid: '9d7c6f2e-1111-4222-8333-944455556666', username: 'Ana' }, 'clave'), null)
+	assert.equal(await whoCookie(url, `Bearer ${token}`, { error: 'Unauthenticated' }, 'clave'), null)
 })

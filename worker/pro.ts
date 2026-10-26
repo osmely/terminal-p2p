@@ -1,17 +1,17 @@
 // Plan Pro de Terminal P2P (app.terminalp2p.com/pro/*).
 //
-// Quién es cada usuario lo dice QvaPay con el propio pago: al pagar una factura de nuestra app, la
-// API de comerciante devuelve quién la pagó (PaidBy), con su uuid y su usuario verificados. El token
-// de QvaPay nunca llega aquí: de cada dispositivo solo vemos una huella (HMAC del token calculado en
-// el navegador). Con esa huella se pregunta si eres Pro y se recoge el módulo Pro, firmado para ti.
-// Un dispositivo nuevo entra con un código de 6 cifras generado desde otro que ya es Pro, o con el
-// código de respaldo (que cambia cada vez que se usa).
+// Quién es cada usuario lo dice QvaPay: al pagar una factura de nuestra app, la API de comerciante
+// devuelve quién la pagó (PaidBy); y al conectar la cuenta, el perfil que el relé trae de QvaPay deja
+// firmado de quién es la huella de ese token (session.ts: readWho). El token nunca se guarda: de cada
+// dispositivo solo vemos su huella (HMAC del token). Con ella se pregunta si eres Pro y se recoge el
+// módulo Pro, firmado para ti. Un dispositivo nuevo con tu cuenta entra solo; los códigos de 6 cifras
+// y de respaldo quedan para pasar Pro a un dispositivo sin esa identidad.
 
 import { hex, hmac, sha256, sign, verify } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
-import { sessionCookie, sessionToken } from './session.ts'
+import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
 import { proEnabled, setProEnabled } from './flags.ts'
 
 export interface ProEnv {
@@ -81,7 +81,7 @@ interface Checkout {
 	backup_code: string | null
 	created_at: number
 	paid_at: number | null
-	requester: string | null // la cuenta conectada al terminal que la pidió (la dice el navegador)
+	requester: string | null // la cuenta conectada al terminal que la pidió (confirmada por QvaPay al conectar)
 	payer: string | null // quien pagó, según QvaPay
 }
 
@@ -111,12 +111,14 @@ export async function licenseOfPrint(db: D1, print: string, now: number): Promis
 	return l && !l.revoked && l.expires_at > now ? l : null
 }
 
-// Añade un dispositivo a una licencia; si ya tiene PRO_DEVICES, sale el que lleva más tiempo sin usarse
-export async function attachPrint(db: D1, license: string, print: string, now: number) {
+// Añade un dispositivo a una licencia; si ya tiene PRO_DEVICES, sale el que lleva más tiempo sin usarse.
+// Sin tope (evict = false) cuando QvaPay confirmó que el dispositivo es de esa misma cuenta
+export async function attachPrint(db: D1, license: string, print: string, now: number, evict = true) {
 	await db
 		.prepare('INSERT INTO pro_prints (print, license, added_at, seen_at) VALUES (?, ?, ?, ?) ON CONFLICT(print) DO UPDATE SET license = excluded.license, seen_at = excluded.seen_at')
 		.bind(print, license, now, now)
 		.run()
+	if (!evict) return
 	await db
 		.prepare('DELETE FROM pro_prints WHERE license = ? AND print NOT IN (SELECT print FROM pro_prints WHERE license = ? ORDER BY seen_at DESC, rowid DESC LIMIT ?)')
 		.bind(license, license, PRO_DEVICES)
@@ -412,11 +414,6 @@ export async function claimCode(db: D1, raw: string, now: number): Promise<{ lic
 // ── Rutas ────────────────────────────────────────────────────────────
 
 const readBody = async (req: Request) => (await req.json().catch(() => ({}))) as Record<string, unknown>
-// El usuario de QvaPay conectado al terminal (lo dice el navegador; el servidor no puede comprobarlo)
-const usernameOf = (v: unknown) => {
-	const u = String(v ?? '').replace(/^@/, '').trim()
-	return /^[A-Za-z0-9._-]{1,40}$/.test(u) ? u : undefined
-}
 const printOf = (v: unknown) => {
 	const p = String(v ?? '').toLowerCase()
 	if (!PRINT.test(p)) throw new ProError(400, 'Dispositivo no válido')
@@ -444,9 +441,19 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			}
 			await settlePending(env, now, { print }, fetcher)
 			let l = await licenseOfPrint(db, print, now)
+			// La cuenta de QvaPay de este token, confirmada por QvaPay (no por lo que diga el navegador)
+			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
+			const username = who?.username
+			// Un dispositivo nuevo con tu cuenta entra solo en tu Pro (comprado o de los días gratis)
+			if (!l && username) {
+				const own = (await activeLicense(db, `qp:${username.toLowerCase()}`, now)) ?? (await activeLicense(db, `trial:qp:${username.toLowerCase()}`, now))
+				if (own) {
+					await attachPrint(db, own.uuid, print, now, false)
+					l = own
+				}
+			}
 			// Todos empiezan con 30 días gratis: se activan solos al conectar la cuenta, una vez por usuario de
 			// QvaPay y por dispositivo
-			const username = usernameOf(b.username)
 			const started = !l && !!username && (await freeDays(db, username, print, now, await ipPrint(req, env.PRO_KEY)))
 			if (started) l = await licenseOfPrint(db, print, now)
 			if (l) await db.prepare('UPDATE pro_prints SET seen_at = ? WHERE print = ?').bind(now, print).run()
@@ -459,14 +466,18 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		// Desconectaste tu cuenta en el terminal: el simulador también sale
 		if (route === 'POST /pro/leave') {
 			const res = json(200, { ok: true })
-			res.headers.set('Set-Cookie', sessionCookie(url, '', 0))
+			res.headers.append('Set-Cookie', sessionCookie(url, '', 0))
+			res.headers.append('Set-Cookie', clearWho(url))
 			return res
 		}
 
 		// Comprar o renovar: factura de QvaPay para este dispositivo
 		if (route === 'POST /pro/checkout') {
 			const b = await readBody(req)
-			return json(200, await createCheckout(env, { print: printOf(b.print), username: usernameOf(b.username) }, String(b.plan) as Plan, url.origin, now, fetcher))
+			const print = printOf(b.print)
+			// Pro queda a nombre de la cuenta confirmada de este dispositivo; sin ella, a nombre de quien pague
+			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
+			return json(200, await createCheckout(env, { print, username: who?.username }, String(b.plan) as Plan, url.origin, now, fetcher))
 		}
 
 		// El navegador que pagó pregunta cómo va su factura
