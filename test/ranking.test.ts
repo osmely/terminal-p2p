@@ -20,6 +20,7 @@ const lvl = (user: string, price: number, usd: number, o: Partial<Level> = {}): 
 	gold: false,
 	vipOnly: false,
 	requirements: null,
+	requirementsMet: null,
 	createdAt: NOW - 3 * 86_400_000,
 	updatedAt: null,
 	promoted: false,

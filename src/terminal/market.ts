@@ -40,6 +40,8 @@ export interface Level {
 	gold: boolean
 	vipOnly: boolean
 	requirements: Record<string, number> | null
+	// Si cumples sus requisitos, según QvaPay al leer el libro con tu cuenta (null: no lo dijo)
+	requirementsMet: boolean | null
 	// Epoch ms. updatedAt cambia al editar o reabrir la oferta: es su última actividad
 	createdAt: number | null
 	updatedAt: number | null
@@ -366,6 +368,7 @@ function toLevel(o: P2POffer, promoted: boolean, ref: number | null): Level {
 		gold: !!u?.golden_check,
 		vipOnly: !!o.only_vip,
 		requirements: o.requirements ?? null,
+		requirementsMet: o.requirements_met ?? null,
 		createdAt: ts(o.created_at) ?? ts(o.updated_at),
 		updatedAt: ts(o.updated_at) ?? ts(o.created_at),
 		promoted,

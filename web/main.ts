@@ -8,6 +8,7 @@
 import { Broker, json } from '../src/broker/routes.ts'
 import { QvaPayClient } from '../src/qvapay/client.ts'
 import { COINS, Market, type Tick } from '../src/terminal/market.ts'
+import { bestCross } from '../src/terminal/arbitrage.ts'
 import { CRITERIA, positions, rank, userStats } from '../src/terminal/ranking.ts'
 import { BrowserAccounts, TOKEN_KEY } from './accounts.ts'
 
@@ -88,4 +89,5 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 	return json(404, { error: 'no encontrado' })
 }
 
-;(window as unknown as { TPApi: { fetch: typeof api } }).TPApi = { fetch: api }
+// cross: la mejor oportunidad del libro cruzado (app.js la enseña en la lectura del mercado)
+;(window as unknown as { TPApi: { fetch: typeof api; cross: typeof bestCross } }).TPApi = { fetch: api, cross: bestCross }

@@ -406,19 +406,29 @@ function renderBook(b, asks, bids) {
 	}
 }
 
+// Con menos operaciones, la venta de un libro cruzado lleva aviso (a quien vende le pagas tú primero)
+const CROSS_MIN_OPS = 50
+
 function renderInsight(b, asks, bids) {
 	const out = []
 	const ask = asks[0]
 	const bid = bids[0]
 	const unit = b.coin.unit
 	if (ask && bid && bid.price > ask.price) {
-		const net = bid.price / ask.price - 1 - 0.0025
-		const legs = `comprar a <b>${fmtP(ask.price)}</b> (@${esc(ask.user)}, ${ask.ops} ops) y vender a <b>${fmtP(bid.price)}</b> (@${esc(bid.user)}, ${bid.ops} ops)`
-		out.push(
-			net > 0
-				? `<li class="warn">Libro cruzado: ${legs} deja <b>${pct(net)}</b> tras la comisión de 0,25%.</li>`
-				: `<li>Libro cruzado, pero no compensa: ${legs} da <b>${pct(net)}</b> tras la comisión de 0,25%.</li>`,
-		)
+		// Con tu comisión real (las cuentas GOLD no la pagan) y solo con ofertas que puedes tomar
+		const acct = typeof bk !== 'undefined' ? bk.acct : null
+		const fee = acct?.connected ? (acct.gold ? 0 : (acct.p2pFee ?? 0.0025)) : 0.0025
+		const feeText = fee ? `tras la comisión de ${(fee * 100).toLocaleString('es')} %` : 'sin comisión (cuenta GOLD)'
+		const me = typeof myUsername === 'function' ? myUsername() : null
+		const c = window.TPApi?.cross?.(asks, bids, fee, me)
+		if (c) {
+			const who = (l) => `@${esc(l.user)}, ${l.ops} ops`
+			const fresh = c.ask.ops < CROSS_MIN_OPS ? ` Ojo: @${esc(c.ask.user)} tiene solo ${c.ask.ops} operaciones.` : ''
+			const left = c.leftUsd ? ` Te sobran ${fmtU(c.leftUsd)} USD (la compra es fija y más pequeña).` : ''
+			out.push(
+				`<li class="warn">Libro cruzado: compra <b>${fmtU(c.buyUsd)} USD</b> a <b>${fmtP(c.ask.price)}</b> (${who(c.ask)}) y vende <b>${fmtU(c.sellUsd)}</b> a <b>${fmtP(c.bid.price)}</b> (${who(c.bid)}): te quedan unos <b>${fmtU(Math.round(c.profit))} ${unit}</b> (<b>${pct(c.pct)}</b>) ${feeText}. Son dos operaciones aparte: primero le pagas a @${esc(c.ask.user)} y esperas a que libere; mientras, la compra puede desaparecer.${left}${fresh}</li>`,
+			)
+		} else out.push(`<li>Libro cruzado, pero no lo puedes aprovechar: no compensa ${feeText}, los montos no encajan o son ofertas que no puedes tomar (solo VIP, requisitos, precio atípico).</li>`)
 	}
 	const done = b.completed
 	const m = done ? median(done.offers) : null
