@@ -208,7 +208,10 @@ async function loadCandles(refresh = false) {
 		// deja de ajustarse solo si se arrastró); al refrescar el mismo se respeta el zoom
 		if (!refresh || candlesKey !== `${sym}:${iv}`) {
 			candleSeries.priceScale().applyOptions({ autoScale: true })
-			chart.timeScale().fitContent()
+			// Solo las últimas velas, de unos 8 px: las 500 en el ancho del móvil quedan de menos de un píxel y
+			// parecen una línea. Las anteriores se ven arrastrando hacia atrás
+			const n = Math.max(30, Math.floor(($('chart').clientWidth || 480) / 8))
+			chart.timeScale().setVisibleLogicalRange({ from: rows.length - n, to: rows.length + 2 })
 		}
 		candlesKey = `${sym}:${iv}`
 		drawOrderLines()
