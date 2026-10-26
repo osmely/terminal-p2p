@@ -11,7 +11,7 @@ import { adminPage, askKey } from './admin.ts'
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
-import { proEnabled, setProEnabled } from './flags.ts'
+import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 
 export interface ProEnv {
 	DB: D1
@@ -579,6 +579,11 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 			await setProEnabled(db, action === 'pro-on', now)
 			notice = `<p class="ok">${action === 'pro-on' ? 'Pro encendido: ya se ve en la web, el terminal y el simulador' : 'Pro apagado: no se anuncia ni se ofrece en ningún sitio'} (en menos de un minuto en todas partes).</p>`
 		}
+		// Pausar o reanudar la publicación de ofertas desde el terminal
+		if (action === 'orders-pause' || action === 'orders-resume') {
+			await setOrdersPaused(db, action === 'orders-pause', now)
+			notice = `<p class="ok">${action === 'orders-pause' ? 'Publicar ofertas desde el terminal queda en pausa: quien lo intente ve el aviso de ajustes' : 'Publicar ofertas desde el terminal vuelve a funcionar'} (en menos de un minuto en todas partes).</p>`
+		}
 		// Repasar con QvaPay las facturas recientes: activa las pagadas que se quedaron sin activar y enseña las
 		// pagadas que aquí no constan
 		if (action === 'reconcile')
@@ -730,6 +735,10 @@ export async function proAdmin(req: Request, env: ProEnv, now = Date.now(), fetc
 			(await proEnabled(db, now))
 				? `<form method="post" class="row flag on"><b>● Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis al conectar) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
 				: `<form method="post" class="row flag"><b>○ Pro está apagado</b><span class="note">No se anuncia ni se ofrece: la web no lo menciona, el terminal no tiene orden inteligente ni compras y el simulador solo tiene BTC y ETH.</span><button name="action" value="pro-on" onclick="return confirm('¿Encender Pro? Se anuncia en la web y todos los que conecten su cuenta reciben 30 días gratis.')">Encender Pro</button></form>`
+		}${
+			(await ordersPaused(db, now))
+				? `<form method="post" class="row flag"><b>⏸ Publicar ofertas está en pausa</b><span class="note">Quien intente publicar desde el terminal ve: «${ORDERS_PAUSED_MSG}» Tomar ofertas y cerrar órdenes siguen funcionando.</span><button name="action" value="orders-resume" onclick="return confirm('¿Reanudar la publicación de ofertas desde el terminal?')">Reanudar</button></form>`
+				: `<form method="post" class="row flag on"><b>● Publicar ofertas funciona</b><span class="note">Para cortarlo al momento si aparece un fallo (tomar ofertas y cerrar órdenes siguen funcionando).</span><button class="ghost" name="action" value="orders-pause" onclick="return confirm('¿Pausar la publicación de ofertas desde el terminal? Quien lo intente verá un aviso de ajustes.')">Pausar</button></form>`
 		}${cards}
 		<div class="top" style="margin-top:16px"><form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y enseña las que aquí no constan">Repasar pagos con QvaPay</button></form>
 		<span class="row"><a class="note" href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a class="note" href="/admin/pro?export=copia">Copia completa (JSON)</a></span></div>

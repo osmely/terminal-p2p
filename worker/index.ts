@@ -16,7 +16,7 @@ import { sha256 } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { backupPro, cleanupPro, proAdmin, proApi, reconcile, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
-import { proEnabled } from './flags.ts'
+import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	ASSETS: Fetcher
@@ -84,6 +84,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 
 	if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`)) {
 		if (!(await underLimit(env.RELAY_LIMIT, req, await relayKey(req)))) return secure(jsonError(429, 'Demasiadas peticiones seguidas: espera unos segundos'))
+		// Publicar ofertas en pausa desde el panel: se corta aquí, también para quien tenga abierta una versión vieja
+		// del terminal. 423 y no 5xx: el terminal no lo reintenta y enseña el aviso tal cual
+		if (req.method === 'POST' && url.pathname === `${RELAY_PREFIX}/p2p/create` && (await ordersPaused(env.DB)))
+			return secure(new Response(JSON.stringify({ error: ORDERS_PAUSED_MSG, code: 'TP_ORDERS_PAUSED' }), { status: 423, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }))
 		const res = await relay(req, url, ctx, async (w) => {
 			if (!env.METRICS_SALT) return
 			const e = await relayEvent(w, env.METRICS_SALT)
