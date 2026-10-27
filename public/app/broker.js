@@ -106,6 +106,7 @@ function confirmDialog(title, html, okText, cls = 'primary') {
 async function loadAccount() {
 	try {
 		bk.acct = await api('/me')
+		balanceAt = Date.now()
 	} catch {
 		bk.acct = { connected: false, dryRun: true }
 	}
@@ -114,6 +115,32 @@ async function loadAccount() {
 	else renderTrades()
 	if (typeof refreshPro === 'function') refreshPro()
 }
+
+// El saldo cambia fuera de esta pestaña: otra pestaña o la web de QvaPay publica una venta (los USD quedan
+// reservados), alguien libera o te pagan. Se vuelve a pedir al volver a la pestaña, cada minuto con ella a la vista,
+// al abrir «Publicar» o «Vender» y cuando cambian tus ofertas u operaciones
+const BALANCE_MS = 60_000
+let balanceAt = 0
+let balanceBusy = false
+async function refreshBalance(force = false) {
+	if (!bk.acct.connected || balanceBusy || (!force && Date.now() - balanceAt < BALANCE_MS)) return
+	balanceBusy = true
+	try {
+		const r = await api('/me')
+		balanceAt = Date.now()
+		// Otra cuenta o sin cuenta (token revocado o desconectado en otra pestaña): se recarga todo
+		if (!r.connected || r.username !== bk.acct.username) return loadAccount()
+		if (r.balance === bk.acct.balance) return
+		bk.acct.balance = r.balance
+		const el = document.querySelector('#account .acct-bal')
+		if (el) el.textContent = `${fmtM(r.balance ?? 0)} USD`
+		document.dispatchEvent(new Event('tp:balance'))
+	} catch {
+	} finally {
+		balanceBusy = false
+	}
+}
+document.addEventListener('visibilitychange', () => !document.hidden && refreshBalance(Date.now() - balanceAt > 5_000))
 
 function renderAccount() {
 	const a = bk.acct
@@ -182,8 +209,13 @@ async function loadTrades() {
 	tradesBusy = true
 	try {
 		const r = await api('/trades')
+		// Una oferta nueva o cancelada, o una operación que cambió de estado, mueve el saldo
+		const sign = (trades, offers) => JSON.stringify([trades.map((t) => [t.id, t.status]), offers.map((o) => [o.offerUuid, o.usd, o.available])])
+		const moved = bk.tradesSeen && sign(r.trades, r.openOffers) !== sign(bk.trades, bk.openOffers)
+		bk.tradesSeen = true
 		bk.trades = r.trades
 		bk.openOffers = r.openOffers
+		if (moved) refreshBalance(true)
 		document.title = r.pending ? `(${r.pending}) ${BASE_TITLE}` : BASE_TITLE
 		deliver(r.alerts ?? [])
 	} catch (e) {
@@ -724,8 +756,12 @@ async function showCreateOffer(preset = null) {
 		savedMethods = list
 		if ($('ofSaved')) renderSaved()
 	})
-	// Vendiendo, nunca más que tu saldo: el monto se recorta a lo que tienes
+	// Vendiendo, nunca más que tu saldo: el monto se recorta a lo que tienes. Se pide el saldo al abrir y, si
+	// cambia mientras está abierto, se aplica
 	const balance = () => Math.floor((bk.acct.balance ?? 0) * 100) / 100
+	const onBalance = () => ($('ofAmount') ? update() : document.removeEventListener('tp:balance', onBalance))
+	document.addEventListener('tp:balance', onBalance)
+	refreshBalance(true)
 	const update = () => {
 		if (type === 'sell' && num2($('ofAmount').value) > balance()) $('ofAmount').value = String(balance())
 		$('ofBal').hidden = type !== 'sell'
@@ -1376,6 +1412,15 @@ async function showSwap() {
 	const clamp = () => {
 		if (amount() > maxUsd()) $('swAmount').value = String(maxUsd())
 	}
+	// El saldo se pide al abrir y, si cambia mientras está abierto, se aplica
+	const onBalance = () => {
+		if (!$('swAmount')) return document.removeEventListener('tp:balance', onBalance)
+		if ($('swMax')) $('swMax').innerHTML = `Saldo: <b class="mono">${fmtM(bk.acct.balance ?? 0)}</b> USD`
+		clamp()
+		render()
+	}
+	document.addEventListener('tp:balance', onBalance)
+	refreshBalance(true)
 	const unit = () => unitOf(sw.coin)
 
 	const renderDetails = () => {
@@ -1756,7 +1801,10 @@ let tradeTicks = 0
 setInterval(() => {
 	tradeTicks++
 	if (!bk.acct.connected) return
-	if (!document.hidden) return loadTrades()
+	if (!document.hidden) {
+		refreshBalance()
+		return loadTrades()
+	}
 	const watching = bk.openOffers.length || bk.trades.some((t) => t.status !== 'completed')
 	if (bk.alerts && watching && tradeTicks % 2 === 0) loadTrades()
 }, 15_000)
