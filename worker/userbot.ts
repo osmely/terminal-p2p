@@ -152,7 +152,9 @@ export interface RadarHit {
 	// Lo que hace el usuario: compra USD (toma una venta) o vende USD (toma una compra)
 	side: 'buy' | 'sell'
 	price: number
+	// Lo que tomarías con tu regla y, en una oferta por rango, lo que tiene la oferta
 	usd: number
+	total?: number
 	peer: string
 	limit: number
 	// Tomada comprando: lo que hay que pagar y hasta cuándo
@@ -178,7 +180,8 @@ export function cleanRadarHit(b: Record<string, unknown>): RadarHit | null {
 	if (!kind || !side || !UUID.test(offer) || !RADAR_MARKETS[coin] || !/^[\w.-]{1,40}$/.test(peer) || !price || !usd || !limit) return null
 	const pay = amount(b.pay, 1e9)
 	const payBy = amount(b.payBy, 4e12)
-	return { kind, offer, coin, side, price, usd, peer, limit, ...(kind === 'taken' && side === 'buy' && pay ? { pay, payBy: payBy ?? undefined } : {}) }
+	const total = amount(b.total, 1e5)
+	return { kind, offer, coin, side, price, usd, peer, limit, ...(total && total > usd ? { total } : {}), ...(kind === 'taken' && side === 'buy' && pay ? { pay, payBy: payBy ?? undefined } : {}) }
 }
 
 const money = (n: number) => n.toLocaleString('es', { maximumFractionDigits: 2 })
@@ -189,7 +192,7 @@ export function radarText(h: RadarHit) {
 	const who = `@${tgEsc(h.peer)}`
 	const at = `<b>${money(h.price)} ${m.unit}</b> por USD`
 	if (h.kind === 'found')
-		return `📡 <b>Radar: oferta para ti</b>\n\n${who} ${h.side === 'buy' ? 'vende' : 'compra'} <b>${money(h.usd)} USD</b> a ${at} en ${m.name}.\nTu límite: ${money(h.limit)}.\n\nÁbrela en el terminal para tomarla.`
+		return `📡 <b>Radar: oferta para ti</b>\n\nPuedes ${h.side === 'buy' ? 'comprar' : 'vender'} <b>${money(h.usd)} USD</b> a ${at} en ${m.name}, ${h.side === 'buy' ? 'de' : 'a'} ${who}${h.total ? ` (oferta por rango de ${money(h.total)} USD)` : ''}.\nTu límite: ${money(h.limit)}.\n\nÁbrela en el terminal para tomarla.`
 	const next =
 		h.side === 'buy'
 			? `Págale <b>${money(h.pay ?? h.usd * h.price)} ${m.unit}</b>${h.payBy ? ` antes de las <b>${clock(h.payBy)}</b> (hora de Cuba)` : ''} y marca el pago en «Mis operaciones».`

@@ -906,13 +906,16 @@ test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto e
 	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit, coin: 'NADA' })).status, 400)
 	const r = await s.post('/pro/radar/alert', { print: P1, ...hit })
 	assert.deepEqual(r.body, { ok: true, sent: true })
-	assert.match(toUser()[0].text, /Radar: oferta para ti[\s\S]*@leo vende <b>50 USD<\/b> a <b>478 CUP<\/b> por USD en CUP Transferencia[\s\S]*Tu límite: 480/)
+	assert.match(toUser()[0].text, /Radar: oferta para ti[\s\S]*Puedes comprar <b>50 USD<\/b> a <b>478 CUP<\/b> por USD en CUP Transferencia, de @leo\.[\s\S]*Tu límite: 480/)
 	assert.equal(toUser()[0].url, `https://app.terminalp2p.com/#p2p/${offer}`)
 	// La misma oferta desde otra pestaña: no se repite. Tomada después: ese aviso sí sale
 	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit })).body.repeated, true)
 	await s.post('/pro/radar/alert', { print: P1, ...hit, kind: 'taken', pay: 23900, payBy: Date.parse('2026-10-25T16:30:00Z') })
 	assert.match(toUser()[1].text, /tomé una oferta por ti[\s\S]*Compraste <b>50 USD<\/b>[\s\S]*Págale <b>23\.900 CUP<\/b> antes de las <b>12:30<\/b> \(hora de Cuba\)/)
 	assert.equal(toUser().length, 2)
+	// De una oferta por rango más grande: se dice cuánto tiene
+	await s.post('/pro/radar/alert', { print: P1, ...hit, offer: '0b0e1c2d-3e4f-4a5b-8c6d-aaaaaaaaaaaa', total: 500 })
+	assert.match(toUser()[2].text, /Puedes comprar <b>50 USD<\/b>[\s\S]*\(oferta por rango de 500 USD\)/)
 	// Tope por hora
 	for (let i = 0; i < 40; i++) await s.post('/pro/radar/alert', { print: P1, ...hit, offer: `0b0e1c2d-3e4f-4a5b-8c6d-${String(i).padStart(12, '0')}` })
 	assert.equal(toUser().length, 30)

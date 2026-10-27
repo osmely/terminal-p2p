@@ -1175,8 +1175,9 @@ function showTakeOffer(uuid, side) {
 	renderTake(uuid, side, l, state.book.coin.tick)
 }
 
-// Una oferta por su enlace (#p2p/<uuid>): la carga aunque no esté entre las que muestra el libro
-async function showTakeOfferById(uuid) {
+// Una oferta por su enlace (#p2p/<uuid>): la carga aunque no esté entre las que muestra el libro. amount: el monto
+// con el que abrir una por rango (el que calculó el radar); sin él, el máximo que deja tomar
+async function showTakeOfferById(uuid, amount) {
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para abrir la oferta', true)
 	openModal('<p class="muted">Cargando oferta…</p>')
 	let o
@@ -1207,7 +1208,7 @@ async function showTakeOfferById(uuid) {
 		rating: o.owner?.rating ?? null,
 		kyc: false,
 	}
-	renderTake(o.offer, o.type === 'sell' ? 'ask' : 'bid', level, o.coin)
+	renderTake(o.offer, o.type === 'sell' ? 'ask' : 'bid', level, o.coin, amount)
 }
 
 const REQ_NAMES = { min_completed: ['operaciones completadas', ''], min_rating: ['valoración', '★'], min_account_days: ['días de cuenta', ''], min_trustscore: ['trustscore', ''] }
@@ -1230,13 +1231,15 @@ async function checkRequirements(uuid, l) {
 	$('tkGo').disabled = true
 }
 
-function renderTake(uuid, side, l, coin) {
+function renderTake(uuid, side, l, coin, preset) {
 	const unit = unitOf(coin)
 	// En una venta ajena compras USD (pagas tú); en una compra ajena vendes USD (te pagan)
 	const youBuy = side === 'ask'
 	const flex = l.kind === 'flexible'
 	const max = flex ? Math.min(l.orderMax ?? l.usd, l.usd) : l.usd
 	const min = flex ? (l.orderMin ?? 0) : l.usd
+	// Lo que se propone tomar: el monto pedido (dentro de lo que deja la oferta) o, si no, el máximo
+	const start = flex && preset > 0 ? Math.min(max, Math.max(min, preset)) : max
 	const req = reqText(l.requirements)
 	openModal(`<div class="stack">
 		<div><h3>${youBuy ? 'Comprar' : 'Vender'} USD a ${fmtP(l.price)} ${unit}</h3>
@@ -1248,7 +1251,7 @@ function renderTake(uuid, side, l, coin) {
 			${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
 			${l.vipOnly ? '<span>Solo</span><b>cuentas VIP</b><span></span>' : ''}
 		</div>
-		${flex ? `<label class="field">¿Cuántos USD ${youBuy ? 'compras' : 'vendes'}?<input class="input" id="tkAmount" type="number" min="${min}" max="${max}" step="0.01" inputmode="decimal" value="${max}" /></label>` : ''}
+		${flex ? `<label class="field">¿Cuántos USD ${youBuy ? 'compras' : 'vendes'}?<input class="input" id="tkAmount" type="number" min="${min}" max="${max}" step="0.01" inputmode="decimal" value="${start}" /></label>` : ''}
 		<p class="hint" id="tkTotal"></p>
 		<p class="notice">${
 			youBuy
