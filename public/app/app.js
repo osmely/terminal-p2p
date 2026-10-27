@@ -301,7 +301,8 @@ function pulseScore(b) {
 	const now = b.serverTime ?? Date.now()
 	const hour = 3_600_000
 	const fresh = levels.filter((l) => l.updatedAt && now - l.updatedAt < hour).length
-	const gone = b.activity.filter((a) => a.kind === 'gone' && now - a.t < hour).length
+	// Lo que salió o se tomó en la última hora (del feed, también lo tomado en parte)
+	const gone = b.activity.filter((a) => (a.kind === 'gone' || a.kind === 'taken' || a.kind === 'partial' || a.kind === 'cancelled') && now - a.t < hour).length
 	const last = Math.max(0, ...levels.map((l) => l.updatedAt ?? 0), ...b.activity.map((a) => a.t))
 	const done = b.completed
 	const pace = done?.count && done.window_hours ? done.count / done.window_hours : null
@@ -517,28 +518,51 @@ function informalInsight(tick, ref) {
 	return out
 }
 
-// Ofertas que entran y salen del libro. De una que sale no se sabe si la tomaron o la retiró su dueño:
-// QvaPay no lo dice
-const ACT_ICON = {
-	new: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 6v12M6 12h12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
-	gone: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M14 5h4a1 1 0 011 1v12a1 1 0 01-1 1h-4M9 16l-4-4 4-4M5 12h10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+// Lo que pasa en el libro. Si el mercado llega desde el servidor, del feed de QvaPay: ofertas nuevas, tomadas (enteras o
+// en parte), retiradas, editadas y operaciones completadas. Si no, comparando lecturas: solo se ve qué entra y qué sale
+// (y de una que sale no se sabe si la tomaron o la retiró su dueño)
+const ACT_PATH = {
+	plus: 'M12 6v12M6 12h12',
+	out: 'M14 5h4a1 1 0 011 1v12a1 1 0 01-1 1h-4M9 16l-4-4 4-4M5 12h10',
+	hand: 'M5 12h10M11 8l4 4-4 4M19 5v14',
+	part: 'M4 12h7M15 12h5M11 8l4 4-4 4',
+	back: 'M19 12H9M13 8l-4 4 4 4',
+	edit: 'M4 20h4L19 9l-4-4L4 16v4z',
+	done: 'M5 12.5l4.5 4.5L19 7',
 }
+const actIcon = (d) => `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+// [icono, texto («una venta» o «una compra» va en {s}), explicación al pasar el ratón]
+const ACT = {
+	new: ['plus', 'Entra {s}', 'Oferta nueva'],
+	reopened: ['plus', 'Vuelve {s}', 'La contraparte se retiró o se le venció el plazo de pago: la oferta vuelve al libro'],
+	taken: ['hand', 'Toman {s}', 'Alguien la tomó entera'],
+	partial: ['part', 'Toman parte de {s}', 'Alguien tomó una parte de esta oferta por rango'],
+	returned: ['back', 'Vuelve parte a {s}', 'Una parte tomada volvió (se canceló o se venció el plazo)'],
+	cancelled: ['out', 'Retiran {s}', 'Su dueño la retiró del libro'],
+	edited: ['edit', 'Cambia {s}', 'Su dueño cambió el precio o el monto'],
+	done: ['done', 'Se completa {s}', 'Operación terminada a este precio'],
+	gone: ['out', 'Sale {s}', 'La tomó alguien o la retiró su dueño; QvaPay no indica cuál'],
+}
+const ACT_OUT = new Set(['gone', 'taken', 'partial', 'cancelled'])
 function renderActivity(b) {
 	const items = b.activity.slice(0, 40)
 	// Solo se repinta si cambió algo: repintar con cada lectura del libro haría perder el clic en un nombre
-	const key = items.map((a) => `${a.t}:${a.kind}:${a.user}:${a.price}`).join('|')
+	const key = `${b.activitySource}|${items.map((a) => `${a.t}:${a.kind}:${a.user}:${a.price}:${a.usd}`).join('|')}`
 	if ($('activity').dataset.key === key) return
 	$('activity').dataset.key = key
-	const note = '<li class="act-note">Ofertas que entran y salen del libro. Las que salen las tomó alguien o las retiró su dueño: QvaPay no indica cuál.</li>'
+	const note =
+		b.activitySource === 'feed'
+			? '<li class="act-note">Lo que pasa en el libro según QvaPay: ofertas nuevas, tomadas (enteras o en parte), retiradas y operaciones completadas.</li>'
+			: '<li class="act-note">Ofertas que entran y salen del libro. Las que salen las tomó alguien o las retiró su dueño: QvaPay no indica cuál.</li>'
 	$('activity').innerHTML = items.length
 		? note +
 			items
 				.map((a) => {
+					const [icon, text, tip] = ACT[a.kind] ?? ACT.gone
 					const t = new Date(a.t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })
-					const sideName = a.side === 'ask' ? 'una venta' : 'una compra'
-					const what = a.kind === 'new' ? `Entra ${sideName}` : `Sale ${sideName}`
-					const tip = a.kind === 'new' ? 'Oferta nueva o que volvió al libro' : 'La tomó alguien o la retiró su dueño; QvaPay no indica cuál'
-					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${a.kind} ${a.side}">${ACT_ICON[a.kind]}</i><span>${what} · ${fmtU(a.usd)} USD · <button type="button" class="link peer-link" data-peer="${esc(a.user)}" title="Ver su ficha">@${esc(a.user)}</button></span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
+					const what = text.replace('{s}', a.side === 'ask' ? 'una venta' : 'una compra')
+					const who = a.user && a.user !== '—' ? ` · <button type="button" class="link peer-link" data-peer="${esc(a.user)}" title="Ver su ficha">@${esc(a.user)}</button>` : ''
+					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} USD${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
 				})
 				.join('')
 		: '<li><span></span><span class="muted">Esperando cambios en el libro…</span><span></span></li>'

@@ -42,6 +42,8 @@ const SIGNATURE_MAX_AGE_MS = 5 * 60_000
 export const FEED_IDLE_MS = 10 * 60_000
 // Con el feed, cada lado se relee de vez en cuando (por si se perdió algún evento y para las reputaciones)
 export const RESYNC_MS = 5 * 60_000
+// Actividad que se guarda y se manda de cada mercado (la más reciente primero)
+export const ACT_KEEP = 40
 // Sin Pro, el libro llega cada tanto (con Pro, al instante)
 export const FREE_EVERY_MS = 10_000
 // Sin el feed, los lados que alguien mira se leen así de seguido
@@ -94,6 +96,28 @@ export interface LiveOffer {
 	updatedAt: number
 }
 
+// Lo que pasó en el libro, para la actividad del terminal
+export type ActKind = 'new' | 'reopened' | 'taken' | 'partial' | 'returned' | 'cancelled' | 'edited' | 'done'
+export interface Act {
+	t: number
+	kind: ActKind
+	side: Side
+	price: number
+	usd: number
+	// El anunciante: su uuid y, si ya se sabe, su usuario (al mandarlo se completa con lo que se sepa entonces)
+	owner: string
+	user: string
+	uuid: string
+}
+
+export interface Applied {
+	coin: string
+	side: Side
+	changed: boolean
+	unknownOwner: boolean
+	act: Act | null
+}
+
 export interface Owner {
 	username: string
 	ops: number
@@ -116,8 +140,9 @@ export class Book {
 	changed = new Set<string>()
 	changedOwners = new Set<string>()
 
-	// Un evento del feed. Devuelve el lado que cambió (null si no cambió nada) y si su dueño es desconocido
-	apply(e: FeedEvent, now = Date.now()): { coin: string; side: Side; unknownOwner: boolean } | null {
+	// Un evento del feed. Devuelve el mercado y el lado, si cambió el libro, si su dueño es desconocido y lo que pasó
+	// (para la actividad: el feed sí dice si una oferta se tomó o la retiró su dueño). null si no hay nada que contar
+	apply(e: FeedEvent, now = Date.now()): Applied | null {
 		const d = e?.data
 		if (!d?.uuid || !TICKS.has(d.coin) || (d.type !== 'buy' && d.type !== 'sell')) return null
 		const side: Side = d.type === 'sell' ? 'ask' : 'bid'
@@ -129,14 +154,24 @@ export class Book {
 		if (!had && gone !== undefined && at < gone) return null
 		const flexible = d.offer_kind === 'flexible' || e.event.startsWith('p2p.range_')
 		const usd = flexible ? num(d.available_amount ?? 0) : num(d.amount)
+		const amount = num(d.amount)
+		const price = amount > 0 ? num(d.receive) / amount : 0
+		const user = this.owners.get(d.owner_uuid ?? '')?.username ?? ''
+		const act = (kind: ActKind, actUsd: number, actPrice = price): Act | null =>
+			actUsd > 0 && actPrice > 0 ? { t: at, kind, side, price: actPrice, usd: Math.round(actUsd * 100) / 100, owner: d.owner_uuid ?? '', user, uuid: d.uuid } : null
+		const out = (changed: boolean, a: Act | null, unknownOwner = false): Applied | null => (changed || a ? { coin: d.coin, side, changed, unknownOwner, act: a } : null)
+
+		// Una operación que se completó: no cambia el libro (la oferta ya había salido al tomarla), pero es un precio real
+		if (e.event === 'p2p.completed') return out(false, act('done', amount))
+		if (e.event === 'p2p.paid') return null
+
 		const put = (e.event === 'p2p.created' || e.event === 'p2p.reopened' || e.event === 'p2p.range_created' || e.event === 'p2p.range_updated') && d.status === 'open' && usd > 0
 		if (put) {
-			const amount = num(d.amount)
 			const o: LiveOffer = {
 				uuid: d.uuid,
 				coin: d.coin,
 				side,
-				price: amount > 0 ? num(d.receive) / amount : 0,
+				price,
 				usd,
 				kind: flexible ? 'flexible' : 'fixed',
 				orderMin: flexible && d.order_min != null ? num(d.order_min) : null,
@@ -152,14 +187,25 @@ export class Book {
 			this.offers.set(o.uuid, o)
 			this.changed.add(o.uuid)
 			this.gone.delete(o.uuid)
-			return { coin: o.coin, side, unknownOwner: !!o.owner && !this.owners.has(o.owner) }
+			// Qué pasó: nueva, reabierta, o en una de rango, una parte tomada, una parte que volvió o editada
+			let a: Act | null
+			if (!had) a = act(e.event === 'p2p.reopened' ? 'reopened' : 'new', usd)
+			else if (d.change === 'taken' || (d.change == null && usd < had.usd && price === had.price)) a = act('partial', had.usd - usd)
+			else if (d.change === 'returned') a = act('returned', usd - had.usd)
+			else if (price !== had.price || usd !== had.usd) a = act('edited', usd)
+			else a = null
+			return out(true, a, !!o.owner && !this.owners.has(o.owner))
 		}
-		// Tomada, cancelada, cerrada o sin cupo: sale del libro
+		// Sale del libro: tomada entera, cancelada por su dueño o cerrada. Pasar de fija a por rango no es salir
 		this.gone.set(d.uuid, at)
-		if (!had) return null
-		this.offers.delete(d.uuid)
-		this.changed.add(d.uuid)
-		return { coin: had.coin, side: had.side, unknownOwner: false }
+		if (had) {
+			this.offers.delete(d.uuid)
+			this.changed.add(d.uuid)
+		}
+		const converted = e.event === 'p2p.cancelled' && d.offer_kind === 'flexible' && d.status === 'open'
+		const taken = e.event === 'p2p.applied' || (e.event === 'p2p.range_closed' && d.change === 'taken')
+		const rest = had?.usd ?? (flexible ? num(d.available_amount ?? 0) || amount : amount)
+		return out(!!had, converted ? null : act(taken ? 'taken' : 'cancelled', rest, had?.price ?? price))
 	}
 
 	// Una lectura del libro (las mejores TAKE de un lado) con nuestro token: mete o actualiza lo leído, aprende quién
@@ -257,6 +303,11 @@ export class Book {
 			// El precio exacto (sin pasar por receive/amount redondeados) y quién es su dueño, si se sabe
 			return { ...level, price: o.price, user: w?.username ?? '—', ops: w?.ops ?? 0, rating: w?.rating ?? null, kyc: w?.kyc ?? false, vip: w?.vip ?? o.ownerVip, gold: w?.gold ?? false }
 		})
+	}
+
+	// La actividad con el usuario de cada anunciante tal como se sabe ahora
+	named(acts: Act[]) {
+		return acts.map((a) => ({ ...a, user: a.user || this.owners.get(a.owner)?.username || '' }))
 	}
 
 	count(coin: string, side: Side) {
@@ -390,6 +441,8 @@ export interface LiveState {
 	lastRejected: { at: number; reason: string } | null
 	offers: number
 	owners: number
+	// Movimientos de actividad guardados (de todos los mercados)
+	acts?: number
 	clients: number
 	proClients: number
 	creds: boolean

@@ -1406,7 +1406,7 @@ async function liveForm(env: ProEnv) {
 	const notes = [
 		`${s.events.toLocaleString('es')} eventos del feed (el último: ${when(s.lastEvent)}).`,
 		live.STAGING || !s.stream ? '' : s.stream.on ? `Stream de QvaPay conectado desde ${when(s.stream.since)} (${(s.stream.events ?? 0).toLocaleString('es')} eventos por el stream).` : `Stream de QvaPay desconectado${s.stream.error ? `: ${escHtml(s.stream.error)}` : ''}.`,
-		`${s.offers.toLocaleString('es')} ofertas en el libro y ${s.owners.toLocaleString('es')} anunciantes conocidos; ${s.clients === 1 ? '1 terminal conectado' : `${s.clients} terminales conectados`} (${s.proClients} con Pro, al instante; el resto, cada 10 s).`,
+		`${s.offers.toLocaleString('es')} ofertas en el libro, ${s.owners.toLocaleString('es')} anunciantes conocidos y ${(s.acts ?? 0).toLocaleString('es')} movimientos de actividad guardados; ${s.clients === 1 ? '1 terminal conectado' : `${s.clients} terminales conectados`} (${s.proClients} con Pro, al instante; el resto, cada 10 s).`,
 		s.creds ? `Lectura del listado con la app: ${s.readError ? `falla (${escHtml(s.readError)})` : `bien (la última: ${when(s.lastRead)})`}.` : 'Faltan las credenciales de la app (QVAPAY_APP_ID y QVAPAY_APP_SECRET): sin ellas no se saben los nombres ni la reputación.',
 		s.lastRejected ? `Último evento rechazado: ${escHtml(s.lastRejected.reason)} (${when(s.lastRejected.at)}).` : '',
 		!live.QVAPAY_FEED_SECRET ? 'Falta el secreto del feed (QVAPAY_FEED_SECRET): los eventos se rechazan.' : '',

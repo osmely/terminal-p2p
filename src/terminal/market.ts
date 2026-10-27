@@ -51,9 +51,11 @@ export interface Level {
 	outlier: boolean
 }
 
+// new/gone: comparando dos lecturas del libro (no se sabe si una que sale la tomaron o la retiraron). Del feed, a través
+// del servidor: new, reopened, taken, partial (una parte de una de rango), returned, cancelled, edited y done (completada)
 export interface BookActivity {
 	t: number
-	kind: 'new' | 'gone'
+	kind: 'new' | 'gone' | 'reopened' | 'taken' | 'partial' | 'returned' | 'cancelled' | 'edited' | 'done'
 	side: 'ask' | 'bid'
 	price: number
 	usd: number
@@ -73,6 +75,10 @@ interface CoinState {
 	completed: CompletedRates | null
 	completedAt: number | null
 	activity: BookActivity[]
+	// La actividad que manda el servidor (del feed): mientras el mercado llega desde el servidor, se usa esta
+	feedActivity: BookActivity[] | null
+	// Las mejores ofertas de cada lado que manda el servidor para la lista de mercados (de todos, se miren o no)
+	top: { ask: Level[]; bid: Level[]; at: number } | null
 	hotUntil: number
 }
 
@@ -156,7 +162,7 @@ export class Market {
 		this.readers = opts.readers
 		this.historyStore = opts.historyStore
 		for (const c of COINS) {
-			this.coins.set(c.tick, { ask: emptySide(), bid: emptySide(), completed: null, completedAt: null, activity: [], hotUntil: 0 })
+			this.coins.set(c.tick, { ask: emptySide(), bid: emptySide(), completed: null, completedAt: null, activity: [], feedActivity: null, top: null, hotUntil: 0 })
 			this.history.set(c.tick, [])
 		}
 	}
@@ -247,7 +253,9 @@ export class Market {
 				? { average: avg.average, buy: avg.average_buy, sell: avg.average_sell, count: avg.count, windowHours: avg.window_hours ?? null }
 				: null,
 			completed: c.completed,
-			activity: c.activity.slice(0, 40),
+			// Del servidor si este mercado llega desde allí (sabe si una oferta se tomó o la retiraron); si no, comparando lecturas
+			activity: (this.liveCoins.has(tick) && c.feedActivity ? c.feedActivity : c.activity).slice(0, 40),
+			activitySource: this.liveCoins.has(tick) && c.feedActivity ? 'feed' : 'book',
 			// false = nadie ha conectado su cuenta: no hay libro en vivo
 			live: this.hasReader || this.liveCoins.has(tick),
 			// Este mercado llega empujado por el servidor (no se lee con el token)
@@ -268,11 +276,30 @@ export class Market {
 	overview() {
 		return COINS.map((meta) => {
 			const c = this.coins.get(meta.tick)!
-			const ask = c.ask.levels.find((l) => !l.outlier && !l.vipOnly)?.price ?? null
-			const bid = c.bid.levels.find((l) => !l.outlier && !l.vipOnly)?.price ?? null
+			// Lo más reciente: lo leído o empujado de ese mercado, o las mejores que manda el servidor para la lista
+			const best = (side: 'ask' | 'bid') => {
+				const useTop = c.top && !this.liveCoins.has(meta.tick) && c.top.at > (c[side].updatedAt ?? 0)
+				const ref = this.reference(meta.tick)?.[side === 'ask' ? 'sell' : 'buy'] ?? null
+				const levels = useTop ? c.top![side].map((l) => ({ ...l, outlier: isOutlier(l.price, ref, side) })) : c[side].levels
+				return levels.find((l) => !l.outlier && !l.vipOnly)?.price ?? null
+			}
 			const avg = this.averages?.[meta.tick]
-			return { ...meta, ask, bid, count24h: avg?.count ?? 0, avgBuy: avg?.average_buy || null, avgSell: avg?.average_sell || null }
+			return { ...meta, ask: best('ask'), bid: best('bid'), count24h: avg?.count ?? 0, avgBuy: avg?.average_buy || null, avgSell: avg?.average_sell || null }
 		})
+	}
+
+	// La actividad de un mercado que manda el servidor (la más reciente primero)
+	setActivity(tick: Tick, items: BookActivity[]) {
+		const c = this.coins.get(tick)
+		if (c && Array.isArray(items)) c.feedActivity = items.slice(0, 100)
+	}
+
+	// Las mejores ofertas de cada mercado, para la lista de mercados
+	setTop(top: Record<string, { ask: Level[]; bid: Level[] }>, at = Date.now()) {
+		for (const [tick, t] of Object.entries(top ?? {})) {
+			const c = this.coins.get(tick as Tick)
+			if (c && Array.isArray(t?.ask) && Array.isArray(t?.bid)) c.top = { ask: t.ask, bid: t.bid, at }
+		}
 	}
 
 	historyFor(tick: Tick) {

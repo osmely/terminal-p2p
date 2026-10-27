@@ -106,3 +106,19 @@ test('tiempo real (Pro): lo empujado por el servidor no se lee con el token y le
 	assert.equal(reads.at(-1), 'BANK_CUP:ask')
 	assert.equal(market.snapshot('BANK_CUP').realtime, false)
 })
+
+test('desde el servidor: la actividad del feed sustituye a la de comparar lecturas, y la lista de mercados va al día', async (t) => {
+	t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-27T12:00:00Z') })
+	const { market } = setup()
+	market.touch('BANK_CUP')
+	assert.equal(market.snapshot('BANK_CUP').activitySource, 'book')
+	market.setLiveCoins(['BANK_CUP'])
+	market.setActivity('BANK_CUP', [{ t: Date.now(), kind: 'partial', side: 'ask', price: 1040, usd: 30, user: 'ana' }])
+	const snap = market.snapshot('BANK_CUP')
+	assert.deepEqual([snap.activitySource, snap.activity[0].kind, snap.activity[0].usd], ['feed', 'partial', 30])
+	// Un mercado que no se mira: su mejor precio llega con la lista del servidor (saltando las solo-VIP)
+	const lv = (price: number, vipOnly = false) => ({ uuid: String(price), price, usd: 10, kind: 'fixed', orderMin: null, orderMax: null, user: 'x', ops: 9, rating: 5, kyc: true, vip: false, gold: false, vipOnly, requirements: null, requirementsMet: null, createdAt: 0, updatedAt: 0, promoted: false, outlier: false }) as const
+	market.setTop({ ZELLE: { ask: [lv(1.02, true), lv(1.03)], bid: [lv(0.99)] } })
+	const z = market.overview().find((c) => c.tick === 'ZELLE')!
+	assert.deepEqual([z.ask, z.bid], [1.03, 0.99])
+})

@@ -6,7 +6,7 @@
 
 import { COINS } from '../src/terminal/market.ts'
 import type { P2POffer } from '../src/qvapay/types.ts'
-import { ALARM_MS, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, TAKE, TICKS, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, TAKE, TICKS, type Act, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
 
 interface Sock {
 	subs: string[]
@@ -23,9 +23,15 @@ export class LiveBook {
 	private readAt = new Map<string, number>()
 	// Lados leídos enteros con las credenciales al menos una vez: solo esos se dan por completos (el feed solo trae lo nuevo)
 	private synced = new Set<string>()
-	// Lados que cambiaron desde el último envío a los terminales sin Pro
+	// Lados y actividad que cambiaron desde el último envío a los terminales sin Pro
 	private freePending = new Set<string>()
+	private freeActs = new Set<string>()
 	private freeAt = 0
+	// Lo que pasó en cada mercado (lo dice el feed), la más reciente primero
+	private acts = new Map<string, Act[]>()
+	private actsChanged = new Set<string>()
+	// El mejor precio de cada mercado cambió (para la lista de mercados de todos los terminales)
+	private topDirty = false
 	private want = new Set<string>()
 	private reads: number[] = []
 	private lastRead: number | null = null
@@ -49,6 +55,7 @@ export class LiveBook {
 		this.ctx.blockConcurrencyWhile(async () => {
 			for (const o of (await this.ctx.storage.list<LiveOffer>({ prefix: 'o:' })).values()) this.book.offers.set(o.uuid, o)
 			for (const [k, w] of await this.ctx.storage.list<Owner>({ prefix: 'u:' })) this.book.owners.set(k.slice(2), w)
+			for (const [k, a] of await this.ctx.storage.list<Act[]>({ prefix: 'a:' })) this.acts.set(k.slice(2), a)
 			this.recent = (await this.ctx.storage.get<FeedSample[]>('recent')) ?? []
 			const meta = await this.ctx.storage.get<{ events: number; lastEvent: number | null; synced?: string[] }>('meta')
 			if (meta) Object.assign(this, { events: meta.events, lastEvent: meta.lastEvent, synced: new Set(meta.synced ?? []) })
@@ -76,7 +83,7 @@ export class LiveBook {
 	private state(): LiveState {
 		const now = Date.now()
 		return {
-			version: 3,
+			version: 4,
 			recent: this.recent,
 			mode: this.feedOn(now) ? 'feed' : this.creds() ? 'poll' : 'off',
 			events: this.events,
@@ -84,6 +91,7 @@ export class LiveBook {
 			lastRejected: this.lastRejected,
 			offers: this.book.offers.size,
 			owners: this.book.owners.size,
+			acts: [...this.acts.values()].reduce((n, a) => n + a.length, 0),
 			clients: this.ctx.getWebSockets().length,
 			proClients: this.ctx.getWebSockets().filter((ws) => (ws.deserializeAttachment() as Sock | null)?.pro).length,
 			creds: this.creds(),
@@ -121,11 +129,12 @@ export class LiveBook {
 		this.events++
 		this.lastEvent = Date.now()
 		const ch = this.book.apply(e)
-		if (ch) {
+		if (ch?.changed) {
 			this.broadcast(ch.coin, ch.side)
 			// De un dueño que no conocemos aún no sabemos nombre ni reputación: se lee ese lado pronto
 			if (ch.unknownOwner) this.want.add(sideKey(ch.coin, ch.side))
 		}
+		if (ch?.act) this.addAct(ch.coin, ch.act)
 		await this.save()
 		if (this.want.size && !this.streaming) await this.soon(1500)
 		return true
@@ -140,6 +149,8 @@ export class LiveBook {
 			else dels.push(`o:${id}`)
 		}
 		for (const id of this.book.changedOwners) puts[`u:${id}`] = this.book.owners.get(id)
+		for (const coin of this.actsChanged) puts[`a:${coin}`] = this.acts.get(coin)
+		this.actsChanged.clear()
 		this.book.changed.clear()
 		this.book.changedOwners.clear()
 		// De 128 en 128, lo más que deja guardar o borrar de una vez
@@ -176,8 +187,11 @@ export class LiveBook {
 		const was = ws.deserializeAttachment() as Sock | null
 		const before = new Set(was?.subs ?? [])
 		ws.serializeAttachment({ subs, pro: !!was?.pro } satisfies Sock)
+		// La lista de mercados siempre va al día (el mejor precio de cada uno)
+		if (!before.size) ws.send(this.topMsg())
 		for (const coin of subs) {
 			if (before.has(coin)) continue
+			ws.send(this.actMsg(coin))
 			for (const side of ['ask', 'bid'] as const) {
 				ws.send(this.sideMsg(coin, side))
 				// Un mercado que alguien empieza a mirar se lee ya si aún no está completo o, sin el feed, si su lectura es vieja
@@ -200,6 +214,33 @@ export class LiveBook {
 		return JSON.stringify({ t: 'side', coin, side, ready, levels: ready ? this.book.levels(coin, side) : [], total: this.book.count(coin, side), at: Date.now(), feed: this.feedOn() })
 	}
 
+	private actMsg(coin: string) {
+		return JSON.stringify({ t: 'act', coin, items: this.book.named(this.acts.get(coin) ?? []) })
+	}
+
+	// El mejor precio de cada mercado y lado (las primeras ofertas; el terminal salta las solo-VIP y las de precio raro)
+	private topMsg() {
+		const top: Record<string, { ask: unknown[]; bid: unknown[] }> = {}
+		for (const c of COINS) {
+			if (!this.synced.has(sideKey(c.tick, 'ask')) || !this.synced.has(sideKey(c.tick, 'bid'))) continue
+			top[c.tick] = { ask: this.book.levels(c.tick, 'ask', 5), bid: this.book.levels(c.tick, 'bid', 5) }
+		}
+		return JSON.stringify({ t: 'top', top, at: Date.now() })
+	}
+
+	private addAct(coin: string, a: Act) {
+		const list = this.acts.get(coin) ?? []
+		if (list.some((x) => x.uuid === a.uuid && x.kind === a.kind && x.t === a.t)) return
+		this.acts.set(coin, [a, ...list].sort((x, y) => y.t - x.t).slice(0, ACT_KEEP))
+		this.actsChanged.add(coin)
+		this.freeActs.add(coin)
+		const msg = this.actMsg(coin)
+		for (const ws of this.subscribers(coin).filter((w) => (w.deserializeAttachment() as Sock | null)?.pro))
+			try {
+				ws.send(msg)
+			} catch {}
+	}
+
 	private subscribers(coin: string) {
 		return this.ctx.getWebSockets().filter((ws) => ((ws.deserializeAttachment() as Sock | null)?.subs ?? []).includes(coin))
 	}
@@ -208,6 +249,7 @@ export class LiveBook {
 	private broadcast(coin: string, side: Side) {
 		const to = this.subscribers(coin).filter((ws) => (ws.deserializeAttachment() as Sock | null)?.pro)
 		this.freePending.add(sideKey(coin, side))
+		this.topDirty = true
 		if (!to.length) return
 		const msg = this.sideMsg(coin, side)
 		for (const ws of to)
@@ -216,21 +258,32 @@ export class LiveBook {
 			} catch {}
 	}
 
+	// Cada FREE_EVERY_MS: a los terminales sin Pro, los lados y la actividad que cambiaron; a todos, la lista de mercados
 	private flushFree(now: number) {
-		if (now - this.freeAt < FREE_EVERY_MS - 500 || !this.freePending.size) return
+		if (now - this.freeAt < FREE_EVERY_MS - 500 || (!this.freePending.size && !this.freeActs.size && !this.topDirty)) return
 		this.freeAt = now
-		const free = this.ctx.getWebSockets().filter((ws) => !(ws.deserializeAttachment() as Sock | null)?.pro)
-		for (const k of this.freePending) {
-			const [coin, side] = k.split(':') as [string, Side]
-			const to = free.filter((ws) => ((ws.deserializeAttachment() as Sock | null)?.subs ?? []).includes(coin))
-			if (!to.length) continue
-			const msg = this.sideMsg(coin, side)
+		const all = this.ctx.getWebSockets()
+		const free = all.filter((ws) => !(ws.deserializeAttachment() as Sock | null)?.pro)
+		const send = (msg: string, to: WebSocket[]) => {
 			for (const ws of to)
 				try {
 					ws.send(msg)
 				} catch {}
 		}
+		const subs = (coin: string) => free.filter((ws) => ((ws.deserializeAttachment() as Sock | null)?.subs ?? []).includes(coin))
+		for (const k of this.freePending) {
+			const [coin, side] = k.split(':') as [string, Side]
+			const to = subs(coin)
+			if (to.length) send(this.sideMsg(coin, side), to)
+		}
+		for (const coin of this.freeActs) {
+			const to = subs(coin)
+			if (to.length) send(this.actMsg(coin), to)
+		}
+		if (this.topDirty && all.length) send(this.topMsg(), all)
 		this.freePending.clear()
+		this.freeActs.clear()
+		this.topDirty = false
 	}
 
 	// Cada pocos segundos: lo periódico y, en producción, escuchar el stream de QvaPay hasta que se corte
@@ -362,11 +415,12 @@ export class LiveBook {
 		const uuid = crypto.randomUUID()
 		const price = Math.round(base.price * 0.99 * 100) / 100
 		const usd = 20
-		this.book.apply({
+		const r = this.book.apply({
 			event: 'p2p.created',
 			data: { uuid, type: 'sell', coin, amount: String(usd), receive: String(Math.round(price * usd * 100) / 100), status: 'open', updated_at: new Date().toISOString(), offer_kind: 'fixed', owner_uuid: base.owner, only_vip: false, requirements: null },
 		})
 		this.broadcast(coin, 'ask')
+		if (r?.act) this.addAct(coin, r.act)
 		await this.save()
 		return Response.json({ ok: true, offer: uuid, price })
 	}

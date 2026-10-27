@@ -91,7 +91,7 @@ function liveConnect() {
 		syncLive()
 	}
 	s.onmessage = (e) => {
-		let m: { t?: string; coin?: Tick; side?: 'ask' | 'bid'; ready?: boolean; levels?: []; total?: number; feed?: boolean; pro?: boolean }
+		let m: { t?: string; coin?: Tick; side?: 'ask' | 'bid'; ready?: boolean; levels?: []; total?: number; feed?: boolean; pro?: boolean; items?: []; top?: Record<string, { ask: []; bid: [] }> }
 		try {
 			m = JSON.parse(String(e.data))
 		} catch {
@@ -99,6 +99,13 @@ function liveConnect() {
 		}
 		if (typeof m.feed === 'boolean') liveFeed = m.feed
 		if (m.t === 'hello') livePro = !!m.pro
+		// La lista de mercados (el mejor precio de cada uno) y la actividad de un mercado
+		if (m.t === 'top') return market.setTop(m.top ?? {})
+		if (m.t === 'act' && isTick(m.coin ?? null)) {
+			market.setActivity(m.coin!, m.items ?? [])
+			window.dispatchEvent(new CustomEvent('tp:live', { detail: m.coin }))
+			return
+		}
 		// Un lado que el servidor aún no tiene completo no se usa: se sigue leyendo con el token
 		if (m.t !== 'side' || !m.ready || !isTick(m.coin ?? null) || (m.side !== 'ask' && m.side !== 'bid') || !liveSubs.split(',').includes(m.coin!)) return
 		market.setLive(m.coin!, m.side, m.levels ?? [], m.total ?? 0)

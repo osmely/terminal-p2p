@@ -14,9 +14,11 @@ const ana = { uuid: 'u-ana', username: 'ana', rating_avg: 4.9, rating_count: 30,
 
 test('feed: una venta nueva entra al libro y sale al tomarla; un evento viejo o repetido no la resucita', () => {
 	const b = new Book()
-	assert.deepEqual(b.apply(ev('p2p.created', {}), T), { coin: 'BANK_CUP', side: 'ask', unknownOwner: true })
+	const c = b.apply(ev('p2p.created', {}), T)!
+	assert.deepEqual([c.coin, c.side, c.changed, c.unknownOwner, c.act?.kind, c.act?.usd], ['BANK_CUP', 'ask', true, true, 'new', 20])
 	assert.equal(b.levels('BANK_CUP', 'ask')[0].price, 1050)
-	assert.deepEqual(b.apply(ev('p2p.applied', {}, 5), T), { coin: 'BANK_CUP', side: 'ask', unknownOwner: false })
+	const a = b.apply(ev('p2p.applied', {}, 5), T)!
+	assert.deepEqual([a.changed, a.act?.kind, a.act?.usd, a.act?.price], [true, 'taken', 20, 1050])
 	assert.equal(b.count('BANK_CUP', 'ask'), 0)
 	// El «created» repetido (reintento de QvaPay) llega tarde: no vuelve
 	assert.equal(b.apply(ev('p2p.created', {}), T), null)
@@ -130,4 +132,35 @@ test('reenvío del stream a staging: firmado como lo firma QvaPay, y staging lo 
 	const h = await feedSign(raw, 'secreto', T)
 	assert.equal(await feedSigned(raw, new Headers(h), 'secreto', T), null)
 	assert.equal(await feedSigned(raw, new Headers(h), 'otro', T), 'firma que no coincide')
+})
+
+test('actividad del feed: tomada entera o en parte, retirada, editada y completada (y pasar a rango no es retirarla)', () => {
+	const b = new Book()
+	b.owners.set('u-ana', { username: 'ana', ops: 40, rating: 4.9, kyc: true, vip: false, gold: false })
+	const kinds = (e: FeedEvent) => {
+		const r = b.apply(e, T)
+		return r?.act ? [r.act.kind, r.act.usd, r.act.user] : null
+	}
+	const range = (s: number, available: string, change: string | null, extra: Partial<FeedEvent['data']> = {}) =>
+		ev('p2p.range_updated', { uuid: 'r', amount: '100', receive: '105000', offer_kind: 'flexible', available_amount: available, change, ...extra }, s)
+	assert.deepEqual(kinds(ev('p2p.range_created', { uuid: 'r', amount: '100', receive: '105000', offer_kind: 'flexible', available_amount: '100' }, 1)), ['new', 100, 'ana'])
+	assert.deepEqual(kinds(range(2, '70', 'taken')), ['partial', 30, 'ana'])
+	assert.deepEqual(kinds(range(3, '80', 'returned')), ['returned', 10, 'ana'])
+	assert.deepEqual(kinds(range(4, '80', 'edited', { receive: '106000' })), ['edited', 80, 'ana'])
+	assert.deepEqual(kinds(ev('p2p.range_closed', { uuid: 'r', offer_kind: 'flexible', available_amount: '0', change: 'taken' }, 5)), ['taken', 80, 'ana'])
+	// Una fija: retirada por su dueño, o pasada a por rango (eso no es retirarla)
+	b.apply(ev('p2p.created', { uuid: 'f1' }, 6), T)
+	assert.deepEqual(kinds(ev('p2p.cancelled', { uuid: 'f1' }, 7)), ['cancelled', 20, 'ana'])
+	b.apply(ev('p2p.created', { uuid: 'f2' }, 8), T)
+	assert.equal(kinds(ev('p2p.cancelled', { uuid: 'f2', offer_kind: 'flexible' }, 9)), null)
+	// Completada: no cambia el libro, pero es un precio real; pagada no cuenta
+	const done = b.apply(ev('p2p.completed', { uuid: 'x', status: 'completed', amount: '50', receive: '52000' }, 10), T)!
+	assert.deepEqual([done.changed, done.act?.kind, done.act?.usd, done.act?.price], [false, 'done', 50, 1040])
+	assert.equal(b.apply(ev('p2p.paid', { uuid: 'x', status: 'paid' }, 9), T), null)
+	// Tomada aunque no estuviera en nuestro libro: se cuenta igual
+	assert.deepEqual(kinds(ev('p2p.applied', { uuid: 'fuera', status: 'processing' }, 11)), ['taken', 20, 'ana'])
+	// El usuario de un anunciante que aún no se conocía se completa al mandarlo
+	const n = b.apply(ev('p2p.created', { uuid: 'z', owner_uuid: 'u-leo' }, 12), T)!.act!
+	b.owners.set('u-leo', { username: 'leo', ops: 9, rating: null, kyc: false, vip: false, gold: false })
+	assert.equal(b.named([n])[0].user, 'leo')
 })
