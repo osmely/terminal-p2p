@@ -1198,6 +1198,16 @@ function every(ms, fn) {
 	setInterval(() => !document.hidden && fn(), ms)
 }
 every(5000, loadBook)
+// Lo que empuja el servidor (al instante con Pro, cada 10 s sin Pro) se pinta en cuanto llega. Las dos mitades del
+// libro llegan seguidas: se espera un momento para pintarlas juntas
+let liveDraw = null
+window.addEventListener('tp:live', (e) => {
+	if (e.detail !== state.coin || document.hidden || liveDraw) return
+	liveDraw = setTimeout(() => {
+		liveDraw = null
+		loadBook()
+	}, 120)
+})
 loadRanking()
 every(10_000, loadRanking)
 every(15_000, loadOverview)

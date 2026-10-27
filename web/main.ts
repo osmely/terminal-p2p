@@ -104,6 +104,8 @@ function liveConnect() {
 		market.setLive(m.coin!, m.side, m.levels ?? [], m.total ?? 0)
 		liveReady.add(m.coin!)
 		market.setLiveCoins([...liveReady])
+		// El terminal lo pinta ya, sin esperar a su repaso de cada 5 s
+		window.dispatchEvent(new CustomEvent('tp:live', { detail: m.coin }))
 	}
 	s.onclose = () => {
 		if (ws !== s) return
