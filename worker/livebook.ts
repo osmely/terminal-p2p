@@ -51,6 +51,8 @@ export const POLL_MS = 15_000
 export const ALARM_MS = 5_000
 // El stream se corta solo cada pocos minutos; aun así, cada conexión dura como mucho esto (un alarm vive 15 min)
 export const STREAM_MAX_MS = 10 * 60_000
+// Sin nada del stream en este tiempo (ni la señal de vida, que llega cada 25 s), la conexión se dio por colgada
+export const STREAM_STALL_MS = 60_000
 // Lecturas del libro por minuto con nuestro token (QvaPay deja 25)
 export const READS_PER_MIN = 18
 // Lo que dura el recuerdo de una oferta que ya salió (para no meterla de nuevo con un evento viejo que llega tarde)
@@ -447,7 +449,7 @@ export interface LiveState {
 	proClients: number
 	creds: boolean
 	// El stream de QvaPay (solo producción se conecta; staging lo recibe reenviado)
-	stream?: { on: boolean; since: number | null; events: number; error: string | null }
+	stream?: { on: boolean; since: number | null; events: number; error: string | null; connects?: number; gap?: number | null }
 	lastRead: number | null
 	readError: string | null
 }

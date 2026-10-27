@@ -6,7 +6,7 @@
 
 import { COINS } from '../src/terminal/market.ts'
 import type { P2POffer } from '../src/qvapay/types.ts'
-import { ACT_KEEP, ALARM_MS, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, TAKE, TICKS, type Act, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
 
 interface Sock {
 	subs: string[]
@@ -43,6 +43,10 @@ export class LiveBook {
 	private streamError: string | null = null
 	// Tras un 401/402 (sin suscripción) no se reintenta enseguida
 	private streamPauseUntil = 0
+	// Conexiones al stream y cuánto duró el último corte (lo que pasa en un corte llega luego por el webhook)
+	private streamConnects = 0
+	private streamEndedAt: number | null = null
+	private streamGap: number | null = null
 
 	private ctx: DurableObjectState
 	private env: LiveEnv
@@ -59,7 +63,8 @@ export class LiveBook {
 			this.recent = (await this.ctx.storage.get<FeedSample[]>('recent')) ?? []
 			const meta = await this.ctx.storage.get<{ events: number; lastEvent: number | null; synced?: string[] }>('meta')
 			if (meta) Object.assign(this, { events: meta.events, lastEvent: meta.lastEvent, synced: new Set(meta.synced ?? []) })
-			if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + ALARM_MS)
+			// Al arrancar (también tras un despliegue), enseguida: así el stream vuelve a conectarse sin esperar
+			await this.ctx.storage.setAlarm(Date.now() + 200)
 		})
 	}
 
@@ -83,7 +88,7 @@ export class LiveBook {
 	private state(): LiveState {
 		const now = Date.now()
 		return {
-			version: 4,
+			version: 5,
 			recent: this.recent,
 			mode: this.feedOn(now) ? 'feed' : this.creds() ? 'poll' : 'off',
 			events: this.events,
@@ -95,7 +100,7 @@ export class LiveBook {
 			clients: this.ctx.getWebSockets().length,
 			proClients: this.ctx.getWebSockets().filter((ws) => (ws.deserializeAttachment() as Sock | null)?.pro).length,
 			creds: this.creds(),
-			stream: { on: this.streaming, since: this.streamSince, events: this.streamEvents, error: this.streamError },
+			stream: { on: this.streaming, since: this.streamSince, events: this.streamEvents, error: this.streamError, connects: this.streamConnects, gap: this.streamGap },
 			lastRead: this.lastRead,
 			readError: this.readError,
 		}
@@ -335,6 +340,9 @@ export class LiveBook {
 	private async stream() {
 		const ac = new AbortController()
 		const stop = setTimeout(() => ac.abort(), STREAM_MAX_MS)
+		// QvaPay manda una señal de vida cada 25 s: si en STREAM_STALL_MS no llega nada, la conexión se colgó y se rehace
+		let heard = Date.now()
+		const watch = setInterval(() => Date.now() - heard > STREAM_STALL_MS && ac.abort(), 10_000)
 		const tick = setInterval(() => void this.periodic().catch(() => {}), 2500)
 		this.streaming = true
 		this.streamSince = Date.now()
@@ -350,11 +358,18 @@ export class LiveBook {
 				return
 			}
 			this.streamError = null
+			this.streamConnects++
+			this.streamGap = this.streamEndedAt ? Date.now() - this.streamEndedAt : null
+			// Lo que pasó mientras estaba cortado: se releen ya los mercados que alguien mira
+			if (this.streamGap === null || this.streamGap > 5000)
+				for (const coin of new Set(this.ctx.getWebSockets().flatMap((ws) => (ws.deserializeAttachment() as Sock | null)?.subs ?? [])))
+					for (const side of ['ask', 'bid'] as const) this.want.add(sideKey(coin, side))
 			const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
 			let buffer = ''
 			for (;;) {
 				const { value, done } = await reader.read()
 				if (done) break
+				heard = Date.now()
 				const r = sseEvents(buffer + value)
 				buffer = r.rest
 				for (const ev of r.events) {
@@ -371,10 +386,13 @@ export class LiveBook {
 			}
 		} catch (e) {
 			if ((e as Error).name !== 'AbortError') this.streamError = (e as Error).message
+			else if (Date.now() - heard > STREAM_STALL_MS) this.streamError = 'se colgó (sin señal de vida): se reconecta'
 		} finally {
 			clearTimeout(stop)
+			clearInterval(watch)
 			clearInterval(tick)
 			this.streaming = false
+			this.streamEndedAt = Date.now()
 		}
 	}
 
