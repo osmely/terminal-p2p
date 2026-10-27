@@ -141,6 +141,7 @@ export const RADAR_MARKETS: Record<string, { name: string; unit: string }> = {
 	BANDECPREPAGO: { name: 'Bandec Prepago', unit: 'USD' },
 	TROPIPAY: { name: 'TropiPay', unit: 'EUR' },
 	CUPCASH: { name: 'CUP Efectivo', unit: 'CUP' },
+	USDCASH: { name: 'USD Efectivo', unit: 'USD' },
 	BOLSATM: { name: 'Bolsa TM', unit: 'CUP' },
 }
 

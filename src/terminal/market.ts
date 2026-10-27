@@ -20,6 +20,7 @@ export const COINS = [
 	{ tick: 'BANDECPREPAGO', name: 'Bandec Prepago', unit: 'USD' },
 	{ tick: 'TROPIPAY', name: 'TropiPay', unit: 'EUR' },
 	{ tick: 'CUPCASH', name: 'CUP Efectivo', unit: 'CUP' },
+	{ tick: 'USDCASH', name: 'USD Efectivo', unit: 'USD' },
 	{ tick: 'BOLSATM', name: 'Bolsa TM', unit: 'CUP' },
 ] as const
 

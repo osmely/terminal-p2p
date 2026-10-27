@@ -172,7 +172,7 @@ export class LiveBook {
 			return
 		}
 		if (!Array.isArray(m.sub)) return
-		const subs = [...new Set(m.sub.map(String).filter((c) => TICKS.has(c)))].slice(0, 9)
+		const subs = [...new Set(m.sub.map(String).filter((c) => TICKS.has(c)))].slice(0, TICKS.size)
 		const was = ws.deserializeAttachment() as Sock | null
 		const before = new Set(was?.subs ?? [])
 		ws.serializeAttachment({ subs, pro: !!was?.pro } satisfies Sock)
