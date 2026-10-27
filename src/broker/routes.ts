@@ -46,7 +46,7 @@ const TICKS = new Set<string>(COINS.map((c) => c.tick))
 const REQUIREMENTS: Record<keyof Requirements, number[]> = {
 	min_completed: [5, 10, 25, 50, 100],
 	min_rating: [4, 4.5],
-	min_account_days: [7, 30, 90, 180],
+	min_account_days: [7, 30, 90, 180, 365],
 	min_trustscore: [50, 85],
 }
 
@@ -454,14 +454,29 @@ export class Broker {
 		if (o.User?.uuid !== acc.me.uuid) return json(403, { error: 'Solo puedes editar tus ofertas' })
 		if (o.status !== 'open') return json(400, { error: 'Solo se edita una oferta publicada y sin contraparte' })
 		const flexible = o.offer_kind === 'flexible'
-		const terms = offerTerms(b, flexible, true)
+		// Pasar una fija a por partes: lleva sus límites por orden y se valida como al publicarla (máximo ≤ monto)
+		const toFlexible = !flexible && b.toFlexible === true
+		const terms = offerTerms(b, flexible || toFlexible, flexible)
 		if ('error' in terms) return json(400, terms)
 		const body: EditOfferBody = flexible
 			? { available_amount: terms.amount, receive: terms.receive, order_min: terms.orderMin, order_max: terms.orderMax }
-			: { amount: terms.amount, receive: terms.receive }
+			: toFlexible
+				? { offer_kind: 'flexible', amount: terms.amount, receive: terms.receive, order_min: terms.orderMin, order_max: terms.orderMax }
+				: { amount: terms.amount, receive: terms.receive }
 		if (b.requirements !== undefined) body.requirements = terms.requirements ?? {}
+		if (typeof b.onlyVip === 'boolean' && b.onlyVip !== !!o.only_vip) body.only_vip = b.onlyVip ? 1 : 0
+		// QvaPay solo deja pasarla de privada a pública
+		if (b.makePublic === true && o.private) body.private = false
+		// El mensaje público lo guarda QvaPay solo a cuentas GOLD (a las demás lo ignora sin decir nada); vaciarlo, cualquiera
+		if (typeof b.message === 'string') {
+			const message = b.message.trim().slice(0, 79)
+			if (message !== (o.message ?? '')) {
+				if (message && !acc.me.golden_check) return json(400, { error: 'El mensaje público es solo para cuentas GOLD de QvaPay' })
+				body.message = message || null
+			}
+		}
 		await acc.client.editOffer(o.uuid, body)
-		return json(200, { ok: true, message: 'Oferta actualizada' })
+		return json(200, { ok: true, message: toFlexible ? 'Oferta actualizada: ahora se toma por partes' : 'Oferta actualizada' })
 	}
 
 	private async pauseOffer({ req }: Ctx, acc: Account) {
@@ -871,6 +886,7 @@ export function offerView(o: P2POffer, meUuid: string) {
 		requirements: o.requirements ?? null,
 		isPrivate: !!o.private,
 		onlyVip: !!o.only_vip,
+		message: o.message ?? null,
 		isOwner,
 		// El detalle de una oferta no siempre trae el conteo de operaciones: sin él, null (no un 0 falso)
 		owner: o.User

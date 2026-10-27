@@ -46,6 +46,8 @@ export interface P2POffer {
 	status: OfferStatus
 	only_vip?: boolean
 	private?: boolean
+	// Mensaje público (lo pone una cuenta GOLD)
+	message?: string | null
 	offer_kind?: 'fixed' | 'flexible'
 	available_amount?: Num | null
 	reserved_amount?: Num | null
@@ -122,6 +124,10 @@ export interface EditOfferBody {
 	requirements?: Requirements
 	message?: string | null
 	only_vip?: 0 | 1
+	// Solo de privada a pública
+	private?: false
+	// Convertir una fija en una por partes (no tiene vuelta atrás)
+	offer_kind?: 'flexible'
 }
 
 export interface Paginated<T> {

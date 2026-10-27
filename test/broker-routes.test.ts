@@ -30,6 +30,7 @@ function fakeQvaPay() {
 			return { amount: 29.92, fee: 0.08, gross_amount: 30 }
 		},
 		cancelOrder: async (uuid: string) => (calls.push(`cancel:${uuid}`), { message: 'P2P cancelada' }),
+		editOffer: async (uuid: string, body: unknown) => void calls.push(`edit:${uuid}:${JSON.stringify(body)}`),
 	}
 	return { client: client as unknown as QvaPayClient, calls, offers }
 }
@@ -104,4 +105,34 @@ test('conectar: límite de intentos por IP', async () => {
 	const h = { ...HEADERS, 'cf-connecting-ip': '203.0.113.9' }
 	for (let i = 0; i < 10; i++) assert.equal((await post('/connect', { token: 'x' }, h)).status, 400)
 	assert.equal((await post('/connect', { token: 'x' }, h)).status, 429)
+})
+
+test('editar tu oferta: requisitos, solo VIP, pública, por partes y mensaje', async () => {
+	const { fake, post } = await setup()
+	const me = { uuid: 'me', username: 'yo' }
+	fake.offers.e1 = { uuid: 'e1', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10500', status: 'open', User: me, private: true, requirements: { min_trustscore: 50 } }
+	const edit = (b: Record<string, unknown>) => post('/offer/edit', { offer: 'e1', amount: 10, price: 1050, ...b })
+	const last = () => JSON.parse(fake.calls.at(-1)!.split(':').slice(2).join(':'))
+
+	// Requisitos (se conserva el de la web), solo VIP y de privada a pública
+	assert.equal((await edit({ requirements: { min_completed: 25, min_trustscore: 50 }, onlyVip: true, makePublic: true })).status, 200)
+	assert.deepEqual(last(), { amount: 10, receive: 10500, requirements: { min_completed: 25, min_trustscore: 50 }, only_vip: 1, private: false })
+
+	// A por partes: con sus límites y sin pasarse del monto
+	assert.equal((await edit({ toFlexible: true, orderMin: 2, orderMax: 20 })).status, 400)
+	const flex = await edit({ toFlexible: true, orderMin: 2, orderMax: 5 })
+	assert.equal(flex.status, 200)
+	assert.match(flex.body.message, /por partes/)
+	assert.deepEqual(last(), { offer_kind: 'flexible', amount: 10, receive: 10500, order_min: 2, order_max: 5 })
+
+	// El mensaje público es de GOLD: sin GOLD no se manda; vaciarlo sí
+	const n = fake.calls.length
+	assert.equal((await edit({ message: 'Pago rápido' })).status, 400)
+	assert.equal(fake.calls.length, n)
+	fake.offers.e1.message = 'viejo'
+	assert.equal((await edit({ message: '' })).status, 200)
+	assert.deepEqual(last(), { amount: 10, receive: 10500, message: null })
+
+	// Requisito con un valor que QvaPay no acepta
+	assert.equal((await edit({ requirements: { min_completed: 7 } })).status, 400)
 })

@@ -507,7 +507,7 @@ async function loadCoinFields() {
 const REQ_OPTIONS = {
 	min_completed: ['Operaciones completadas', [5, 10, 25, 50, 100], (v) => `${v} o más`],
 	min_rating: ['Valoración', [4, 4.5], (v) => `${String(v).replace('.', ',')} ★ o más`],
-	min_account_days: ['Antigüedad de la cuenta', [7, 30, 90, 180], (v) => `${v} días o más`],
+	min_account_days: ['Antigüedad de la cuenta', [7, 30, 90, 180, 365], (v) => `${v} días o más`],
 }
 const reqText = (r) =>
 	r
@@ -517,6 +517,52 @@ const reqText = (r) =>
 				.join(' · ')
 		: ''
 const num2 = (v) => Math.round(Number(v) * 100) / 100
+
+// Métodos de pago guardados en tu cuenta de QvaPay (tarjetas, cuentas): se piden una vez y sirven a «Publicar» y «Vender»
+let paymentMethods = null
+function loadPaymentMethods() {
+	paymentMethods ??= api('/payment-methods')
+		.then((r) => r.methods ?? [])
+		.catch(() => {
+			paymentMethods = null
+			return []
+		})
+	return paymentMethods
+}
+
+// Botones con los métodos guardados de ese mercado: un toque rellena los campos del formulario. Cada método trae sus
+// campos con los nombres del formulario y se rellena cada uno con lo suyo
+function savedMethodChips(box, methods, coin, inputs, nameOf) {
+	if (!box) return
+	const list = (methods ?? []).filter((m) => m.coin === coin)
+	box.hidden = !list.length
+	const tail = (m) => {
+		const v = Object.values(m.fields).find((x) => /\d{4}/.test(x)) ?? ''
+		return v ? ` · <span class="mono">…${esc(v.replace(/\D/g, '').slice(-4))}</span>` : ''
+	}
+	box.innerHTML = list.length
+		? `<span class="muted small">Guardado en QvaPay:</span>${list.map((m, i) => `<button type="button" class="chip-btn" data-saved="${i}">${esc(m.name)}${tail(m)}</button>`).join('')}`
+		: ''
+	const norm = (x) => String(x ?? '').trim().toLowerCase()
+	for (const b of box.querySelectorAll('[data-saved]'))
+		b.onclick = () => {
+			const m = list[Number(b.dataset.saved)]
+			const els = inputs()
+			let filled = 0
+			for (const el of els) {
+				const [, v] = Object.entries(m.fields).find(([k]) => k && norm(k) === norm(nameOf(el))) ?? []
+				if (v == null) continue
+				el.value = v
+				el.dispatchEvent(new Event('input', { bubbles: true }))
+				filled++
+			}
+			// Si los nombres no coinciden (o es un método de un solo texto), al primer campo
+			if (!filled && els[0]) {
+				els[0].value = Object.values(m.fields)[0]
+				els[0].dispatchEvent(new Event('input', { bubbles: true }))
+			}
+		}
+}
 
 function myUsername() {
 	return bk.acct.connected ? bk.acct.username : null
@@ -673,44 +719,11 @@ async function showCreateOffer(preset = null) {
 	}
 	// Lo que guardaste en QvaPay para este mercado (tarjetas, cuentas): un toque y se rellena el campo
 	let savedMethods = null
-	const renderSaved = () => {
-		const coin = $('ofCoin').value
-		const list = (savedMethods ?? []).filter((m) => m.coin === coin)
-		$('ofSaved').hidden = !list.length
-		// Cada método trae sus campos con los nombres del formulario: se rellenan todos, cada uno con lo suyo
-		const tail = (m) => {
-			const v = Object.values(m.fields).find((x) => /\d{4}/.test(x)) ?? ''
-			return v ? ` · <span class="mono">…${esc(v.replace(/\D/g, '').slice(-4))}</span>` : ''
-		}
-		$('ofSaved').innerHTML = list.length
-			? `<span class="muted small">Guardado en QvaPay:</span>${list.map((m, i) => `<button type="button" class="chip-btn" data-saved="${i}">${esc(m.name)}${tail(m)}</button>`).join('')}`
-			: ''
-		const norm = (x) => String(x ?? '').trim().toLowerCase()
-		for (const b of $('ofSaved').querySelectorAll('[data-saved]'))
-			b.onclick = () => {
-				const m = list[Number(b.dataset.saved)]
-				const inputs = [...$('ofDetails').querySelectorAll('[data-detail]')]
-				let filled = 0
-				for (const el of inputs) {
-					const [, v] = Object.entries(m.fields).find(([k]) => k && norm(k) === norm(el.dataset.detail)) ?? []
-					if (v == null) continue
-					el.value = v
-					el.dispatchEvent(new Event('input', { bubbles: true }))
-					filled++
-				}
-				// Si los nombres no coinciden (o es un método de un solo texto), al primer campo
-				if (!filled && inputs[0]) {
-					inputs[0].value = Object.values(m.fields)[0]
-					inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
-				}
-			}
-	}
-	api('/payment-methods')
-		.then((r) => {
-			savedMethods = r.methods ?? []
-			if ($('ofSaved')) renderSaved()
-		})
-		.catch(() => {})
+	const renderSaved = () => savedMethodChips($('ofSaved'), savedMethods, $('ofCoin').value, () => [...$('ofDetails').querySelectorAll('[data-detail]')], (el) => el.dataset.detail)
+	loadPaymentMethods().then((list) => {
+		savedMethods = list
+		if ($('ofSaved')) renderSaved()
+	})
 	// Vendiendo, nunca más que tu saldo: el monto se recorta a lo que tienes
 	const balance = () => Math.floor((bk.acct.balance ?? 0) * 100) / 100
 	const update = () => {
@@ -902,9 +915,34 @@ function renderManage(o) {
 				<div class="grid2">
 					<label class="field">${flex ? 'Disponible' : 'Monto'} (USD)<input class="input" id="edAmount" type="number" step="0.01" inputmode="decimal" value="${amount}" /></label>
 					<label class="field">Precio por USD (${unit})<input class="input" id="edPrice" type="number" step="any" inputmode="decimal" value="${Math.round(o.price * 10000) / 10000}" /></label>
-					${flex ? `<label class="field">Mínimo por orden<input class="input" id="edMin" type="number" step="0.01" value="${o.orderMin ?? ''}" /></label><label class="field">Máximo por orden<input class="input" id="edMax" type="number" step="0.01" value="${o.orderMax ?? ''}" /></label>` : ''}
 				</div>
 				<p class="hint" id="edTotal"></p><div id="edWarn"></div>
+				${flex ? '' : '<label class="check"><input type="checkbox" id="edFlex" /> Pasarla a por partes: que la tomen por partes</label>'}
+				<div class="grid2" id="edFlexBox" ${flex ? '' : 'hidden'}>
+					<label class="field">Mínimo por orden (USD)<input class="input" id="edMin" type="number" step="0.01" inputmode="decimal" value="${o.orderMin ?? ''}" /></label>
+					<label class="field">Máximo por orden (USD)<input class="input" id="edMax" type="number" step="0.01" inputmode="decimal" value="${o.orderMax ?? ''}" /></label>
+				</div>
+				${flex ? '' : '<p class="notice warn" id="edFlexNote" hidden>No tiene vuelta atrás: QvaPay no deja volver a convertir una oferta por partes en una que se toma entera.</p>'}
+				<details class="opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
+					${Object.entries(REQ_OPTIONS)
+						.map(([k, [label, vals, fmt]]) => {
+							const cur = Number(o.requirements?.[k] ?? 0)
+							// Un valor puesto desde la web de QvaPay que aquí no está en la lista se conserva
+							const opts = cur && !vals.includes(cur) ? [...vals, cur].sort((a, b) => a - b) : vals
+							return `<label class="field">${label}<select class="input" data-ed-req="${k}"><option value="0">Sin requisito</option>${opts.map((v) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${fmt(v)}</option>`).join('')}</select></label>`
+						})
+						.join('')}
+					<label class="check"><input type="checkbox" id="edVip" ${o.onlyVip ? 'checked' : ''} /> Solo cuentas VIP</label>
+					${o.isPrivate ? '<label class="check"><input type="checkbox" id="edPublic" /> Hacerla pública: que se anuncie en el canal de Telegram de QvaPay (no se puede volver a privada)</label>' : ''}
+					${
+						bk.acct.gold
+							? `<label class="field">Mensaje público (GOLD)<input class="input" id="edMsg" maxlength="79" placeholder="Ej.: pago rápido, respondo al momento" value="${esc(o.message ?? '')}" /></label><p class="hint">Hasta 79 caracteres. QvaPay quita los enlaces.</p>`
+							: o.message
+								? `<p class="hint">Mensaje público: «${esc(o.message)}». Solo una cuenta GOLD puede cambiarlo.</p>`
+								: ''
+					}
+				</div></details>
+				<p class="hint">Los datos de pago, el mercado y si compras o vendes no se pueden cambiar en QvaPay: para eso, cancela la oferta y publica otra.</p>
 				<button class="btn" id="edSave">Guardar cambios</button></div>`
 				: ''
 		}
@@ -948,17 +986,37 @@ function renderManage(o) {
 		}
 		for (const id of ['edAmount', 'edPrice']) $(id).addEventListener('input', upd)
 		upd()
+		$('edFlex')?.addEventListener('change', () => {
+			const on = $('edFlex').checked
+			$('edFlexBox').hidden = !on
+			$('edFlexNote').hidden = !on
+		})
 		$('edSave').onclick = async () => {
 			const btn = $('edSave')
+			const toFlexible = !flex && !!$('edFlex')?.checked
+			const makePublic = !!$('edPublic')?.checked
+			// Los requisitos que la web de QvaPay deja poner y aquí no salen se mantienen
+			const requirements = { ...(o.requirements ?? {}) }
+			for (const sel of document.querySelectorAll('[data-ed-req]')) requirements[sel.dataset.edReq] = Number(sel.value)
+			// Todo se lee antes de confirmar: la confirmación ocupa la ventana y el formulario deja de estar
+			const edit = {
+				offer: o.offer,
+				amount: num2($('edAmount').value),
+				price: Number($('edPrice').value),
+				orderMin: flex || toFlexible ? num2($('edMin').value) : undefined,
+				orderMax: flex || toFlexible ? num2($('edMax').value) : undefined,
+				toFlexible,
+				requirements,
+				onlyVip: $('edVip').checked,
+				makePublic,
+				message: $('edMsg') ? $('edMsg').value : undefined,
+			}
+			// Lo que no tiene vuelta atrás se confirma antes
+			const oneWay = [toFlexible && 'pasará a tomarse por partes y no podrá volver a tomarse entera', makePublic && 'será pública y no podrá volver a ser privada'].filter(Boolean)
+			if (oneWay.length && !(await confirmDialog('Guardar cambios', `<p class="muted">La oferta ${oneWay.join(', y ')}.</p>`, 'Guardar cambios'))) return showManageOffer(o.offer)
 			btn.disabled = true
 			try {
-				const r = await api('/offer/edit', {
-					offer: o.offer,
-					amount: num2($('edAmount').value),
-					price: Number($('edPrice').value),
-					orderMin: flex ? num2($('edMin').value) : undefined,
-					orderMax: flex ? num2($('edMax').value) : undefined,
-				})
+				const r = await api('/offer/edit', edit)
 				toast(r.message)
 				loadTrades()
 				loadBook()
@@ -966,6 +1024,7 @@ function renderManage(o) {
 			} catch (e) {
 				btn.disabled = false
 				toast(e.message, true)
+				if (oneWay.length) refresh()
 			}
 		}
 	}
@@ -1298,6 +1357,7 @@ async function showSwap() {
 			<div class="swap-saved" id="swSaved" hidden></div>
 			<div id="swEdit" class="stack tight">
 				<p class="hint">Dónde quieres recibir el pago (se lo enviamos al VIP por el chat de la operación)</p>
+				<div class="saved-methods" id="swMethods" hidden></div>
 				<div id="swDetails" class="stack tight"></div>
 				<label class="check"><input type="checkbox" id="swRemember" /> Recordar en este navegador</label>
 			</div>
@@ -1336,6 +1396,7 @@ async function showSwap() {
 					.join('')
 			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Cierra y vuelve a abrir.</p>'
 		for (const i of $('swDetails').querySelectorAll('[data-sw-detail]')) i.addEventListener('input', render)
+		savedMethodChips($('swMethods'), sw.methods, sw.coin, () => [...$('swDetails').querySelectorAll('[data-sw-detail]')], (el) => el.dataset.swDetail)
 		// Con los datos ya guardados basta un resumen; se editan con «Cambiar»
 		const complete = list.length > 0 && list.every((f) => saved[f.name])
 		$('swSaved').hidden = !complete
@@ -1491,6 +1552,12 @@ async function showSwap() {
 
 	clamp()
 	renderDetails()
+	// Tus métodos guardados en QvaPay: llegan después y solo añaden los botones (lo que ya escribiste se queda)
+	if (bk.acct.connected)
+		loadPaymentMethods().then((list) => {
+			sw.methods = list
+			savedMethodChips($('swMethods'), sw.methods, sw.coin, () => [...$('swDetails').querySelectorAll('[data-sw-detail]')], (el) => el.dataset.swDetail)
+		})
 	// Cada segundo la edad del precio; cada SWAP_REFRESH_MS, precio nuevo
 	sw.timer = setInterval(() => {
 		if (document.hidden || sw.loading) return
