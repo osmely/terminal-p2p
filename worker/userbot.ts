@@ -112,15 +112,18 @@ export async function expiryReminders(env: BotEnv, now: number, fetcher: typeof 
 	for (const l of results) {
 		const ended = l.expires_at <= now
 		const key = `${ended ? 'exp0' : 'exp3'}:${l.expires_at}`
-		const fresh = await db.prepare('INSERT OR IGNORE INTO pro_tg_sent (license, key, at) VALUES (?, ?, ?)').bind(l.uuid, key, now).run()
-		if (!fresh.meta?.changes) continue
+		if (await db.prepare('SELECT 1 FROM pro_tg_sent WHERE license = ? AND key = ?').bind(l.uuid, key).first()) continue
 		const u = `@${tgEsc(l.username)}`
 		const trial = l.plan === 'trial'
 		const left = Math.ceil((l.expires_at - now) / DAY_MS)
 		const text = ended
 			? `🔔 <b>${trial ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó'}</b>\n\n${u}, se acabaron tus días de Pro. Tu cuenta y tu historial siguen guardados: cuando quieras, compras días desde el terminal y sigues donde lo dejaste.`
 			: `⏳ <b>${trial ? `A tus días gratis de Pro ${left === 1 ? 'les queda' : 'les quedan'}` : `A tu Pro ${left === 1 ? 'le queda' : 'le quedan'}`} ${daysText(left)}</b>\n\n${u}, tus días terminan el <b>${day(l.expires_at)}</b>. Nada se cobra solo: si quieres seguir con la orden inteligente y el libro cruzado, ${trial ? 'compra días' : 'renueva'} desde el terminal en «Mi cuenta» → ★ Pro.`
-		if (await tellUser(env, l.uuid, text, openApp(env, ended ? 'Comprar días' : trial ? 'Comprar días' : 'Renovar en el terminal'), fetcher)) sent++
+		// Se apunta solo si salió: si Telegram falló, se reintenta en el próximo repaso (sigue dentro de la ventana)
+		if (await tellUser(env, l.uuid, text, openApp(env, ended ? 'Comprar días' : trial ? 'Comprar días' : 'Renovar en el terminal'), fetcher)) {
+			await db.prepare('INSERT OR IGNORE INTO pro_tg_sent (license, key, at) VALUES (?, ?, ?)').bind(l.uuid, key, now).run()
+			sent++
+		}
 	}
 	return sent
 }

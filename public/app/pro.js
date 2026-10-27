@@ -66,6 +66,11 @@ function applyPro(s) {
 		pro.loaded = true
 		const s2 = document.createElement('script')
 		s2.src = `/pro/module.js?l=${encodeURIComponent(pro.license)}`
+		// Si no llega (sin red, licencia recién renovada), se vuelve a pedir en la próxima revisión de Pro
+		s2.onerror = () => {
+			s2.remove()
+			pro.loaded = false
+		}
 		document.head.appendChild(s2)
 	}
 	renderProChip()

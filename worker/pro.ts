@@ -284,7 +284,9 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	const payer = t?.PaidBy
 	if (t?.status !== 'paid' || !payer?.uuid || !payer.username) return false
 	if (t.remote_id && t.remote_id !== c.id) return false
-	if (Number(t.amount) + 1e-6 < c.amount) return false
+	// La factura es nuestra (se consulta por su uuid y lleva nuestro remote_id) y su importe lo fija QvaPay. Se
+	// admite una diferencia pequeña por si QvaPay informa el importe tras alguna comisión
+	if (!(Number(t.amount) >= c.amount * (1 - AMOUNT_SLACK) - 1e-6)) return false
 	const db = env.DB
 	// Pro queda a nombre de la cuenta conectada al terminal aunque pague otra (p. ej. con otra sesión abierta
 	// en qvapay.com). Desde el simulador no hay cuenta de QvaPay conectada: a nombre de quien paga
@@ -309,6 +311,8 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	if (c.print) await attachPrint(db, key, c.print, now)
 	return true
 }
+
+const AMOUNT_SLACK = 0.03
 
 // Facturas pendientes de la última hora, confirmadas con QvaPay aunque nadie las esté mirando: si se
 // pidió otra después, se cerró la pestaña o el aviso de QvaPay no llegó. Lo lanza el cron cada minuto
@@ -352,10 +356,12 @@ export async function reconcile(env: ProEnv, now: number, fetcher: typeof fetch 
 			out.checked++
 			const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(t.remote_id).first<Checkout>()
 			if (c?.status === 'paid') continue
-			if (c) {
-				if (await settle(env, c, now, fetcher)) out.activated.push(c.id)
+			if (c && (await settle(env, c, now, fetcher))) {
+				out.activated.push(c.id)
 				continue
 			}
+			// No consta aquí, o QvaPay la da por pagada y aun así no se pudo activar (importe, pagador…): a «Pendientes»,
+			// para que nadie se quede pagado y sin sus días sin que lo sepas
 			const d = await qvapay<{ transaction?: Transaction }>(env, `/v2/transactions/${encodeURIComponent(t.uuid)}`, {}, fetcher)
 			out.unknown.push({ invoice: t.uuid, remoteId: t.remote_id, amount: Number(t.amount), payer: d.transaction?.PaidBy?.username ?? null, paidAt: t.created_at ?? null })
 		}
@@ -421,13 +427,17 @@ export async function dailyDigest(env: ProEnv, r: Reconciled | null, now: number
 export async function recover(env: ProEnv, invoice: string, now: number, fetcher: typeof fetch = fetch) {
 	const { transaction: t } = await qvapay<{ transaction?: Transaction }>(env, `/v2/transactions/${encodeURIComponent(invoice)}`, {}, fetcher)
 	if (t?.status !== 'paid' || !t.remote_id?.startsWith('pro-') || !t.PaidBy?.username) throw new ProError(400, 'QvaPay no la da por pagada')
-	const plan = (Object.keys(PLANS) as Plan[]).find((p) => Math.abs(PLANS[p].usd - Number(t.amount)) < 0.005)
-	if (!plan) throw new ProError(400, `Importe sin días asociados: ${t.amount} USD`)
-	await env.DB.prepare("INSERT OR IGNORE INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at) VALUES (?, '', NULL, ?, ?, ?, 'pending', ?)")
-		.bind(t.remote_id, plan, PLANS[plan].usd, invoice, Date.parse(t.created_at ?? '') || now)
-		.run()
+	// Si la factura ya consta aquí, sus días son los de su plan; si no, los del importe
+	const known = await env.DB.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(t.remote_id).first<Checkout>()
+	const plan = known?.plan ?? (Object.keys(PLANS) as Plan[]).find((p) => Math.abs(PLANS[p].usd - Number(t.amount)) <= PLANS[p].usd * AMOUNT_SLACK + 0.005)
+	if (!plan) throw new ProError(400, `Importe sin días asociados: ${t.amount} USD. Dale los días a mano desde su ficha.`)
+	if (!known)
+		await env.DB.prepare("INSERT OR IGNORE INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at) VALUES (?, '', NULL, ?, ?, ?, 'pending', ?)")
+			.bind(t.remote_id, plan, PLANS[plan].usd, invoice, Date.parse(t.created_at ?? '') || now)
+			.run()
 	const c = (await env.DB.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(t.remote_id).first<Checkout>())!
-	await settle(env, c, now, fetcher)
+	// Solo se da por resuelta si de verdad quedó activada
+	if (!(await settle(env, c, now, fetcher))) throw new ProError(409, `QvaPay la da por pagada (${t.amount} USD) pero no se pudo activar sola. Dale los días a mano desde la ficha de @${t.PaidBy.username}.`)
 	await env.DB.prepare('UPDATE pro_issues SET resolved_at = ? WHERE invoice = ? AND resolved_at IS NULL').bind(now, invoice).run()
 	return { username: t.PaidBy.username, plan }
 }
@@ -1177,6 +1187,11 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 				} catch (err) {
 					notice = `<p class="note">No se pudo repasar con QvaPay: ${escHtml((err as Error).message)}</p>`
 				}
+			// Un pago que no se pudo activar solo y ya resolviste tú (días a mano o devolución): sale de «Pendientes»
+			if (action === 'issue-done') {
+				const r = await db.prepare('UPDATE pro_issues SET resolved_at = ? WHERE invoice = ? AND resolved_at IS NULL').bind(now, String(f.get('invoice') ?? '')).run()
+				notice = r.meta?.changes ? '<p class="ok">Marcado como resuelto: sale de Pendientes.</p>' : '<p class="note">Ese pago ya no estaba pendiente.</p>'
+			}
 			if (action === 'recover')
 				try {
 					const r = await recover(env, String(f.get('invoice') ?? ''), now, fetcher)
@@ -1287,8 +1302,8 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 		.map(
 			(i) =>
 				`<div class="rf"><div class="rf-head"><span class="pill approved">Cobrado sin activar</span> @${escHtml(i.payer ?? '?')} · <b>${hUsd(i.amount)}</b>${i.paid_at ? ` <span class="note">· ${escHtml(i.paid_at.slice(0, 16).replace('T', ' '))}</span>` : ''}</div>
-				<p class="note">QvaPay lo cobró y aquí no consta (factura ${hShort(i.invoice)}). Actívalo para quien pagó, o devuélvele el dinero si no corresponde.</p>
-				<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(i.invoice)}"><button name="action" value="recover">Activar para @${escHtml(i.payer ?? '?')}</button></form></div>`,
+				<p class="note">QvaPay lo cobró y no se activó solo (factura ${hShort(i.invoice)}). Actívalo para quien pagó; si no se puede, dale los días a mano desde su ficha o devuélvele el dinero, y márcalo resuelto.</p>
+				<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(i.invoice)}"><button name="action" value="recover">Activar para @${escHtml(i.payer ?? '?')}</button><button class="ghost" name="action" value="issue-done" onclick="return confirm('¿Ya le diste los días a mano o le devolviste el dinero? Sale de Pendientes.')">Ya lo resolví a mano</button></form></div>`,
 		)
 		.join('')
 	const pending = panel(

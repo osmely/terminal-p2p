@@ -835,3 +835,50 @@ test('avisos al usuario por Telegram: se conecta desde «Mi cuenta» y recibe su
 	assert.match(await admin({ action: 'bot-connect' }), /El bot ya responde desde app\.terminalp2p\.com/)
 	assert.deepEqual(s.q.telegram.at(-1), { chat_id: 'webhook', text: 'https://app.terminalp2p.com/pro/telegram/webhook', url: await webhookSecret(s.env) })
 })
+
+test('importe con comisión: se activa; importe que no cuadra: el repaso lo deja en «Pendientes» y se resuelve a mano', async () => {
+	const { reconcile, recordIssues, pendingWork } = await import('../worker/pro.ts')
+	const s = setup()
+	const admin = (fields: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now(), s.q.fetcher).then((r) => r.text())
+	// QvaPay informa el importe tras una comisión pequeña: cuenta como pagada
+	const a = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	s.q.pay('inv-1', 'ana', 1.95)
+	assert.equal((await s.status(a.body.id)).body.status, 'paid')
+	// Pagada en QvaPay pero con un importe que no cuadra: no se activa sola, y el repaso no se la salta
+	const b = await s.post('/pro/checkout', { print: P2, plan: 'year' })
+	s.q.pay('inv-2', 'leo', 5)
+	assert.equal((await s.status(b.body.id, P2)).body.status, 'pending')
+	const r = await reconcile(s.env, s.now(), s.q.fetcher)
+	assert.deepEqual(r.unknown.map((u) => [u.invoice, u.payer]), [['inv-2', 'leo']])
+	await recordIssues(s.env.DB, r, s.now())
+	assert.equal((await pendingWork(s.env.DB)).count, 1)
+	// «Activar» no la da por resuelta si no se pudo activar
+	assert.match(await admin({ action: 'recover', invoice: 'inv-2' }), /no se pudo activar sola/)
+	assert.equal((await pendingWork(s.env.DB)).count, 1)
+	// Le das los días a mano y la marcas resuelta
+	await admin({ action: 'days', username: 'leo', days: '365', note: 'pago de 5 USD que no cuadraba' })
+	assert.match(await admin({ action: 'issue-done', invoice: 'inv-2' }), /Marcado como resuelto/)
+	assert.equal((await pendingWork(s.env.DB)).count, 0)
+})
+
+test('aviso de fin de días: si Telegram falla no se da por enviado y sale en el siguiente repaso', async () => {
+	const { webhookSecret, expiryReminders } = await import('../worker/userbot.ts')
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100' })
+	await s.trial(P1, 'ana')
+	const { url } = (await s.post('/pro/telegram/link', { print: P1, username: 'ana' })).body
+	const code = url.split('start=')[1]
+	await proApi(
+		new Request('https://app.terminalp2p.com/pro/telegram/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': await webhookSecret(s.env) }, body: JSON.stringify({ message: { text: `/start ${code}`, chat: { id: 555, type: 'private' } } }) }),
+		new URL('https://app.terminalp2p.com/pro/telegram/webhook'),
+		s.env,
+		s.now(),
+		s.q.fetcher,
+	)
+	s.tick(28 * 86_400_000)
+	const down = (async () => new Response('{}', { status: 502 })) as unknown as typeof fetch
+	assert.equal(await expiryReminders(s.env, s.now(), down), 0)
+	s.tick(86_400_000)
+	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 1)
+	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 0)
+})
