@@ -36,12 +36,25 @@ async function apiForm(path, form) {
 	return data
 }
 
-// Las imágenes del chat llegan como ruta de QvaPay (chat/123/456.jpg) y se sirven desde su dominio de archivos
-const chatImageUrl = (img) => {
+// Las imágenes del chat y las fotos de perfil llegan como ruta de QvaPay (chat/123/456.jpg, profiles/…) y se sirven
+// desde su dominio de archivos
+const mediaUrl = (img) => {
 	const v = String(img ?? '')
 	if (/^https:\/\/media\.qvapay\.com\//.test(v)) return v
 	return /^[\w./-]+$/.test(v) && !v.includes('..') ? `https://media.qvapay.com/${v.replace(/^\//, '')}` : null
 }
+
+// Foto de perfil con las iniciales debajo (si no hay foto o no carga, quedan ellas). Las fotos se recuerdan por
+// usuario para ponerlas donde solo se sabe el nombre (al tomar una oferta abierta desde el libro). En el libro no van
+const faces = new Map()
+function rememberFace(user, img) {
+	if (user && img) faces.set(String(user).toLowerCase(), img)
+}
+function avatar(user, img, cls = '') {
+	const url = mediaUrl(img ?? faces.get(String(user ?? '').toLowerCase()))
+	return `<span class="avatar ${cls}" aria-hidden="true">${esc(String(user ?? '?').slice(0, 2))}${url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}</span>`
+}
+document.addEventListener('error', (e) => e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains('avatar') && e.target.remove(), true)
 
 // Antes de enviarla, la imagen se reduce a 1280 px como mucho y a JPG (QvaPay la deja en 1000 × 1000 igualmente):
 // una foto del móvil pasa de varios MB a unos cientos de KB. Un GIF pequeño va tal cual para no perder la animación
@@ -186,7 +199,7 @@ function renderAccount() {
 			<button class="pro-chip" id="proBtn" hidden></button>
 			<div class="acct">
 				<button type="button" class="acct-open" id="acctOpen" title="Mi cuenta">
-					<span class="avatar" aria-hidden="true">${esc((a.username ?? '?').slice(0, 2))}</span>
+					${avatar(a.username, a.image)}
 					<div><div class="acct-name">@${esc(a.username)}${a.gold ? ' <span class="badge warn">GOLD</span>' : ''}</div><div class="acct-bal">${fmtM(a.balance ?? 0)} USD</div></div>
 				</button>
 				<button class="icon-btn small" id="disconnectBtn" title="Desconectar cuenta" aria-label="Desconectar cuenta">
@@ -252,6 +265,7 @@ async function loadTrades() {
 		bk.tradesSeen = true
 		bk.trades = r.trades
 		bk.openOffers = r.openOffers
+		for (const t of r.trades) rememberFace(t.counterparty?.username, t.counterparty?.image)
 		if (moved) refreshBalance(true)
 		document.title = r.pending ? `(${r.pending}) ${BASE_TITLE}` : BASE_TITLE
 		deliver(r.alerts ?? [])
@@ -299,7 +313,8 @@ function renderTrades() {
 	}
 
 	const side = (t) => `<span class="side-${t.side}">${t.side === 'buy' ? 'Compra' : 'Venta'}</span>`
-	const who = (t) => (t.counterparty ? `@${esc(t.counterparty.username)} <span class="muted">· ${t.counterparty.ops} ops</span>` : '<span class="muted">—</span>')
+	const who = (t) =>
+		t.counterparty ? `<span class="who-ava">${avatar(t.counterparty.username, t.counterparty.image, 'sm')}<span>@${esc(t.counterparty.username)} <span class="muted">· ${t.counterparty.ops} ops</span></span></span>` : '<span class="muted">—</span>'
 	const head = (cols) => `<thead><tr>${cols.map(([c, cls]) => `<th class="${cls ?? ''}">${c}</th>`).join('')}</tr></thead>`
 	const common = [['Lado'], ['Mercado'], ['USD', 'r'], ['Precio', 'r'], ['Total', 'r']]
 
@@ -449,7 +464,7 @@ function renderDetail(t) {
 
 	$('modalBody').innerHTML = `<div class="stack">
 		<div><h3>${buy ? 'Compras' : 'Vendes'} ${fmtM(t.usd)} USD por ${fmtM(t.coinAmount)} ${unit}</h3>
-			<p class="muted">${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button>` : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
+			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button>` : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
 		${
 			payTo.length
 				? `<div><p class="hint">Datos de pago de @${esc(t.counterparty)}:</p><div class="kv">${payTo
@@ -463,7 +478,7 @@ function renderDetail(t) {
 				? t.chat
 						.map(
 							(m) =>
-								`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${chatImageUrl(m.image) ? `<a class="msg-img" href="${esc(chatImageUrl(m.image))}" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="${esc(chatImageUrl(m.image))}" alt="Imagen" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
+								`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${mediaUrl(m.image) ? `<a class="msg-img" href="${esc(mediaUrl(m.image))}" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="${esc(mediaUrl(m.image))}" alt="Imagen" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
 						)
 						.join('')
 				: '<p class="muted small">Sin mensajes.</p>'
@@ -1204,6 +1219,7 @@ async function showTakeOfferById(uuid, amount) {
 		requirementsMissing: o.requirementsMissing,
 		vipOnly: o.onlyVip,
 		user: o.owner?.username ?? '—',
+		image: o.owner?.image ?? null,
 		ops: o.owner?.ops ?? null,
 		rating: o.owner?.rating ?? null,
 		kyc: false,
@@ -1212,11 +1228,84 @@ async function showTakeOfferById(uuid, amount) {
 }
 
 const REQ_NAMES = { min_completed: ['operaciones completadas', ''], min_rating: ['valoración', '★'], min_account_days: ['días de cuenta', ''], min_trustscore: ['trustscore', ''] }
+// ── Ofertas que puedes tomar ──────────────────────────────────────────
+// Para el filtro «Solo las que puedo tomar»: ni tuyas ni solo VIP, con saldo para lo mínimo si les vendes y con
+// requisitos que cumples. Las operaciones y la valoración salen de tu perfil de P2P (/me); la antigüedad de la cuenta y
+// el TrustScore solo los dice el detalle de una oferta que los pide. Esos detalles se piden de uno en uno (REQ_GAP_MS,
+// para no comerse las consultas de tu cuenta) y lo que enseñan sirve para las demás ofertas
+const REQ_GAP_MS = 6000
+const req = { user: null, seen: new Map(), least: {}, exact: {}, queue: new Set(), busy: false }
+
+function reqReset() {
+	if (req.user === bk.acct.username) return
+	Object.assign(req, { user: bk.acct.username, seen: new Map(), least: {}, exact: {}, queue: new Set() })
+}
+
+// Lo que dice el detalle de una oferta sobre tus números: lo que falta trae tu valor exacto; lo que cumples, un mínimo
+function learnReq(o) {
+	reqReset()
+	const missing = new Map((o.requirementsMissing ?? []).map((m) => [m.key, m]))
+	for (const [key, need] of Object.entries(o.requirements ?? {})) {
+		const m = missing.get(key)
+		if (m) req.exact[key] = Number(m.actual)
+		else if (o.requirementsMet != null) req.least[key] = Math.max(req.least[key] ?? 0, Number(need))
+	}
+	req.seen.set(o.offer, o.requirementsMet !== false)
+}
+
+function reqOk(key, need) {
+	const a = bk.acct
+	if (key === 'min_completed' && a.p2pCompleted != null) return a.p2pCompleted >= need
+	if (key === 'min_rating' && a.p2pCompleted != null) return (a.p2pRating ?? 0) >= need
+	if (req.exact[key] != null) return req.exact[key] >= need
+	if (req.least[key] != null && need <= req.least[key]) return true
+	return null
+}
+
+async function pumpReq() {
+	// Las que ya no están en el libro no se preguntan
+	for (const u of req.queue) if (!findLevel(u, 'ask') && !findLevel(u, 'bid')) req.queue.delete(u)
+	if (req.busy || !req.queue.size || document.hidden) return
+	req.busy = true
+	const uuid = req.queue.values().next().value
+	req.queue.delete(uuid)
+	try {
+		learnReq(await api(`/offer?offer=${encodeURIComponent(uuid)}`))
+		render()
+	} catch {
+		req.seen.set(uuid, false)
+	}
+	setTimeout(() => {
+		req.busy = false
+		pumpReq()
+	}, REQ_GAP_MS)
+}
+
+// Sin cuenta conectada el filtro no aplica (no se puede tomar nada y el libro quedaría vacío)
+function canTake(l, side) {
+	const a = bk.acct
+	if (!a.connected) return true
+	if (a.p2pEnabled === false || l.user === a.username || l.vipOnly) return false
+	// En una compra ajena vendes tú: hace falta saldo para lo mínimo que se puede tomar
+	if (side === 'bid' && !((a.balance ?? 0) >= (l.kind === 'flexible' ? l.orderMin || 0.01 : l.usd))) return false
+	reqReset()
+	const met = l.requirementsMet ?? req.seen.get(l.uuid)
+	if (met != null || !l.requirements) return met ?? true
+	const r = Object.entries(l.requirements).map(([k, v]) => reqOk(k, Number(v)))
+	if (r.includes(false)) return false
+	if (!r.includes(null)) return true
+	// Hasta saberlo no se enseña: se pregunta a QvaPay
+	if (req.queue.size < 30) req.queue.add(l.uuid)
+	pumpReq()
+	return false
+}
+
 async function checkRequirements(uuid, l) {
 	let o = l.requirementsMet === false ? l : null
 	if (!o)
 		try {
 			o = await api(`/offer?offer=${encodeURIComponent(uuid)}`)
+			learnReq(o)
 		} catch {
 			return
 		}
@@ -1243,7 +1332,7 @@ function renderTake(uuid, side, l, coin, preset) {
 	const req = reqText(l.requirements)
 	openModal(`<div class="stack">
 		<div><h3>${youBuy ? 'Comprar' : 'Vender'} USD a ${fmtP(l.price)} ${unit}</h3>
-			<p class="muted">${esc(nameOf(coin))} · <button type="button" class="link peer-link" data-peer="${esc(l.user)}">@${esc(l.user)}</button>${l.ops != null ? ` · ${l.ops} operaciones` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ' · sin valoraciones' : ''}${l.kyc ? ' · KYC' : ''}</p>
+			<p class="muted who-ava">${avatar(l.user, l.image, 'sm')}${esc(nameOf(coin))} · <button type="button" class="link peer-link" data-peer="${esc(l.user)}">@${esc(l.user)}</button>${l.ops != null ? ` · ${l.ops} operaciones` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ' · sin valoraciones' : ''}${l.kyc ? ' · KYC' : ''}</p>
 			${typeof rankText === 'function' && rankText(l.user) ? `<p class="rank-line">🏆 Ranking: ${esc(rankText(l.user))}</p>` : ''}</div>
 		<div class="kv">
 			<span>${youBuy ? 'Vende' : 'Compra'}</span><b>${fmtM(l.usd)} USD</b><span></span>
@@ -1311,7 +1400,7 @@ function knownPeer(user) {
 	const l = b && [...b.ask.levels, ...b.bid.levels].find((x) => x.user.toLowerCase() === u)
 	if (l) return { ops: l.ops, rating: l.rating, kyc: l.kyc, vip: l.vip, gold: l.gold }
 	const t = bk.trades.find((x) => x.counterparty?.username?.toLowerCase() === u)
-	return t ? { ops: t.counterparty.ops, rating: t.counterparty.rating } : null
+	return t ? { ops: t.counterparty.ops, rating: t.counterparty.rating, image: t.counterparty.image } : null
 }
 
 function peerSignals(p, known, offers) {
@@ -1362,6 +1451,7 @@ async function showPeer(user) {
 	const p = d.profile
 	const known = p ? null : knownPeer(user)
 	const name = p?.username ?? user
+	rememberFace(name, p?.image)
 	const me = myUsername()
 	const isMe = me && name.toLowerCase() === me.toLowerCase()
 	const badges = [
@@ -1408,7 +1498,7 @@ async function showPeer(user) {
 
 	$('modalBody').innerHTML = `<div class="stack peer">
 		<div class="peer-head">
-			<span class="avatar lg" aria-hidden="true">${esc(name.slice(0, 2))}</span>
+			${avatar(name, p?.image ?? known?.image, 'lg')}
 			<div><h3>@${esc(name)}${isMe ? ' <span class="badge info">tú</span>' : ''}</h3><div class="peer-badges">${badges || '<span class="muted small">Sin datos de verificación</span>'}</div></div>
 		</div>
 		<div class="peer-stats">

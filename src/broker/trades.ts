@@ -20,7 +20,7 @@ export interface Trade {
 	usd: number
 	coinAmount: number
 	price: number
-	counterparty: { username: string; ops: number; rating: number | null } | null
+	counterparty: { username: string; ops: number; rating: number | null; image?: string | null } | null
 	kind: 'fixed' | 'flexible'
 	updatedAt: string | null
 	// Fin del plazo de pago (solo tiene sentido mientras se espera el pago)
@@ -48,7 +48,7 @@ const FINAL = new Set(['completed', 'cancelled'])
 
 function party(u?: P2PUser | null) {
 	if (!u) return null
-	return { username: u.username, ops: (u._count?.P2P ?? 0) + (u._count?.P2P_Peer ?? 0), rating: u.rating_count ? (u.rating_avg ?? null) : null }
+	return { username: u.username, ops: (u._count?.P2P ?? 0) + (u._count?.P2P_Peer ?? 0), rating: u.rating_count ? (u.rating_avg ?? null) : null, image: u.image ?? null }
 }
 
 export function actionsFor(status: string, payer: boolean, role: 'owner' | 'taker', hasPeer: boolean): Action[] {

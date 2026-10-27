@@ -13,6 +13,8 @@ import { pendingCount, tradeAlerts } from './alerts.ts'
 import { tradeStats } from './stats.ts'
 import { orderTrades, paymentDetails, toTrades, type Trade } from './trades.ts'
 
+const STATS_MS = 10 * 60_000
+
 export interface Account {
 	sid: string
 	me: Me
@@ -20,6 +22,8 @@ export interface Account {
 	// Huella del token para el plan Pro: HMAC del token calculado aquí, en el navegador. El servidor solo
 	// ve esta huella (de la que no se puede sacar el token)
 	print?: string
+	// Tus operaciones completadas y tu valoración en P2P (para saber qué ofertas con requisitos puedes tomar)
+	stats?: { completed: number; rating: number | null; at: number }
 }
 
 // Dónde vive la cuenta conectada (en el navegador: su almacenamiento local)
@@ -161,6 +165,11 @@ export class Broker {
 		if (!acc) return json(200, { connected: false, dryRun: this.dryRun })
 		const me = await acc.client.me().catch(() => acc.me)
 		acc.me = me
+		// Cambian poco: se piden como mucho cada STATS_MS (el saldo, en cambio, en cada /me)
+		if (!acc.stats || Date.now() - acc.stats.at > STATS_MS) {
+			const x = await acc.client.extended().catch(() => null)
+			if (x) acc.stats = { completed: x.p2p_completed_count ?? 0, rating: x.p2p_raters_count ? (x.p2p_average_rating ?? null) : null, at: Date.now() }
+		}
 		return json(200, {
 			connected: true,
 			dryRun: this.dryRun,
@@ -169,6 +178,9 @@ export class Broker {
 			kyc: me.kyc,
 			p2pEnabled: me.p2p_enabled,
 			gold: me.golden_check,
+			image: me.image ?? null,
+			p2pCompleted: acc.stats?.completed ?? null,
+			p2pRating: acc.stats?.rating ?? null,
 			// La comisión al liberar (la paga quien compra; GOLD no): el terminal muestra los netos con ella
 			p2pFee: P2P_FEE,
 		})
@@ -295,6 +307,7 @@ export class Broker {
 			ownerDetails: paymentDetails(o.details),
 			isOwner,
 			counterparty: isOwner ? (ord?.Taker ?? o.Peer)?.username : o.User?.username,
+			counterpartyImage: (isOwner ? (ord?.Taker ?? o.Peer) : o.User)?.image ?? null,
 			chat: chat.slice(-30).map((m) => ({
 				mine: m.peer_id === acc.me.uuid,
 				moderator: !!m.is_moderator,
@@ -678,6 +691,7 @@ export function peerProfile(u: P2PUser | undefined | null) {
 	const taker = u._count?.P2P_Peer ?? 0
 	return {
 		username: u.username,
+		image: u.image ?? null,
 		kyc: !!u.kyc,
 		vip: !!u.vip,
 		gold: !!u.golden_check,
@@ -928,13 +942,16 @@ export function offerView(o: P2POffer, meUuid: string) {
 		orderMax: o.order_max == null ? null : num(o.order_max),
 		pause: o.pause ?? null,
 		requirements: o.requirements ?? null,
+		// Si tu cuenta los cumple (null si la oferta no pide nada) y, si no, qué falta con tu valor
+		requirementsMet: o.requirements_met ?? null,
+		requirementsMissing: o.requirements_missing ?? [],
 		isPrivate: !!o.private,
 		onlyVip: !!o.only_vip,
 		message: o.message ?? null,
 		isOwner,
 		// El detalle de una oferta no siempre trae el conteo de operaciones: sin él, null (no un 0 falso)
 		owner: o.User
-			? { username: o.User.username, ops: o.User._count ? (o.User._count.P2P ?? 0) + (o.User._count.P2P_Peer ?? 0) : null, rating: o.User.rating_count ? (o.User.rating_avg ?? null) : null }
+			? { username: o.User.username, image: o.User.image ?? null, ops: o.User._count ? (o.User._count.P2P ?? 0) + (o.User._count.P2P_Peer ?? 0) : null, rating: o.User.rating_count ? (o.User.rating_avg ?? null) : null }
 			: null,
 		peer: o.Peer?.username ?? null,
 		details: isOwner ? paymentDetails(o.details) : [],

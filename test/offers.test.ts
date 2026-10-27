@@ -100,3 +100,11 @@ test('ratingsOf en una oferta por rango: tu valoración viene en la orden', () =
 	assert.deepEqual(ratingsOf(o, 'o1').mine, { rating: 4, editableUntil: '2026-10-26T01:15:47Z' })
 	assert.equal(ratingsOf(o, 'o2').mine, null)
 })
+
+test('offerView: dice si cumples los requisitos y qué te falta', () => {
+	const o = { ...flexOffer, requirements: { min_completed: 25, min_account_days: 30 }, requirements_met: false, requirements_missing: [{ key: 'min_account_days', required: 30, actual: 12 }] }
+	const v = offerView(o, 'otro')
+	assert.equal(v.requirementsMet, false)
+	assert.deepEqual(v.requirementsMissing, [{ key: 'min_account_days', required: 30, actual: 12 }])
+	assert.equal(offerView(flexOffer, 'otro').requirementsMet, null)
+})

@@ -23,7 +23,8 @@ const state = {
 	chart: store.get('chart', 'depth'),
 	range: store.get('range', 7),
 	view: store.get('view', 'book'),
-	filters: { vip: true, outlier: true, ops: 0, usd: 0, ageH: 0, ...store.get('filters', {}) },
+	grouped: store.get('grouped', false),
+	filters: { vip: true, outlier: true, take: false, ops: 0, usd: 0, ageH: 0, ...store.get('filters', {}) },
 	book: null,
 	history: [],
 	overview: [],
@@ -54,8 +55,11 @@ const ago = (ms) =>
 				: `${Math.round(ms / 86_400_000)} d`
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 
-function filtered(levels) {
+// Con el lado, también «Solo las que puedo tomar» (canTake, en broker.js); sin él (referencias de precio, puesto de una
+// oferta tuya), ese filtro no aplica
+function filtered(levels, side) {
 	const f = state.filters
+	const take = f.take && side && typeof canTake === 'function'
 	// Antigüedad medida contra el reloj del servidor, no el del navegador
 	const now = state.book?.serverTime ?? Date.now()
 	const maxAge = f.ageH ? f.ageH * 3600_000 : Infinity
@@ -65,7 +69,8 @@ function filtered(levels) {
 			!(f.outlier && l.outlier) &&
 			l.ops >= f.ops &&
 			l.usd >= f.usd &&
-			(l.updatedAt == null || now - l.updatedAt <= maxAge),
+			(l.updatedAt == null || now - l.updatedAt <= maxAge) &&
+			(!take || canTake(l, side)),
 	)
 }
 
@@ -208,8 +213,8 @@ function render() {
 		$('asks').innerHTML = $('bids').innerHTML = '<div class="empty">Cargando…</div>'
 		return
 	}
-	const asks = filtered(b.ask.levels)
-	const bids = filtered(b.bid.levels)
+	const asks = filtered(b.ask.levels, 'ask')
+	const bids = filtered(b.bid.levels, 'bid')
 	const offline = !b.live && !b.ask.levels.length && !b.bid.levels.length
 	document.querySelector('.area-book').classList.toggle('offline', offline)
 	if (offline) {
@@ -402,6 +407,42 @@ function renderIntent(bidUsd, askUsd, mid, doneMedian, given) {
 		: 'La intención del mercado se calcula con el libro en vivo: conecta tu cuenta de QvaPay.'
 }
 
+// Lo que cambió desde el último libro pintado destella: verde si la oferta es nueva o sube su monto, rojo si baja,
+// azul si cambió el precio; la que se toma entera o se retira se queda un momento tachada y se apaga en su sitio. Cada
+// marca dura FLASH_MS aunque el libro se repinte entretanto (la animación sigue por donde iba)
+const FLASH_MS = 1200
+const seen = { coin: null, rows: new Map(), best: null }
+const marks = new Map()
+
+function diffBook(b) {
+	const now = Date.now()
+	for (const [k, m] of marks) if (now - m.t > FLASH_MS) marks.delete(k)
+	const rows = new Map()
+	for (const s of ['ask', 'bid']) for (const l of b[s].levels) rows.set(l.uuid, { l, side: s })
+	// Un lado que aún no se había leído llega entero de golpe: eso no es un cambio del mercado
+	const had = new Set([...seen.rows.values()].map((r) => r.side))
+	if (seen.coin !== state.coin) {
+		marks.clear()
+	} else {
+		for (const [uuid, { l, side }] of rows) {
+			if (!had.has(side)) continue
+			const was = seen.rows.get(uuid)?.l
+			const kind = !was ? 'up' : l.price !== was.price ? 'edit' : l.usd > was.usd ? 'up' : l.usd < was.usd ? 'down' : null
+			if (kind) marks.set(uuid, { kind, t: now })
+		}
+		const has = new Set([...rows.values()].map((r) => r.side))
+		for (const [uuid, was] of seen.rows) if (!rows.has(uuid) && has.has(was.side)) marks.set(uuid, { kind: 'gone', t: now, ...was })
+	}
+	seen.coin = state.coin
+	seen.rows = rows
+}
+
+const markOf = (uuid) => {
+	const m = marks.get(uuid)
+	const age = m ? Date.now() - m.t : FLASH_MS
+	return age < FLASH_MS ? { cls: m.kind === 'gone' ? 'gone' : `flash-${m.kind}`, style: `--fd:-${age}ms;` } : null
+}
+
 function levelRow(l, side, cum, maxCum) {
 	const color = side === 'ask' ? 'var(--ask-bg)' : 'var(--bid-bg)'
 	const w = maxCum ? Math.max(2, (cum / maxCum) * 100) : 0
@@ -412,24 +453,114 @@ function levelRow(l, side, cum, maxCum) {
 	// Tus propias ofertas se marcan en el libro (broker.js sabe quién eres)
 	const mine = typeof myUsername === 'function' && myUsername() === l.user
 	const medal = rankMedal(l.user)
-	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''}" data-uuid="${l.uuid}" data-side="${side}"
-		style="background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
+	const mark = markOf(l.uuid)
+	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${l.uuid}" data-side="${side}"
+		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
 		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em title="Ver la ficha de ${esc(l.user)}">${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
+// ── Libro agrupado por rangos de precio ───────────────────────────────
+// El rango sale del precio: un 0,5 % redondeado a 1, 2 o 5 (5 CUP en CUP Transferencia, 0,005 en MLC). Las ventas se
+// agrupan hacia arriba y las compras hacia abajo, como en los exchanges: el rango «1.075» de las ventas va de 1.070 a 1.075
+function stepOf(price) {
+	const raw = price * 0.005
+	const pow = 10 ** Math.floor(Math.log10(raw))
+	return [1, 2, 5, 10].map((m) => m * pow).find((x) => x >= raw * 0.75) ?? 10 * pow
+}
+const fmtStep = (x) => x.toLocaleString('es', { maximumFractionDigits: 4 })
+
+const groups = { ask: new Map(), bid: new Map() }
+
+function groupOf(levels, side, step) {
+	const bucket = (p) => (side === 'ask' ? Math.ceil(p / step - 1e-9) : Math.floor(p / step + 1e-9))
+	const out = new Map()
+	for (const l of levels) {
+		const k = bucket(l.price)
+		const g = out.get(k) ?? { key: k, price: k * step, step, usd: 0, members: [], gone: [] }
+		g.usd += l.usd
+		g.members.push(l)
+		out.set(k, g)
+	}
+	// Las que se acaban de ir también hacen destellar su rango (en rojo)
+	for (const m of marks.values()) if (m.kind === 'gone' && m.side === side) out.get(bucket(m.l.price))?.gone.push(m)
+	return out
+}
+
+function groupMark(g) {
+	const ms = [...g.members.map((l) => marks.get(l.uuid)).filter((m) => m && m.kind !== 'gone'), ...g.gone]
+	const m = ms.sort((a, b) => b.t - a.t)[0]
+	const age = m ? Date.now() - m.t : FLASH_MS
+	return age < FLASH_MS ? { cls: `flash-${m.kind === 'gone' ? 'down' : m.kind}`, style: `--fd:-${age}ms;` } : null
+}
+
+function groupRow(g, side, cum, maxCum) {
+	const color = side === 'ask' ? 'var(--ask-bg)' : 'var(--bid-bg)'
+	const w = maxCum ? Math.max(2, (cum / maxCum) * 100) : 0
+	const best = g.members[0]
+	const dim = g.members.every((l) => l.outlier || l.vipOnly)
+	const mine = typeof myUsername === 'function' && g.members.some((l) => myUsername() === l.user)
+	const mark = groupMark(g)
+	const n = g.members.length
+	return `<div class="lvl grp ${dim ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${best.uuid}" data-side="${side}" data-group="${g.key}"
+		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
+		<span class="p">${fmtP(g.price)}</span><span class="u">${fmtU(g.usd)}</span><span class="c">${fmtU(cum)}</span>
+		<span class="who">${n} ${n === 1 ? 'oferta' : 'ofertas'}${mine ? ' · <b class="you">tú</b>' : ''} · <em title="Ver la ficha de ${esc(best.user)}">${esc(best.user)}</em></span></div>`
+}
+
+function groupTip(g, side) {
+	const unit = state.book.coin.unit
+	const prices = g.members.map((l) => l.price)
+	const lo = side === 'ask' ? g.price - g.step : g.price
+	const hi = side === 'ask' ? g.price : g.price + g.step
+	const best = g.members[0]
+	return [
+		`<div><b>${fmtP(lo)} – ${fmtP(hi)}</b> ${unit}/USD</div>`,
+		`<div>${g.members.length} ${g.members.length === 1 ? 'oferta' : 'ofertas'} que ${side === 'ask' ? 'venden' : 'compran'} ${fmtU(g.usd)} USD en total</div>`,
+		g.members.length > 1 ? `<div>Precios de ${fmtP(Math.min(...prices))} a ${fmtP(Math.max(...prices))}</div>` : '',
+		`<div>La mejor: @${esc(best.user)} a ${fmtP(best.price)} · ${fmtU(best.usd)} USD</div>`,
+		'<div class="muted">Clic para ver y tomar la mejor oferta del rango</div>',
+	].join('')
+}
+
+function renderGroupBtn(price) {
+	$('groupBtn').setAttribute('aria-pressed', String(state.grouped))
+	// Solo el icono: el tamaño del rango va en la descripción del botón
+	const step = price ? ` de ${fmtStep(stepOf(price))} ${state.book?.coin.unit ?? ''}`.trimEnd() : ''
+	$('groupBtn').title = state.grouped ? `Libro agrupado en rangos${step}: clic para ver cada oferta` : 'Agrupar el libro por rangos de precio'
+	$('bookWho').textContent = state.grouped ? 'Ofertas · mejor' : 'Contraparte'
+}
+
 function renderBook(b, asks, bids) {
 	const N = 30
+	diffBook(b)
+	// Mismo rango para los dos lados, según el primer precio del libro
+	const step = stepOf(asks[0]?.price ?? bids[0]?.price ?? 1)
+	// Las que se fueron hace nada (y pasarían los filtros) se intercalan en su precio, sin contar en el acumulado
+	const goneOf = (s) => filtered([...marks.values()].filter((m) => m.kind === 'gone' && m.side === s && Date.now() - m.t < FLASH_MS).map((m) => m.l), s)
 	const side = (levels, s) => {
 		if (!levels.length)
 			return `<div class="empty">${b[s].error ? `QvaPay no deja leer el libro con tu cuenta:<br><b>${esc(b[s].error)}</b>` : 'Sin ofertas con estos filtros'}</div>`
 		let cum = 0
+		if (state.grouped) {
+			groups[s] = groupOf(levels, s, step)
+			const rows = [...groups[s].values()].slice(0, N).map((g) => ({ g, cum: (cum += g.usd) }))
+			return rows.map(({ g, cum }) => groupRow(g, s, cum, rows.at(-1).cum)).join('')
+		}
 		const rows = levels.slice(0, N).map((l) => ({ l, cum: (cum += l.usd) }))
 		const max = rows.at(-1).cum
+		const worse = (x, y) => (s === 'ask' ? x > y : x < y)
+		for (const l of goneOf(s)) {
+			if (worse(l.price, rows.at(-1).l.price)) continue
+			const i = rows.findIndex((r) => worse(r.l.price, l.price))
+			const at = i < 0 ? rows.length : i
+			rows.splice(at, 0, { l, cum: at ? rows[at - 1].cum : 0 })
+		}
 		return rows.map(({ l, cum }) => levelRow(l, s, cum, max)).join('')
 	}
 	$('asks').innerHTML = side(asks, 'ask')
 	$('bids').innerHTML = side(bids, 'bid')
+	renderGroupBtn(asks[0]?.price ?? bids[0]?.price)
 	const hidden = b.ask.levels.length + b.bid.levels.length - asks.length - bids.length
 	$('bookCount').textContent = `${b.ask.total} / ${b.bid.total} ofertas${hidden ? ` · ${hidden} ocultas` : ''}`
 	$('bookCount').title = `${b.ask.total} ventas y ${b.bid.total} compras en QvaPay`
@@ -437,14 +568,20 @@ function renderBook(b, asks, bids) {
 	const ask = asks[0]?.price
 	const bid = bids[0]?.price
 	const el = $('spread')
+	// El diferencial destella cuando se mueve la mejor venta o la mejor compra
+	const best = `${state.coin}:${ask}:${bid}`
+	if (seen.best && seen.best !== best && seen.best.startsWith(`${state.coin}:`)) marks.set('spread', { kind: 'edit', t: Date.now() })
+	seen.best = best
+	const flash = markOf('spread')
+	el.style.cssText = flash?.style ?? ''
 	if (ask && bid) {
 		const crossed = bid > ask
-		el.className = `spread ${crossed ? 'crossed' : ''}`
+		el.className = `spread ${crossed ? 'crossed' : ''} ${flash?.cls ?? ''}`
 		el.innerHTML = crossed
 			? `<span class="lbl">Libro cruzado</span><span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>`
 			: `<span class="lbl">Diferencial</span><span>${fmtP(ask - bid)} · ${pct(ask / bid - 1)}</span>`
 	} else {
-		el.className = 'spread'
+		el.className = `spread ${flash?.cls ?? ''}`
 		el.textContent = 'Sin cotización en uno de los lados'
 	}
 }
@@ -627,8 +764,8 @@ function drawDepth() {
 	const { ctx, width, height } = setupCanvas($('depth'))
 	const b = state.book
 	if (!b) return
-	const asks = filtered(b.ask.levels)
-	const bids = filtered(b.bid.levels)
+	const asks = filtered(b.ask.levels, 'ask')
+	const bids = filtered(b.bid.levels, 'bid')
 	if (!asks.length && !bids.length) return emptyChart(ctx, width, height, 'Sin ofertas')
 	const mid = asks[0] && bids[0] ? (asks[0].price + bids[0].price) / 2 : (asks[0] ?? bids[0]).price
 	const range = 0.06
@@ -747,8 +884,8 @@ function drawCompleted() {
 		ctx.textAlign = x(v) > width / 2 ? 'right' : 'left'
 		ctx.fillText(label, x(v) + (ctx.textAlign === 'right' ? -4 : 4), top)
 	}
-	const asks = filtered(state.book.ask.levels)
-	const bids = filtered(state.book.bid.levels)
+	const asks = filtered(state.book.ask.levels, 'ask')
+	const bids = filtered(state.book.bid.levels, 'bid')
 	vline(m, css('--text'), `mediana ${fmtP(m)}`, 0)
 	vline(bids[0]?.price, css('--bid'), `mejor compra ${fmtP(bids[0]?.price)}`, 1)
 	vline(asks[0]?.price, css('--ask'), `mejor venta ${fmtP(asks[0]?.price)}`, 2)
@@ -1103,9 +1240,16 @@ function closeMenus(e) {
 }
 
 // Cuántos filtros se apartan de los valores por defecto
+// «Solo las que puedo tomar» necesita la cuenta conectada
+function renderTakeHint() {
+	const on = typeof myUsername === 'function' && !!myUsername()
+	$('fTake').disabled = !on
+	$('fTakeHint').hidden = on
+}
+
 function renderFilterCount() {
 	const f = state.filters
-	const n = [!f.vip, !f.outlier, f.ops > 0, f.usd > 0, f.ageH > 0].filter(Boolean).length
+	const n = [!f.vip, !f.outlier, f.take, f.ops > 0, f.usd > 0, f.ageH > 0].filter(Boolean).length
 	$('filterCount').hidden = !n
 	$('filterCount').textContent = String(n)
 }
@@ -1120,7 +1264,7 @@ function bind() {
 	$('marketSearch').addEventListener('input', renderMarkets)
 	$('filterBtn').addEventListener('click', (e) => {
 		e.stopPropagation()
-		toggleMenu('filterMenu', 'filterBtn')
+		toggleMenu('filterMenu', 'filterBtn', renderTakeHint)
 	})
 	$('filterMenu').addEventListener('click', (e) => e.stopPropagation())
 	for (const t of document.querySelectorAll('[data-view]')) t.addEventListener('click', () => showView(t.dataset.view))
@@ -1181,6 +1325,7 @@ function bind() {
 	const f = state.filters
 	$('fVip').checked = f.vip
 	$('fOutlier').checked = f.outlier
+	$('fTake').checked = f.take
 	$('fOps').value = String(f.ops)
 	$('fUsd').value = String(f.usd)
 	$('fAge').value = String(f.ageH)
@@ -1188,6 +1333,7 @@ function bind() {
 		state.filters = {
 			vip: $('fVip').checked,
 			outlier: $('fOutlier').checked,
+			take: $('fTake').checked,
 			ops: Number($('fOps').value),
 			usd: Number($('fUsd').value),
 			ageH: Number($('fAge').value),
@@ -1196,23 +1342,31 @@ function bind() {
 		renderFilterCount()
 		render()
 	}
-	for (const id of ['fVip', 'fOutlier', 'fOps', 'fUsd', 'fAge']) $(id).addEventListener('change', onFilter)
+	for (const id of ['fVip', 'fOutlier', 'fTake', 'fOps', 'fUsd', 'fAge']) $(id).addEventListener('change', onFilter)
 	$('filterReset').addEventListener('click', () => {
 		$('fVip').checked = true
 		$('fOutlier').checked = true
+		$('fTake').checked = false
 		$('fOps').value = $('fUsd').value = $('fAge').value = '0'
 		onFilter()
 	})
 	renderFilterCount()
+
+	$('groupBtn').addEventListener('click', () => {
+		state.grouped = !state.grouped
+		store.set('grouped', state.grouped)
+		render()
+	})
 
 	const tip = $('tip')
 	for (const id of ['asks', 'bids']) {
 		const el = $(id)
 		el.addEventListener('mousemove', (e) => {
 			const row = e.target.closest('.lvl')
+			const g = row?.dataset.group != null && groups[row.dataset.side].get(Number(row.dataset.group))
 			const l = row && findLevel(row.dataset.uuid, row.dataset.side)
 			if (!l) return (tip.hidden = true)
-			tip.innerHTML = tooltip(l, row.dataset.side)
+			tip.innerHTML = g ? groupTip(g, row.dataset.side) : tooltip(l, row.dataset.side)
 			tip.hidden = false
 			const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8)
 			const y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8)

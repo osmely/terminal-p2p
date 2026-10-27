@@ -116,6 +116,9 @@
 				<div class="head-btns">
 				<button class="chip-btn radar-btn" id="radarBtn" hidden title="Radar: te avisa (o la toma sola) cuando aparece una oferta con tus reglas"><span class="radar-dot" aria-hidden="true"></span>Radar</button>
 				<button class="chip-btn" data-new-offer title="Publicar una oferta de compra o venta">+ Publicar</button>
+				<button class="chip-btn group-btn" id="groupBtn" aria-pressed="false" aria-label="Agrupar por rangos de precio" title="Agrupar el libro por rangos de precio">
+					<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 4.5-9 4.5-9-4.5z" /><path d="M3 12l9 4.5 9-4.5" /><path d="M3 16.5l9 4.5 9-4.5" /></svg>
+				</button>
 				<div class="filter-wrap">
 					<button class="chip-btn" id="filterBtn" aria-haspopup="dialog" aria-expanded="false">
 						<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
@@ -124,6 +127,8 @@
 					<div class="menu filter-menu" id="filterMenu" hidden>
 						<label class="check"><input type="checkbox" id="fVip" checked /> Ocultar ofertas solo-VIP</label>
 						<label class="check"><input type="checkbox" id="fOutlier" checked /> Ocultar precios atípicos</label>
+						<label class="check" title="Sin tus ofertas ni las solo VIP, con requisitos que cumples y, si les vendes, con saldo para lo mínimo"><input type="checkbox" id="fTake" /> Solo las que puedo tomar</label>
+						<p class="hint" id="fTakeHint" hidden>Conecta tu cuenta para usarlo.</p>
 						<label class="field">Reputación mínima
 							<select class="input" id="fOps">
 								<option value="0">Cualquiera</option>
@@ -155,7 +160,7 @@
 				</div>
 				</div>
 			</div>
-			<div class="book-cols"><span>Precio</span><span>USD</span><span>Acumulado</span><span>Contraparte</span></div>
+			<div class="book-cols"><span>Precio</span><span>USD</span><span>Acumulado</span><span id="bookWho">Contraparte</span></div>
 			<div class="book-side asks" id="asks"></div>
 			<div class="spread" id="spread">—</div>
 			<div class="book-side bids" id="bids"></div>

@@ -17,6 +17,7 @@ function fakeQvaPay() {
 	}
 	const client = {
 		me: async () => ({ uuid: 'me', username: 'yo', balance: 100, kyc: true, golden_check: false, p2p_enabled: true }),
+		extended: async () => (calls.push('extended'), { uuid: 'me', username: 'yo', balance: 100, kyc: true, golden_check: false, p2p_enabled: true, p2p_completed_count: 42, p2p_average_rating: 4.8, p2p_raters_count: 30 }),
 		getOffer: async (uuid: string) => structuredClone(offers[uuid]),
 		listOffers: async () => ({ current_page: 1, per_page: 50, total: 2, data: Object.values(offers) }),
 		getChat: async () => [],
@@ -154,4 +155,13 @@ test('imagen al chat: solo imágenes y con tope de tamaño', async () => {
 	assert.equal(await send(new Blob(['<svg/>'], { type: 'image/svg+xml' })), 400)
 	assert.equal(await send(new Blob([new Uint8Array(2 * 1024 * 1024 + 1)], { type: 'image/jpeg' })), 413)
 	assert.deepEqual(fake.calls, ['image:a1:1000:imagen.png:comprobante'])
+})
+
+test('/me trae tus operaciones y tu valoración de P2P, pedidas como mucho cada 10 minutos', async () => {
+	const { fake, get } = await setup()
+	const a = await get('/me')
+	assert.equal(a.body.p2pCompleted, 42)
+	assert.equal(a.body.p2pRating, 4.8)
+	await get('/me')
+	assert.equal(fake.calls.filter((c) => c === 'extended').length, 1)
 })

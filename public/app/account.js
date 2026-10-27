@@ -14,7 +14,7 @@ function showAccount(tab = acctTab) {
 	acctTab = tab === 'pro' && !TPPro.enabled ? 'summary' : tab
 	const tabs = [['summary', 'Resumen'], ...(TPPro.enabled ? [['pro', '★ Pro']] : []), ['stats', 'Estadísticas']]
 	openModal(`<div class="stack acct-modal">
-		<div class="peer-head"><span class="avatar lg" aria-hidden="true">${esc((bk.acct.username ?? '?').slice(0, 2))}</span><div><h3>@${esc(bk.acct.username)}</h3><p class="muted small">Mi cuenta</p></div></div>
+		<div class="peer-head">${avatar(bk.acct.username, bk.acct.image, 'lg')}<div><h3>@${esc(bk.acct.username)}</h3><p class="muted small">Mi cuenta</p></div></div>
 		<div class="seg-tabs" role="tablist">${tabs.map(([id, name]) => `<button class="seg-tab ${id === acctTab ? 'active' : ''}" data-acct-tab="${id}">${name}</button>`).join('')}</div>
 		<div id="acctBody"></div></div>`)
 	for (const b of $('modalBody').querySelectorAll('[data-acct-tab]')) b.onclick = () => showAccount(b.dataset.acctTab)

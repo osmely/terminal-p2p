@@ -4,7 +4,7 @@ import { Broker, type AccountStore } from '../src/broker/routes.ts'
 import type { QvaPayClient } from '../src/qvapay/client.ts'
 import type { ListParams, P2POffer } from '../src/qvapay/types.ts'
 
-const lock = { uuid: 'u1', username: 'LockBefore', kyc: true, vip: true, golden_check: true, phone_verified: true, telegram_verified: true, rating_avg: 4.91, rating_count: 524, _count: { P2P: 245, P2P_Peer: 1476 } }
+const lock = { uuid: 'u1', username: 'LockBefore', image: 'profiles/u1/avatar-1.webp', kyc: true, vip: true, golden_check: true, phone_verified: true, telegram_verified: true, rating_avg: 4.91, rating_count: 524, _count: { P2P: 245, P2P_Peer: 1476 } }
 
 async function setup(data: P2POffer[]) {
 	const lists: ListParams[] = []
@@ -33,7 +33,7 @@ test('ficha de un usuario: perfil y ofertas abiertas en todos los mercados', asy
 	assert.deepEqual(lists[0], { peer: 'LockBefore', take: 100 })
 	assert.deepEqual(
 		{ ...body.profile, score: Math.round(body.profile.score * 1000) / 1000 },
-		{ username: 'LockBefore', kyc: true, vip: true, gold: true, phone: true, telegram: true, opsOwner: 245, opsTaker: 1476, rating: 4.91, ratings: 524, score: 4.903 },
+		{ username: 'LockBefore', image: 'profiles/u1/avatar-1.webp', kyc: true, vip: true, gold: true, phone: true, telegram: true, opsOwner: 245, opsTaker: 1476, rating: 4.91, ratings: 524, score: 4.903 },
 	)
 	assert.deepEqual(
 		body.offers.map((o: { offer: string; type: string; price: number; usd: number; orderMax: number | null }) => [o.offer, o.type, o.price, o.usd, o.orderMax]),

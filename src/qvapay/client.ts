@@ -9,6 +9,7 @@ import type {
 	EditOfferBody,
 	ListParams,
 	Me,
+	MeExtended,
 	P2POffer,
 	Paginated,
 	SavedMethod,
@@ -74,6 +75,10 @@ export class QvaPayClient {
 
 	me() {
 		return this.request<Me>('GET', '/user', { bucket: 'general' })
+	}
+
+	extended() {
+		return this.request<MeExtended>('GET', '/user/extended', { bucket: 'general' })
 	}
 
 	averages() {

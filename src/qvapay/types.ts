@@ -9,6 +9,8 @@ export interface P2PUser {
 	uuid: string
 	username: string
 	name?: string
+	// Foto de perfil: ruta en media.qvapay.com (profiles/…) o null
+	image?: string | null
 	kyc?: boolean
 	vip?: boolean
 	golden_check?: boolean
@@ -199,6 +201,14 @@ export interface Me {
 	kyc: boolean
 	golden_check: boolean
 	p2p_enabled: boolean
+	image?: string | null
+}
+
+// GET /user/extended: el perfil con sus números de P2P (con los que QvaPay mide min_completed y min_rating)
+export interface MeExtended extends Me {
+	p2p_completed_count?: number
+	p2p_average_rating?: number
+	p2p_raters_count?: number
 }
 
 export const num = (v: Num | null | undefined): number => (v == null ? 0 : typeof v === 'number' ? v : Number(v))
