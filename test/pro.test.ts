@@ -46,7 +46,12 @@ function fakeQvaPay() {
 	const fetcher = (async (input: string | URL, init?: RequestInit) => {
 		const url = String(input)
 		if (url.startsWith('https://api.telegram.org/')) {
+			if (url.endsWith('/getMe')) return Response.json({ ok: true, result: { username: 'TerminalP2PBot' } })
 			const b = JSON.parse(String(init?.body))
+			if (url.endsWith('/setWebhook')) {
+				telegram.push({ chat_id: 'webhook', text: b.url, url: b.secret_token })
+				return Response.json({ ok: true, description: 'Webhook was set' })
+			}
 			telegram.push({ chat_id: b.chat_id, text: b.text, url: b.reply_markup?.inline_keyboard?.[0]?.[0]?.url })
 			return Response.json({ ok: true })
 		}
@@ -733,4 +738,74 @@ test('panel: tras una acción redirige a la página y el aviso sale una sola vez
 	assert.doesNotMatch(await (await get({ Cookie: 'tpflash=eyJrIjoiZmxhc2gifQ.falsa' })).text(), /class="ok"/)
 	// Y la acción se hizo una sola vez
 	assert.equal((s.db.prepare("SELECT COUNT(*) AS n FROM pro_days WHERE license = 'qp:ana'").get() as { n: number }).n, 1)
+})
+
+test('avisos al usuario por Telegram: se conecta desde «Mi cuenta» y recibe su pago, sus devoluciones y el fin de sus días', async () => {
+	const { webhookSecret, expiryReminders } = await import('../worker/userbot.ts')
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100' })
+	const tg = async (text: string, chat = { id: 555, type: 'private' }, secret?: string) => {
+		const res = await proApi(
+			new Request('https://app.terminalp2p.com/pro/telegram/webhook', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': secret ?? (await webhookSecret(s.env)) },
+				body: JSON.stringify({ message: { text, chat } }),
+			}),
+			new URL('https://app.terminalp2p.com/pro/telegram/webhook'),
+			s.env,
+			s.now(),
+			s.q.fetcher,
+		)
+		return { status: res!.status, body: (await res!.json().catch(() => null)) as { method?: string; chat_id?: number; text?: string } | null }
+	}
+	const toUser = () => s.q.telegram.filter((m) => String(m.chat_id) === '555')
+	await s.post('/pro/status', { print: P1, username: 'ana' }) // días gratis
+	// Sin cuenta conectada no hay enlace
+	assert.equal((await s.post('/pro/telegram/link', { print: P2 })).status, 403)
+	const { url } = (await s.post('/pro/telegram/link', { print: P1, username: 'ana' })).body
+	const code = url.match(/^https:\/\/t\.me\/TerminalP2PBot\?start=([A-Za-z0-9_-]{24})$/)?.[1]
+	assert.ok(code, url)
+	// Sin la clave de Telegram, nada
+	assert.equal((await tg(`/start ${code}`, undefined, 'falsa')).status, 401)
+	// En grupos no contesta
+	assert.deepEqual((await tg(`/start ${code}`, { id: -100, type: 'supergroup' })).body, { ok: true })
+	const hi = (await tg(`/start ${code}`)).body!
+	assert.deepEqual([hi.method, hi.chat_id], ['sendMessage', 555])
+	assert.match(hi.text!, /¡Hola, @ana! Tu cuenta quedó conectada[\s\S]*\/stop[\s\S]*Tienes Pro hasta el/)
+	assert.equal((await s.post('/pro/account', { print: P1, username: 'ana' })).body.telegram, true)
+	// El enlace sirve una sola vez
+	assert.match((await tg(`/start ${code}`)).body!.text!, /caducó/)
+	assert.match((await tg('/start')).body!.text!, /Recibir avisos en Telegram/)
+	assert.match((await tg('hola?')).body!.text!, /no leemos los mensajes/)
+
+	// Compra: el aviso al grupo y la confirmación al usuario
+	const { checkout } = await buy(s, P1, 'month', 'ana')
+	assert.match(toUser()[0].text, /Pago confirmado[\s\S]*Recibimos tus 1,99 USD: <b>30 días de Pro<\/b> para @ana/)
+	// Devolución: pedida (no se le avisa: ya lo ve en «Mi cuenta»), aprobada y transferida
+	await s.post('/pro/refund', { print: P1, username: 'ana', checkout: checkout.id, reason: 'no la uso' })
+	const admin = (fields: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now(), s.q.fetcher).then((r) => r.text())
+	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
+	await admin({ action: 'refund-approve', id })
+	assert.match(toUser()[1].text, /Devolución aprobada[\s\S]*1,99 USD<\/b> a la cuenta de QvaPay @ana/)
+	await admin({ action: 'refund-transfer', id, ref: 'TX-9' })
+	assert.match(toUser()[2].text, /Devolución enviada[\s\S]*Referencia: <code>TX-9<\/code>/)
+
+	// Devuelta la compra, le quedan los 30 días gratis (su último plan es el comprado): a 2 días, el aviso (una vez); al terminar, otro
+	s.tick(28 * 86_400_000)
+	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 1)
+	assert.match(toUser()[3].text, /A tu Pro le quedan 2 días<\/b>[\s\S]*renueva desde el terminal/)
+	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 0)
+	s.tick(2 * 86_400_000 + 60_000)
+	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 1)
+	assert.match(toUser()[4].text, /Tu Pro terminó[\s\S]*tu historial siguen guardados/)
+
+	// /stop lo desconecta y no le llega nada más
+	assert.match((await tg('/stop')).body!.text!, /ya no te escribiremos/)
+	assert.equal((await s.post('/pro/account', { print: P1, username: 'ana' })).body.telegram, false)
+	await buy(s, P1, 'month', 'ana')
+	assert.equal(toUser().length, 5)
+
+	// El panel conecta el bot a este entorno, con la clave
+	assert.match(await admin({ action: 'bot-connect' }), /El bot ya responde desde app\.terminalp2p\.com/)
+	assert.deepEqual(s.q.telegram.at(-1), { chat_id: 'webhook', text: 'https://app.terminalp2p.com/pro/telegram/webhook', url: await webhookSecret(s.env) })
 })

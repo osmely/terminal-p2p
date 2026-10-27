@@ -16,6 +16,7 @@ import { sha256 } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
+import { expiryReminders } from './userbot.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
@@ -120,7 +121,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 	// Plan Pro, en el dominio del terminal. Pedir facturas tiene tope
 	if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
-		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund'
+		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund' || url.pathname === '/pro/telegram/link'
 			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 			// La consulta de estado da los días gratis y la sesión del simulador: con tope por IP (amplio)
 			if (url.pathname === '/pro/status' && !(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiadas consultas seguidas: espera un minuto'))
@@ -141,7 +142,7 @@ function proMarkup(res: Response, on: boolean) {
 	return new HTMLRewriter().on(on ? '[data-nopro]' : '[data-pro]', { element: (el) => void el.remove() }).transform(res)
 }
 
-const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook'])
+const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook', '/pro/telegram/webhook'])
 // El relé a QvaPay lleva el token del usuario en Authorization, la misma cabecera que la contraseña de
 // staging: pidiéndola ahí, el navegador volvía a sacar el diálogo al conectar la cuenta. No expone nada de
 // staging (solo reenvía a QvaPay con el token del usuario, como en producción)
@@ -205,6 +206,13 @@ export default {
 			}
 		// Una vez al día (09:00 UTC, las 5:00 en Cuba): los pagos se repasan con QvaPay y se guarda una copia de Pro
 		if (at % 86_400_000 === 9 * 3600_000) await dailyPro(env as unknown as ProEnv, at)
+		// A las 14:00 UTC (las 10:00 en Cuba, no de madrugada): el aviso por Telegram a quien se le acaban los días
+		if (at % 86_400_000 === 14 * 3600_000 && env.PRO_KEY)
+			try {
+				if (await proEnabled(env.DB, at)) await expiryReminders(env as unknown as ProEnv, at)
+			} catch (err) {
+				console.error(`pro, recordatorios: ${(err as Error).message}`)
+			}
 		if (!tenth) return
 		try {
 			await collect(env.DB, at)

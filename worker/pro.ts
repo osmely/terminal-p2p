@@ -12,6 +12,7 @@ import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, tgEsc, type AlertEnv } from './alerts.ts'
+import { connectBot, linked, linkUrl, tellPaid, tellRefund, unlink, botWebhook } from './userbot.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 
 export interface ProEnv extends AlertEnv {
@@ -302,6 +303,7 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	const r = await addDays(db, owner, { kind: 'purchase', days: PLANS[c.plan].days, plan: c.plan, checkout: c.id, note: `${PLANS[c.plan].name} · ${c.amount} USD · pagó @${payer.username}`, actor: 'system' }, now)
 	const other = owner.toLowerCase() !== payer.username.toLowerCase() ? ` (pagó @${tgEsc(payer.username)})` : ''
 	await notify(env, `💰 <b>Pago nuevo</b>\n@${tgEsc(owner)} compró <b>${PLANS[c.plan].name}</b> · ${c.amount} USD${other}\nTiene Pro hasta el ${hDay(r.after)}`, `/admin/pro?u=${encodeURIComponent(owner)}`, fetcher)
+	await tellPaid(env, key, owner, PLANS[c.plan].days, c.amount, r.after, fetcher)
 	if (c.print) await attachPrint(db, key, c.print, now)
 	return true
 }
@@ -592,6 +594,7 @@ export async function accountView(db: D1, license: string | null, now: number) {
 		purchases,
 		refundDays: REFUND_DAYS,
 		refundUntil: first !== null ? first + REFUND_DAYS * DAY_MS : null,
+		telegram: await linked(db, l.uuid),
 	}
 }
 
@@ -613,7 +616,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 	try {
 		// Con Pro apagado en el panel: nadie es Pro ni puede comprar, y no empiezan los días gratis. La consulta de
 		// estado sigue dejando la sesión del simulador, y los avisos de pago de QvaPay se siguen atendiendo
-		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
+		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook', 'POST /pro/telegram/webhook', 'POST /pro/telegram/unlink'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
 		// ¿Este dispositivo es Pro?
 		if (route === 'POST /pro/status') {
 			const b = await readBody(req)
@@ -693,6 +696,24 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 				)
 			return json(200, await accountView(db, license, now))
 		}
+
+		// Avisos por Telegram: el enlace para conectar el chat desde «Mi cuenta», dejar de recibirlos, y lo que el
+		// usuario le escribe al bot (lo manda Telegram, con su clave)
+		if (route === 'POST /pro/telegram/link') {
+			const print = printOf((await readBody(req)).print)
+			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			if (!license || !(await db.prepare('SELECT 1 FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first())) return json(403, { error: 'Conecta tu cuenta para recibir avisos' })
+			const url = await linkUrl(env, license, now, fetcher)
+			if (!url) return json(503, { error: 'Los avisos por Telegram no están disponibles ahora mismo' })
+			return json(200, { url })
+		}
+		if (route === 'POST /pro/telegram/unlink') {
+			const print = printOf((await readBody(req)).print)
+			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			if (license) await unlink(db, license)
+			return json(200, await accountView(db, license, now))
+		}
+		if (route === 'POST /pro/telegram/webhook') return botWebhook(req, env, now)
 
 		// Aviso de QvaPay: solo dice qué factura mirar; se confirma consultándola
 		if (req.method === 'POST' && (path === '/pro/webhook' || path === '/api/pro/webhook')) {
@@ -806,6 +827,7 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 			`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>${pageHead(`@${u}`, 'No tiene cuenta Pro todavía. Puedes darle días: se le activan al conectar su cuenta en el terminal.')}${notice}${panel('Dar o quitar días', daysForm(name))}`,
 		)
 	const all = <T>(sql: string) => db.prepare(sql).bind(id).all<T>().then((r) => r.results)
+	const tg = await db.prepare('SELECT linked_at FROM pro_telegram WHERE license = ?').bind(id).first<{ linked_at: number }>()
 	const [refunds, pays, moves, devices, notes, trials] = await Promise.all([
 		all<Refund>('SELECT * FROM pro_refunds WHERE license = ? ORDER BY requested_at DESC'),
 		all<Checkout & { refunded_at: number | null }>("SELECT * FROM pro_checkouts WHERE license = ? AND status = 'paid' ORDER BY COALESCE(paid_at, created_at) DESC"),
@@ -846,7 +868,7 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 		'pro-cuentas',
 		`@${u}`,
 		`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>
-		${pageHead(`@${u} ${state}`, `Cuenta <span class="mono">${escHtml(l.uuid)}</span> · días gratis usados: ${trials.map((t) => `${escHtml(t.key.startsWith('print:') ? 'un dispositivo' : t.key)} (${hDay(t.created_at)})`).join(', ') || 'ninguno'}`, suspend)}
+		${pageHead(`@${u} ${state}`, `Cuenta <span class="mono">${escHtml(l.uuid)}</span> · ${tg ? `avisos por Telegram desde el ${hDay(tg.linked_at)}` : 'sin avisos por Telegram'} · días gratis usados: ${trials.map((t) => `${escHtml(t.key.startsWith('print:') ? 'un dispositivo' : t.key)} (${hDay(t.created_at)})`).join(', ') || 'ninguno'}`, suspend)}
 		${notice}
 		<div class="cards">
 			<div class="card"><span>Pro hasta</span><b>${hDay(l.expires_at)}</b><small>${left > 0 ? `${left} días` : 'vencido'} · ${escHtml(({ month: 'comprados', year: 'comprados', trial: 'gratis', gift: 'regalados' } as Record<string, string>)[l.plan] ?? l.plan)}</small></div>
@@ -1079,18 +1101,22 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 			const note = String(f.get('note') ?? '').trim().slice(0, 300) || null
 			if (action === 'refund') {
 				const r = await adminRefund(db, String(f.get('checkout') ?? ''), note, now)
+				await tellRefund(env, r, fetcher)
 				notice = `<p class="ok">Devolución aprobada: se le quitaron los días de esa compra. Ahora transfiere <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> desde tu cuenta de QvaPay ${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')} y márcala como transferida.</p>`
 			}
 			if (action === 'refund-approve') {
 				const r = await approveRefund(db, String(f.get('id') ?? ''), note, now)
+				await tellRefund(env, r, fetcher)
 				notice = `<p class="ok">Aprobada: se le quitaron los días de esa compra. Ahora transfiere <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> ${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')} y márcala como transferida.</p>`
 			}
 			if (action === 'refund-reject') {
 				await rejectRefund(db, String(f.get('id') ?? ''), note ?? '', now)
+				await tellRefund(env, (await refundRow(db, String(f.get('id') ?? '')))!, fetcher)
 				notice = '<p class="ok">Rechazada. El usuario ve el motivo en «Mi cuenta».</p>'
 			}
 			if (action === 'refund-transfer') {
-				await transferRefund(db, String(f.get('id') ?? ''), String(f.get('ref') ?? '').trim().slice(0, 120) || null, now)
+				const r = await transferRefund(db, String(f.get('id') ?? ''), String(f.get('ref') ?? '').trim().slice(0, 120) || null, now)
+				await tellRefund(env, r, fetcher)
 				notice = '<p class="ok">Devolución cerrada: transferida.</p>'
 			}
 			// Nota interna sobre un cliente
@@ -1145,6 +1171,13 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 					}
 			}
 			// Probar el grupo de avisos de Telegram
+			// Que Telegram mande a este entorno lo que los usuarios le escriben al bot (conectar sus avisos, /stop)
+			if (action === 'bot-connect') {
+				const r = await connectBot(env, url.origin, fetcher)
+				notice = r.ok
+					? `<p class="ok">El bot ya responde desde ${escHtml(url.host)}: los usuarios pueden conectar sus avisos en «Mi cuenta».</p>`
+					: `<p class="note">Telegram no aceptó la conexión: ${escHtml(r.description)}</p>`
+			}
 			if (action === 'alert-test')
 				notice = (await notify(env, '🔔 <b>Aviso de prueba</b>\nSi lo ves, los avisos de Pro llegan bien a este grupo.', '/admin/pro', fetcher))
 					? '<p class="ok">Aviso de prueba enviado: míralo en el grupo.</p>'
@@ -1240,6 +1273,7 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 		{ sub: work.count ? 'Devoluciones por decidir o transferir y pagos que QvaPay cobró sin activarse' : '', flush: true },
 	)
 	const proOn = await proEnabled(db, now)
+	const tgUsers = (await db.prepare('SELECT COUNT(*) AS n FROM pro_telegram').first<{ n: number }>())?.n ?? 0
 	const paused = await ordersPaused(db, now)
 	const toggles = `<div class="toggles">${
 		proOn
@@ -1249,7 +1283,11 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 		paused
 			? `<form method="post" class="flag paused"><b>Publicar ofertas está en pausa</b><span class="note">Quien intente publicar desde el terminal ve: «${ORDERS_PAUSED_MSG}» Tomar ofertas y cerrar órdenes siguen funcionando.</span><button name="action" value="orders-resume" onclick="return confirm('¿Reanudar la publicación de ofertas desde el terminal?')">Reanudar</button></form>`
 			: `<form method="post" class="flag on"><b>Publicar ofertas funciona</b><span class="note">Para cortarlo al momento si aparece un fallo (tomar ofertas y cerrar órdenes siguen funcionando).</span><button class="ghost" name="action" value="orders-pause" onclick="return confirm('¿Pausar la publicación de ofertas desde el terminal? Quien lo intente verá un aviso de ajustes.')">Pausar</button></form>`
-	}<form method="post" class="flag${alertsReady(env) ? ' on' : ''}"><b>${alertsReady(env) ? 'Avisos de Telegram activados' : 'Avisos de Telegram sin configurar'}</b><span class="note">${alertsReady(env) ? 'Pagos nuevos, devoluciones pedidas y el repaso de cada mañana llegan a tu grupo.' : 'Falta el token del bot (TELEGRAM_BOT_TOKEN) o el chat del grupo (ALERT_CHAT).'}</span>${alertsReady(env) ? '<button class="ghost" name="action" value="alert-test">Probar</button>' : ''}</form></div>`
+	}<form method="post" class="flag${alertsReady(env) ? ' on' : ''}"><b>${alertsReady(env) ? 'Avisos de Telegram activados' : 'Avisos de Telegram sin configurar'}</b><span class="note">${alertsReady(env) ? 'Pagos nuevos, devoluciones pedidas y el repaso de cada mañana llegan a tu grupo.' : 'Falta el token del bot (TELEGRAM_BOT_TOKEN) o el chat del grupo (ALERT_CHAT).'}</span>${alertsReady(env) ? '<button class="ghost" name="action" value="alert-test">Probar</button>' : ''}</form>${
+		env.TELEGRAM_BOT_TOKEN
+			? `<form method="post" class="flag${tgUsers ? ' on' : ''}"><b>Avisos a los usuarios: ${tgUsers === 1 ? '1 conectado' : `${tgUsers} conectados`}</b><span class="note">Quien lo conecta en «Mi cuenta» recibe la confirmación de cada pago, el aviso 3 días antes de que se le acaben los días y cada paso de su devolución. «Conectar el bot» hace que el bot responda desde este entorno (staging y producción comparten bot: vale el último donde se pulsó).</span><button class="ghost" name="action" value="bot-connect">Conectar el bot</button></form>`
+			: ''
+	}</div>`
 	const upkeep = `<div class="stack">
 		<form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y apunta en Pendientes las que aquí no constan">Repasar pagos con QvaPay</button></form>
 		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>

@@ -76,14 +76,45 @@ async function acctPro() {
 				`<li><span>${ACCT_KIND[m.kind] ?? esc(m.kind)}${m.note ? `<small class="muted"> · ${esc(m.note)}</small>` : ''}</span><b class="mono ${m.days < 0 ? 'ask' : 'bid'}">${m.days > 0 ? '+' : ''}${m.days}</b><small class="muted">${acctDay(m.at)}</small></li>`,
 		)
 		.join('')
+	const tg = d.telegram
+		? `<div class="acct-tg on"><span>✓ Recibes los avisos de tu Pro en Telegram</span><button class="link small" id="tgOff">Dejar de recibirlos</button></div>`
+		: `<div class="acct-tg"><button class="btn block" id="tgOn">Recibir avisos en Telegram</button><p class="hint">Te escribimos cuando se confirme un pago, 3 días antes de que se acaben tus días y en cada paso de una devolución. Nada más.</p></div>`
 	$('acctBody').innerHTML = `<div class="stack">
 		${head}
+		${tg}
 		${canRenew() ? '<button class="btn primary block" id="acctBuy">Comprar días</button>' : `<p class="hint">Podrás comprar más días cuando te queden 5 o menos.</p>`}
 		<div><p class="hint">Tus compras</p>${purchases ? `<ul class="acct-list">${purchases}</ul>` : '<p class="muted small">Aún no has comprado días.</p>'}
 		${d.refundUntil && d.refundUntil > Date.now() ? `<p class="hint">Puedes pedir la devolución hasta el ${acctDay(d.refundUntil)} (${d.refundDays} días desde tu primera compra).</p>` : ''}</div>
 		<div><p class="hint">Historial de tus días</p><ul class="acct-moves">${moves || '<li class="muted">Sin movimientos.</li>'}</ul></div></div>`
 	$('acctBuy')?.addEventListener('click', showPro)
+	$('tgOn')?.addEventListener('click', acctTelegram)
+	$('tgOff')?.addEventListener('click', async () => {
+		try {
+			await proFetch('/pro/telegram/unlink', { print: TPPro.print })
+			toast('Ya no te llegarán avisos por Telegram')
+			acctPro()
+		} catch (e) {
+			toast(e.message, true)
+		}
+	})
 	for (const b of $('acctBody').querySelectorAll('[data-refund]')) b.onclick = () => acctAskRefund(b.dataset.refund)
+}
+
+// El bot solo puede escribir a quien le escribió antes: se abre con un enlace de un solo uso y, al volver aquí,
+// se mira si ya quedó conectado
+async function acctTelegram() {
+	// La pestaña se abre ya (al pulsar) para que el navegador no la bloquee, y luego va al enlace
+	const tab = window.open('about:blank', '_blank')
+	try {
+		const { url } = await proFetch('/pro/telegram/link', { print: TPPro.print })
+		if (tab) tab.location.href = url
+		else location.href = url
+		toast('Pulsa «Iniciar» en Telegram y vuelve aquí')
+		window.addEventListener('focus', () => acctTab === 'pro' && $('acctBody') && acctPro(), { once: true })
+	} catch (e) {
+		tab?.close()
+		toast(e.message, true)
+	}
 }
 
 function acctAskRefund(checkout) {
