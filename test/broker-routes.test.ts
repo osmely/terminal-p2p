@@ -76,6 +76,19 @@ test('mis operaciones: acciones según el lado y liberación protegida', async (
 	assert.deepEqual(fake.calls, ['paid:a1:REF-9', 'received:b1'])
 })
 
+test('cancelar tu oferta: si alguien la acaba de tomar no se manda nada a QvaPay', async () => {
+	const { fake, post } = await setup()
+	const me = { uuid: 'me', username: 'yo' }
+	// Tu venta, que el terminal aún veía publicada, ya la tomó alguien: cancelarla abriría una disputa
+	fake.offers.c1 = { uuid: 'c1', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10500', status: 'processing', User: me, Peer: { uuid: 's1', username: 'otro' } }
+	fake.offers.c2 = { uuid: 'c2', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10500', status: 'open', User: me }
+	const taken = await post('/trade/action', { offer: 'c1', action: 'cancel_offer' })
+	assert.equal(taken.status, 409)
+	assert.match(taken.body.error, /acaba de tomar/)
+	assert.equal((await post('/trade/action', { offer: 'c2', action: 'cancel_offer' })).status, 200)
+	assert.deepEqual(fake.calls, ['cancel:c2'])
+})
+
 test('sin sesión no hay operaciones y los POST ajenos se rechazan', async () => {
 	const { post, get } = await setup()
 	assert.equal((await get('/trades', {})).status, 401)

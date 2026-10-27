@@ -990,6 +990,11 @@ function renderManage(o) {
 			loadBook()
 		} catch (e) {
 			toast(e.message, true)
+			// Si alguien la acaba de tomar, la oferta se recarga y enseña la operación
+			if (e.status === 409) {
+				loadTrades()
+				showManageOffer(o.offer)
+			}
 		}
 	})
 	$('modalBody').querySelector('[data-open-trade]')?.addEventListener('click', () => openTrade(o.offer, null))

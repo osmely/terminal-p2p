@@ -578,9 +578,18 @@ export class Broker {
 				const r = await c.markReceived(offer, order, { coin: o.coin, side: o.type, usd })
 				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${Number(r.amount).toLocaleString('es')} USD netos (comisión ${Number(r.fee ?? 0).toLocaleString('es')}).` : 'Liberado' })
 			}
-			case 'cancel':
-			case 'dispute':
 			case 'cancel_offer': {
+				// Estado fresco: si alguien la tomó mientras la tenías abierta, cancelarla en QvaPay no la cancela,
+				// abre una disputa con quien la tomó (venta) o la devuelve al mercado (compra). Solo se cancela
+				// publicada; en una por partes QvaPay ya rechaza cancelarla entera con órdenes en curso
+				const o = await c.getOffer(offer)
+				if (o.offer_kind !== 'flexible' && o.status !== 'open')
+					return json(409, { error: 'Alguien acaba de tomar tu oferta y ya no se puede cancelar: ábrela para ver la operación.', status: o.status })
+				const r = await c.cancelOrder(offer, order)
+				return json(200, { ok: true, message: r.message })
+			}
+			case 'cancel':
+			case 'dispute': {
 				const r = await c.cancelOrder(offer, order)
 				return json(200, { ok: true, message: r.message })
 			}
