@@ -693,10 +693,8 @@ function drawCompleted() {
 let historyChart = null
 let bidSeries = null
 let askSeries = null
+// Operaciones por día: una barra sólida por día, como el volumen de un exchange (con Pro, partida en compras y ventas)
 let opsSeries = null
-// Pro: volumen por día con compras (verde) y ventas (rojo) apiladas, en vez de una sola barra
-let opsSellSeries = null
-let opsBuySeries = null
 let usdSeries = null
 let usdtSeries = null
 // Los datos ya dibujados y el mercado y rango del último encuadre: el libro se refresca cada pocos
@@ -741,9 +739,7 @@ function drawHistory() {
 		bidSeries = historyChart.addLineSeries({ color: css('--bid'), lineWidth: 2, title: 'compra' })
 		askSeries = historyChart.addLineSeries({ color: css('--ask'), lineWidth: 2, title: 'venta' })
 		// Operaciones por día: barras en una escala propia, en la franja de abajo
-		opsSeries = historyChart.addHistogramSeries({ priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
-		opsSellSeries = historyChart.addHistogramSeries({ priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
-		opsBuySeries = historyChart.addHistogramSeries({ priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
+		opsSeries = historyChart.addCustomSeries(new DayBars(), { priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
 		// Referencia del mercado informal (elTOQUE): una mediana por día, en líneas discontinuas
 		usdSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USD informal' })
 		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT' })
@@ -761,18 +757,18 @@ function drawHistory() {
 		const series = (key) => points.filter((p) => p[key] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[key] }))
 		bidSeries.setData(series('buy'))
 		askSeries.setData(series('sell'))
-		const accent = css('--accent')
 		const daily = state.history?.daily ?? []
-		const pro = proVolume()
-		opsSeries.setData(pro ? [] : daily.map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d.ops, color: `${accent}${d.partial ? '40' : '80'}` })))
-		// Pro: cada punto del gráfico lleva el volumen de su día, así las barras forman un bloque por día que se ve
-		// también en la vista de 7 días (con una barra por día quedaban como rayas finas). La roja es el total
-		// (compras + ventas) y la verde, encima, las compras: queda apilado
-		const dayOf = (t) => daily.find((d) => Math.abs(t - d.t) <= 12 * 3_600_000)
-		const stacked = pro ? (points.length ? points : daily).map((p) => ({ p, d: dayOf(p.t) })).filter(({ d }) => d && d.buy != null && d.sell != null) : []
-		const fade = (d) => (d.partial ? '55' : '99')
-		opsSellSeries.setData(stacked.map(({ p, d }) => ({ time: Math.floor(p.t / 1000) + tz, value: d.buy + d.sell, color: `${css('--ask')}${fade(d)}` })))
-		opsBuySeries.setData(stacked.map(({ p, d }) => ({ time: Math.floor(p.t / 1000) + tz, value: d.buy, color: `${css('--bid')}${fade(d)}` })))
+		// La barra de cada día ocupa los puntos de ese día (en 7 y 30 días hay muchos) y se dibuja como un solo bloque.
+		// Con Pro se parte en compras y ventas; los días sin reparto (antes de que QvaPay lo diera) van enteros
+		const byDay = new Map()
+		for (const p of points) byDay.set(cubaDate(p.t), [...(byDay.get(cubaDate(p.t)) ?? []), p.t])
+		opsSeries.setData(
+			daily.flatMap((d) => {
+				const split = proSplit() && d.buy != null && d.sell != null
+				const bar = { day: d.day, total: split ? d.buy + d.sell : d.ops, buy: split ? d.buy : null, partial: d.partial }
+				return (byDay.get(d.day) ?? [d.t]).map((t) => ({ time: Math.floor(t / 1000) + tz, ...bar }))
+			}),
+		)
 		const ref = (key) => informal.filter((d) => d[key] != null).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d[key] }))
 		usdSeries.setData(ref('usd'))
 		usdtSeries.setData(ref('usdt'))
@@ -783,18 +779,73 @@ function drawHistory() {
 	const step = { 600000: 'cada 10 min', 3600000: 'por hora', 86400000: 'por día' }[state.history?.bucketMs] ?? ''
 	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
 	$('chartNote').textContent = first
-		? `Mediana de lo completado (24 h), ${step} · barras: ${proVolume() ? 'volumen por día (compras en verde, ventas en rojo)' : 'operaciones por día'}${src} · QvaPay desde ${new Date(first).toLocaleDateString('es')}`
+		? `Mediana de lo completado (24 h), ${step} · barras: operaciones por día${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${src} · QvaPay desde ${new Date(first).toLocaleDateString('es')}`
 		: informal.length
 			? `Mercado informal según elTOQUE, por día · QvaPay se registra cada 10 minutos`
 			: 'Se registra cada 10 minutos: vuelve en un rato'
 	$('chartNote').title =
 		'Líneas continuas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.' +
+		(proSplit() ? ' Con Pro, cada barra se parte en compras (verde) y ventas (rojo).' : '') +
 		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
 }
 
-// El volumen con compras y ventas por separado es de Pro (con Pro encendido en el panel y activo en este dispositivo)
-const proVolume = () => !!(window.TPPro?.enabled && window.TPPro?.active)
-// Al cambiar Pro (al conectar, comprar o apagarse), se vuelve a dibujar con o sin el volumen de Pro
+// Fecha de Cuba (AAAA-MM-DD) de un instante: así agrupa el servidor las operaciones por día
+const cubaDate = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Havana' })
+
+// Serie propia del gráfico para las operaciones por día. Con barras de la librería, un día de 7 o 30 días eran
+// decenas de rayas finas con huecos; aquí los puntos seguidos del mismo día se pintan como un solo bloque sólido,
+// con un hueco entre días. Compras abajo en verde y ventas encima en rojo; sin reparto, una barra de un color
+class DayBars {
+	renderer() {
+		return this
+	}
+	update(data) {
+		this.data = data
+	}
+	priceValueBuilder(bar) {
+		return [0, bar.total]
+	}
+	isWhitespace(bar) {
+		return bar.total == null
+	}
+	defaultOptions() {
+		return { color: css('--accent') }
+	}
+	draw(target, toY) {
+		const { bars, visibleRange, barSpacing } = this.data ?? {}
+		if (!visibleRange) return
+		target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+			const zero = toY(0)
+			for (let i = visibleRange.from; i < visibleRange.to; ) {
+				const bar = bars[i].originalData
+				let j = i
+				while (j + 1 < visibleRange.to && bars[j + 1].originalData.day === bar.day) j++
+				// Hueco entre días de 2 a 6 px, sin comerse las barras finas (un año entero en un móvil)
+				const span = bars[j].x - bars[i].x + barSpacing
+				const gap = Math.min(Math.max(barSpacing * 0.3, 2), 6, span * 0.3)
+				const x0 = Math.round((bars[i].x - barSpacing / 2 + gap / 2) * hr)
+				const width = Math.max(1, Math.round((bars[j].x + barSpacing / 2 - gap / 2) * hr) - x0)
+				const fill = (from, to, color) => {
+					const top = toY(to)
+					const bottom = from ? toY(from) : zero
+					if (top == null || bottom == null) return
+					ctx.fillStyle = color
+					ctx.fillRect(x0, Math.round(top * vr), width, Math.max(1, Math.round(bottom * vr) - Math.round(top * vr)))
+				}
+				if (bar.buy != null) {
+					const alpha = bar.partial ? '55' : '99'
+					fill(0, bar.buy, `${css('--bid')}${alpha}`)
+					fill(bar.buy, bar.total, `${css('--ask')}${alpha}`)
+				} else fill(0, bar.total, `${css('--accent')}${bar.partial ? '40' : '80'}`)
+				i = j + 1
+			}
+		})
+	}
+}
+
+// Las barras partidas en compras y ventas son de Pro (con Pro encendido en el panel y activo en este dispositivo)
+const proSplit = () => !!(window.TPPro?.enabled && window.TPPro?.active)
+// Al cambiar Pro (al conectar, comprar o apagarse), se vuelve a dibujar con o sin el reparto
 document.addEventListener('tp:pro', () => {
 	historyDrawn = null
 	if (historyChart && state.chart === 'history') drawHistory()
