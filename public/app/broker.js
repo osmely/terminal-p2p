@@ -561,13 +561,16 @@ function bindDetail(t) {
 		$('chatInput').value = ''
 		act('chat', { message: text })
 	}
-	// Una imagen se envía al elegirla, con lo que haya escrito como texto
-	$('chatFile').onchange = async () => {
-		const file = $('chatFile').files?.[0]
+	// Una imagen se envía al elegirla, con lo que haya escrito como texto. El chat se redibuja cada pocos segundos y
+	// elegir la foto puede tardar más: se lee del campo que la recibió, que ya puede no ser el de la pantalla
+	$('chatFile').onchange = async (ev) => {
+		const input = ev.currentTarget
+		const file = input.files?.[0]
 		const d = bk.detail
+		input.value = ''
 		if (!file || !d) return
-		const label = $('chatFile').closest('label')
-		label.classList.add('busy')
+		const label = $('chatFile')?.closest('label')
+		label?.classList.add('busy')
 		toast('Enviando imagen…')
 		try {
 			const form = new FormData()
@@ -583,7 +586,7 @@ function bindDetail(t) {
 		} catch (e) {
 			toast(e.message || 'No se pudo enviar la imagen', true)
 		} finally {
-			label.classList.remove('busy')
+			$('chatFile')?.closest('label').classList.remove('busy')
 		}
 	}
 }
