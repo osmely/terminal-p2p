@@ -31,6 +31,7 @@ function fakeQvaPay() {
 		},
 		cancelOrder: async (uuid: string) => (calls.push(`cancel:${uuid}`), { message: 'P2P cancelada' }),
 		editOffer: async (uuid: string, body: unknown) => void calls.push(`edit:${uuid}:${JSON.stringify(body)}`),
+		sendChatImage: async (uuid: string, file: Blob, name: string, message?: string) => void calls.push(`image:${uuid}:${file.size}:${name}:${message ?? ''}`),
 	}
 	return { client: client as unknown as QvaPayClient, calls, offers }
 }
@@ -135,4 +136,22 @@ test('editar tu oferta: requisitos, solo VIP, pública, por partes y mensaje', a
 
 	// Requisito con un valor que QvaPay no acepta
 	assert.equal((await edit({ requirements: { min_completed: 7 } })).status, 400)
+})
+
+test('imagen al chat: solo imágenes y con tope de tamaño', async () => {
+	const { fake } = await setup()
+	const acc = { sid: 'sid1', me: await fake.client.me(), client: fake.client }
+	const broker = new Broker({ accounts: { get: async () => acc } as unknown as AccountStore, market: { wake() {} }, dryRun: false })
+	const send = async (blob: Blob, message = '') => {
+		const form = new FormData()
+		form.append('offer', 'a1')
+		form.append('message', message)
+		form.append('file', blob)
+		const res = (await broker.handle(new Request(BASE + '/trade/image', { method: 'POST', headers: { 'X-Broker': '1', Cookie: 'sid=sid1' }, body: form })))!
+		return res.status
+	}
+	assert.equal(await send(new Blob([new Uint8Array(1000)], { type: 'image/png' }), 'comprobante'), 200)
+	assert.equal(await send(new Blob(['<svg/>'], { type: 'image/svg+xml' })), 400)
+	assert.equal(await send(new Blob([new Uint8Array(2 * 1024 * 1024 + 1)], { type: 'image/jpeg' })), 413)
+	assert.deepEqual(fake.calls, ['image:a1:1000:imagen.png:comprobante'])
 })

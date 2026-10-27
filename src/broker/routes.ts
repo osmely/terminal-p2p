@@ -43,6 +43,10 @@ const CHAT_ACTIVE = new Set(['processing', 'paid', 'revision'])
 const FLEX_WATCH = 4
 const TICKS = new Set<string>(COINS.map((c) => c.tick))
 // Valores que QvaPay acepta en los requisitos de una oferta
+// Imágenes del chat: los tipos que acepta QvaPay y un tope (el terminal las reduce antes de enviarlas)
+const CHAT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif'])
+export const CHAT_IMAGE_MAX = 2 * 1024 * 1024
+
 const REQUIREMENTS: Record<keyof Requirements, number[]> = {
 	min_completed: [5, 10, 25, 50, 100],
 	min_rating: [4, 4.5],
@@ -111,6 +115,8 @@ export class Broker {
 					return await this.trade(ctx, acc)
 				case 'POST /trade/action':
 					return await this.action(ctx, acc)
+				case 'POST /trade/image':
+					return await this.chatImage(ctx, acc)
 				case 'GET /coins':
 					return await this.coins(acc)
 				case 'GET /payment-methods':
@@ -501,6 +507,20 @@ export class Broker {
 		}
 		const r = await acc.client.applyOffer(o.uuid, amount, { coin: o.coin, side: o.type, usd: amount ?? num(o.amount) })
 		return json(200, { ok: true, offer: o.uuid, order: r.order ?? null, message: 'Tomaste la oferta' })
+	}
+
+	// Imagen al chat de una operación (un comprobante, una captura del banco)
+	private async chatImage({ req }: Ctx, acc: Account) {
+		const form = await req.formData()
+		const file = form.get('file')
+		const offer = String(form.get('offer') ?? '')
+		const order = form.get('order') ? String(form.get('order')) : undefined
+		const message = String(form.get('message') ?? '').trim().slice(0, 599)
+		if (!(file instanceof Blob) || !CHAT_IMAGE_TYPES.has(file.type)) return json(400, { error: 'Solo se pueden enviar imágenes JPG, PNG o GIF' })
+		if (file.size > CHAT_IMAGE_MAX) return json(413, { error: 'La imagen es demasiado grande (máximo 2 MB)' })
+		const ext = file.type === 'image/png' ? 'png' : file.type === 'image/gif' ? 'gif' : 'jpg'
+		await acc.client.sendChatImage(offer, file, `imagen.${ext}`, message || undefined, order)
+		return json(200, { ok: true })
 	}
 
 	// ── Ficha de un usuario ─────────────────────────────────────────────

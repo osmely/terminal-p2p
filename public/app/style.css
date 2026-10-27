@@ -474,6 +474,10 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .msg.mod { border: 1px solid var(--warn); }
 .msg time { display: block; font: 10px var(--mono); color: var(--muted); margin-top: 2px; }
 .chatform { display: flex; gap: 6px; margin-top: 6px; }
+.chat-attach { flex: none; cursor: pointer; }
+.chat-attach.busy { opacity: 0.5; pointer-events: none; }
+.msg-img { display: block; margin-bottom: 4px; }
+.msg-img img { display: block; max-width: 100%; max-height: 180px; border-radius: 6px; }
 .stars { display: inline-flex; gap: 2px; }
 /* Al pasar por encima se iluminan las estrellas hasta la elegida */
 .stars button { font-size: 28px; line-height: 1; padding: 2px 3px; background: none; border: 0; color: var(--line-strong); transition: color 0.1s, transform 0.1s; }

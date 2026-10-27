@@ -28,6 +28,40 @@ async function api(path, body) {
 	return data
 }
 
+// Un formulario con archivo (la imagen del chat): sin Content-Type, lo pone el navegador
+async function apiForm(path, form) {
+	const r = await TPApi.fetch(`/api/broker${path}`, { method: 'POST', headers: { 'X-Broker': '1' }, body: form })
+	const data = await r.json().catch(() => ({}))
+	if (!r.ok) throw Object.assign(new Error(data.error || `Error ${r.status}`), { status: r.status })
+	return data
+}
+
+// Las imágenes del chat llegan como ruta de QvaPay (chat/123/456.jpg) y se sirven desde su dominio de archivos
+const chatImageUrl = (img) => {
+	const v = String(img ?? '')
+	if (/^https:\/\/media\.qvapay\.com\//.test(v)) return v
+	return /^[\w./-]+$/.test(v) && !v.includes('..') ? `https://media.qvapay.com/${v.replace(/^\//, '')}` : null
+}
+
+// Antes de enviarla, la imagen se reduce a 1280 px como mucho y a JPG (QvaPay la deja en 1000 × 1000 igualmente):
+// una foto del móvil pasa de varios MB a unos cientos de KB. Un GIF pequeño va tal cual para no perder la animación
+const CHAT_IMAGE_PX = 1280
+async function shrinkImage(file) {
+	if (file.type === 'image/gif' && file.size <= 2 * 1024 * 1024) return file
+	const bmp = await createImageBitmap(file)
+	const k = Math.min(1, CHAT_IMAGE_PX / Math.max(bmp.width, bmp.height))
+	const canvas = document.createElement('canvas')
+	canvas.width = Math.round(bmp.width * k)
+	canvas.height = Math.round(bmp.height * k)
+	const ctx = canvas.getContext('2d')
+	// Fondo blanco: un PNG con transparencia no queda negro al pasar a JPG
+	ctx.fillStyle = '#fff'
+	ctx.fillRect(0, 0, canvas.width, canvas.height)
+	ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height)
+	bmp.close?.()
+	return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error('No se pudo preparar la imagen'))), 'image/jpeg', 0.85))
+}
+
 function toast(text, bad = false) {
 	const el = document.createElement('div')
 	el.className = `toast ${bad ? 'bad' : ''}`
@@ -422,12 +456,12 @@ function renderDetail(t) {
 				? t.chat
 						.map(
 							(m) =>
-								`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${esc(m.text ?? '')}${m.image && /^https:\/\//.test(m.image) ? ` <a href="${esc(m.image)}" target="_blank" rel="noopener">🖼</a>` : ''}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
+								`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${chatImageUrl(m.image) ? `<a class="msg-img" href="${esc(chatImageUrl(m.image))}" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="${esc(chatImageUrl(m.image))}" alt="Imagen" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
 						)
 						.join('')
 				: '<p class="muted small">Sin mensajes.</p>'
 		}</div>
-		<form class="chatform" id="chatform"><input class="input" id="chatInput" maxlength="599" placeholder="Escribe un mensaje…" /><button class="btn">Enviar</button></form></div>
+		<form class="chatform" id="chatform"><label class="btn icon-only chat-attach" title="Enviar una imagen (comprobante, captura)" aria-label="Enviar una imagen"><input type="file" id="chatFile" accept="image/*" hidden /><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.5 3.5 0 015 5l-8.6 8.6a2 2 0 01-2.8-2.8l7.9-7.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label><input class="input" id="chatInput" maxlength="599" placeholder="Escribe un mensaje…" /><button class="btn">Enviar</button></form></div>
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${t.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
 	</div>`
 	tickClocks()
@@ -526,6 +560,31 @@ function bindDetail(t) {
 		bk.chatToEnd = true
 		$('chatInput').value = ''
 		act('chat', { message: text })
+	}
+	// Una imagen se envía al elegirla, con lo que haya escrito como texto
+	$('chatFile').onchange = async () => {
+		const file = $('chatFile').files?.[0]
+		const d = bk.detail
+		if (!file || !d) return
+		const label = $('chatFile').closest('label')
+		label.classList.add('busy')
+		toast('Enviando imagen…')
+		try {
+			const form = new FormData()
+			form.append('offer', d.offer)
+			if (d.order) form.append('order', d.order)
+			form.append('message', $('chatInput').value.trim())
+			form.append('file', await shrinkImage(file))
+			await apiForm('/trade/image', form)
+			$('chatInput').value = ''
+			bk.chatToEnd = true
+			toast('Imagen enviada')
+			refreshDetail()
+		} catch (e) {
+			toast(e.message || 'No se pudo enviar la imagen', true)
+		} finally {
+			label.classList.remove('busy')
+		}
 	}
 }
 

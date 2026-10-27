@@ -35,6 +35,8 @@ interface RequestOpts {
 	bucket: BucketName
 	query?: Record<string, string | number | boolean | undefined>
 	body?: unknown
+	// Un formulario con archivo (imagen del chat): va tal cual y el navegador pone su Content-Type
+	form?: FormData
 	// Las escrituras solo se reintentan ante 429 (no se ejecutaron), salvo `idempotent`
 	write?: boolean
 	idempotent?: boolean
@@ -196,6 +198,15 @@ export class QvaPayClient {
 		}
 	}
 
+	// Imagen al chat (JPG, PNG o GIF; QvaPay la reduce a 1000×1000 como mucho), con un texto opcional
+	async sendChatImage(uuid: string, file: Blob, name: string, message?: string, order?: string) {
+		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/chat (imagen)${order ? `?order=${order}` : ''}`)
+		const form = new FormData()
+		form.append('file', file, name)
+		if (message) form.append('message', message)
+		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, form, write: true })
+	}
+
 	async sendChat(uuid: string, message: string, order?: string) {
 		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/chat${order ? `?order=${order}` : ''}`)
 		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, body: { message }, write: true })
@@ -219,10 +230,10 @@ export class QvaPayClient {
 						headers: {
 							...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
 							Accept: 'application/json',
-							...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+							...(opts.body !== undefined && !opts.form ? { 'Content-Type': 'application/json' } : {}),
 							...(opts.meta ? { 'X-TP-Meta': new URLSearchParams(Object.entries(opts.meta).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString() } : {}),
 						},
-						body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+						body: opts.form ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
 						signal: AbortSignal.timeout(20_000),
 					}),
 				)

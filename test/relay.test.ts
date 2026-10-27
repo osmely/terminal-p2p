@@ -46,3 +46,24 @@ test('reenvía solo autorización y tipo, sin cookies, y rechaza escrituras ajen
 	const blocked = new URL('https://terminalp2p.com/qp/withdraw')
 	assert.equal((await relay(new Request(blocked, { method: 'POST', headers: { Origin: 'https://terminalp2p.com' }, body: '{}' }), blocked)).status, 404)
 })
+
+test('imagen del chat: el formulario con archivo pasa entero a QvaPay, con tope de tamaño', async (t) => {
+	const real = globalThis.fetch
+	t.after(() => (globalThis.fetch = real))
+	let sent: { type: string | null; bytes: number } | undefined
+	globalThis.fetch = (async (_url: string, init: RequestInit) => {
+		sent = { type: new Headers(init.headers).get('content-type'), bytes: (init.body as ArrayBuffer).byteLength }
+		return new Response('{"message":"1"}', { status: 200, headers: { 'content-type': 'application/json' } })
+	}) as typeof fetch
+	const url = new URL(`https://terminalp2p.com/qp/p2p/${U}/chat`)
+	const post = (bytes: number) => {
+		const form = new FormData()
+		form.append('file', new Blob([new Uint8Array(bytes).fill(255)], { type: 'image/jpeg' }), 'imagen.jpg')
+		return relay(new Request(url, { method: 'POST', headers: { Origin: url.origin, Authorization: 'Bearer t' }, body: form }), url)
+	}
+	// 200 KB: mucho más que el tope de 64 KB de las escrituras de texto
+	assert.equal((await post(200_000)).status, 200)
+	assert.match(sent!.type ?? '', /^multipart\/form-data; boundary=/)
+	assert.ok(sent!.bytes > 200_000)
+	assert.equal((await post(3_200_000)).status, 413)
+})

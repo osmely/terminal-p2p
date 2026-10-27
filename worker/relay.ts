@@ -16,6 +16,8 @@
 export const RELAY_PREFIX = '/qp'
 const UPSTREAM = 'https://api.qvapay.com'
 const MAX_BODY = 64 * 1024
+// Una imagen del chat va como formulario con archivo: el terminal la reduce antes, así que 3 MB sobran
+const MAX_IMAGE_BODY = 3 * 1024 * 1024
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const PUBLIC_TTL_S = 60
 const PUBLIC_PATHS = new Set(['/p2p/averages', '/p2p/completed_pairs_average', '/coins'])
@@ -72,8 +74,12 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 		if (v) headers.set(h, v)
 	}
 
-	let body: string | undefined
-	if (req.method !== 'GET') {
+	let body: string | ArrayBuffer | undefined
+	const image = req.method === 'POST' && /\/chat$/.test(path) && (req.headers.get('content-type') ?? '').startsWith('multipart/form-data')
+	if (image) {
+		body = await req.arrayBuffer()
+		if (body.byteLength > MAX_IMAGE_BODY) return text(413, 'Imagen demasiado grande')
+	} else if (req.method !== 'GET') {
 		body = await req.text()
 		if (body.length > MAX_BODY) return text(413, 'Cuerpo demasiado grande')
 	}
@@ -95,7 +101,7 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 	const retryAfter = upstream.headers.get('retry-after')
 	if (retryAfter) out.set('Retry-After', retryAfter)
 	if (onWrite && req.method !== 'GET') {
-		const note = onWrite({ method: req.method, path, query: url.searchParams, body, meta: req.headers.get('x-tp-meta'), response: upstream.clone() }).catch(() => {})
+		const note = onWrite({ method: req.method, path, query: url.searchParams, body: typeof body === 'string' ? body : undefined, meta: req.headers.get('x-tp-meta'), response: upstream.clone() }).catch(() => {})
 		if (ctx) ctx.waitUntil(note)
 		else await note
 	}
