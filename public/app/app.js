@@ -286,7 +286,12 @@ function renderStats(b, asks, bids) {
 		// En el móvil, una etiqueta más corta si la hay (con tres columnas no caben las largas)
 		.map(([k, v, cls, short]) => `<div class="stat"><label>${short ? `<span class="lg">${k}</span><span class="sh">${short}</span>` : k}</label><b class="${cls === 'warn' ? '' : cls}">${cls === 'warn' ? `<span class="badge warn">${v}</span>` : v}</b></div>`)
 		.join('')
-	renderIntent(mid ? within(bids, 'bid') : 0, mid ? within(asks, 'ask') : 0, mid, doneMedian)
+	// Con el libro del servidor, la intención la calcula él (con el libro completo, igual para todos). Si no, aquí; y sin
+	// las completadas aún, la aguja espera (con media cuenta saldría otro valor y luego saltaría)
+	const si = b.stats?.intent
+	if (b.stats) si ? renderIntent(si.bidUsd, si.askUsd, si.mid, si.doneMedian, si) : renderIntent(0, 0, null, null)
+	else if (b.completedReady === false) renderIntent(0, 0, null, null)
+	else renderIntent(mid ? within(bids, 'bid') : 0, mid ? within(asks, 'ask') : 0, mid, doneMedian)
 	renderPulse(b)
 }
 
@@ -305,26 +310,45 @@ function pulseScore(b) {
 	const gone = b.activity.filter((a) => (a.kind === 'gone' || a.kind === 'taken' || a.kind === 'partial' || a.kind === 'cancelled') && now - a.t < hour).length
 	const last = Math.max(0, ...levels.map((l) => l.updatedAt ?? 0), ...b.activity.map((a) => a.t))
 	const done = b.completed
-	const pace = done?.count && done.window_hours ? done.count / done.window_hours : null
-	const moves = fresh + gone
-	const ratio = pace ? moves / pace : null
-	const level = !last || now - last > 30 * 60_000 ? 0 : ratio != null ? (ratio >= 2 ? 4 : ratio >= 1 ? 3 : ratio >= 0.4 ? 2 : 1) : moves >= 20 ? 4 : moves >= 8 ? 3 : moves >= 3 ? 2 : 1
-	return { level, fresh, gone, last: last ? now - last : null, pace }
+	// Las barras miden lo mismo que el número (operaciones por minuto) frente al ritmo normal de ese mercado: las
+	// operaciones completadas por minuto en la ventana de QvaPay. Sin ese ritmo, por umbrales fijos
+	const pace = b.stats?.pace ?? (done?.count && done.window_hours ? done.count / done.window_hours / 60 : null)
+	const ops = opsPerMin(b)
+	const ratio = pace ? ops / pace : null
+	const level = !ops ? 0 : ratio != null ? (ratio >= 2 ? 4 : ratio >= 1 ? 3 : ratio >= 0.4 ? 2 : 1) : ops >= 3 ? 4 : ops >= 1 ? 3 : ops >= 0.3 ? 2 : 1
+	return { level, fresh, gone, last: last ? now - last : null, pace, ratio, ops }
 }
+// Operaciones por minuto: lo que se tomó (entero o en parte) en los últimos minutos, pesando más lo reciente (cada toma
+// pesa e^(-edad/OPS_TAU_MS)). Así el número es el real y se mueve de verdad: baja poco a poco entre tomas y sube en
+// cuanto alguien toma. Con la actividad del feed se sabe qué se tomó; sin ella, se cuenta lo que salió del libro
+// (tomado o retirado: QvaPay no lo dice)
+const OPS_TAU_MS = 5 * 60_000
+const OPS_HORIZON_MS = 30 * 60_000
+function opsPerMin(b) {
+	const now = Date.now()
+	const taken = (a) => (b.activitySource === 'feed' ? a.kind === 'taken' || a.kind === 'partial' : a.kind === 'gone')
+	// Con el libro del servidor, sus tomas (todas las de la última media hora); si no, la actividad que hay aquí
+	const times = b.stats ? b.stats.takes : b.activity.filter(taken).map((a) => a.t)
+	const weight = times.filter((t) => now - t <= OPS_HORIZON_MS).reduce((sum, t) => sum + Math.exp(-Math.max(0, now - t) / OPS_TAU_MS), 0)
+	const r = weight / (OPS_TAU_MS / 60_000)
+	return r < 0.01 ? 0 : r
+}
+// o/m: operaciones por minuto
+const opsText = (r) => `${r >= 10 ? Math.round(r) : r.toLocaleString('es', { minimumFractionDigits: r ? 2 : 0, maximumFractionDigits: 2 })} o/m`
+
 function renderPulse(b) {
 	const el = $('pulse')
 	const r = pulseScore(b)
 	el.classList.toggle('off', !r)
 	el.dataset.level = r ? String(r.level) : ''
-	const label = r ? PULSE[r.level] : '—'
-	el.setAttribute('aria-label', r ? `Actividad del mercado: ${label}` : 'Actividad del mercado: sin libro en vivo')
-	el.innerHTML = `<label>Actividad</label><div class="pulse-body" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<i class="${r && r.level >= i ? 'on' : ''}" style="height:${6 + i * 4}px"></i>`).join('')}<span>${label}</span></div>`
-	el.title = r
-		? `Actividad del mercado: ${label.toLowerCase()}.\n` +
-			`· Última novedad en el libro: hace ${ago(r.last ?? 0)}.\n` +
-			`· En la última hora: ${r.fresh} ${r.fresh === 1 ? 'oferta publicada o editada' : 'ofertas publicadas o editadas'} y ${r.gone} que ${r.gone === 1 ? 'salió' : 'salieron'} del libro (estas, desde que lo tienes abierto).\n` +
-			(r.pace != null ? `· Ritmo normal: unas ${Math.round(r.pace)} operaciones completadas por hora.` : '· Sin datos de operaciones completadas para comparar.')
-		: 'La actividad del mercado se calcula con el libro en vivo: conecta tu cuenta de QvaPay.'
+	const label = r ? opsText(r.ops) : '—'
+	el.setAttribute('aria-label', r ? `Actividad del mercado: ${label} (${PULSE[r.level].toLowerCase()})` : 'Actividad del mercado: sin libro en vivo')
+	// Se arma una vez; luego solo cambian las barras encendidas y el número
+	if (!el.querySelector('.pulse-body'))
+		el.innerHTML = `<label>Actividad</label><div class="pulse-body" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<i style="height:${6 + i * 4}px"></i>`).join('')}<span></span></div>`
+	el.querySelectorAll('.pulse-body i').forEach((bar, i) => bar.classList.toggle('on', !!r && r.level >= i + 1))
+	el.querySelector('.pulse-body span').textContent = label
+	el.removeAttribute('title')
 }
 
 // Intención del mercado (0 = más venden, 100 = más compran): un 70% sale de la profundidad a ±2%
@@ -336,15 +360,26 @@ function intentScore(bidUsd, askUsd, mid, doneMedian) {
 	const drift = mid && doneMedian ? Math.max(-1, Math.min(1, (mid / doneMedian - 1) / 0.02)) : 0
 	return { score: Math.round((0.7 * depth + 0.3 * (drift + 1) / 2) * 100), depth, drift: mid && doneMedian ? mid / doneMedian - 1 : null }
 }
-function renderIntent(bidUsd, askUsd, mid, doneMedian) {
+// Semicírculo de 180°: la aguja apunta hacia arriba y gira de -90° (0, a la izquierda) a 90° (100, a la derecha)
+const needleDeg = (score) => `rotate(${((score - 50) * 1.8).toFixed(1)}deg)`
+// Como una aguja de verdad, oscila un poco (±INTENT_WOBBLE de 100) alrededor del valor real; el valor exacto está en
+// la explicación. Sin oscilación con «reducir movimiento» o la pestaña oculta
+const INTENT_WOBBLE = 2
+const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+setInterval(() => {
 	const el = $('intent')
-	const r = intentScore(bidUsd, askUsd, mid, doneMedian)
+	const line = el?.querySelector('.g-needle')
+	if (!line || document.hidden || calm?.matches || el.dataset.score === '') return
+	const real = Number(el.dataset.score)
+	line.style.transform = needleDeg(Math.max(0, Math.min(100, real + (Math.random() * 2 - 1) * INTENT_WOBBLE)))
+}, 700)
+
+// given: la intención ya calculada (la del servidor); si no, se calcula aquí
+function renderIntent(bidUsd, askUsd, mid, doneMedian, given) {
+	const el = $('intent')
+	const r = given ?? intentScore(bidUsd, askUsd, mid, doneMedian)
 	const s = r?.score ?? 50
 	const [label, cls] = !r ? ['—', ''] : s >= 60 ? ['Más compran', 'bid'] : s <= 40 ? ['Más venden', 'ask'] : ['Equilibrio', '']
-	// Semicírculo de 180°: la aguja va de la izquierda (0) a la derecha (100)
-	const a = Math.PI * (1 - s / 100)
-	const nx = (23 + 15 * Math.cos(a)).toFixed(1)
-	const ny = (23 - 15 * Math.sin(a)).toFixed(1)
 	const arc = (from, to) => {
 		const p = (t) => [(23 + 19 * Math.cos(Math.PI * (1 - t))).toFixed(1), (23 - 19 * Math.sin(Math.PI * (1 - t))).toFixed(1)]
 		const [x1, y1] = p(from)
@@ -353,11 +388,12 @@ function renderIntent(bidUsd, askUsd, mid, doneMedian) {
 	}
 	el.classList.toggle('off', !r)
 	el.dataset.side = cls
+	el.dataset.score = r ? String(s) : ''
 	el.setAttribute('aria-label', r ? `Intención del mercado: ${label}, ${s} de 100` : 'Intención del mercado: sin libro en vivo')
 	el.innerHTML = `<label>Intención</label><div class="intent-body">
 		<svg class="gauge" viewBox="0 0 46 27" width="46" height="27" aria-hidden="true">
 			<path class="g-ask" d="${arc(0, 0.39)}"/><path class="g-mid" d="${arc(0.41, 0.59)}"/><path class="g-bid" d="${arc(0.61, 1)}"/>
-			<line class="g-needle" x1="23" y1="23" x2="${nx}" y2="${ny}"/><circle class="g-hub" cx="23" cy="23" r="2.6"/>
+			<line class="g-needle" x1="23" y1="23" x2="23" y2="8" style="transform:${needleDeg(s)}"/><circle class="g-hub" cx="23" cy="23" r="2.6"/>
 		</svg></div>`
 	el.title = r
 		? `Intención del mercado: ${s} de 100 (0 = más venden, 100 = más compran).\n` +
@@ -1222,6 +1258,8 @@ function every(ms, fn) {
 	setInterval(() => !document.hidden && fn(), ms)
 }
 every(5000, loadBook)
+// Las operaciones por minuto cambian con el tiempo (lo reciente pesa más): se recalculan cada segundo
+every(1000, () => state.book && renderPulse(state.book))
 // Lo que empuja el servidor (al instante con Pro, cada 10 s sin Pro) se pinta en cuanto llega. Las dos mitades del
 // libro llegan seguidas: se espera un momento para pintarlas juntas
 let liveDraw = null

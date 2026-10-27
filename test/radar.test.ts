@@ -13,13 +13,14 @@ function setup() {
 			return { current_page: 1, per_page: 50, total: 1, data: [{ uuid: `o-${p.coin}-${p.type}`, type: p.type, coin: p.coin, amount: '10', receive: p.type === 'sell' ? '4800' : '4700', status: 'open', User: { username: 'ana', rating_avg: 4.9, rating_count: 20, _count: { P2P: 30, P2P_Peer: 0 } } }] }
 		},
 	}
-	const publicClient = { averages: async () => ({}), completedRates: async () => null }
+	const completed: string[] = []
+	const publicClient = { averages: async () => ({}), completedRates: async (coin: string) => (completed.push(coin), null) }
 	const market = new Market({
 		publicClient: publicClient as unknown as QvaPayClient,
 		readers: { get: async () => ({ sid: 's', client: client as unknown as QvaPayClient }), invalid: () => {} },
 		historyStore: { load: async () => [], append: async () => {} },
 	})
-	return { market, reads }
+	return { market, reads, completed }
 }
 
 test('radar: sus lados se leen antes que el mercado que se mira, y cada lectura le llega', async (t) => {
@@ -121,4 +122,14 @@ test('desde el servidor: la actividad del feed sustituye a la de comparar lectur
 	market.setTop({ ZELLE: { ask: [lv(1.02, true), lv(1.03)], bid: [lv(0.99)] } })
 	const z = market.overview().find((c) => c.tick === 'ZELLE')!
 	assert.deepEqual([z.ask, z.bid], [1.03, 0.99])
+})
+
+test('un mercado que se empieza a mirar pide sus completadas en la primera pasada (la intención depende de ellas)', async (t) => {
+	t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-27T12:00:00Z') })
+	const { market, completed } = setup()
+	market.touch('ETECSA')
+	assert.equal(market.snapshot('ETECSA').completedReady, false)
+	await market.tick()
+	assert.deepEqual(completed, ['ETECSA'])
+	assert.equal(market.snapshot('ETECSA').completedReady, true)
 })

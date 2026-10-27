@@ -7,7 +7,7 @@
 
 import { Broker, json } from '../src/broker/routes.ts'
 import { QvaPayClient } from '../src/qvapay/client.ts'
-import { COINS, Market, type Tick, type Watch, type WatchedSide } from '../src/terminal/market.ts'
+import { COINS, Market, type LiveStats, type Tick, type Watch, type WatchedSide } from '../src/terminal/market.ts'
 import { bestCross } from '../src/terminal/arbitrage.ts'
 import { CRITERIA, positions, rank, userStats } from '../src/terminal/ranking.ts'
 import { BrowserAccounts, TOKEN_KEY } from './accounts.ts'
@@ -101,6 +101,11 @@ function liveConnect() {
 		if (m.t === 'hello') livePro = !!m.pro
 		// La lista de mercados (el mejor precio de cada uno) y la actividad de un mercado
 		if (m.t === 'top') return market.setTop(m.top ?? {})
+		if (m.t === 'stats' && isTick(m.coin ?? null)) {
+			market.setStats(m.coin!, m as unknown as LiveStats)
+			window.dispatchEvent(new CustomEvent('tp:live', { detail: m.coin }))
+			return
+		}
 		if (m.t === 'act' && isTick(m.coin ?? null)) {
 			market.setActivity(m.coin!, m.items ?? [])
 			window.dispatchEvent(new CustomEvent('tp:live', { detail: m.coin }))

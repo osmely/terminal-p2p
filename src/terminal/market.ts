@@ -79,6 +79,8 @@ interface CoinState {
 	feedActivity: BookActivity[] | null
 	// Las mejores ofertas de cada lado que manda el servidor para la lista de mercados (de todos, se miren o no)
 	top: { ask: Level[]; bid: Level[]; at: number } | null
+	// Intención y actividad calculadas en el servidor (ver src/terminal/stats.ts)
+	stats: LiveStats | null
 	hotUntil: number
 }
 
@@ -106,6 +108,15 @@ export interface WatchedSide extends Watch {
 	error: string | null
 	// Mediana de lo completado en ese lado (para las reglas «% mejor que lo cerrado»)
 	reference: number | null
+}
+
+// Lo que manda el servidor de cada mercado para los indicadores: la intención (con el libro completo), la hora de cada
+// toma de la última media hora (el terminal la va pesando según su edad) y el ritmo normal (operaciones por minuto)
+export interface LiveStats {
+	intent: { score: number; depth: number; drift: number | null; bidUsd: number; askUsd: number; mid: number; doneMedian: number | null } | null
+	takes: number[]
+	pace: number | null
+	at: number
 }
 
 export interface HistoryPoint {
@@ -162,7 +173,7 @@ export class Market {
 		this.readers = opts.readers
 		this.historyStore = opts.historyStore
 		for (const c of COINS) {
-			this.coins.set(c.tick, { ask: emptySide(), bid: emptySide(), completed: null, completedAt: null, activity: [], feedActivity: null, top: null, hotUntil: 0 })
+			this.coins.set(c.tick, { ask: emptySide(), bid: emptySide(), completed: null, completedAt: null, activity: [], feedActivity: null, top: null, stats: null, hotUntil: 0 })
 			this.history.set(c.tick, [])
 		}
 	}
@@ -253,6 +264,10 @@ export class Market {
 				? { average: avg.average, buy: avg.average_buy, sell: avg.average_sell, count: avg.count, windowHours: avg.window_hours ?? null }
 				: null,
 			completed: c.completed,
+			// Ya se pidieron sus completadas (aunque no hubiera): hasta entonces la intención no se calcula
+			completedReady: c.completedAt !== null,
+			// Intención y actividad del servidor, si este mercado llega desde allí (si no, las calcula el terminal)
+			stats: this.liveCoins.has(tick) ? c.stats : null,
 			// Del servidor si este mercado llega desde allí (sabe si una oferta se tomó o la retiraron); si no, comparando lecturas
 			activity: (this.liveCoins.has(tick) && c.feedActivity ? c.feedActivity : c.activity).slice(0, 40),
 			activitySource: this.liveCoins.has(tick) && c.feedActivity ? 'feed' : 'book',
@@ -294,6 +309,12 @@ export class Market {
 		if (c && Array.isArray(items)) c.feedActivity = items.slice(0, 100)
 	}
 
+	// Intención y actividad de un mercado calculadas en el servidor
+	setStats(tick: Tick, stats: LiveStats) {
+		const c = this.coins.get(tick)
+		if (c && stats && Array.isArray(stats.takes)) c.stats = stats
+	}
+
 	// Las mejores ofertas de cada mercado, para la lista de mercados
 	setTop(top: Record<string, { ask: Level[]; bid: Level[] }>, at = Date.now()) {
 		for (const [tick, t] of Object.entries(top ?? {})) {
@@ -316,9 +337,16 @@ export class Market {
 		this.busy = true
 		try {
 			const now = Date.now()
+			// Un mercado que se mira por primera vez pide ya sus completadas: la intención y los precios atípicos dependen de
+			// ellas (sin esperar, al recargar se veía unos segundos un valor y luego otro)
+			const fresh = COINS.find((m) => this.coins.get(m.tick)!.hotUntil > now && !this.coins.get(m.tick)!.completedAt)
 			if (now - this.averagesAt > COMPLETED_EVERY_MS) {
 				this.averagesAt = now
 				this.averages = await this.publicClient.averages().catch((e) => (log.warn(`averages: ${e.message}`), this.averages))
+			}
+			if (fresh) {
+				this.lastCompletedCall = now
+				await this.refreshCompleted(fresh.tick)
 			} else if (now - this.lastCompletedCall > COMPLETED_GAP_MS) {
 				const due = COINS.map((m) => m.tick)
 					.filter((t) => {

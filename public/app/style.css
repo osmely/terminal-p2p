@@ -228,7 +228,7 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .gauge .g-ask { stroke: var(--ask); opacity: 0.75; }
 .gauge .g-mid { stroke: var(--line-strong); }
 .gauge .g-bid { stroke: var(--bid); opacity: 0.75; }
-.gauge .g-needle { stroke: var(--text); stroke-width: 2; stroke-linecap: round; transition: all 0.4s ease; }
+.gauge .g-needle { stroke: var(--text); stroke-width: 2; stroke-linecap: round; transform-box: view-box; transform-origin: 23px 23px; transition: transform 0.6s ease-in-out; }
 .gauge .g-hub { fill: var(--text); }
 /* La aguja toma el color de la zona: rojo si más venden, verde si más compran */
 .intent[data-side='ask'] .g-needle { stroke: var(--ask); }
@@ -238,7 +238,7 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .intent.off .gauge path { stroke: var(--line-strong); opacity: 1; }
 .intent.off .g-needle, .intent.off .g-hub { display: none; }
 /* Actividad: barras como las de la cobertura del móvil */
-.pulse { display: flex; flex-direction: column; gap: 3px; cursor: help; }
+.pulse { display: flex; flex-direction: column; gap: 3px; }
 .pulse label { font-size: 11px; color: var(--muted); font-weight: 500; }
 .pulse-body { display: flex; align-items: flex-end; gap: 3px; height: 27px; padding-bottom: 2px; box-sizing: border-box; }
 .pulse-body i { width: 5px; border-radius: 2px; background: var(--line-strong); transition: background 0.3s; }
