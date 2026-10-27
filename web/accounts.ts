@@ -17,6 +17,8 @@ export class BrowserAccounts implements AccountStore {
 	private readonly storage: TokenStorage
 	private readonly baseUrl: string
 	private acc: Account | null = null
+	// El token de la cuenta en memoria: si en el almacenamiento ya hay otro (o ninguno), se desconectó o cambió en otra pestaña
+	private token: string | null = null
 	private loading: Promise<Account | null> | null = null
 
 	constructor(opts: { storage: TokenStorage; baseUrl: string }) {
@@ -35,11 +37,14 @@ export class BrowserAccounts implements AccountStore {
 		this.clear()
 		safe(() => (opts.remember ? this.storage.local : this.storage.session).setItem(TOKEN_KEY, token))
 		this.acc = { sid: SID, me, client, print: await tokenPrint(token) }
+		// Sin almacenamiento (bloqueado, modo privado) el token vive solo en memoria y no hay otra pestaña que mirar
+		this.token = this.stored() === token ? token : null
 		return this.acc
 	}
 
 	async get(): Promise<Account | null> {
-		if (this.acc) return this.acc
+		if (this.acc && (this.token === null || this.stored() === this.token)) return this.acc
+		this.acc = null
 		// Varias llamadas a la vez comparten la misma carga
 		this.loading ??= this.load().finally(() => (this.loading = null))
 		return this.loading
@@ -52,15 +57,21 @@ export class BrowserAccounts implements AccountStore {
 
 	async disconnect() {
 		this.acc = null
+		this.token = null
 		this.clear()
 	}
 
+	private stored() {
+		return safe(() => this.storage.session.getItem(TOKEN_KEY) ?? this.storage.local.getItem(TOKEN_KEY))
+	}
+
 	private async load(): Promise<Account | null> {
-		const token = safe(() => this.storage.session.getItem(TOKEN_KEY) ?? this.storage.local.getItem(TOKEN_KEY))
+		const token = this.stored()
 		if (!token) return null
 		const client = new QvaPayClient({ token, dryRun: false, baseUrl: this.baseUrl })
 		try {
 			this.acc = { sid: SID, me: await client.me(), client, print: await tokenPrint(token) }
+			this.token = token
 			return this.acc
 		} catch (err) {
 			// Token revocado o caducado: se borra de este navegador

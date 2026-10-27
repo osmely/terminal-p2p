@@ -57,3 +57,28 @@ test('desconectar desde el terminal borra el token aunque la petición no lleve 
 	const me = await broker.handle(new Request('https://terminalp2p.com/api/broker/me'))
 	assert.equal((await me!.json()).connected, false)
 })
+
+test('otra pestaña desconecta o cambia de cuenta: esta deja de usar el token que tenía en memoria', async (t) => {
+	t.after(mockQvaPay(new Set(['tok', 'otro'])))
+	const local = memStorage()
+	const acc = new BrowserAccounts({ storage: { session: memStorage(), local }, baseUrl: 'https://x/qp' })
+	await acc.connect('browser', 'tok', { remember: true })
+	assert.ok(await acc.get())
+	// Otra pestaña desconecta: borra el token compartido
+	local.removeItem('tp.token')
+	assert.equal(await acc.get(), null)
+	// Otra pestaña conecta otro token: esta pasa a usarlo
+	const before = (await acc.connect('browser', 'tok', { remember: true })).print
+	local.setItem('tp.token', 'otro')
+	const now = await acc.get()
+	assert.ok(now)
+	assert.notEqual(now.print, before)
+})
+
+test('sin almacenamiento (bloqueado) la cuenta sigue conectada en memoria', async (t) => {
+	t.after(mockQvaPay(new Set(['tok'])))
+	const broken = { getItem: () => { throw new Error('bloqueado') }, setItem: () => { throw new Error('bloqueado') }, removeItem: () => { throw new Error('bloqueado') } }
+	const acc = new BrowserAccounts({ storage: { session: broken, local: broken }, baseUrl: 'https://x/qp' })
+	await acc.connect('browser', 'tok')
+	assert.ok(await acc.get())
+})

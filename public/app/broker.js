@@ -253,11 +253,14 @@ async function loadTrades() {
 		document.title = r.pending ? `(${r.pending}) ${BASE_TITLE}` : BASE_TITLE
 		deliver(r.alerts ?? [])
 	} catch (e) {
-		bk.trades = []
-		bk.openOffers = []
 		// La sesión ya no tiene cuenta (token revocado o desconectado en el servidor)
-		if (e.status === 401) return loadAccount()
-		$('myTrades').innerHTML = `<p class="empty">${esc(e.message)}</p>`
+		if (e.status === 401) {
+			bk.trades = []
+			bk.openOffers = []
+			return loadAccount()
+		}
+		// Un fallo puntual (QvaPay lento, límite de peticiones) no borra lo que ya se veía: la próxima lectura lo pone al día
+		if (!bk.tradesSeen) $('myTrades').innerHTML = `<p class="empty">${esc(e.message)}</p>`
 		return
 	} finally {
 		tradesBusy = false
@@ -383,9 +386,10 @@ async function refreshDetail() {
 		$('txRef').dispatchEvent(new Event('input')) // vuelve a activar "Ya pagué" si ya había referencia
 	}
 	if (keep.chatInput && $('chatInput')) $('chatInput').value = keep.chatInput
-	if (keep.seenMoney && $('seenMoney')) {
+	const release = $('modalBody').querySelector('[data-act="release"]')
+	if (keep.seenMoney && $('seenMoney') && release) {
 		$('seenMoney').checked = true
-		$('modalBody').querySelector('[data-act="release"]').disabled = false
+		release.disabled = false
 	}
 }
 
@@ -1145,6 +1149,8 @@ function renderManage(o) {
 			toast(r.message || 'Oferta cancelada')
 			loadTrades()
 			loadBook()
+			// La ventana pasa a enseñarla cancelada (sin botones que ya no sirven)
+			refresh()
 		} catch (e) {
 			toast(e.message, true)
 			// Si alguien la acaba de tomar, la oferta se recarga y enseña la operación
@@ -1828,8 +1834,15 @@ function bindBroker() {
 				const r = await api('/trade/action', { offer: cancel.dataset.cancelBtn, action: 'cancel_offer' })
 				toast(r.message || 'Oferta cancelada')
 				loadTrades()
+				loadBook()
 			} catch (err) {
 				toast(err.message, true)
+				// Si alguien la acaba de tomar, pasa a «En curso» y se abre la operación
+				if (err.status === 409) {
+					bk.tab = 'active'
+					await loadTrades()
+					showManageOffer(cancel.dataset.cancelBtn)
+				}
 			}
 			return
 		}

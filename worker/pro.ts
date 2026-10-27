@@ -133,21 +133,16 @@ export async function addDays(
 		days >= 0 ? Math.max(now, before ?? 0) + days * DAY_MS : before !== null && before > now ? Math.max(now, before + days * DAY_MS) : (before ?? now)
 	// El tipo de días que tiene ahora: el de lo último que sumó (los gratis permiten comprar más cuando quiera)
 	const plan = days > 0 && m.kind !== 'adjust' ? (m.plan ?? m.kind) : (old?.plan ?? m.plan ?? m.kind)
-	if (old)
-		await db
-			// Pagar reactiva una cuenta suspendida
-			.prepare(`UPDATE pro_licenses SET username = ?, plan = ?, expires_at = ?, updated_at = ?${m.kind === 'purchase' ? ', revoked = 0' : ''} WHERE uuid = ?`)
-			.bind(username, plan, after, now, id)
-			.run()
-	else
-		await db
-			.prepare('INSERT INTO pro_licenses (uuid, username, plan, expires_at, backup_hash, revoked, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 0, ?, ?)')
-			.bind(id, username, plan, after, now, now)
-			.run()
-	await db
-		.prepare('INSERT INTO pro_days (license, kind, days, expires_before, expires_after, checkout, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-		.bind(id, m.kind, days, before, after, m.checkout ?? null, m.note ?? null, m.actor, now)
-		.run()
+	// La cuenta y su movimiento van juntos (batch es una transacción): o quedan los dos o ninguno
+	await db.batch([
+		old
+			? // Pagar reactiva una cuenta suspendida
+				db.prepare(`UPDATE pro_licenses SET username = ?, plan = ?, expires_at = ?, updated_at = ?${m.kind === 'purchase' ? ', revoked = 0' : ''} WHERE uuid = ?`).bind(username, plan, after, now, id)
+			: db.prepare('INSERT INTO pro_licenses (uuid, username, plan, expires_at, backup_hash, revoked, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 0, ?, ?)').bind(id, username, plan, after, now, now),
+		db
+			.prepare('INSERT INTO pro_days (license, kind, days, expires_before, expires_after, checkout, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+			.bind(id, m.kind, days, before, after, m.checkout ?? null, m.note ?? null, m.actor, now),
+	])
 	return { license: id, before, after }
 }
 
@@ -300,7 +295,14 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 		.bind(key, now, payer.username, payer.uuid, c.id)
 		.run()
 	if (!marked.meta?.changes) return true
-	const r = await addDays(db, owner, { kind: 'purchase', days: PLANS[c.plan].days, plan: c.plan, checkout: c.id, note: `${PLANS[c.plan].name} · ${c.amount} USD · pagó @${payer.username}`, actor: 'system' }, now)
+	let r: Awaited<ReturnType<typeof addDays>>
+	try {
+		r = await addDays(db, owner, { kind: 'purchase', days: PLANS[c.plan].days, plan: c.plan, checkout: c.id, note: `${PLANS[c.plan].name} · ${c.amount} USD · pagó @${payer.username}`, actor: 'system' }, now)
+	} catch (err) {
+		// Sin sus días no puede quedar como pagada: vuelve a pendiente y el próximo repaso la activa
+		await db.prepare("UPDATE pro_checkouts SET status = 'pending', license = NULL, paid_at = NULL WHERE id = ?").bind(c.id).run()
+		throw err
+	}
 	const other = owner.toLowerCase() !== payer.username.toLowerCase() ? ` (pagó @${tgEsc(payer.username)})` : ''
 	await notify(env, `💰 <b>Pago nuevo</b>\n@${tgEsc(owner)} compró <b>${PLANS[c.plan].name}</b> · ${c.amount} USD${other}\nTiene Pro hasta el ${hDay(r.after)}`, `/admin/pro?u=${encodeURIComponent(owner)}`, fetcher)
 	await tellPaid(env, key, owner, PLANS[c.plan].days, c.amount, r.after, fetcher)
@@ -494,8 +496,12 @@ export async function cleanupPro(db: D1, now: number) {
 // Los 30 días gratis. Las llaves dicen quién ya los usó (una sola vez cada una); si alguna ya se usó, no hay otro
 export async function startTrial(db: D1, username: string, keys: string[], now: number) {
 	for (const k of keys) if (await db.prepare('SELECT 1 FROM pro_trials WHERE key = ?').bind(k).first()) throw new ProError(409, 'Ya usaste tus 30 días gratis')
-	const { license } = await addDays(db, username, { kind: 'trial', days: TRIAL_DAYS, note: 'Días gratis activados', actor: 'system' }, now)
-	for (const k of keys) await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(k, license, now).run()
+	// Las llaves se apuntan antes que los días: de dos peticiones a la vez, solo la que apunta la primera los recibe
+	const license = accountOf(username)
+	const first = await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(keys[0], license, now).run()
+	if (!first.meta?.changes) throw new ProError(409, 'Ya usaste tus 30 días gratis')
+	for (const k of keys.slice(1)) await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(k, license, now).run()
+	await addDays(db, username, { kind: 'trial', days: TRIAL_DAYS, note: 'Días gratis activados', actor: 'system' }, now)
 	return license
 }
 

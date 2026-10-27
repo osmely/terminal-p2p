@@ -334,6 +334,24 @@ test('factura pagada sin que nadie la mire: la confirma la consulta de estado de
 	assert.equal(s.q.calls.length, before)
 })
 
+test('si la base falla al sumar los días, el pago no queda como pagado sin ellos: vuelve a pendiente y se activa luego', async () => {
+	const { settlePending } = await import('../worker/pro.ts')
+	const s = setup()
+	await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	s.q.pay('inv-1', 'ana')
+	const batch = s.env.DB.batch
+	s.env.DB.batch = async () => {
+		throw new Error('D1 caída')
+	}
+	await settlePending(s.env, s.now(), {}, s.q.fetcher)
+	assert.equal(s.db.prepare("SELECT status FROM pro_checkouts WHERE invoice = 'inv-1'").get()?.status, 'pending')
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM pro_days').get()?.n, 0)
+	s.env.DB.batch = batch
+	await settlePending(s.env, s.now(), {}, s.q.fetcher)
+	assert.equal(s.db.prepare("SELECT status FROM pro_checkouts WHERE invoice = 'inv-1'").get()?.status, 'paid')
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
+})
+
 test('pide una factura, luego otra, y paga la primera: la pantalla que espera la segunda también se entera', async () => {
 	const s = setup()
 	const first = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
