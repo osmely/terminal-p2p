@@ -13,6 +13,7 @@
 	<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)" />
 	<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)" />
 	<script src="/theme.js"></script>
+	<script src="/hit.js" defer></script>
 	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 	<link rel="stylesheet" href="/vendor/fonts.css" />
 	<link rel="stylesheet" href="/site.css" />
@@ -315,7 +316,7 @@
 					<li><b>Token solo en tu navegador.</b> Se borra al cerrar la pestaña, salvo que elijas recordarlo.</li>
 					<li><b>Solo acciones del P2P.</b> El terminal no puede transferir ni retirar: solo publicar y tomar ofertas, pagar, liberar, chatear y calificar, y cada paso lo confirmas tú.</li>
 					<li><b>Nadie ve lo tuyo.</b> El libro se lee con el token de quien mira; tus datos no se comparten con otros usuarios.</li>
-					<li><b>Sin rastreadores.</b> La única cookie es la de tu sesión, que comparten el terminal y el simulador: lleva la huella de tu token, nunca el token. Sin analítica de visitas, y las fuentes se sirven desde este dominio. Solo se cuentan, de forma anónima, las acciones del P2P (publicar, tomar, completar), sin usuario, token ni IP.</li>
+					<li><b>Sin rastreadores.</b> La única cookie es la de tu sesión, que comparten el terminal y el simulador: lleva la huella de tu token, nunca el token. Las fuentes se sirven desde este dominio. Solo se cuentan, de forma anónima, las visitas de cada día (y por qué enlace llegaste) y las acciones del P2P (publicar, tomar, completar): sin usuario, token, IP ni ningún identificador.</li>
 					<li><b>Código abierto.</b> Licencia Apache 2.0: puedes revisarlo, o desplegar tu propia copia.<span data-pro> Las funciones Pro van aparte, pero lo que mueve dinero sigue en el código abierto.</span></li>
 				</ul>
 			</div>
@@ -351,7 +352,7 @@
 				</details>
 				<details>
 					<summary>¿Qué guarda el servidor?</summary>
-					<p>Datos públicos del mercado (cada 10 minutos, los promedios que QvaPay publica sin cuenta, y la tasa del mercado informal de elTOQUE) y contadores anónimos de las acciones del P2P hechas desde el terminal: tipo de acción, mercado, lado y monto. Sin usuario, token ni IP; la oferta va cifrada de forma irreversible, solo para saber si una oferta publicada aquí llegó a completarse. Si te haces Pro, tu usuario de QvaPay, tu plan y la huella de tus dispositivos; nunca tu token.</p>
+					<p>Datos públicos del mercado (cada 10 minutos, los promedios que QvaPay publica sin cuenta, y la tasa del mercado informal de elTOQUE) y contadores anónimos de las acciones del P2P hechas desde el terminal: tipo de acción, mercado, lado y monto. Sin usuario, token ni IP; la oferta va cifrada de forma irreversible, solo para saber si una oferta publicada aquí llegó a completarse. Y cuántas visitas hubo cada día y por qué enlace llegaron: solo esas sumas, sin cookies ni identificadores. Si te haces Pro, tu usuario de QvaPay, tu plan y la huella de tus dispositivos; nunca tu token.</p>
 				</details>
 			</div>
 		</section>

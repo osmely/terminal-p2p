@@ -14,6 +14,7 @@ import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, tgEsc, type AlertEnv } from './alerts.ts'
 import { connectBot, linked, linkUrl, tellPaid, tellRefund, unlink, botWebhook } from './userbot.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
+import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
 
 export interface ProEnv extends AlertEnv {
 	DB: D1
@@ -27,6 +28,8 @@ export interface ProEnv extends AlertEnv {
 	PRO?: { get(key: string): Promise<string | null>; put?(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void> }
 	// Clave del panel (la misma de las métricas)
 	METRICS_KEY?: string
+	// El grupo de la comunidad, donde sale la «Tasa QvaPay del día»
+	COMMUNITY_CHAT?: string
 }
 
 export const PLANS = {
@@ -1015,7 +1018,7 @@ async function reportsPage(env: ProEnv, notice: string, now: number) {
 const AUDIT_NAME: Record<string, string> = {
 	days: 'Días', refund: 'Devolución (directa)', 'refund-approve': 'Devolución aprobada', 'refund-reject': 'Devolución rechazada', 'refund-transfer': 'Devolución transferida', note: 'Nota',
 	revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
-	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba',
+	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba', 'daily-on': 'Encender tasa del día', 'daily-off': 'Apagar tasa del día', 'daily-test': 'Probar tasa del día',
 }
 
 async function auditPage(env: ProEnv, notice: string, now: number) {
@@ -1170,6 +1173,15 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 				notice = `<p class="ok">${action === 'pro-on' ? 'Pro encendido: ya se ve en la web, el terminal y el simulador' : 'Pro apagado: no se anuncia ni se ofrece en ningún sitio'} (en menos de un minuto en todas partes).</p>`
 			}
 			// Pausar o reanudar la publicación de ofertas desde el terminal
+			// La «Tasa QvaPay del día» en el grupo de la comunidad: encenderla, apagarla y probarla en tu grupo de avisos
+			if (action === 'daily-on' || action === 'daily-off') {
+				await setDailyPost(db, action === 'daily-on', now)
+				notice = `<p class="ok">${action === 'daily-on' ? `La tasa del día saldrá cada mañana a las ${POST_HOUR}:00 (hora de Cuba) en el grupo de la comunidad` : 'La tasa del día deja de publicarse'}.</p>`
+			}
+			if (action === 'daily-test') {
+				const r = await testDailyPost(env, now, fetcher)
+				notice = r.ok ? '<p class="ok">Prueba enviada a tu grupo de avisos: así saldría hoy.</p>' : `<p class="note">No salió: ${escHtml(r.description)}</p>`
+			}
 			if (action === 'orders-pause' || action === 'orders-resume') {
 				await setOrdersPaused(db, action === 'orders-pause', now)
 				notice = `<p class="ok">${action === 'orders-pause' ? 'Publicar ofertas desde el terminal queda en pausa: quien lo intente ve el aviso de ajustes' : 'Publicar ofertas desde el terminal vuelve a funcionar'} (en menos de un minuto en todas partes).</p>`
@@ -1316,6 +1328,18 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 	const proOn = await proEnabled(db, now)
 	const tgUsers = (await db.prepare('SELECT COUNT(*) AS n FROM pro_telegram').first<{ n: number }>())?.n ?? 0
 	const paused = await ordersPaused(db, now)
+	const daily = await dailyPostOn(db)
+	const posted = (await lastPosts(db)).results.filter((p) => p.message_id)
+	const dailyNote = !env.COMMUNITY_CHAT
+		? 'En este entorno no hay grupo de la comunidad configurado (COMMUNITY_CHAT): solo se puede probar.'
+		: `${daily ? `Sale cada mañana a las ${POST_HOUR}:00 (hora de Cuba) en el grupo de la comunidad.` : 'Apagada: no se publica nada.'} «Probar» manda el mensaje de hoy a tu grupo de avisos.${posted.length ? ` Última: ${posted[0].day}.` : ''}`
+	const dailyForm = `<form method="post" class="flag${daily && env.COMMUNITY_CHAT ? ' on' : ''}"><b>Tasa QvaPay del día ${daily && env.COMMUNITY_CHAT ? 'encendida' : 'apagada'}</b><span class="note">${dailyNote}</span><button class="ghost" name="action" value="daily-test">Probar</button>${
+		env.COMMUNITY_CHAT
+			? daily
+				? '<button class="ghost" name="action" value="daily-off">Apagar</button>'
+				: `<button name="action" value="daily-on" onclick="return confirm('¿Publicar cada mañana la tasa del día en el grupo de la comunidad?')">Encender</button>`
+			: ''
+	}</form>`
 	const toggles = `<div class="toggles">${
 		proOn
 			? `<form method="post" class="flag on"><b>Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis para quien los active) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
@@ -1328,7 +1352,7 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 		env.TELEGRAM_BOT_TOKEN
 			? `<form method="post" class="flag${tgUsers ? ' on' : ''}"><b>Avisos a los usuarios: ${tgUsers === 1 ? '1 conectado' : `${tgUsers} conectados`}</b><span class="note">Quien lo conecta en «Mi cuenta» recibe la confirmación de cada pago, el aviso 3 días antes de que se le acaben los días y cada paso de su devolución. «Conectar el bot» hace que el bot responda desde este entorno (staging y producción comparten bot: vale el último donde se pulsó).</span><button class="ghost" name="action" value="bot-connect">Conectar el bot</button></form>`
 			: ''
-	}</div>`
+	}${dailyForm}</div>`
 	const upkeep = `<div class="stack">
 		<form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y apunta en Pendientes las que aquí no constan">Repasar pagos con QvaPay</button></form>
 		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>

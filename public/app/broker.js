@@ -145,8 +145,11 @@ async function loadAccount() {
 		bk.acct = { connected: false, dryRun: true }
 	}
 	renderAccount()
-	if (bk.acct.connected) loadTrades()
-	else renderTrades()
+	if (bk.acct.connected) {
+		loadTrades()
+		// Contador anónimo de cuentas conectadas por día (hit.js): sin usuario ni nada que lo identifique
+		window.TPHit?.connected()
+	} else renderTrades()
 	if (typeof refreshPro === 'function') refreshPro()
 }
 

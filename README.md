@@ -13,7 +13,7 @@ Libro de órdenes por moneda (CUP Transferencia, Saldo ETECSA, Tarjeta Clásica,
 - **El token** se guarda solo en tu navegador: se borra al cerrar la pestaña, salvo que elijas recordarlo. "Desconectar" lo borra.
 - **Sin custodia:** el dinero de cada operación queda en el escrow de QvaPay.
 - Sin cookies ni rastreadores, y una política de seguridad estricta que solo admite scripts del propio dominio.
-- **Métricas anónimas:** el servidor cuenta las acciones del P2P hechas desde el terminal (publicar, tomar, pagar, liberar, completar) con su mercado, lado y monto, sin usuario, token ni IP. La oferta va como huella SHA-256, solo para unir "publicada" con "completada". El panel es privado (`/admin/metrics`, con la clave del secreto `METRICS_KEY`).
+- **Métricas anónimas:** el servidor cuenta las acciones del P2P hechas desde el terminal (publicar, tomar, pagar, liberar, completar) con su mercado, lado y monto, sin usuario, token ni IP. La oferta va como huella SHA-256, solo para unir "publicada" con "completada". También suma por día las visitas a la web, al terminal y al simulador, las cuentas conectadas y por qué enlace llegaron (`?de=…`), sin cookies ni identificadores (`public/app/hit.js`, `worker/hits.ts`). El panel es privado (`/admin/metrics`, con la clave del secreto `METRICS_KEY`).
 
 ## Mis operaciones
 

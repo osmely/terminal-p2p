@@ -38,8 +38,9 @@
 	// Módulo Pro (de un repositorio privado): se sube aquí y el Worker lo entrega solo con licencia
 	"kv_namespaces": [{ "binding": "PRO", "id": "<id de tu espacio KV para el módulo Pro>" }],
 	// ALERT_CHAT: el chat del grupo privado de avisos de Pro (con el bot dentro); el token del bot es secreto
+	// COMMUNITY_CHAT: el grupo público de la comunidad, donde sale la «Tasa QvaPay del día» (se enciende en el panel)
 	// (npx wrangler secret put TELEGRAM_BOT_TOKEN)
-	"vars": { "QVAPAY_APP_ID": "<app-id de tu app de comerciante de QvaPay>", "ALERT_CHAT": "<id del grupo de avisos, p. ej. -100123…>" },
+	"vars": { "QVAPAY_APP_ID": "<app-id de tu app de comerciante de QvaPay>", "ALERT_CHAT": "<id del grupo de avisos, p. ej. -100123…>", "COMMUNITY_CHAT": "<id del grupo de la comunidad>" },
 	"triggers": { "crons": ["* * * * *"] },
 	// Opcional: la referencia del mercado informal de elTOQUE necesita su clave como secreto
 	// (npx wrangler secret put ELTOQUE_TOKEN). Sin ella, el cron solo guarda lo de QvaPay.

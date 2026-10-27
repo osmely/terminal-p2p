@@ -296,14 +296,15 @@ const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '�
 const coinName = (t: string) => COINS.find((c) => c.tick === t)?.name ?? 'Sin identificar'
 const EVENT_NAMES: Record<string, string> = { create: 'Publicar', take: 'Tomar', paid: 'Marcar pagado', release: 'Liberar', cancel: 'Cancelar', rate: 'Calificar', completed: 'Completada' }
 
-export function panelHtml(s: Summary) {
+export function panelHtml(s: Summary, visits = '') {
 	const card = (label: string, value: string, sub = '') => `<div class="card"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
 	const step = (label: string, value: number, of: number | null) => `<li><b>${n(value)}</b><span>${label}</span>${of != null ? `<em>${pct(value, of)}</em>` : ''}</li>`
 	const ranges = [7, 30, 90, 365].map((d) => `<a href="?days=${d}" class="${d === s.days ? 'on' : ''}">${d === 365 ? '1 año' : `${d} días`}</a>`).join('')
 	const errors = Object.entries(s.errors)
 	const table = (head: string[], rows: string) =>
 		rows ? `<div class="wrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="empty">Aún no hay acciones en este periodo.</p>'
-	return `${pageHead('Métricas', 'Acciones del P2P hechas desde el terminal. Anónimas: sin usuario, token ni IP.', `<nav class="ranges">${ranges}</nav>`)}
+	return `${pageHead('Métricas', 'Visitas y acciones del P2P hechas desde el terminal. Anónimas: sin usuario, token, IP ni cookies.', `<nav class="ranges">${ranges}</nav>`)}
+${visits ? `<h2 class="sec-title">Visitas</h2>${visits}<h2 class="sec-title">Acciones del P2P</h2>` : ''}
 <div class="cards">
 ${card('Ofertas publicadas aquí', n(s.created))}
 ${card('Operaciones tomadas aquí', n(s.taken))}

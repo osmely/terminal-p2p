@@ -65,6 +65,7 @@ svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:
 .ph-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .crumb{display:inline-flex;align-items:center;gap:6px;margin-bottom:10px;color:var(--muted);font-size:13px}.crumb:hover{color:var(--text)}
 h1{margin:0;font-size:22px}h2{margin:0;font-size:15px;font-weight:600}
+h2.sec-title{margin:22px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .note{color:var(--muted);font-size:12.5px}p.note{margin:8px 0 0}
 
 .panel{margin-top:20px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}

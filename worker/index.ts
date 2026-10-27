@@ -17,6 +17,8 @@ import { adminPage, askKey } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 import { expiryReminders } from './userbot.ts'
+import { dailyPost } from './community.ts'
+import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
@@ -40,6 +42,8 @@ interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
 	// Avisos al grupo privado de Telegram (ver alerts.ts): el token es secreto, el chat una variable
 	TELEGRAM_BOT_TOKEN?: string
 	ALERT_CHAT?: string
+	// El grupo de la comunidad, donde sale la «Tasa QvaPay del día» (ver community.ts)
+	COMMUNITY_CHAT?: string
 }
 
 interface RateLimiter {
@@ -69,7 +73,7 @@ const SECURITY_HEADERS: Record<string, string> = {
 const RATES_TTL_S = 300
 const INFORMAL_TTL_S = 600
 // La landing y el simulador reutilizan estos archivos del terminal en vez de duplicarlos
-const SHARED = ['/vendor/', '/favicon.svg', '/theme.js', '/resize.js']
+const SHARED = ['/vendor/', '/favicon.svg', '/theme.js', '/resize.js', '/hit.js']
 
 // app.terminalp2p.com (app.localhost en desarrollo) → terminal; sim.* → simulador; el resto → landing
 const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : host.startsWith('sim.') ? 'sim' : 'site')
@@ -105,6 +109,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		return secure(res)
 	}
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
+	if (url.pathname === '/data/hit' && req.method === 'POST') return secure(await hit(req, url, env))
 	// Panel único en el dominio del terminal
 	if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/')))
 		return Response.redirect(`${url.origin.replace('://sim.', '://app.')}/admin`, 301)
@@ -213,6 +218,12 @@ export default {
 			} catch (err) {
 				console.error(`pro, recordatorios: ${(err as Error).message}`)
 			}
+		// A las 9:00 de Cuba, la «Tasa QvaPay del día» en el grupo de la comunidad (si está encendida en el panel)
+		try {
+			await dailyPost(env, at)
+		} catch (err) {
+			console.error(`tasa del día: ${(err as Error).message}`)
+		}
 		if (!tenth) return
 		try {
 			await collect(env.DB, at)
@@ -298,12 +309,29 @@ async function event(req: Request, url: URL, env: Env) {
 	return new Response(null, { status: 204 })
 }
 
+// Visita anónima (public/app/hit.js): solo suma 1 a un contador del día, sin cookies, IP ni identificadores
+async function hit(req: Request, url: URL, env: Env) {
+	if (req.headers.get('origin') !== url.origin) return jsonError(403, 'Origen no permitido')
+	if (!(await underLimit(env.EVENT_LIMIT, req))) return jsonError(429, 'Demasiados avisos')
+	const body = await req.text()
+	if (body.length > 512) return jsonError(413, 'Cuerpo demasiado grande')
+	let h
+	try {
+		h = cleanHit(JSON.parse(body))
+	} catch {
+		h = null
+	}
+	if (!h) return jsonError(400, 'Visita no válida')
+	await saveHit(env.DB, h)
+	return new Response(null, { status: 204 })
+}
+
 // Panel privado de métricas, con HTTP Basic (cualquier usuario y la clave METRICS_KEY)
 async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
-	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days)))
+	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days), hitsHtml(await loadHits(env.DB, days))))
 }
 
 // La tasa informal más reciente (para la landing y la lectura del mercado), cacheada 10 minutos
