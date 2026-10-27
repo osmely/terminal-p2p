@@ -141,6 +141,13 @@ test('comprar: factura de QvaPay y quién pagó lo confirma QvaPay', async () =>
 	assert.deepEqual({ ...s.db.prepare('SELECT username, plan FROM pro_licenses').get() }, { username: 'ana', plan: 'month' })
 })
 
+test('el paquete de 7 días: factura de 0,99 USD y una semana de Pro', async () => {
+	const s = setup()
+	const { result } = await buy(s, P1, 'week')
+	assert.equal(s.q.invoices.get('inv-1')?.amount, 0.99)
+	assert.equal(result.expiresAt, T0 + 7 * 86_400_000)
+})
+
 test('renovar suma el periodo', async () => {
 	const s = setup()
 	await buy(s)

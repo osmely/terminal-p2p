@@ -16,6 +16,7 @@ const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname)
 
 // Lo que se compra son días de Pro: se suman a los que te queden
 const PRO_PLANS = [
+	['week', '7 días', '0,99 USD', '0,14 USD al día'],
 	['month', '30 días', '1,99 USD', '0,07 USD al día'],
 	['year', '365 días', '20 USD', '0,05 USD al día'],
 ]

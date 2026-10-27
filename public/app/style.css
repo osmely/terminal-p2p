@@ -762,7 +762,7 @@ a.icon-btn { text-decoration: none; }
 .pro-feats li { display: flex; gap: 10px; align-items: flex-start; }
 .pro-feats p { margin: 2px 0 0; font-size: 12.5px; }
 .pro-ic { flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--warn) 14%, transparent); }
-.pro-plans { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pro-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px; }
 .pro-more summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .pro-more[open] summary { margin-bottom: 10px; }
 .pro-more .hint { margin-top: 8px; }

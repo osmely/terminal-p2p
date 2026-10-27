@@ -34,6 +34,7 @@ export interface ProEnv extends AlertEnv {
 }
 
 export const PLANS = {
+	week: { usd: 0.99, days: 7, name: '7 días' },
 	month: { usd: 1.99, days: 30, name: '30 días' },
 	year: { usd: 20, days: 365, name: '365 días' },
 } as const
