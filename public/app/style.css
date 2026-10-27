@@ -747,6 +747,33 @@ a.icon-btn { text-decoration: none; }
 .pro-plan:hover { border-color: var(--warn); }
 .pro-plan .mono { font-size: 18px; font-weight: 600; }
 .pro-plan small { color: var(--muted); font-size: 11.5px; }
+/* Radar de Pro: el botón del libro (con un punto que late mientras vigila) y su ventana */
+.radar-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.radar-btn.on { color: var(--bid); border-color: color-mix(in srgb, var(--bid) 50%, var(--line)); background: var(--bid-bg); }
+.radar-btn.on .radar-dot { background: var(--bid); animation: radar-pulse 1.6s ease-out infinite; }
+@keyframes radar-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--bid) 60%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+@media (prefers-reduced-motion: reduce) { .radar-btn.on .radar-dot { animation: none; } }
+.radar-state { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.radar-state .hint { margin: 0; }
+.radar-state .btn { flex: none; }
+.radar-tip { display: flex; align-items: center; gap: 7px; margin: 0; }
+.radar-tip svg { flex: none; color: var(--accent); }
+.radar-box h3 { margin: 0; }
+.radar-box .up { color: var(--bid); font-family: var(--sans); }
+.radar-box .down { color: var(--ask); }
+.radar-rules { display: flex; flex-direction: column; gap: 8px; }
+.radar-rule { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); }
+.radar-rule .hint { margin: 3px 0 0; }
+.radar-rule .row-btns { flex: none; gap: 12px; }
+.radar-limits { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--warn-bg); }
+.radar-limits .hint { margin: 0; }
+.radar-found { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.radar-found li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; }
+@media (max-width: 520px) {
+	.radar-found li { grid-template-columns: auto 1fr; }
+	.radar-rule { flex-direction: column; }
+}
+
 /* En el móvil la barra no da para más: solo la estrella (dorada si eres Pro) */
 @media (max-width: 520px) {
 	.pro-chip { width: 32px; padding: 0; justify-content: center; }

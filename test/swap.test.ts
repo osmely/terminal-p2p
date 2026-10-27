@@ -275,3 +275,51 @@ test('orden inteligente: el resto se publica siempre entero, aunque se pida por 
 	// Pública salvo que se pida privada
 	assert.equal(body.private, 0)
 })
+
+// Radar de Pro: una toma suelta, con las mismas comprobaciones que la orden inteligente y sin publicar nada
+async function radarSetup() {
+	const s = await smartSetup()
+	const broker = new Broker({ accounts: { get: async () => ({ sid: 'sid1', me: await s.fake.client.me(), client: s.fake.client }) } as unknown as AccountStore, market: { wake() {} }, dryRun: false })
+	const post = async (body: unknown) => {
+		const res = (await broker.handle(new Request('https://app.terminalp2p.com/api/broker/radar/take', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Broker': '1' }, body: JSON.stringify(body) })))!
+		return { status: res.status, body: await res.json() }
+	}
+	return { fake: s.fake, post }
+}
+
+test('radar: toma la oferta que cumplió la regla y devuelve a quién pagar, sin publicar nada', async () => {
+	const { fake, post } = await radarSetup()
+	const r = (await post({ offer: 's2', amount: 50, side: 'buy', coin: 'BANK_CUP', price: 1050 })).body
+	assert.equal(r.ok, true)
+	assert.equal(r.step.status, 'taken')
+	assert.equal(r.step.order, 'ord-s2')
+	assert.equal(r.step.pay.coinAmount, 52500)
+	assert.deepEqual(fake.calls, ['apply:s2:50'])
+})
+
+test('radar: si la oferta cambió de precio o su dueño no tiene historial, no se toma', async () => {
+	const { fake, post } = await radarSetup()
+	fake.offers.s1.receive = '21400' // 1070 por USD: ya no llega a tu 1050
+	const r = (await post({ offer: 's1', amount: 20, side: 'buy', coin: 'BANK_CUP', price: 1050 })).body
+	assert.deepEqual([r.ok, r.step.status], [false, 'skipped'])
+	assert.match(r.step.error, /cambió de precio/)
+	fake.offers.s2.User = { uuid: 'u-nuevo', username: 'nuevo', rating_count: 0, _count: { P2P: 2, P2P_Peer: 0 } }
+	const r2 = (await post({ offer: 's2', amount: 50, side: 'buy', coin: 'BANK_CUP', price: 1050 })).body
+	assert.match(r2.step.error, /poco historial/)
+	assert.deepEqual(fake.calls, [])
+})
+
+test('radar vendiendo: pide tus datos, nunca más que tu saldo y se los manda al comprador', async () => {
+	const { fake, post } = await radarSetup()
+	const sell = { offer: 'b1', amount: 50, side: 'sell', coin: 'BANK_CUP', price: 1040 }
+	assert.equal((await post(sell)).status, 400)
+	const details = [{ label: 'Tarjeta', value: '9200 1111' }]
+	const poor = (await post({ ...sell, amount: 400, details })).body
+	assert.equal(poor.ok, false)
+	assert.match(poor.error, /necesitas 400 USD/)
+	const r = (await post({ ...sell, details })).body
+	assert.deepEqual([r.ok, r.chatSent], [true, true])
+	assert.equal(fake.calls[0], 'apply:b1:undefined')
+	assert.match(fake.calls[1], /^chat:b1:Hola\. Vendo 50 USD[\s\S]*Tarjeta: 9200 1111/)
+	noCancels(fake.calls)
+})

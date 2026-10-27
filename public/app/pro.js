@@ -21,6 +21,8 @@ const PRO_PLANS = [
 ]
 const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
+	['⚡', 'Libro en tiempo real', 'cada oferta nueva te llega al instante, empujada por el servidor, sin esperar a la próxima lectura (y sin gastar las consultas de tu cuenta)'],
+	['📡', 'Radar', 'vigila hasta 3 mercados mientras el terminal está abierto, aunque sea en otra pestaña, y te avisa con sonido, notificación y por Telegram cuando aparece una oferta con tus reglas. Si quieres, la toma sola, con tu tope del día'],
 	['🔀', 'Libro cruzado', 'cuando alguien vende más barato de lo que otro compra: si lo puedes aprovechar, cuántos USD encajan y cuánto te quedaría'],
 	['📊', 'Compras y ventas en el gráfico', 'cada barra de operaciones por día partida en compras (verde) y ventas (rojo), para ver hacia dónde se mueve el mercado'],
 	['📈', 'Todos los mercados del simulador', 'sin Pro, BTC y ETH; con Pro también SOL, XRP, BNB, DOGE, SUI, PEPE y TAO (sim.terminalp2p.com)'],
@@ -73,6 +75,9 @@ function applyPro(s) {
 		}
 		document.head.appendChild(s2)
 	}
+	// El libro llega del servidor con tu cuenta conectada: con Pro, al instante; sin Pro, cada 10 s
+	if (bk.acct.connected && pro.print) TPApi.live?.start(pro.print, pro.active)
+	else TPApi.live?.stop()
 	renderProChip()
 	document.dispatchEvent(new CustomEvent('tp:pro', { detail: pro }))
 }
@@ -125,6 +130,9 @@ function renderProChip() {
 	b.hidden = !bk.acct.connected || !pro.enabled
 	b.classList.toggle('on', pro.active)
 	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? daysText(daysLeft()) : pro.canTrial ? 'Probar Pro' : 'Pro'}</span>`
+	// El radar es del módulo Pro (TPProRadar); sin Pro, su botón abre la ventana de Pro
+	const r = $('radarBtn')
+	if (r) r.hidden = b.hidden
 	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? 'Prueba Pro 30 días gratis' : 'Terminal P2P Pro'
 }
 
@@ -259,6 +267,7 @@ function showWelcome() {
 }
 
 document.addEventListener('click', (e) => e.target.closest('#proBtn') && showPro())
+document.addEventListener('click', (e) => e.target.closest('#radarBtn') && (pro.active && window.TPProRadar ? window.TPProRadar.open() : showPro()))
 // Cada 5 minutos y al volver a la pestaña: si se apaga o enciende Pro en el panel, o se te acaban los días, se
 // nota sin recargar (y la licencia firmada de un día se renueva sola)
 setInterval(() => !document.hidden && bk.acct.connected && refreshPro(), 5 * 60_000)

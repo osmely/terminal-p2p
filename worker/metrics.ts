@@ -66,7 +66,7 @@ const cleanUsd = (v: unknown) => {
 // Datos que el navegador añade a sus escrituras para el relé (X-TP-Meta). No se reenvían a QvaPay
 export function parseMeta(header: string | null) {
 	const p = new URLSearchParams(header ?? '')
-	return { coin: cleanCoin(p.get('coin')), side: cleanSide(p.get('side')), usd: cleanUsd(p.get('usd')), via: ['swap', 'smart'].includes(p.get('via') ?? '') ? (p.get('via') as string) : '' }
+	return { coin: cleanCoin(p.get('coin')), side: cleanSide(p.get('side')), usd: cleanUsd(p.get('usd')), via: ['swap', 'smart', 'radar'].includes(p.get('via') ?? '') ? (p.get('via') as string) : '' }
 }
 
 const tryJson = (s: string | undefined) => {

@@ -12,9 +12,10 @@ import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, tgEsc, type AlertEnv } from './alerts.ts'
-import { connectBot, linked, linkUrl, tellPaid, tellRefund, unlink, botWebhook } from './userbot.ts'
+import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tellPaid, tellRefund, tellUser, unlink, botWebhook } from './userbot.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
+import { liveSimulate, liveStatus, type LiveEnv } from './livebook.ts'
 
 export interface ProEnv extends AlertEnv {
 	DB: D1
@@ -48,6 +49,9 @@ export const TRIAL_PER_DAY = 1000
 // Facturas pendientes de la última hora en total: más es un ataque, no compras
 export const PENDING_MAX = 300
 const DAY_MS = 86_400_000
+const HOUR_MS = 3_600_000
+// Avisos del radar por Telegram que puede recibir una cuenta en una hora
+const RADAR_TG_PER_HOUR = 30
 const LICENSE_MS = DAY_MS // la licencia firmada vale un día y el terminal la renueva sola
 const CHECKOUT_MS = 60 * 60_000
 // Con días de Pro (pagados o regalados) solo se compran más cuando quedan pocos; con los días gratis, siempre
@@ -754,6 +758,25 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		}
 		if (route === 'POST /pro/telegram/webhook') return botWebhook(req, env, now)
 
+		// Radar: el terminal te avisa por Telegram de una oferta que encontró o tomó. Solo con Pro activo, una vez por
+		// oferta (aunque el radar corra en varias pestañas) y con tope por hora
+		if (route === 'POST /pro/radar/alert') {
+			const b = await readBody(req)
+			const l = await licenseOfPrint(db, printOf(b.print), now)
+			if (!l) return json(403, { error: 'El radar es parte de Pro' })
+			const hit = cleanRadarHit(b)
+			if (!hit) return json(400, { error: 'Aviso no válido' })
+			await db.prepare('DELETE FROM pro_radar_sent WHERE at < ?').bind(now - DAY_MS).run()
+			const recent = await db.prepare('SELECT COUNT(*) AS n FROM pro_radar_sent WHERE license = ? AND at > ?').bind(l.uuid, now - HOUR_MS).first<{ n: number }>()
+			if ((recent?.n ?? 0) >= RADAR_TG_PER_HOUR) return json(429, { error: 'Demasiados avisos del radar en la última hora' })
+			const claim = await db.prepare('INSERT OR IGNORE INTO pro_radar_sent (license, offer, kind, at) VALUES (?, ?, ?, ?)').bind(l.uuid, hit.offer, hit.kind, now).run()
+			if (!claim.meta?.changes) return json(200, { ok: true, sent: false, repeated: true })
+			const sent = await tellUser(env, l.uuid, radarText(hit), radarButton(env, hit), fetcher)
+			// Si no salió (sin chat conectado, Telegram caído), no cuenta como mandado
+			if (!sent) await db.prepare('DELETE FROM pro_radar_sent WHERE license = ? AND offer = ? AND kind = ?').bind(l.uuid, hit.offer, hit.kind).run()
+			return json(200, { ok: true, sent })
+		}
+
 		// Aviso de QvaPay: solo dice qué factura mirar; se confirma consultándola
 		if (req.method === 'POST' && (path === '/pro/webhook' || path === '/api/pro/webhook')) {
 			const text = await req.text()
@@ -1182,6 +1205,11 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 				const r = await testDailyPost(env, now, fetcher)
 				notice = r.ok ? '<p class="ok">Prueba enviada a tu grupo de avisos: así saldría hoy.</p>' : `<p class="note">No salió: ${escHtml(r.description)}</p>`
 			}
+			// Staging: una venta inventada en el libro en vivo, para probar el radar sin esperar al mercado
+			if (action === 'live-sim') {
+				const r = await liveSimulate(env as unknown as LiveEnv)
+				notice = r?.ok ? `<p class="ok">Oferta de prueba en el libro en vivo: vende 20 USD a ${r.price} en CUP Transferencia. No se puede tomar (no existe en QvaPay) y sale sola en menos de un minuto.</p>` : `<p class="note">No se pudo: ${escHtml(r?.error ?? 'el libro en vivo no está disponible')}</p>`
+			}
 			if (action === 'orders-pause' || action === 'orders-resume') {
 				await setOrdersPaused(db, action === 'orders-pause', now)
 				notice = `<p class="ok">${action === 'orders-pause' ? 'Publicar ofertas desde el terminal queda en pausa: quien lo intente ve el aviso de ajustes' : 'Publicar ofertas desde el terminal vuelve a funcionar'} (en menos de un minuto en todas partes).</p>`
@@ -1352,7 +1380,7 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 		env.TELEGRAM_BOT_TOKEN
 			? `<form method="post" class="flag${tgUsers ? ' on' : ''}"><b>Avisos a los usuarios: ${tgUsers === 1 ? '1 conectado' : `${tgUsers} conectados`}</b><span class="note">Quien lo conecta en «Mi cuenta» recibe la confirmación de cada pago, el aviso 3 días antes de que se le acaben los días y cada paso de su devolución. «Conectar el bot» hace que el bot responda desde este entorno (staging y producción comparten bot: vale el último donde se pulsó).</span><button class="ghost" name="action" value="bot-connect">Conectar el bot</button></form>`
 			: ''
-	}${dailyForm}</div>`
+	}${dailyForm}${await liveForm(env)}</div>`
 	const upkeep = `<div class="stack">
 		<form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y apunta en Pendientes las que aquí no constan">Repasar pagos con QvaPay</button></form>
 		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
@@ -1365,6 +1393,41 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 		${flash}${cards}${pending}
 		<div class="grid2">${panel('Estado', toggles, { flush: true })}${panel('Pagos y copias', upkeep, { foot: `Política: se compran días, nada se cobra solo; devolución completa en los ${REFUND_DAYS} días siguientes a la primera compra. Si Pro falla por nuestra culpa, en vez de devolver se dan los días perdidos.` })}</div>`,
 	)
+}
+
+// El libro en tiempo real (feed del mercado de QvaPay): si llega, qué tiene y cuántos terminales lo reciben
+async function liveForm(env: ProEnv) {
+	const live = env as unknown as LiveEnv
+	if (!live.LIVE) return ''
+	const s = await liveStatus(live)
+	if (!s || typeof s.events !== 'number') return '<form class="flag"><b>Libro en tiempo real: sin respuesta</b><span class="note">El objeto del libro no contestó.</span></form>'
+	const when = (t: number | null) => (t ? new Date(t).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'nunca')
+	const title = { feed: 'Libro en tiempo real: feed de QvaPay llegando', poll: 'Libro en tiempo real: sin feed, se lee con la app', off: 'Libro en tiempo real: sin feed ni credenciales' }[s.mode]
+	const notes = [
+		`${s.events.toLocaleString('es')} eventos del feed (el último: ${when(s.lastEvent)}).`,
+		live.STAGING || !s.stream ? '' : s.stream.on ? `Stream de QvaPay conectado desde ${when(s.stream.since)} (${(s.stream.events ?? 0).toLocaleString('es')} eventos por el stream).` : `Stream de QvaPay desconectado${s.stream.error ? `: ${escHtml(s.stream.error)}` : ''}.`,
+		`${s.offers.toLocaleString('es')} ofertas en el libro y ${s.owners.toLocaleString('es')} anunciantes conocidos; ${s.clients === 1 ? '1 terminal conectado' : `${s.clients} terminales conectados`} (${s.proClients} con Pro, al instante; el resto, cada 10 s).`,
+		s.creds ? `Lectura del listado con la app: ${s.readError ? `falla (${escHtml(s.readError)})` : `bien (la última: ${when(s.lastRead)})`}.` : 'Faltan las credenciales de la app (QVAPAY_APP_ID y QVAPAY_APP_SECRET): sin ellas no se saben los nombres ni la reputación.',
+		s.lastRejected ? `Último evento rechazado: ${escHtml(s.lastRejected.reason)} (${when(s.lastRejected.at)}).` : '',
+		!live.QVAPAY_FEED_SECRET ? 'Falta el secreto del feed (QVAPAY_FEED_SECRET): los eventos se rechazan.' : '',
+		live.FEED_FORWARD ? 'Cada evento válido se reenvía a staging.' : live.STAGING ? 'Los eventos llegan reenviados desde producción (el webhook es uno solo).' : '',
+	].filter(Boolean)
+	// Lo que manda QvaPay tal cual (los últimos 15), para ver qué trae cada evento
+	const pretty = (b: string) => {
+		try {
+			return JSON.stringify(JSON.parse(b), null, 2)
+		} catch {
+			return b
+		}
+	}
+	const recent = s.recent.length
+		? `<details><summary>Últimos ${s.recent.length} eventos tal como llegaron</summary>${s.recent
+				.map((r) => `<p class="note">${when(r.at)} · ${r.rejected ? `rechazado: ${escHtml(r.rejected)}` : 'firma válida'}</p><pre style="white-space:pre-wrap;font-size:11px;max-height:260px;overflow:auto">${escHtml(pretty(r.body))}</pre>`)
+				.join('')}</details>`
+		: ''
+	return `<form method="post" class="flag${s.mode === 'feed' ? ' on' : ''}"><b>${title}</b><span class="note">${notes.join(' ')} (versión ${s.version ?? 1})</span>${
+		live.STAGING ? '<button class="ghost" name="action" value="live-sim" title="Mete una venta inventada en CUP Transferencia, un 1 % más barata que la mejor">Simular oferta</button>' : ''
+	}</form>${recent}`
 }
 
 type PayRow = Checkout & { refunded_at: number | null; owner: string | null; first_paid: number | null; rstatus: string | null }

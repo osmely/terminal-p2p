@@ -253,6 +253,12 @@ function renderStatus(b) {
 		$('dot').className = 'dot'
 		return
 	}
+	// El libro llega empujado por el servidor: con Pro, en cuanto cambia; sin Pro, cada 10 s
+	if (b.realtime) {
+		setStatus(TPApi.live?.state().pro ? 'En tiempo real' : 'Actualizado cada 10 s')
+		$('dot').className = 'dot live'
+		return
+	}
 	const age = b.serverTime - Math.min(...times)
 	setStatus(`Actualizado hace ${ago(age)}`)
 	$('dot').className = `dot ${age < 30_000 ? 'live' : 'stale'}`

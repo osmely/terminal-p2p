@@ -11,7 +11,7 @@ import { cubaDate, informalSince, latestInformal, syncInformal } from './informa
 import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
-import { whoCookie } from './session.ts'
+import { readWho, whoCookie } from './session.ts'
 import { sha256 } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
@@ -20,8 +20,14 @@ import { expiryReminders } from './userbot.ts'
 import { dailyPost } from './community.ts'
 import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
+import { feedWebhook, liveSocket, type LiveEnv } from './livebook.ts'
+import { LiveBook } from './livebook-do.ts'
+import { licenseOfPrint } from './pro.ts'
 
-interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'> {
+// El libro en tiempo real de Pro (un Durable Object)
+export { LiveBook }
+
+interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'>, Omit<LiveEnv, 'DB'> {
 	ASSETS: Fetcher
 	DB: D1Database
 	// Clave de la API de tasas de elTOQUE (secreto del Worker). Sin ella no hay referencia informal
@@ -108,6 +114,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		}
 		return secure(res)
 	}
+	// Feed del mercado de QvaPay (webhook firmado) y el libro en vivo para los terminales Pro (WebSocket)
+	if (url.pathname === '/api/p2p/feed' && req.method === 'POST') return secure(await feedWebhook(req, env as unknown as LiveEnv, ctx))
+	if (url.pathname === '/live' && folderFor(url.hostname) === 'app')
+		return liveSocket(req, url, env as unknown as LiveEnv, async (print) => {
+			// Una cuenta de QvaPay conectada de verdad en este navegador (la cookie que firma el relé con el perfil de QvaPay)
+			const ok = !!env.PRO_KEY && !!(await readWho(req.headers.get('cookie'), print, env.PRO_KEY, Date.now()))
+			return { ok, pro: ok && (await proEnabled(env.DB)) && !!(await licenseOfPrint(env.DB, print, Date.now())) }
+		})
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
 	if (url.pathname === '/data/hit' && req.method === 'POST') return secure(await hit(req, url, env))
 	// Panel único en el dominio del terminal
@@ -147,7 +161,7 @@ function proMarkup(res: Response, on: boolean) {
 	return new HTMLRewriter().on(on ? '[data-nopro]' : '[data-pro]', { element: (el) => void el.remove() }).transform(res)
 }
 
-const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook', '/pro/telegram/webhook'])
+const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook', '/pro/telegram/webhook', '/api/p2p/feed'])
 // El relé a QvaPay lleva el token del usuario en Authorization, la misma cabecera que la contraseña de
 // staging: pidiéndola ahí, el navegador volvía a sacar el diálogo al conectar la cuenta. No expone nada de
 // staging (solo reenvía a QvaPay con el token del usuario, como en producción)

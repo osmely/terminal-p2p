@@ -882,3 +882,42 @@ test('aviso de fin de días: si Telegram falla no se da por enviado y sale en el
 	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 1)
 	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 0)
 })
+
+test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto escrito aquí y tope por hora', async () => {
+	const { webhookSecret } = await import('../worker/userbot.ts')
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot' })
+	const offer = '0b0e1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d'
+	const hit = { kind: 'found', offer, coin: 'BANK_CUP', side: 'buy', price: 478, usd: 50, peer: 'leo', limit: 480 }
+	// Sin Pro, nada
+	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit })).status, 403)
+	await s.trial(P1, 'ana')
+	const { url } = (await s.post('/pro/telegram/link', { print: P1, username: 'ana' })).body
+	const code = url.split('start=')[1]
+	await proApi(
+		new Request('https://app.terminalp2p.com/pro/telegram/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': await webhookSecret(s.env) }, body: JSON.stringify({ message: { text: `/start ${code}`, chat: { id: 555, type: 'private' } } }) }),
+		new URL('https://app.terminalp2p.com/pro/telegram/webhook'),
+		s.env,
+		s.now(),
+		s.q.fetcher,
+	)
+	const toUser = () => s.q.telegram.filter((m) => String(m.chat_id) === '555')
+	// Datos raros (texto libre, mercado que no existe): no se manda
+	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit, peer: '<b>hola</b>' })).status, 400)
+	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit, coin: 'NADA' })).status, 400)
+	const r = await s.post('/pro/radar/alert', { print: P1, ...hit })
+	assert.deepEqual(r.body, { ok: true, sent: true })
+	assert.match(toUser()[0].text, /Radar: oferta para ti[\s\S]*@leo vende <b>50 USD<\/b> a <b>478 CUP<\/b> por USD en CUP Transferencia[\s\S]*Tu límite: 480/)
+	assert.equal(toUser()[0].url, `https://app.terminalp2p.com/#p2p/${offer}`)
+	// La misma oferta desde otra pestaña: no se repite. Tomada después: ese aviso sí sale
+	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit })).body.repeated, true)
+	await s.post('/pro/radar/alert', { print: P1, ...hit, kind: 'taken', pay: 23900, payBy: Date.parse('2026-10-25T16:30:00Z') })
+	assert.match(toUser()[1].text, /tomé una oferta por ti[\s\S]*Compraste <b>50 USD<\/b>[\s\S]*Págale <b>23\.900 CUP<\/b> antes de las <b>12:30<\/b> \(hora de Cuba\)/)
+	assert.equal(toUser().length, 2)
+	// Tope por hora
+	for (let i = 0; i < 40; i++) await s.post('/pro/radar/alert', { print: P1, ...hit, offer: `0b0e1c2d-3e4f-4a5b-8c6d-${String(i).padStart(12, '0')}` })
+	assert.equal(toUser().length, 30)
+	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit, offer: '0b0e1c2d-3e4f-4a5b-8c6d-ffffffffffff' })).status, 429)
+	// Al día siguiente se limpia y vuelve a avisar
+	s.tick(25 * 3_600_000)
+	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit })).body.sent, true)
+})

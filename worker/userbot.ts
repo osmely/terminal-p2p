@@ -128,6 +128,76 @@ export async function expiryReminders(env: BotEnv, now: number, fetcher: typeof 
 	return sent
 }
 
+// ── Radar de Pro ─────────────────────────────────────────────────────
+// El terminal encontró (o tomó) una oferta que cumple las reglas del usuario y le avisa al móvil. Llega del
+// navegador solo lo que se ve en el libro (nunca el token) y se escribe aquí, escapado: el bot no repite texto libre
+
+export const RADAR_MARKETS: Record<string, { name: string; unit: string }> = {
+	BANK_CUP: { name: 'CUP Transferencia', unit: 'CUP' },
+	ETECSA: { name: 'Saldo ETECSA', unit: 'CUP' },
+	CLASICA: { name: 'Tarjeta Clásica', unit: 'USD' },
+	BANK_MLC: { name: 'MLC', unit: 'MLC' },
+	ZELLE: { name: 'Zelle', unit: 'USD' },
+	BANDECPREPAGO: { name: 'Bandec Prepago', unit: 'USD' },
+	TROPIPAY: { name: 'TropiPay', unit: 'EUR' },
+	CUPCASH: { name: 'CUP Efectivo', unit: 'CUP' },
+	BOLSATM: { name: 'Bolsa TM', unit: 'CUP' },
+}
+
+export interface RadarHit {
+	kind: 'found' | 'taken'
+	offer: string
+	coin: string
+	// Lo que hace el usuario: compra USD (toma una venta) o vende USD (toma una compra)
+	side: 'buy' | 'sell'
+	price: number
+	usd: number
+	peer: string
+	limit: number
+	// Tomada comprando: lo que hay que pagar y hasta cuándo
+	pay?: number
+	payBy?: number
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const amount = (v: unknown, max: number) => {
+	const n = Number(v)
+	return Number.isFinite(n) && n > 0 && n <= max ? n : null
+}
+
+export function cleanRadarHit(b: Record<string, unknown>): RadarHit | null {
+	const kind = b.kind === 'found' || b.kind === 'taken' ? b.kind : null
+	const side = b.side === 'buy' || b.side === 'sell' ? b.side : null
+	const offer = String(b.offer ?? '').toLowerCase()
+	const coin = String(b.coin ?? '')
+	const peer = String(b.peer ?? '')
+	const price = amount(b.price, 1e7)
+	const usd = amount(b.usd, 1e5)
+	const limit = amount(b.limit, 1e7)
+	if (!kind || !side || !UUID.test(offer) || !RADAR_MARKETS[coin] || !/^[\w.-]{1,40}$/.test(peer) || !price || !usd || !limit) return null
+	const pay = amount(b.pay, 1e9)
+	const payBy = amount(b.payBy, 4e12)
+	return { kind, offer, coin, side, price, usd, peer, limit, ...(kind === 'taken' && side === 'buy' && pay ? { pay, payBy: payBy ?? undefined } : {}) }
+}
+
+const money = (n: number) => n.toLocaleString('es', { maximumFractionDigits: 2 })
+const clock = (ms: number) => new Date(ms).toLocaleTimeString('es', { timeZone: 'America/Havana', hour: '2-digit', minute: '2-digit' })
+
+export function radarText(h: RadarHit) {
+	const m = RADAR_MARKETS[h.coin]
+	const who = `@${tgEsc(h.peer)}`
+	const at = `<b>${money(h.price)} ${m.unit}</b> por USD`
+	if (h.kind === 'found')
+		return `📡 <b>Radar: oferta para ti</b>\n\n${who} ${h.side === 'buy' ? 'vende' : 'compra'} <b>${money(h.usd)} USD</b> a ${at} en ${m.name}.\nTu límite: ${money(h.limit)}.\n\nÁbrela en el terminal para tomarla.`
+	const next =
+		h.side === 'buy'
+			? `Págale <b>${money(h.pay ?? h.usd * h.price)} ${m.unit}</b>${h.payBy ? ` antes de las <b>${clock(h.payBy)}</b> (hora de Cuba)` : ''} y marca el pago en «Mis operaciones».`
+			: 'Le mandamos tus datos de pago por el chat. Libera los USD solo cuando veas el pago.'
+	return `⚡ <b>Radar: tomé una oferta por ti</b>\n\n${h.side === 'buy' ? 'Compraste' : 'Vendiste'} <b>${money(h.usd)} USD</b> a ${at} ${h.side === 'buy' ? 'a' : 'con'} ${who} en ${m.name}.\n\n${next}`
+}
+
+export const radarButton = (env: AlertEnv, h: RadarHit) => (h.kind === 'found' ? button('Abrir la oferta', `${appUrl(env)}/#p2p/${h.offer}`) : openApp(env, 'Ver mis operaciones'))
+
 // ── Lo que el usuario le escribe al bot ──────────────────────────────
 
 interface Update {

@@ -37,6 +37,14 @@
 	// app-secret y la clave de las licencias sí (npx wrangler secret put QVAPAY_APP_SECRET / PRO_KEY)
 	// Módulo Pro (de un repositorio privado): se sube aquí y el Worker lo entrega solo con licencia
 	"kv_namespaces": [{ "binding": "PRO", "id": "<id de tu espacio KV para el módulo Pro>" }],
+	// Libro del P2P en tiempo real para Pro (worker/livebook-do.ts): lo alimenta el feed del mercado de QvaPay, que
+	// llega por webhook a /api/p2p/feed (npx wrangler secret put QVAPAY_FEED_SECRET), y lo completa el listado del P2P
+	// leído con la app de comerciante (QVAPAY_APP_ID y QVAPAY_APP_SECRET). Con staging, el webhook es
+	// uno solo (el de producción) y producción le reenvía cada evento: pon FEED_FORWARD en vars y el mismo secreto en los dos
+	// ("FEED_FORWARD": "https://app.staging.example.com/api/p2p/feed"). Con "LIVE_FREE": "1", el libro del servidor llega
+	// también a quien no tiene Pro (cada 10 s); sin él, solo a los Pro
+	"durable_objects": { "bindings": [{ "name": "LIVE", "class_name": "LiveBook" }] },
+	"migrations": [{ "tag": "v3", "new_sqlite_classes": ["LiveBook"] }],
 	// ALERT_CHAT: el chat del grupo privado de avisos de Pro (con el bot dentro); el token del bot es secreto
 	// COMMUNITY_CHAT: el grupo público de la comunidad, donde sale la «Tasa QvaPay del día» (se enciende en el panel)
 	// (npx wrangler secret put TELEGRAM_BOT_TOKEN)
@@ -62,6 +70,7 @@
 				{ "binding": "DB", "database_name": "terminal-p2p-staging", "database_id": "<id de la base D1 de staging>" }
 			],
 			"kv_namespaces": [{ "binding": "PRO", "id": "<id del KV de staging>" }],
+			"durable_objects": { "bindings": [{ "name": "LIVE", "class_name": "LiveBook" }] },
 			"ratelimits": [
 				{ "name": "EVENT_LIMIT", "namespace_id": "2001", "simple": { "limit": 30, "period": 60 } },
 				{ "name": "PANEL_LIMIT", "namespace_id": "2002", "simple": { "limit": 10, "period": 60 } },

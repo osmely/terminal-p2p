@@ -87,6 +87,20 @@ export interface HistoryStore {
 	append(points: (HistoryPoint & { coin: string })[]): Promise<void>
 }
 
+export interface Watch {
+	tick: Tick
+	side: 'ask' | 'bid'
+}
+
+// Lo que el radar recibe tras cada lectura de uno de sus lados
+export interface WatchedSide extends Watch {
+	levels: Level[]
+	updatedAt: number | null
+	error: string | null
+	// Mediana de lo completado en ese lado (para las reglas «% mejor que lo cerrado»)
+	reference: number | null
+}
+
 export interface HistoryPoint {
 	t: number
 	bid: number | null
@@ -109,6 +123,9 @@ const COMPLETED_EVERY_MS = 5 * 60_000
 const COMPLETED_GAP_MS = 20_000
 const NO_READER_RETRY_MS = 15_000
 const HISTORY_EVERY_MS = 60_000
+// Radar de Pro: hasta 3 lados que se leen antes que nada (cada ~8 s) y también con la pestaña oculta
+const WATCH_MAX = 3
+const WATCH_REFRESH_MS = 8_000
 const HISTORY_KEEP_MS = 14 * 24 * 3600_000
 
 const emptySide = (): SideState => ({ levels: [], total: 0, updatedAt: null, error: null })
@@ -127,6 +144,11 @@ export class Market {
 	// Sin ninguna cuenta conectada no hay con qué leer el libro
 	private noReaderUntil = 0
 	private hasReader = false
+	private watched: Watch[] = []
+	// Mercados que llegan empujados por el servidor (con Pro al instante, sin Pro cada 10 s). Esos no se leen con el token
+	private liveCoins = new Set<string>()
+	private onWatched: ((w: WatchedSide) => void) | null = null
+	private lastIdleRead = 0
 
 	constructor(opts: { publicClient: QvaPayClient; readers: BookReaders; historyStore: HistoryStore }) {
 		this.publicClient = opts.publicClient
@@ -145,11 +167,59 @@ export class Market {
 		}
 	}
 
-	// Cuándo conviene el próximo tick: rápido si alguien mira, lento si no
+	// Cuándo conviene el próximo tick: rápido si alguien mira (o vigila el radar), lento si no
 	nextDelayMs() {
 		const now = Date.now()
-		const watched = COINS.some((m) => this.coins.get(m.tick)!.hotUntil > now)
+		const watched = this.watched.length > 0 || COINS.some((m) => this.coins.get(m.tick)!.hotUntil > now)
 		return watched ? TICK_MS : IDLE_TICK_MS
+	}
+
+	// Radar de Pro: qué lados vigilar (lista vacía para apagarlo) y a quién avisar tras cada lectura
+	watch(list: Watch[], onRead: ((w: WatchedSide) => void) | null) {
+		const ticks = new Set<string>(COINS.map((c) => c.tick))
+		const keys = new Set<string>()
+		this.watched = []
+		for (const w of list) {
+			const key = `${w.tick}:${w.side}`
+			if (!ticks.has(w.tick) || (w.side !== 'ask' && w.side !== 'bid') || keys.has(key)) continue
+			keys.add(key)
+			this.watched.push({ tick: w.tick, side: w.side })
+		}
+		this.watched = this.watched.slice(0, WATCH_MAX)
+		this.onWatched = this.watched.length ? onRead : null
+	}
+
+	watching() {
+		return this.watched.length > 0
+	}
+
+	// Los mercados que interesan ahora: los que se están mirando y los del radar (para pedirlos en tiempo real)
+	wanted() {
+		const now = Date.now()
+		const out = new Set<string>(this.watched.map((w) => w.tick))
+		for (const c of COINS) if (this.coins.get(c.tick)!.hotUntil > now) out.add(c.tick)
+		return [...out].sort()
+	}
+
+	// Qué mercados llegan ahora desde el servidor (vacío si se cortó la conexión: se vuelve a leer con el token)
+	setLiveCoins(ticks: string[]) {
+		this.liveCoins = new Set(ticks)
+	}
+
+	// Un lado entero recién llegado del servidor. Se marca lo atípico con la referencia de aquí, como al leerlo
+	setLive(tick: Tick, side: 'ask' | 'bid', levels: Level[], total: number) {
+		const c = this.coins.get(tick)
+		if (!c || !Array.isArray(levels)) return
+		const ref = this.reference(tick)?.[side === 'ask' ? 'sell' : 'buy'] ?? null
+		const next = levels.map((l) => ({ ...l, outlier: isOutlier(l.price, ref, side) }))
+		this.diffActivity(c, side, c[side].levels, next)
+		c[side] = { levels: next, total, updatedAt: Date.now(), error: null }
+		this.tellRadar(tick, side)
+	}
+
+	watchedSide(w: Watch): WatchedSide {
+		const c = this.coins.get(w.tick)![w.side]
+		return { ...w, levels: c.levels, updatedAt: c.updatedAt, error: c.error, reference: this.reference(w.tick)?.[w.side === 'ask' ? 'sell' : 'buy'] ?? null }
 	}
 
 	// Alguien acaba de conectar su cuenta: el libro puede leerse ya
@@ -178,7 +248,9 @@ export class Market {
 			completed: c.completed,
 			activity: c.activity.slice(0, 40),
 			// false = nadie ha conectado su cuenta: no hay libro en vivo
-			live: this.hasReader,
+			live: this.hasReader || this.liveCoins.has(tick),
+			// Este mercado llega empujado por el servidor (no se lee con el token)
+			realtime: this.liveCoins.has(tick),
 			serverTime: Date.now(),
 		}
 	}
@@ -248,11 +320,20 @@ export class Market {
 	}
 
 	private nextBookTask(now: number): { tick: Tick; side: 'ask' | 'bid' } | undefined {
-		const tasks = COINS.flatMap((m) => (['ask', 'bid'] as const).map((side) => ({ tick: m.tick, side })))
+		// Lo que llega en tiempo real no se lee con el token
+		const tasks = COINS.filter((m) => !this.liveCoins.has(m.tick)).flatMap((m) => (['ask', 'bid'] as const).map((side) => ({ tick: m.tick, side })))
 		const age = (t: { tick: Tick; side: 'ask' | 'bid' }) => now - (this.coins.get(t.tick)![t.side].updatedAt ?? 0)
+		const oldest = (list: Watch[]) => list.sort((a, b) => age(b) - age(a))[0]
+		// Primero lo que vigila el radar; luego el mercado que se está mirando
+		const radar = this.watched.filter((t) => !this.liveCoins.has(t.tick) && age(t) > WATCH_REFRESH_MS)
+		if (radar.length) return oldest(radar)
 		const hot = tasks.filter((t) => this.coins.get(t.tick)!.hotUntil > now && age(t) > HOT_REFRESH_MS)
-		const pool = hot.length ? hot : tasks.filter((t) => age(t) > 30_000)
-		return pool.sort((a, b) => age(b) - age(a))[0]
+		if (hot.length) return oldest(hot)
+		// Con el radar encendido se dan pasos cada pocos segundos: los demás mercados siguen a su ritmo de siempre
+		if (this.watched.length && now - this.lastIdleRead < IDLE_TICK_MS) return undefined
+		const task = oldest(tasks.filter((t) => age(t) > 30_000))
+		if (task) this.lastIdleRead = now
+		return task
 	}
 
 	private async refreshSide(tick: Tick, side: 'ask' | 'bid') {
@@ -273,11 +354,13 @@ export class Market {
 			levels.sort((a, b) => (side === 'ask' ? a.price - b.price : b.price - a.price))
 			this.diffActivity(c, side, c[side].levels, levels)
 			c[side] = { levels, total: res.total, updatedAt: Date.now(), error: null }
+			this.tellRadar(tick, side)
 		} catch (err) {
 			// El mensaje de QvaPay tal cual (p. ej. "Debes vincular tu cuenta de Telegram…"), sin el código delante
 			const body = err instanceof QvaPayError ? (err.body as { error?: unknown } | undefined) : undefined
 			c[side].error = typeof body?.error === 'string' ? body.error : (err as Error).message
 			c[side].updatedAt = Date.now()
+			this.tellRadar(tick, side)
 			// Token revocado: esa cuenta se desconecta y la próxima lectura usa otra
 			if (err instanceof QvaPayError && err.status === 401) {
 				await this.readers.invalid(reader.sid)
@@ -285,6 +368,15 @@ export class Market {
 				return
 			}
 			log.warn(`${tick} ${side}: ${(err as Error).message}`)
+		}
+	}
+
+	private tellRadar(tick: Tick, side: 'ask' | 'bid') {
+		if (!this.onWatched || !this.watched.some((w) => w.tick === tick && w.side === side)) return
+		try {
+			this.onWatched(this.watchedSide({ tick, side }))
+		} catch (err) {
+			log.warn(`radar: ${(err as Error).message}`)
 		}
 	}
 
@@ -347,7 +439,7 @@ export class Market {
 	}
 }
 
-function toLevel(o: P2POffer, promoted: boolean, ref: number | null): Level {
+export function toLevel(o: P2POffer, promoted: boolean, ref: number | null): Level {
 	const amount = num(o.amount)
 	const flexible = o.offer_kind === 'flexible'
 	const price = amount > 0 ? num(o.receive) / amount : 0

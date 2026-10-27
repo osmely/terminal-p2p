@@ -7,7 +7,7 @@
 
 import { Broker, json } from '../src/broker/routes.ts'
 import { QvaPayClient } from '../src/qvapay/client.ts'
-import { COINS, Market, type Tick } from '../src/terminal/market.ts'
+import { COINS, Market, type Tick, type Watch, type WatchedSide } from '../src/terminal/market.ts'
 import { bestCross } from '../src/terminal/arbitrage.ts'
 import { CRITERIA, positions, rank, userStats } from '../src/terminal/ranking.ts'
 import { BrowserAccounts, TOKEN_KEY } from './accounts.ts'
@@ -31,20 +31,124 @@ try {
 const ready = market.init()
 
 // ── Bucle del libro: un paso cada nextDelayMs, en pausa con la pestaña oculta ──
-let timer: ReturnType<typeof setTimeout> | undefined
+// Con el radar de Pro encendido sigue también con la pestaña oculta. Los navegadores frenan los temporizadores
+// de una pestaña oculta (Chrome, hasta uno por minuto); los de un worker no, así que entonces se cuenta allí
+let ticker: Worker | null = null
+let noTicker = false
+let gen = 0
 let nextAt = 0
+function schedule(ms: number) {
+	const id = ++gen
+	nextAt = Date.now() + ms
+	if (market.watching() && !noTicker) {
+		try {
+			if (!ticker) {
+				ticker = new Worker('/tick.js')
+				ticker.onmessage = (e) => e.data === gen && void loop()
+				// Si no arranca (bloqueado, sin red), el bucle sigue con el temporizador normal: nunca se queda parado
+				ticker.onerror = () => {
+					ticker?.terminate()
+					ticker = null
+					noTicker = true
+					schedule(50)
+				}
+			}
+			ticker.postMessage({ id, ms })
+			return
+		} catch {
+			ticker = null
+			noTicker = true
+		}
+	}
+	setTimeout(() => id === gen && void loop(), ms)
+}
 async function loop() {
 	await ready
-	if (!document.hidden) await market.tick().catch((e: Error) => console.warn('tick:', e.message))
-	const delay = market.nextDelayMs()
-	nextAt = Date.now() + delay
-	timer = setTimeout(loop, delay)
+	if (!document.hidden || market.watching()) await market.tick().catch((e: Error) => console.warn('tick:', e.message))
+	syncLive()
+	schedule(market.nextDelayMs())
+}
+
+// ── Libro desde el servidor ──────────────────────────────────────────────
+// Con tu cuenta conectada, el servidor te empuja el libro por un WebSocket (lo alimenta el feed de QvaPay): con Pro,
+// cada cambio al instante; sin Pro, cada 10 s. Los mercados que llegan así no se leen con tu token. Si la conexión
+// se corta, se vuelve a leer como siempre hasta que vuelva
+let ws: WebSocket | null = null
+let livePrint: string | null = null
+let livePro = false
+let liveRetry = 0
+let liveSubs = ''
+let liveFeed = false
+// Mercados pedidos de los que ya llegó el libro completo: esos dejan de leerse con el token
+let liveReady = new Set<string>()
+function liveConnect() {
+	if (!livePrint || ws) return
+	const s = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/live?p=${encodeURIComponent(livePrint)}`)
+	ws = s
+	liveSubs = ''
+	s.onopen = () => {
+		liveRetry = 0
+		syncLive()
+	}
+	s.onmessage = (e) => {
+		let m: { t?: string; coin?: Tick; side?: 'ask' | 'bid'; ready?: boolean; levels?: []; total?: number; feed?: boolean; pro?: boolean }
+		try {
+			m = JSON.parse(String(e.data))
+		} catch {
+			return // el «pong» de la señal de vida
+		}
+		if (typeof m.feed === 'boolean') liveFeed = m.feed
+		if (m.t === 'hello') livePro = !!m.pro
+		// Un lado que el servidor aún no tiene completo no se usa: se sigue leyendo con el token
+		if (m.t !== 'side' || !m.ready || !isTick(m.coin ?? null) || (m.side !== 'ask' && m.side !== 'bid') || !liveSubs.split(',').includes(m.coin!)) return
+		market.setLive(m.coin!, m.side, m.levels ?? [], m.total ?? 0)
+		liveReady.add(m.coin!)
+		market.setLiveCoins([...liveReady])
+	}
+	s.onclose = () => {
+		if (ws !== s) return
+		ws = null
+		liveReady.clear()
+		market.setLiveCoins([])
+		if (livePrint) setTimeout(liveConnect, Math.min(30_000, 1000 * 2 ** liveRetry++))
+	}
+}
+// Pide al servidor los mercados que interesan ahora (el que se mira y los del radar)
+function syncLive() {
+	if (ws?.readyState !== WebSocket.OPEN) return
+	const subs = market.wanted()
+	const key = subs.join()
+	if (key === liveSubs) return
+	liveSubs = key
+	ws.send(JSON.stringify({ sub: subs }))
+	liveReady = new Set([...liveReady].filter((c) => subs.includes(c)))
+	market.setLiveCoins([...liveReady])
+}
+// Señal de vida para que ningún proxy dé la conexión por muerta
+setInterval(() => ws?.readyState === WebSocket.OPEN && ws.send('ping'), 25_000)
+let wantPro = false
+const live = {
+	// pro: si tienes Pro ahora. Al cambiar, se reconecta para recibirlo al instante (o cada 10 s)
+	start(print: string, pro = false) {
+		if (livePrint === print && wantPro === pro && ws) return
+		if (livePrint !== null) live.stop()
+		livePrint = print
+		wantPro = pro
+		liveConnect()
+	},
+	stop() {
+		livePrint = null
+		const s = ws
+		ws = null
+		s?.close()
+		liveReady.clear()
+		market.setLiveCoins([])
+	},
+	state: () => ({ connected: ws?.readyState === WebSocket.OPEN, feed: liveFeed, pro: livePro }),
 }
 function wake() {
 	if (nextAt - Date.now() <= WAKE_IF_FURTHER_THAN_MS) return
-	clearTimeout(timer)
-	nextAt = Date.now()
-	timer = setTimeout(loop, 50)
+	schedule(50)
 }
 document.addEventListener('visibilitychange', () => !document.hidden && wake())
 // Otra pestaña conectó o desconectó una cuenta recordada: esta se recarga para no seguir con la anterior
@@ -67,6 +171,7 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 		const coin = url.searchParams.get('coin')
 		if (!isTick(coin)) return json(400, { error: 'coin inválida' })
 		market.touch(coin)
+		syncLive()
 		wake()
 		return json(200, market.snapshot(coin))
 	}
@@ -89,5 +194,16 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 	return json(404, { error: 'no encontrado' })
 }
 
+// Radar de Pro (lo usa el módulo Pro): qué lados vigilar, y la función a la que se le pasa cada lectura nueva
+const radar = {
+	watch(list: Watch[], onRead: ((w: WatchedSide) => void) | null) {
+		market.watch(list, onRead)
+		syncLive()
+		wake()
+	},
+	read: (w: Watch) => market.watchedSide(w),
+}
+
 // cross: la mejor oportunidad del libro cruzado (app.js la enseña en la lectura del mercado)
-;(window as unknown as { TPApi: { fetch: typeof api; cross: typeof bestCross } }).TPApi = { fetch: api, cross: bestCross }
+// live: el libro en tiempo real de Pro (pro.js lo enciende con la huella de tu token)
+;(window as unknown as { TPApi: { fetch: typeof api; cross: typeof bestCross; radar: typeof radar; live: typeof live } }).TPApi = { fetch: api, cross: bestCross, radar, live }

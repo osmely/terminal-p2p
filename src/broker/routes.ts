@@ -61,6 +61,10 @@ interface Seen {
 	sent: Set<string>
 }
 
+// Una toma de la orden inteligente o del radar. pay: comprando, a quién pagar, cuánto y hasta cuándo
+type Pay = { details: { name: string; value: string }[]; expiresAt: string | null; coinAmount: number }
+type TakeStep = { offer: string; user: string; status: 'pending' | 'taken' | 'skipped' | 'failed' | 'stuck'; order: string | null; error?: string; pay?: Pay }
+
 interface Ctx {
 	req: Request
 	url: URL
@@ -133,6 +137,8 @@ export class Broker {
 					return await this.applyOffer(ctx, acc)
 				case 'POST /smart':
 					return await this.smart(ctx, acc)
+				case 'POST /radar/take':
+					return await this.radarTake(ctx, acc)
 				case 'GET /peer':
 					return await this.peer(ctx, acc)
 				case 'GET /swap/quote':
@@ -360,10 +366,7 @@ export class Broker {
 		const check = restBody(total)
 		if ('error' in check) return json(400, check)
 
-		// pay: comprando, a quién pagar, cuánto y hasta cuándo (para la lista de pagos al terminar)
-		type Pay = { details: { name: string; value: string }[]; expiresAt: string | null; coinAmount: number }
-		type Step = { offer: string; user: string; status: 'pending' | 'taken' | 'skipped' | 'failed' | 'stuck'; order: string | null; error?: string; pay?: Pay }
-		const steps: Step[] = takes.map((t: { offer: string }) => ({ offer: t.offer, user: '—', status: 'pending', order: null }))
+		const steps: TakeStep[] = takes.map((t: { offer: string }) => ({ offer: t.offer, user: '—', status: 'pending', order: null }))
 		const notes: string[] = []
 
 		if (side === 'sell') {
@@ -375,66 +378,10 @@ export class Broker {
 
 		let chatSent: boolean | undefined
 		for (const [i, t] of takes.entries()) {
-			// 1) ¿Sigue sirviendo tal como se planeó?
-			const o = await acc.client.getOffer(t.offer).catch(() => null)
-			steps[i].user = o?.User?.username ?? '—'
-			const user = steps[i].user
-			const problem = takeProblem(o, t.amount, side, coin, limit, acc.me.uuid)
-			if (problem) {
-				steps[i].status = 'skipped'
-				steps[i].error = problem
-				continue
-			}
-			// 2) Tomarla y confirmar con una lectura nueva
-			const flexible = o!.offer_kind === 'flexible'
-			const before = new Set((o!.Orders ?? []).map((x) => x.uuid))
-			let error: string | undefined
-			let order: string | null = null
-			try {
-				order = (await acc.client.applyOffer(o!.uuid, flexible ? t.amount : undefined, { coin, side: o!.type, usd: t.amount, via: 'smart' })).order ?? null
-			} catch (e) {
-				error = friendly(e)
-			}
-			const now = await acc.client.getOffer(o!.uuid).catch(() => null)
-			const held = now ? heldTake(now, flexible, before, order, acc.me.uuid) : error ? 'unknown' : { order, price: null }
-			if (held === 'unknown') {
-				// No se sabe si quedó tomada: su parte no se suma a lo publicado (podrías comprar de más) y se avisa
-				steps[i].status = 'stuck'
-				steps[i].error = `no se pudo confirmar si quedó tomada (${error})`
-				notes.push(`No se pudo confirmar si la oferta de @${user} quedó tomada: revísala en «Mis operaciones». Sus ${t.amount.toLocaleString('es')} USD no se sumaron a tu oferta.`)
-				continue
-			}
-			if (!held) {
-				steps[i].status = 'failed'
-				steps[i].error = error ?? 'no quedó tomada'
-				continue
-			}
-			steps[i].status = 'taken'
-			steps[i].order = held.order
-			if (side === 'buy' && now) {
-				const ord = held.order ? now.Orders?.find((x) => x.uuid === held.order) : undefined
-				steps[i].pay = {
-					details: paymentDetails(now.details),
-					expiresAt: ord?.payment_window_expires_at ?? now.payment_window_expires_at ?? null,
-					coinAmount: round2(t.amount * (held.price ?? limit)),
-				}
-			}
-			// Su dueño cambió el precio justo antes de tomarla: no se cancela, se avisa (comprando, la puedes
-			// cancelar tú sin disputa mientras no la hayas pagado)
-			if (held.price != null && (side === 'buy' ? held.price > limit * (1 + 1e-9) : held.price < limit * (1 - 1e-9)))
-				notes.push(
-					`@${user} cambió el precio justo antes: ${side === 'buy' ? 'compraste' : 'vendiste'} a ${held.price.toLocaleString('es')}, ${side === 'buy' ? 'por encima' : 'por debajo'} de tu ${limit.toLocaleString('es')}.${side === 'buy' ? ' Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.' : ''}`,
-				)
-			// Vendiendo, el comprador recibe tus datos por el chat
-			if (side === 'sell') {
-				const text = `Hola. Vendo ${t.amount} USD desde Terminal P2P. Págame aquí:\n${details.map((d) => `${d.label}: ${d.value}`).join('\n')}`
-				const sent = await acc.client
-					.sendChat(o!.uuid, text.slice(0, 599), held.order ?? undefined)
-					.then(() => true)
-					.catch(() => false)
-				if (!sent) notes.push(`No se pudo mandar tus datos a @${user}: escríbeselos por el chat de la operación.`)
-				chatSent = (chatSent ?? true) && sent
-			}
+			const r = await this.takeStep(acc, t, side, coin, limit, details, 'smart')
+			steps[i] = r.step
+			notes.push(...r.notes)
+			if (r.chatSent !== undefined) chatSent = (chatSent ?? true) && r.chatSent
 		}
 
 		// 3) Publicar el resto: lo planeado más lo que no se pudo tomar
@@ -452,6 +399,83 @@ export class Broker {
 			}
 		}
 		return json(200, { ok: true, steps, published, rest, publishError, chatSent, notes })
+	}
+
+	// Una toma de la orden inteligente o del radar: 1) comprueba que la oferta sigue sirviendo tal como se planeó,
+	// 2) la toma y lo confirma con una lectura nueva (un corte de red puede esconder una toma hecha) y 3) vendiendo,
+	// le manda tus datos de pago al comprador por el chat. Nunca cancela nada
+	private async takeStep(acc: Account, t: { offer: string; amount: number }, side: 'buy' | 'sell', coin: string, limit: number, details: { label: string; value: string }[], via: string) {
+		const step: TakeStep = { offer: t.offer, user: '—', status: 'pending', order: null }
+		const notes: string[] = []
+		const o = await acc.client.getOffer(t.offer).catch(() => null)
+		step.user = o?.User?.username ?? '—'
+		const user = step.user
+		const problem = takeProblem(o, t.amount, side, coin, limit, acc.me.uuid)
+		if (problem) return { step: { ...step, status: 'skipped' as const, error: problem }, notes }
+		const flexible = o!.offer_kind === 'flexible'
+		const before = new Set((o!.Orders ?? []).map((x) => x.uuid))
+		let error: string | undefined
+		let order: string | null = null
+		try {
+			order = (await acc.client.applyOffer(o!.uuid, flexible ? t.amount : undefined, { coin, side: o!.type, usd: t.amount, via })).order ?? null
+		} catch (e) {
+			error = friendly(e)
+		}
+		const now = await acc.client.getOffer(o!.uuid).catch(() => null)
+		const held = now ? heldTake(now, flexible, before, order, acc.me.uuid) : error ? 'unknown' : { order, price: null }
+		if (held === 'unknown') {
+			// No se sabe si quedó tomada: no se cuenta como tomada ni como libre (podrías comprar de más) y se avisa
+			notes.push(`No se pudo confirmar si la oferta de @${user} quedó tomada: revísala en «Mis operaciones». Sus ${t.amount.toLocaleString('es')} USD no se sumaron a tu oferta.`)
+			return { step: { ...step, status: 'stuck' as const, error: `no se pudo confirmar si quedó tomada (${error})` }, notes }
+		}
+		if (!held) return { step: { ...step, status: 'failed' as const, error: error ?? 'no quedó tomada' }, notes }
+		step.status = 'taken'
+		step.order = held.order
+		if (side === 'buy' && now) {
+			const ord = held.order ? now.Orders?.find((x) => x.uuid === held.order) : undefined
+			step.pay = {
+				details: paymentDetails(now.details),
+				expiresAt: ord?.payment_window_expires_at ?? now.payment_window_expires_at ?? null,
+				coinAmount: round2(t.amount * (held.price ?? limit)),
+			}
+		}
+		// Su dueño cambió el precio justo antes de tomarla: no se cancela, se avisa (comprando, la puedes
+		// cancelar tú sin disputa mientras no la hayas pagado)
+		if (held.price != null && (side === 'buy' ? held.price > limit * (1 + 1e-9) : held.price < limit * (1 - 1e-9)))
+			notes.push(
+				`@${user} cambió el precio justo antes: ${side === 'buy' ? 'compraste' : 'vendiste'} a ${held.price.toLocaleString('es')}, ${side === 'buy' ? 'por encima' : 'por debajo'} de tu ${limit.toLocaleString('es')}.${side === 'buy' ? ' Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.' : ''}`,
+			)
+		// Vendiendo, el comprador recibe tus datos por el chat
+		let chatSent: boolean | undefined
+		if (side === 'sell') {
+			const text = `Hola. Vendo ${t.amount} USD desde Terminal P2P. Págame aquí:\n${details.map((d) => `${d.label}: ${d.value}`).join('\n')}`
+			chatSent = await acc.client
+				.sendChat(o!.uuid, text.slice(0, 599), held.order ?? undefined)
+				.then(() => true)
+				.catch(() => false)
+			if (!chatSent) notes.push(`No se pudo mandar tus datos a @${user}: escríbeselos por el chat de la operación.`)
+		}
+		return { step, notes, chatSent }
+	}
+
+	// Radar de Pro: toma una oferta que cumplió tus reglas, con las mismas comprobaciones que la orden
+	// inteligente (sigue igual, cruza con tu precio, su dueño tiene historial) y sin publicar nada
+	private async radarTake({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		const side: 'buy' | 'sell' | null = b.side === 'buy' || b.side === 'sell' ? b.side : null
+		const coin = String(b.coin ?? '')
+		const limit = Number(b.price)
+		const t = { offer: String(b.offer ?? ''), amount: round2(Number(b.amount)) }
+		if (!side || !TICKS.has(coin) || !(limit > 0) || !t.offer || !(t.amount >= 0.1)) return json(400, { error: 'Toma no válida' })
+		const details = side === 'sell' ? payDetails(b.details) : []
+		if (side === 'sell' && !details.length) return json(400, { error: 'Pon tus datos para recibir el pago' })
+		if (side === 'sell') {
+			const me = await acc.client.me()
+			acc.me = me
+			if (t.amount > num(me.balance) + 1e-9) return json(200, { ok: false, error: `No tienes saldo suficiente: necesitas ${t.amount.toLocaleString('es')} USD y tienes ${num(me.balance).toLocaleString('es')}.` })
+		}
+		const r = await this.takeStep(acc, t, side, coin, limit, details, 'radar')
+		return json(200, { ok: r.step.status === 'taken', ...r })
 	}
 
 	private async editOffer({ req }: Ctx, acc: Account) {
