@@ -103,6 +103,8 @@ function setup(extra: Partial<ProEnv> = {}) {
 		tick: (ms: number) => (now += ms),
 		now: () => now,
 		post: (p: string, b: unknown) => call('POST', p, b),
+		// Conecta la cuenta en el terminal y activa sus 30 días gratis (no empiezan solos)
+		trial: async (print: string, username: string) => (await call('POST', '/pro/status', { print, username }), call('POST', '/pro/trial', { print, username })),
 		get: (p: string) => call('GET', p),
 		status: (id: string, print = P1) => call('POST', '/pro/checkout/status', { id, print }),
 	}
@@ -216,7 +218,7 @@ test('panel: dar días con motivo (se activan al conectar su cuenta), quitarlos,
 	assert.match(await (await form({ action: 'days', username: '@leo', days: '7' })).text(), /Escribe el motivo/)
 	assert.match(await (await form({ action: 'days', username: '@leo', days: '7', note: 'compensación por el fallo del 3/11' })).text(), /7 días para <b>@leo<\/b>/)
 	const st = (await s.post('/pro/status', { print: P1, username: 'leo' })).body
-	assert.deepEqual([st.pro, st.plan, st.started, st.expiresAt], [true, 'gift', false, T0 + 7 * 86_400_000])
+	assert.deepEqual([st.pro, st.plan, st.canTrial, st.expiresAt], [true, 'gift', false, T0 + 7 * 86_400_000])
 	// Quitar días: no lo deja antes de hoy
 	await form({ action: 'days', username: 'leo', days: '-3', note: 'me pasé' })
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.expiresAt, T0 + 4 * 86_400_000)
@@ -270,20 +272,26 @@ test('huella del token: siempre la misma para el mismo token, distinta entre tok
 	assert.ok(!a.includes('secreto'))
 })
 
-test('30 días gratis al conectar la cuenta: una vez por usuario de QvaPay y por dispositivo; si compra, los días que quedaban se suman', async () => {
+test('30 días gratis cuando el usuario los activa: nunca solos, una vez por usuario de QvaPay y por dispositivo; si compra, se suman', async () => {
 	const s = setup()
-	// Sin usuario conectado (solo la huella) no se activa nada
-	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
-	const r = await s.post('/pro/status', { print: P1, username: 'Ana' })
-	assert.deepEqual([r.body.pro, r.body.plan, r.body.expiresAt, r.body.started], [true, 'trial', T0 + 30 * 86_400_000, true])
-	// La siguiente consulta ya no los vuelve a dar
-	assert.equal((await s.post('/pro/status', { print: P1, username: 'Ana' })).body.started, false)
-	// Otro token (otro dispositivo) con la misma cuenta: entra solo en sus mismos días, sin otros 30
+	// Sin usuario conectado (solo la huella) no hay nada
+	assert.deepEqual([(await s.post('/pro/status', { print: P1 })).body.pro, (await s.post('/pro/status', { print: P1 })).body.canTrial], [false, false])
+	// Conectar la cuenta no da Pro ni crea nada: se le ofrece activarlo
+	const st = (await s.post('/pro/status', { print: P1, username: 'Ana' })).body
+	assert.deepEqual([st.pro, st.canTrial, st.started], [false, true, undefined])
+	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM pro_licenses').get() as { n: number }).n, 0)
+	// Activarlos pide la cuenta confirmada por QvaPay
+	assert.equal((await s.post('/pro/trial', { print: P1 })).status, 403)
+	const r = await s.post('/pro/trial', { print: P1, username: 'Ana' })
+	assert.deepEqual([r.body.pro, r.body.plan, r.body.expiresAt, r.body.started, r.body.canTrial], [true, 'trial', T0 + 30 * 86_400_000, true, false])
+	assert.equal((await s.post('/pro/trial', { print: P1, username: 'Ana' })).status, 409)
+	// Otro token (otro dispositivo) con la misma cuenta: entra solo en sus mismos días, sin ofrecerle otros
 	const other = (await s.post('/pro/status', { print: P2, username: 'ana' })).body
-	assert.deepEqual([other.pro, other.started, other.expiresAt], [true, false, T0 + 30 * 86_400_000])
-	// Ni otro usuario desde el mismo dispositivo (que además ya tiene sus días)
-	assert.equal((await s.post('/pro/status', { print: P3, username: 'leo' })).body.started, true)
-	assert.equal((await s.post('/pro/status', { print: P3, username: 'eva' })).body.started, false)
+	assert.deepEqual([other.pro, other.canTrial, other.expiresAt], [true, false, T0 + 30 * 86_400_000])
+	// Ni otro usuario desde un dispositivo que ya los usó
+	assert.equal((await s.post('/pro/trial', { print: P3, username: 'leo' })).status, 200)
+	assert.equal((await s.post('/pro/status', { print: P3, username: 'eva' })).body.canTrial, false)
+	assert.match((await s.post('/pro/trial', { print: P3, username: 'eva' })).body.error, /Ya usaste tus 30 días gratis/)
 	// A los 10 días compra 30 días: le quedaban 20 gratis, que se suman
 	s.tick(10 * 86_400_000)
 	const c = await s.post('/pro/checkout', { print: P1, plan: 'month' })
@@ -470,12 +478,12 @@ test('topes contra abusos: días gratis por IP y día y facturas pendientes en t
 	const s = setup()
 	// Desde la misma IP, solo TRIAL_PER_IP_DAY cuentas nuevas reciben días gratis ese día
 	const got: boolean[] = []
-	for (let i = 0; i < TRIAL_PER_IP_DAY + 2; i++) got.push((await s.post('/pro/status', { print: i.toString(16).padStart(64, 'e'), username: `nuevo${i}` })).body.started)
+	for (let i = 0; i < TRIAL_PER_IP_DAY + 2; i++) got.push((await s.post('/pro/trial', { print: i.toString(16).padStart(64, 'e'), username: `nuevo${i}` })).status === 200)
 	assert.equal(got.filter(Boolean).length, TRIAL_PER_IP_DAY)
 	assert.deepEqual(got.slice(-2), [false, false])
 	// Al día siguiente, vuelve a haber cupo (y la limpieza borra las huellas viejas)
 	s.tick(86_400_000)
-	assert.equal((await s.post('/pro/status', { print: 'f'.repeat(64), username: 'otroDia' })).body.started, true)
+	assert.equal((await s.post('/pro/trial', { print: 'f'.repeat(64), username: 'otroDia' })).body.started, true)
 	const { cleanupPro } = await import('../worker/pro.ts')
 	s.tick(3 * 86_400_000)
 	await cleanupPro(s.env.DB, s.now())
@@ -492,9 +500,9 @@ test('topes contra abusos: días gratis por IP y día y facturas pendientes en t
 test('la cuenta la confirma QvaPay: el usuario que diga el navegador no cuenta, y un dispositivo nuevo con tu cuenta entra solo en tu Pro', async () => {
 	const s = setup()
 	// Un usuario escrito en el cuerpo, sin la cookie del relé, no activa días gratis ni gasta los de nadie
-	const req = new Request('https://app.terminalp2p.com/pro/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ print: P4, username: 'ana' }) })
-	assert.equal((await (await proApi(req, new URL(req.url), s.env, s.now(), s.q.fetcher))!.json()).started, false)
-	assert.equal((await s.post('/pro/status', { print: P1, username: 'ana' })).body.started, true)
+	const req = new Request('https://app.terminalp2p.com/pro/trial', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ print: P4, username: 'ana' }) })
+	assert.equal((await proApi(req, new URL(req.url), s.env, s.now(), s.q.fetcher))!.status, 403)
+	assert.equal((await s.trial(P1, 'ana')).body.started, true)
 	// Una cookie de identidad de otra huella (otro token) no vale para esta
 	const stolen = await whoToken(P1, 'u-ana', 'ana', 'clave', s.now())
 	const req2 = new Request('https://app.terminalp2p.com/pro/status', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: `tpw=${stolen}` }, body: JSON.stringify({ print: P3 }) })
@@ -577,7 +585,7 @@ test('devolución en pasos: la pide el usuario desde «Mi cuenta», la apruebas 
 			s.env,
 			s.now(),
 		).then((r) => r.text())
-	await s.post('/pro/status', { print: P1, username: 'ana' }) // 30 días gratis
+	await s.trial(P1, 'ana') // 30 días gratis
 	const { checkout } = await buy(s, P1, 'month', 'ana')
 	// «Mi cuenta»: su compra se puede devolver
 	let acc = (await s.post('/pro/account', { print: P1, username: 'ana' })).body
@@ -627,7 +635,7 @@ test('panel: la ficha del cliente lo reúne todo, guarda notas y no acepta formu
 	const s = setup()
 	const req = (init: RequestInit, query = '') => proAdmin(new Request(`https://app.terminalp2p.com/admin/pro${query}`, init), s.env, s.now())
 	const auth = { Authorization: `Basic ${btoa('x:panel')}` }
-	await s.post('/pro/status', { print: P1, username: 'ana' })
+	await s.trial(P1, 'ana')
 	await buy(s, P1, 'month', 'ana')
 	// Desde otra web (o sin origen), nada
 	assert.equal((await req({ method: 'POST', headers: { ...auth, Origin: 'https://malo.example' }, body: new URLSearchParams({ action: 'days', username: 'ana', days: '999', note: 'x' }) })).status, 403)
@@ -690,7 +698,7 @@ test('informes por meses (cobrado, devuelto, neto, nuevos y los que repiten) y r
 	const s = setup()
 	const admin = (fields?: Record<string, string>, query = '') =>
 		proAdmin(new Request(`https://app.terminalp2p.com/admin/pro${query}`, { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }), s.env, s.now(), s.q.fetcher)
-	await s.post('/pro/status', { print: P1, username: 'ana' }) // días gratis
+	await s.trial(P1, 'ana') // días gratis
 	await buy(s, P1, 'month', 'ana')
 	s.tick(56 * 86_400_000) // le quedan 4 días (30 gratis + 30 comprados): ya puede comprar más
 	const second = await buy(s, P1, 'month', 'ana') // repite
@@ -758,7 +766,7 @@ test('avisos al usuario por Telegram: se conecta desde «Mi cuenta» y recibe su
 		return { status: res!.status, body: (await res!.json().catch(() => null)) as { method?: string; chat_id?: number; text?: string } | null }
 	}
 	const toUser = () => s.q.telegram.filter((m) => String(m.chat_id) === '555')
-	await s.post('/pro/status', { print: P1, username: 'ana' }) // días gratis
+	await s.trial(P1, 'ana') // días gratis
 	// Sin cuenta conectada no hay enlace
 	assert.equal((await s.post('/pro/telegram/link', { print: P2 })).status, 403)
 	const { url } = (await s.post('/pro/telegram/link', { print: P1, username: 'ana' })).body

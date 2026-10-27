@@ -100,9 +100,10 @@ test('Pro se hereda del terminal; la cuenta pasa al dueño de la licencia y sigu
 	assert.deepEqual(s.keys(), [`print:aaaaaa→${id}`])
 	// Sin Pro: BTC y ETH; vender lo que ya tienes siempre se puede
 	assert.deepEqual([canTrade(false, 'BTCUSDT', 'BUY'), canTrade(false, 'SOLUSDT', 'BUY'), canTrade(false, 'SOLUSDT', 'SELL'), canTrade(true, 'SOLUSDT', 'BUY')], [true, false, true, true])
-	// Al conectar la cuenta en el terminal (con su usuario) empiezan sus 30 días gratis: el simulador lo ve al
+	// Conecta la cuenta en el terminal (con su usuario) y activa sus 30 días gratis: el simulador lo ve al
 	// momento, y la cuenta pasa a ir con @ana
-	assert.equal((await s.terminal('/pro/status', { print: P1, username: 'Ana' })).body.started, true)
+	assert.equal((await s.terminal('/pro/status', { print: P1, username: 'Ana' })).body.canTrial, true)
+	assert.equal((await s.terminal('/pro/trial', { print: P1, username: 'Ana' })).body.started, true)
 	let me = (await s.sim('GET', '/api/me', c1)).body
 	assert.deepEqual([me.player.id, me.pro.plan], [id, 'trial'])
 	assert.deepEqual(s.keys(), [`user:ana→${id}`])
@@ -135,12 +136,14 @@ test('con Pro apagado en el panel: sin días gratis ni compras, y el simulador s
 	assert.deepEqual([st.body.pro, st.body.enabled, st.body.started], [false, false, undefined])
 	assert.ok(st.cookie) // la sesión del simulador sí se deja
 	assert.equal((await s.terminal('/pro/checkout', { print: P1, plan: 'month' })).status, 404)
+	assert.equal((await s.terminal('/pro/trial', { print: P1, username: 'Ana' })).status, 404)
 	const cfg = (await s.sim('GET', '/api/config', null)).body
 	assert.deepEqual([cfg.pro, cfg.markets.map((m: { symbol: string }) => m.symbol)], [false, ['BTCUSDT', 'ETHUSDT']])
 	assert.equal((await s.sim('GET', '/api/me', st.cookie)).body.pro, null)
-	// Al encenderlo, la siguiente consulta da los 30 días gratis
+	// Al encenderlo, se le ofrecen los 30 días gratis y los activa
 	await setProEnabled(s.d1, true)
-	assert.equal((await s.terminal('/pro/status', { print: P1, username: 'Ana' })).body.started, true)
+	assert.equal((await s.terminal('/pro/status', { print: P1, username: 'Ana' })).body.canTrial, true)
+	assert.equal((await s.terminal('/pro/trial', { print: P1, username: 'Ana' })).body.started, true)
 	assert.ok((await s.sim('GET', '/api/config', null)).body.markets.length > 2)
 })
 

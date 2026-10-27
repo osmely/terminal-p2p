@@ -60,7 +60,7 @@ const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
 const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
 
 function applyPro(s) {
-	Object.assign(pro, { enabled: s.enabled === true, active: !!s.pro, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
+	Object.assign(pro, { enabled: s.enabled === true, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
 	
 	if (pro.active && !pro.loaded) {
 		pro.loaded = true
@@ -86,8 +86,8 @@ async function refreshPro() {
 	try {
 		pro.print = (await api('/print')).print
 		if (!pro.print) return applyPro({ pro: false })
-		// Además de decir si eres Pro, deja la sesión compartida con el simulador y, si es la primera vez
-		// que conectas esta cuenta, activa tus 30 días gratis
+		// Además de decir si eres Pro, deja la sesión compartida con el simulador y dice si aún puedes activar
+		// tus 30 días gratis (no empiezan solos: los activas tú desde ★)
 		let s = await proFetch('/pro/status', { print: pro.print })
 		// Si cambiaste de token en este navegador, la huella vieja pasa su Pro y su cuenta del simulador a la nueva
 		const old = store.get('pro.print', null)
@@ -104,7 +104,6 @@ async function refreshPro() {
 			} catch {}
 			return location.assign(SIM_URL)
 		}
-		if (s.started) showFreeDays()
 		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && store.get('pro.renewTold', '') !== new Date().toDateString()) {
 			store.set('pro.renewTold', new Date().toDateString())
 			toast(`Te quedan ${daysText(daysLeft())} de Pro. Añade más desde el botón ★.`)
@@ -120,8 +119,8 @@ function renderProChip() {
 	if (!b) return
 	b.hidden = !bk.acct.connected || !pro.enabled
 	b.classList.toggle('on', pro.active)
-	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? daysText(daysLeft()) : 'Pro'}</span>`
-	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : 'Terminal P2P Pro'
+	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? daysText(daysLeft()) : pro.canTrial ? 'Probar Pro' : 'Pro'}</span>`
+	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? 'Prueba Pro 30 días gratis' : 'Terminal P2P Pro'
 }
 
 // ── Ventana Pro ──────────────────────────────────────────────────────
@@ -143,18 +142,37 @@ function showPro() {
 						? `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Compra más días cuando quieras: se suman a los que te quedan.</p><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. Nada se cobra solo. ${refund}</p>`
 						: `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Podrás comprar más días cuando te queden 5 o menos, desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>. Nada se cobra solo.</p>`
 				}</div>`
-			: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
+			: pro.canTrial
+				? `<div class="stack pro-box"><h3>★ Prueba Terminal P2P Pro 30 días gratis</h3>
+				<ul class="pro-feats">${feats}</ul>
+				<button class="btn primary block" id="proTrial">Activar mis 30 días gratis</button>
+				<p class="hint">Sin pagar nada. Cuando terminen, decides si compras días: nada se cobra solo. Funciona en todos los dispositivos donde conectes tu cuenta.</p>
+				<details class="pro-more"><summary>¿Prefieres comprar días ya?</summary><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. ${refund}</p></details></div>`
+				: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
 				<p class="muted">Ya usaste tus 30 días gratis. Compra días de Pro:</p>
 				<div class="pro-plans">${plans}</div>
 				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Nada se cobra solo: cada compra la haces tú. ${refund}</p></div>`,
 	)
 	for (const b of $('modalBody').querySelectorAll('[data-plan]')) b.onclick = () => startCheckout(b.dataset.plan)
+	$('proTrial')?.addEventListener('click', startTrial)
 }
 
-// Al conectar la cuenta por primera vez: los 30 días gratis ya están activos
+// Los 30 días gratis empiezan cuando el usuario los activa
+async function startTrial() {
+	$('proTrial').disabled = true
+	try {
+		applyPro(await proFetch('/pro/trial', { print: pro.print }))
+		showFreeDays()
+	} catch (e) {
+		$('proTrial').disabled = false
+		toast(e.message, true)
+	}
+}
+
+// Recién activados los 30 días gratis
 function showFreeDays() {
-	openModal(`<div class="stack pro-box"><h3>★ Tienes 30 días de Pro gratis</h3>
+	openModal(`<div class="stack pro-box"><h3>★ Activaste tus 30 días de Pro gratis</h3>
 		<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa, y en el <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">simulador</a> operas todos los mercados. Cuando se acaben, puedes comprar más días desde el botón ★.</p>
 		<button class="btn primary block" id="proOk">Listo</button></div>`)
 	$('proOk').onclick = closeModal

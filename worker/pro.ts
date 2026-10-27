@@ -453,26 +453,34 @@ export async function activeLicense(db: D1, uuid: string | null | undefined, now
 }
 
 
-// Los 30 días gratis de quien conecta su cuenta por primera vez (false si ese usuario o ese dispositivo ya los
-// usó, o si se pasó el tope del día para su IP o en total). ip es la huella cifrada de la IP (ipPrint)
-async function freeDays(db: D1, username: string, print: string, now: number, ip: string) {
+// Los 30 días gratis, cuando el usuario los activa (una vez por usuario de QvaPay y por dispositivo, con topes por
+// IP y por día). 'used': ese usuario o ese dispositivo ya los usó; 'busy': se llegó a un tope
+async function freeDays(db: D1, username: string, print: string, now: number, ip: string): Promise<'ok' | 'used' | 'busy'> {
+	if (!(await trialAvailable(db, username, print))) return 'used'
 	const day = new Date(now).toISOString().slice(0, 10)
 	const n = async (sql: string, ...args: unknown[]) => (await db.prepare(sql).bind(...args).first<{ n: number | null }>())?.n ?? 0
-	if ((await n('SELECT n FROM pro_trial_ips WHERE day = ? AND ip = ?', day, ip)) >= TRIAL_PER_IP_DAY) return false
+	if ((await n('SELECT n FROM pro_trial_ips WHERE day = ? AND ip = ?', day, ip)) >= TRIAL_PER_IP_DAY) return 'busy'
 	if ((await n('SELECT COALESCE(SUM(n), 0) AS n FROM pro_trial_ips WHERE day = ?', day)) >= TRIAL_PER_DAY) {
 		console.error(`pro: tope diario de días gratis (${TRIAL_PER_DAY}) alcanzado`)
-		return false
+		return 'busy'
 	}
 	let license: string
 	try {
-		license = await startTrial(db, username, [`qp:${username.toLowerCase()}`, `print:${print}`], now)
+		license = await startTrial(db, username, trialKeys(username, print), now)
 	} catch (err) {
-		if (err instanceof ProError) return false
+		if (err instanceof ProError) return 'used'
 		throw err
 	}
 	await attachPrint(db, license, print, now)
 	await db.prepare('INSERT INTO pro_trial_ips (day, ip, n) VALUES (?, ?, 1) ON CONFLICT(day, ip) DO UPDATE SET n = n + 1').bind(day, ip).run()
-	return true
+	return 'ok'
+}
+
+const trialKeys = (username: string, print: string) => [`qp:${username.toLowerCase()}`, `print:${print}`]
+// ¿Puede activar sus días gratis? Ni ese usuario de QvaPay ni ese dispositivo los han usado
+async function trialAvailable(db: D1, username: string, print: string) {
+	const [a, b] = trialKeys(username, print)
+	return !(await db.prepare('SELECT 1 FROM pro_trials WHERE key IN (?, ?)').bind(a, b).first())
 }
 
 // Huella de la IP para los topes: con la clave de Pro, así no se puede volver a la IP
@@ -486,7 +494,7 @@ export async function cleanupPro(db: D1, now: number) {
 // Los 30 días gratis. Las llaves dicen quién ya los usó (una sola vez cada una); si alguna ya se usó, no hay otro
 export async function startTrial(db: D1, username: string, keys: string[], now: number) {
 	for (const k of keys) if (await db.prepare('SELECT 1 FROM pro_trials WHERE key = ?').bind(k).first()) throw new ProError(409, 'Ya usaste tus 30 días gratis')
-	const { license } = await addDays(db, username, { kind: 'trial', days: TRIAL_DAYS, note: 'Días gratis al conectar la cuenta', actor: 'system' }, now)
+	const { license } = await addDays(db, username, { kind: 'trial', days: TRIAL_DAYS, note: 'Días gratis activados', actor: 'system' }, now)
 	for (const k of keys) await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(k, license, now).run()
 	return license
 }
@@ -636,13 +644,25 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 				l = await activeLicense(db, accountOf(username), now)
 				if (l) await attachPrint(db, l.uuid, print, now)
 			}
-			// Todos empiezan con 30 días gratis: se activan solos al conectar la cuenta, una vez por usuario de
-			// QvaPay y por dispositivo
-			const started = !l && !!username && (await freeDays(db, username, print, now, await ipPrint(req, env.PRO_KEY)))
-			if (started) l = await licenseOfPrint(db, print, now)
 			if (l) await db.prepare('UPDATE pro_prints SET seen_at = ? WHERE print = ?').bind(now, print).run()
+			// Los 30 días gratis no empiezan solos: si aún puede, el terminal le ofrece activarlos (POST /pro/trial)
+			const canTrial = !l && !!username && (await trialAvailable(db, username, print))
 			// La sesión compartida con el simulador: con ella entra sin otro login y hereda tus días de Pro
-			const res = json(200, { ...(await statusOf(env, l, now)), started })
+			const res = json(200, { ...(await statusOf(env, l, now)), canTrial })
+			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
+			return res
+		}
+
+		// Activar los 30 días gratis (lo pulsa el usuario en el terminal). Con la cuenta que confirmó QvaPay
+		if (route === 'POST /pro/trial') {
+			const print = printOf((await readBody(req)).print)
+			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
+			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para activar tus días gratis' })
+			if (await activeLicense(db, accountOf(who.username), now)) return json(409, { error: 'Ya tienes Pro activo' })
+			const r = await freeDays(db, who.username, print, now, await ipPrint(req, env.PRO_KEY))
+			if (r === 'used') return json(409, { error: 'Ya usaste tus 30 días gratis en esta cuenta o en este dispositivo' })
+			if (r === 'busy') return json(429, { error: 'Ahora mismo no se pueden activar más días gratis desde tu conexión. Inténtalo mañana.' })
+			const res = json(200, { ...(await statusOf(env, await licenseOfPrint(db, print, now), now)), canTrial: false, started: true })
 			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
 			return res
 		}
@@ -1277,8 +1297,8 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 	const paused = await ordersPaused(db, now)
 	const toggles = `<div class="toggles">${
 		proOn
-			? `<form method="post" class="flag on"><b>Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis al conectar) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
-			: `<form method="post" class="flag"><b>Pro está apagado</b><span class="note">No se anuncia ni se ofrece: la web no lo menciona, el terminal no tiene orden inteligente ni compras y el simulador solo tiene BTC y ETH.</span><button name="action" value="pro-on" onclick="return confirm('¿Encender Pro? Se anuncia en la web y todos los que conecten su cuenta reciben 30 días gratis.')">Encender</button></form>`
+			? `<form method="post" class="flag on"><b>Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis para quien los active) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
+			: `<form method="post" class="flag"><b>Pro está apagado</b><span class="note">No se anuncia ni se ofrece: la web no lo menciona, el terminal no tiene orden inteligente ni compras y el simulador solo tiene BTC y ETH.</span><button name="action" value="pro-on" onclick="return confirm('¿Encender Pro? Se anuncia en la web y el terminal ofrece 30 días gratis a quien los active.')">Encender</button></form>`
 	}${
 		paused
 			? `<form method="post" class="flag paused"><b>Publicar ofertas está en pausa</b><span class="note">Quien intente publicar desde el terminal ve: «${ORDERS_PAUSED_MSG}» Tomar ofertas y cerrar órdenes siguen funcionando.</span><button name="action" value="orders-resume" onclick="return confirm('¿Reanudar la publicación de ofertas desde el terminal?')">Reanudar</button></form>`
