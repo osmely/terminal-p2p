@@ -184,22 +184,8 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .acct-table td.ask { color: var(--ask); }
 .chips-row { display: flex; flex-wrap: wrap; gap: 6px; }
 
-/* ══ Tira de mercados y secciones (pantallas medianas y móvil) ═══════ */
-.market-strip, .view-tabs { display: none; }
-.market-strip {
-	gap: 8px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
-	overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
-}
-.market-strip::-webkit-scrollbar { display: none; }
-.mchip {
-	flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; scroll-snap-align: center;
-	padding: 6px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface-2); text-align: left;
-}
-.mchip b { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
-.mchip .num { font-size: 11.5px; color: var(--muted); }
-.mchip .num.avg { font-style: italic; }
-.mchip.active { border-color: var(--accent); background: var(--accent-bg); }
-.mchip.active .num { color: var(--text-2); }
+/* ══ Secciones (pantallas medianas y móvil) ═══════════════════════════ */
+.view-tabs { display: none; }
 .view-tabs {
 	position: sticky; top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 15; gap: 4px; padding: 8px 12px; background: var(--bg);
 	border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none;
@@ -214,6 +200,12 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 /* ══ Ticker del mercado ═══════════════════════════════════════════════ */
 .ticker { display: flex; align-items: center; gap: 32px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
 .ticker-pair h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
+/* El par es un botón: abre la lista de mercados (en escritorio, la columna si estaba colapsada) */
+.pair-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: -3px -6px; padding: 3px 6px; border: 0; border-radius: 8px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.pair-btn > span { min-width: 0; }
+.pair-btn:hover { background: var(--surface-2); }
+.pair-caret { flex: none; color: var(--muted); }
+.markets-close { display: none; }
 .ticker-pair p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
 .ticker-stats { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-end; }
 @media (max-width: 1280px) { .ticker { gap: 24px; } .ticker-stats { gap: 18px; } }
@@ -297,6 +289,17 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .mrow .num { font-size: 12px; }
 .mrow .num.bid { color: var(--bid); }
 .mrow .num.ask { color: var(--ask); }
+/* Mercados colapsados (solo en escritorio): una franja estrecha con el botón para abrirlos */
+@media (min-width: 1281px) {
+	.layout.mk-closed { grid-template-columns: 44px minmax(0, 1fr) var(--c-book, 390px); }
+	.mk-closed .area-markets > :not(.panel-head) { display: none; }
+	.mk-closed .area-markets .panel-head { flex: 1; flex-direction: column-reverse; justify-content: flex-end; gap: 14px; padding: 8px 0; border-bottom: 0; cursor: pointer; }
+	.mk-closed .area-markets .panel-head:hover { background: var(--surface-2); }
+	.mk-closed .area-markets h2 { writing-mode: vertical-rl; rotate: 180deg; color: var(--muted); letter-spacing: 0.04em; }
+	.mk-closed .markets-toggle svg { rotate: 180deg; }
+}
+@media (max-width: 1280px) { .markets-toggle { display: none; } }
+@media (min-width: 1281px) { .pair-caret { display: none; } }
 
 /* ══ Libro ════════════════════════════════════════════════════════════ */
 .filter-wrap { position: relative; }
@@ -644,9 +647,21 @@ a.icon-btn { text-decoration: none; }
 		grid-template-columns: minmax(0, 1fr) 360px;
 		grid-template-areas: 'chart book' 'insights book' 'orders orders';
 	}
+	/* Sin columna, la lista de mercados es una hoja que sube desde abajo al tocar el par */
 	.area-markets { display: none; }
-	.market-strip { display: flex; }
+	body.mk-sheet .layout > .area-markets {
+		display: flex; position: fixed; z-index: 36; left: 0; right: 0; bottom: 0; max-height: min(78dvh, 640px);
+		border-radius: 18px 18px 0 0; border-bottom: 0; box-shadow: 0 -18px 50px rgba(0, 0, 0, 0.35);
+		padding-bottom: env(safe-area-inset-bottom, 0px); animation: sheet-up 0.22s ease-out;
+	}
+	body.mk-sheet .area-markets .panel-head { position: relative; padding-top: 16px; }
+	body.mk-sheet .area-markets .panel-head::before { content: ''; position: absolute; left: 50%; top: 6px; width: 38px; height: 4px; margin-left: -19px; border-radius: 2px; background: var(--line-strong); }
+	body.mk-sheet .markets-close { display: inline-grid; }
+	body.mk-sheet .mrow { padding-top: 11px; padding-bottom: 11px; }
+	body.mk-sheet { overflow: hidden; }
+	.sheet-backdrop { position: fixed; inset: 0; z-index: 35; background: var(--overlay); backdrop-filter: blur(2px); }
 }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0.4; } }
 @media (max-width: 900px) {
 	/* Barra superior compacta: el estado queda como un punto */
 	.nav { gap: 8px; padding: 0 12px; }
@@ -655,7 +670,6 @@ a.icon-btn { text-decoration: none; }
 	.swap-input, .swap-out { font-size: 24px; }
 	.hide-sm, .acct > div, .account > .badge { display: none; }
 
-	.market-strip { padding: 10px 12px; }
 	.ticker { gap: 10px; padding: 12px; }
 	.ticker-pair h1 { font-size: 17px; }
 	.ticker-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; width: 100%; }

@@ -99,7 +99,8 @@ body.rz-drag-h, body.rz-drag-h * { cursor: row-resize !important; }`
 				const el = els[i]
 				const panel = root.querySelector(h.panel)
 				const r = panel?.getBoundingClientRect()
-				el.hidden = !show || !r || !r.width
+				// Un panel colapsado (data-collapsed) no se redimensiona
+				el.hidden = !show || !r || !r.width || panel.dataset.collapsed != null
 				if (el.hidden) return
 				if (h.edge === 'bottom') {
 					el.style.left = `${r.left - lr.left}px`

@@ -58,12 +58,10 @@
 		<div id="account" class="account"></div>
 	</header>
 
-	<!-- Selector de mercado para pantallas sin la columna de mercados -->
-	<nav class="market-strip" id="marketStrip" aria-label="Mercados"></nav>
-
 	<section class="ticker">
 		<div class="ticker-pair">
-			<h1 id="pairName">QUSD / CUP Transferencia</h1>
+			<!-- Sin la columna de mercados (móvil y pantallas medianas), el par abre la lista en una hoja desde abajo -->
+			<h1><button class="pair-btn" id="pairBtn" aria-haspopup="dialog" aria-controls="marketList"><span id="pairName">QUSD / CUP Transferencia</span><svg class="pair-caret" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg></button></h1>
 			<p id="pairSub">Precio en CUP por cada USD de saldo QvaPay</p>
 		</div>
 		<div class="ticker-stats" id="stats"></div>
@@ -81,7 +79,15 @@
 
 	<main class="layout" id="layout">
 		<aside class="panel area-markets">
-			<div class="panel-head"><h2>Mercados</h2></div>
+			<div class="panel-head" id="marketsHead">
+				<h2>Mercados</h2>
+				<button class="icon-btn small markets-close" id="marketsClose" aria-label="Cerrar la lista de mercados" title="Cerrar">
+					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
+				</button>
+				<button class="icon-btn small markets-toggle" id="marketsToggle" aria-expanded="true" aria-controls="marketList" aria-label="Ocultar la lista de mercados" title="Ocultar la lista de mercados">
+					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</button>
+			</div>
 			<div class="markets-search"><input class="input" id="marketSearch" placeholder="Buscar…" autocomplete="off" /></div>
 			<div class="markets-cols"><span>Mercado</span><span>Compra</span><span>Venta</span></div>
 			<div class="markets-list" id="marketList"></div>
@@ -221,6 +227,7 @@
 			<div id="myTrades" class="orders"></div>
 		</section>
 	</main>
+	<div class="sheet-backdrop" id="marketsBackdrop" hidden></div>
 
 	<footer class="foot">
 		Todo corre en tu navegador: tu token y tus datos no se guardan en ningún servidor, y el dinero de cada operación queda en el escrow de QvaPay.

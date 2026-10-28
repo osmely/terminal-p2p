@@ -24,6 +24,7 @@ const state = {
 	range: store.get('range', 7),
 	view: store.get('view', 'book'),
 	grouped: store.get('grouped', false),
+	marketsClosed: store.get('marketsClosed', false),
 	filters: { vip: true, outlier: true, take: false, ops: 0, usd: 0, ageH: 0, ...store.get('filters', {}) },
 	book: null,
 	history: [],
@@ -101,10 +102,8 @@ async function loadBook() {
 
 async function loadOverview() {
 	try {
-		const first = !state.overview.length
 		state.overview = await getJSON('/api/overview')
 		renderMarkets()
-		if (first) revealChip(false)
 		if (!state.book) render()
 	} catch {}
 }
@@ -135,8 +134,8 @@ function selectCoin(tick) {
 	state.book = null
 	state.history = null
 	closeMenus()
+	closeMarketSheet()
 	renderMarkets()
-	revealChip()
 	render()
 	loadBook()
 	loadHistory()
@@ -165,31 +164,25 @@ function marketRows(query) {
 }
 
 // Tira horizontal de mercados (pantallas sin la columna de mercados)
-function marketChips() {
-	return state.overview
-		.map((c) => {
-			const mid = c.bid && c.ask ? (c.bid + c.ask) / 2 : (c.ask ?? c.bid)
-			const px = mid ? `<span class="num">${fmtP(mid)}</span>` : c.avgSell || c.avgBuy ? `<span class="num avg">${fmtP(c.avgSell ?? c.avgBuy)}</span>` : ''
-			return `<button class="mchip ${c.tick === state.coin ? 'active' : ''}" data-tick="${c.tick}" aria-pressed="${c.tick === state.coin}"><b>${esc(c.name)}</b>${px}</button>`
-		})
-		.join('')
-}
-
 function renderMarkets() {
 	$('marketList').innerHTML = marketRows($('marketSearch').value)
-	const strip = $('marketStrip')
-	const left = strip.scrollLeft
-	strip.innerHTML = marketChips()
-	strip.scrollLeft = left
 }
 
-// Lleva a la vista el mercado elegido dentro de la tira
-function revealChip(smooth = true) {
-	const chip = $('marketStrip').querySelector('.mchip.active')
-	if (!chip) return
-	const strip = $('marketStrip')
-	const off = chip.offsetLeft - (strip.clientWidth - chip.offsetWidth) / 2
-	strip.scrollTo({ left: Math.max(0, off), behavior: smooth ? 'smooth' : 'auto' })
+// Sin la columna de mercados (móvil y pantallas medianas), la misma lista se abre como una hoja desde abajo
+const wideLayout = () => matchMedia('(min-width: 1281px)').matches
+function openMarketSheet() {
+	document.body.classList.add('mk-sheet')
+	$('marketsBackdrop').hidden = false
+	$('marketList').querySelector('.mrow.active')?.scrollIntoView({ block: 'center' })
+}
+function closeMarketSheet() {
+	if (!document.body.classList.contains('mk-sheet')) return
+	document.body.classList.remove('mk-sheet')
+	$('marketsBackdrop').hidden = true
+	if ($('marketSearch').value) {
+		$('marketSearch').value = ''
+		renderMarkets()
+	}
 }
 
 // En el móvil se ve una sección a la vez
@@ -943,9 +936,11 @@ function drawHistory() {
 		askSeries = historyChart.addLineSeries({ color: css('--ask'), lineWidth: 2, title: 'venta' })
 		// Operaciones por día: barras en una escala propia, en la franja de abajo
 		opsSeries = historyChart.addCustomSeries(new DayBars(), { priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
-		// Referencia del mercado informal (elTOQUE): una mediana por día, en líneas discontinuas
-		usdSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USD informal' })
-		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT' })
+		// Referencia del mercado informal (elTOQUE): una mediana por día, en líneas discontinuas. No mueven la escala si
+		// hay tasa de QvaPay (suele estar lejos y aplastaría las líneas de compra y venta); se ven si caen dentro
+		const ownScale = (original) => (bidSeries.data().length || askSeries.data().length ? null : original())
+		usdSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USD informal', autoscaleInfoProvider: ownScale })
+		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT', autoscaleInfoProvider: ownScale })
 		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.74, bottom: 0 } })
 		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.3 } })
 		historyChart.timeScale().subscribeSizeChange(fitHistory)
@@ -1054,11 +1049,14 @@ document.addEventListener('tp:pro', () => {
 	if (historyChart && state.chart === 'history') drawHistory()
 })
 
-// Se encuadra al abrir un mercado o un rango; con datos nuevos del mismo, se respeta el zoom.
+// Se encuadra al abrir un mercado o un rango (todo el periodo a lo ancho y la escala de precios automática otra vez,
+// aunque se hubiera arrastrado); con datos nuevos del mismo, se respeta el zoom.
 // Con el gráfico oculto (en el móvil, otra sección a la vista) no tiene ancho: se encuadra al mostrarse
 function fitHistory() {
 	const key = `${state.coin}:${state.range}`
 	if (!state.history || key === historyKey || !historyChart.timeScale().width()) return
+	historyChart.priceScale('right').applyOptions({ autoScale: true })
+	historyChart.priceScale('ops').applyOptions({ autoScale: true })
 	historyChart.timeScale().fitContent()
 	historyKey = key
 }
@@ -1255,12 +1253,46 @@ function renderFilterCount() {
 }
 
 // ── Eventos ───────────────────────────────────────────────────────────
+// La lista de mercados se colapsa en escritorio en una franja estrecha (el gráfico y el libro ganan ancho)
+function renderMarketsPanel() {
+	const closed = state.marketsClosed
+	$('layout').classList.toggle('mk-closed', closed)
+	const panel = document.querySelector('.area-markets')
+	if (closed) panel.dataset.collapsed = ''
+	else delete panel.dataset.collapsed
+	const label = closed ? 'Mostrar la lista de mercados' : 'Ocultar la lista de mercados'
+	$('marketsToggle').setAttribute('aria-expanded', String(!closed))
+	$('marketsToggle').setAttribute('aria-label', label)
+	$('marketsToggle').title = label
+	// Las asas de redimensionar se recolocan con el ancho nuevo
+	window.dispatchEvent(new Event('resize'))
+}
+
 function bind() {
-	for (const id of ['marketList', 'marketStrip'])
-		$(id).addEventListener('click', (e) => {
-			const row = e.target.closest('[data-tick]')
-			if (row) selectCoin(row.dataset.tick)
-		})
+	$('marketsHead').addEventListener('click', (e) => {
+		if (!state.marketsClosed && !e.target.closest('#marketsToggle')) return
+		state.marketsClosed = !state.marketsClosed
+		store.set('marketsClosed', state.marketsClosed)
+		renderMarketsPanel()
+	})
+	$('marketList').addEventListener('click', (e) => {
+		const row = e.target.closest('[data-tick]')
+		if (row) selectCoin(row.dataset.tick)
+	})
+	// El par: en escritorio abre la columna si estaba colapsada y va al buscador; sin columna, abre la hoja
+	$('pairBtn').addEventListener('click', () => {
+		if (!wideLayout()) return openMarketSheet()
+		if (state.marketsClosed) {
+			state.marketsClosed = false
+			store.set('marketsClosed', false)
+			renderMarketsPanel()
+		}
+		$('marketSearch').focus()
+	})
+	$('marketsClose').addEventListener('click', closeMarketSheet)
+	$('marketsBackdrop').addEventListener('click', closeMarketSheet)
+	// Al pasar a escritorio con la hoja abierta, se cierra (la columna ya está a la vista)
+	matchMedia('(min-width: 1281px)').addEventListener('change', (e) => e.matches && closeMarketSheet())
 	$('marketSearch').addEventListener('input', renderMarkets)
 	$('filterBtn').addEventListener('click', (e) => {
 		e.stopPropagation()
@@ -1269,7 +1301,11 @@ function bind() {
 	$('filterMenu').addEventListener('click', (e) => e.stopPropagation())
 	for (const t of document.querySelectorAll('[data-view]')) t.addEventListener('click', () => showView(t.dataset.view))
 	document.addEventListener('click', closeMenus)
-	document.addEventListener('keydown', (e) => e.key === 'Escape' && closeMenus())
+	document.addEventListener('keydown', (e) => {
+		if (e.key !== 'Escape') return
+		closeMenus()
+		closeMarketSheet()
+	})
 
 	for (const t of document.querySelectorAll('[data-chart]')) t.addEventListener('click', () => showChart(t.dataset.chart))
 	for (const b of document.querySelectorAll('[data-crit]'))
@@ -1401,6 +1437,7 @@ window.TPResize?.({
 		{ panel: '.area-chart', edge: 'bottom', v: '--h-top', min: 280, max: 860 },
 	],
 })
+renderMarketsPanel()
 showView(state.view)
 showChart(state.chart)
 render()
