@@ -260,6 +260,45 @@ export async function loadSummary(db: D1, days: number, now = Date.now()) {
 	return summarize(results, days)
 }
 
+// ── Cifras públicas para la web (/data/stats) ─────────────────────────
+
+// Lo mismo que el panel, sin errores ni detalle: desde la primera acción, las últimas 24 h y los últimos 30 días
+export interface PublicStats {
+	since: number | null
+	created: number
+	taken: number
+	completed: number
+	volume: number
+	day: { created: number; taken: number; completed: number; volume: number }
+	byDay: { day: string; completed: number; volume: number }[]
+}
+
+export function publicStats(rows: MetricEvent[], now = Date.now()): PublicStats {
+	const all = summarize(rows, 0)
+	const day = summarize(
+		rows.filter((e) => e.t >= now - 86_400_000),
+		1,
+	)
+	const from = cubaDate(now - 29 * 86_400_000)
+	return {
+		since: rows.reduce<number | null>((m, e) => (m === null || e.t < m ? e.t : m), null),
+		created: all.created,
+		taken: all.taken,
+		completed: all.completed,
+		volume: all.volume,
+		day: { created: day.created, taken: day.taken, completed: day.completed, volume: day.volume },
+		byDay: all.byDay
+			.filter((d) => d.day >= from)
+			.map((d) => ({ day: d.day, completed: d.completed, volume: Math.round(d.volume * 100) / 100 }))
+			.reverse(),
+	}
+}
+
+export async function loadPublicStats(db: D1, now = Date.now()) {
+	const { results } = await db.prepare('SELECT t, event, status, offer, ord, coin, side, usd, source, via FROM events ORDER BY t LIMIT 100000').all<MetricEvent>()
+	return publicStats(results, now)
+}
+
 // ── Panel privado (HTTP Basic con la clave METRICS_KEY) ───────────────
 
 // Igualdad en tiempo constante: se comparan los SHA-256 de las dos cadenas byte a byte, sin

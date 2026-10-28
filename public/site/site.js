@@ -66,6 +66,65 @@ async function loadInformal() {
 	} catch {}
 }
 
+// En números: lo publicado, tomado y completado desde el terminal (/data/stats, anónimo y cacheado 10 min)
+const cubaDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Havana' })
+const dayName = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('es', { day: 'numeric', month: 'short' })
+const whole = (n) => Math.round(n).toLocaleString('es')
+async function loadStats() {
+	let s
+	try {
+		const r = await fetch('/data/stats', { headers: { Accept: 'application/json' } })
+		if (!r.ok) return
+		s = await r.json()
+	} catch {
+		return
+	}
+	if (!s.since) return
+	const sec = $('numeros')
+	for (const k of ['created', 'taken', 'completed']) {
+		const n = s.day[k]
+		sec.querySelector(`[data-day="${k}"]`).innerHTML = n ? `<b>+${whole(n)}</b> en las últimas 24 h` : ''
+	}
+	sec.querySelector('[data-day="volume"]').innerHTML = s.day.volume ? `<b>+${whole(s.day.volume)} USD</b> en las últimas 24 h` : ''
+	// Un día por barra, desde la primera acción (al menos una semana y como mucho 30 días), con los días sin nada en 0
+	const vol = new Map(s.byDay.map((d) => [d.day, d]))
+	const now = Date.now()
+	const span = Math.min(30, Math.max(7, Math.round((now - s.since) / 86_400_000) + 1))
+	const days = Array.from({ length: span }, (_, i) => cubaDay(now - (span - 1 - i) * 86_400_000))
+	const max = Math.max(...days.map((d) => vol.get(d)?.volume ?? 0))
+	$('statsBars').innerHTML = days
+		.map((d) => {
+			const v = vol.get(d)
+			const usd = v?.volume ?? 0
+			const tip = `${dayName(d)}: ${v ? `${whole(v.completed)} ${v.completed === 1 ? 'operación' : 'operaciones'} · ${whole(usd)} USD` : 'sin operaciones'}`
+			return `<i class="${usd ? (usd === max ? 'top' : '') : 'zero'}" style="--h:${usd ? Math.max(6, (usd / max) * 100) : 0}%" title="${tip}"></i>`
+		})
+		.join('')
+	$('barsFrom').textContent = dayName(days[0])
+	sec.hidden = false
+	// Los números cuentan hasta su valor al verse la sección (de golpe si se prefiere sin animaciones)
+	const nums = [...sec.querySelectorAll('[data-stat]')]
+	const show = (p) => nums.forEach((el) => (el.textContent = whole(s[el.dataset.stat] * p)))
+	const run = () => {
+		$('statsBars').classList.add('in')
+		if (matchMedia('(prefers-reduced-motion: reduce)').matches) return show(1)
+		const t0 = performance.now()
+		const step = (t) => {
+			const p = Math.min(1, (t - t0) / 1400)
+			show(1 - (1 - p) ** 3)
+			if (p < 1) requestAnimationFrame(step)
+		}
+		requestAnimationFrame(step)
+	}
+	if (!('IntersectionObserver' in window)) return run()
+	const io = new IntersectionObserver((entries) => {
+		if (!entries.some((e) => e.isIntersecting)) return
+		io.disconnect()
+		run()
+	}, { threshold: 0.3 })
+	io.observe(sec)
+}
+
 $('themeBtn').addEventListener('click', () => {
 	const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
 	document.documentElement.dataset.theme = next
@@ -96,6 +155,7 @@ if ($('rates')) {
 	setInterval(() => !document.hidden && loadRates(), 60_000)
 }
 if ($('informal')) loadInformal()
+if ($('numeros')) loadStats()
 
 // El menú de ayuda se cierra al tocar fuera o con Escape
 document.addEventListener('click', (e) => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { actionOf, authorized, clientEvent, feeMismatch, fingerprint, parseMeta, relayEvent, sameSecret, summarize, type MetricEvent } from '../worker/metrics.ts'
+import { actionOf, authorized, clientEvent, feeMismatch, fingerprint, parseMeta, publicStats, relayEvent, sameSecret, summarize, type MetricEvent } from '../worker/metrics.ts'
 import { netUsd, p2pFee } from '../src/qvapay/fees.ts'
 
 const OFFER = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d'
@@ -143,4 +143,34 @@ test('comisión del P2P: 0,25 % de lo que recibe quien compra (GOLD no paga), y 
 	assert.equal(feeMismatch({ gross_amount: 48, fee: 0 }), null) // cuenta GOLD
 	assert.equal(feeMismatch({ gross_amount: 0, fee: 1 }), null)
 	assert.match(feeMismatch({ gross_amount: 100, fee: 0.5, amount: 99.5 })!, /cobró 0.5 de 100 USD \(0.500 %\), mostramos 0.25/)
+})
+
+test('cifras públicas: totales desde la primera acción, las últimas 24 h y el volumen por día (sin errores ni detalle)', () => {
+	const DAY = 86_400_000
+	const ev = (t: number, event: MetricEvent['event'], offer: string, o: Partial<MetricEvent> = {}): MetricEvent => ({ t, event, status: 'ok', offer, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 0, source: 'relay', via: '', ...o })
+	const s = publicStats(
+		[
+			ev(NOW - 3 * DAY, 'create', 'a', { usd: 100 }),
+			ev(NOW - 3 * DAY, 'take', 'a', { usd: 40 }),
+			ev(NOW - 3 * DAY, 'release', 'a', { usd: 40 }),
+			ev(NOW - 1000, 'create', 'b', { usd: 50 }),
+			ev(NOW - 1000, 'take', 'c', { usd: 20 }),
+			ev(NOW - 500, 'completed', 'c', { usd: 20, source: 'client' }),
+			ev(NOW - 400, 'take', 'd', { status: 'error' }),
+			ev(NOW - 40 * DAY, 'cancel', 'z'),
+		].sort((x, y) => x.t - y.t),
+		NOW,
+	)
+	assert.equal(s.since, NOW - 40 * DAY)
+	assert.deepEqual([s.created, s.taken, s.completed, s.volume], [2, 2, 2, 60])
+	assert.deepEqual(s.day, { created: 1, taken: 1, completed: 1, volume: 20 })
+	// Solo los últimos 30 días, del más viejo al de hoy
+	assert.deepEqual(
+		s.byDay.map((d) => [d.completed, d.volume]),
+		[
+			[1, 40],
+			[1, 20],
+		],
+	)
+	assert.deepEqual(publicStats([], NOW).since, null)
 })

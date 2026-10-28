@@ -112,6 +112,49 @@
 			</div>
 		</section>
 
+		<!-- ── En números (cifras reales y anónimas de /data/stats) ── -->
+		<section class="sec stats" id="numeros" hidden>
+			<div class="wrap">
+				<div class="sec-head">
+					<div>
+						<h2>Terminal P2P <span class="grad">en cifras</span></h2>
+						<p>Estadísticas de operaciones realizadas en el terminal</p>
+					</div>
+				</div>
+				<div class="flow">
+					<article class="flow-step">
+						<span class="flow-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg></span>
+						<b class="flow-n" data-stat="created">0</b>
+						<span class="flow-label">Ofertas publicadas</span>
+						<em class="flow-day" data-day="created"></em>
+					</article>
+					<article class="flow-step">
+						<span class="flow-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 12h10M13 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
+						<b class="flow-n" data-stat="taken">0</b>
+						<span class="flow-label">Operaciones tomadas</span>
+						<em class="flow-day" data-day="taken"></em>
+					</article>
+					<article class="flow-step">
+						<span class="flow-ico done" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
+						<b class="flow-n" data-stat="completed">0</b>
+						<span class="flow-label">Operaciones completadas</span>
+						<em class="flow-day" data-day="completed"></em>
+					</article>
+				</div>
+				<article class="vol">
+					<div class="vol-copy">
+						<span class="flow-label">Volumen completado</span>
+						<b class="vol-n"><span data-stat="volume">0</span><small>USD</small></b>
+						<em class="flow-day" data-day="volume"></em>
+					</div>
+					<div class="vol-chart">
+						<div class="bars" id="statsBars" role="img" aria-label="Volumen completado por día"></div>
+						<div class="bars-axis"><span id="barsFrom"></span><span>hoy</span></div>
+					</div>
+				</article>
+			</div>
+		</section>
+
 		<!-- ── Tasas en vivo (API pública de QvaPay) ──────────────── -->
 		<section class="band" id="tasas">
 			<div class="wrap">
@@ -287,18 +330,18 @@
 						<a class="btn block" href="https://app.terminalp2p.com">Abrir terminal</a>
 					</article>
 					<article class="plan pro">
-						<span class="plan-tag">30 días gratis para probarlo</span>
+						<span class="plan-tag">14 días gratis para probarlo</span>
 						<h3>★ Pro</h3>
-						<p class="price">1,99 USD <small>30 días</small></p>
-						<p class="price-alt">o 7 días por 0,99 USD · 365 días por 20 USD</p>
+						<p class="price">4,99 USD <small>30 días</small></p>
+						<p class="price-alt">o 7 días por 1,99 USD · 90 días por 12,99 USD · 365 días por 39,99 USD</p>
 						<ul>
 							<li>Todo lo gratis</li>
 							<li><b>Orden inteligente:</b> si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange</li>
 							<li><b>Compras y ventas en el gráfico:</b> cada barra de operaciones por día, partida en compras y ventas</li>
 							<li><b>Simulador completo:</b> también SOL, XRP, BNB, DOGE, SUI, PEPE y TAO</li>
 						</ul>
-						<a class="btn primary block" href="https://app.terminalp2p.com">Pruébalo 30 días gratis</a>
-						<p class="plan-note">Pruébalo 30 días gratis: lo activas cuando quieras desde el terminal. Luego compras días con tu saldo de QvaPay. Para el TerminalP2P y el Simulador de trading, en todos tus dispositivos y con devolución en 7 días.</p>
+						<a class="btn primary block" href="https://app.terminalp2p.com">Pruébalo 14 días gratis</a>
+						<p class="plan-note">Pruébalo 14 días gratis: lo activas cuando quieras desde el terminal. Luego compras días con tu saldo de QvaPay. Para el TerminalP2P y el Simulador de trading, en todos tus dispositivos y con devolución en 7 días.</p>
 					</article>
 				</div>
 			</div>
@@ -336,11 +379,11 @@
 				</details>
 				<details>
 					<summary>¿Cuánto cuesta?</summary>
-					<p>El terminal es gratis y sin comisiones propias: solo aplican las de QvaPay.<span data-pro> Con <a href="#planes">Pro</a> puedes activar 30 días gratis; después compras días con tu saldo de QvaPay: 7 días por 0,99 USD, 30 por 1,99 USD o 365 por 20.</span></p>
+					<p>El terminal es gratis y sin comisiones propias: solo aplican las de QvaPay.<span data-pro> Con <a href="#planes">Pro</a> puedes activar 14 días gratis; después compras días con tu saldo de QvaPay: 7 días por 1,99 USD, 30 por 4,99 USD, 90 por 12,99 USD o 365 por 39,99 USD.</span></p>
 				</details>
 				<details data-pro>
 					<summary>¿Cómo cancelo Pro o pido una devolución?</summary>
-					<p>No hay nada que cancelar: compras días, no una suscripción, y nada se cobra solo. Cuando se acaban tus días, sigues con todo lo gratis. Si no te convence, te devolvemos el dinero en los 7 días siguientes a tu primera compra: escríbenos a <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>. Y antes de pagar tienes 30 días gratis para probarlo. Si Pro falla por nuestra culpa, te regalamos los días perdidos.</p>
+					<p>No hay nada que cancelar: compras días, no una suscripción, y nada se cobra solo. Cuando se acaban tus días, sigues con todo lo gratis. Si no te convence, te devolvemos el dinero en los 7 días siguientes a tu primera compra: escríbenos a <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>. Y antes de pagar tienes 14 días gratis para probarlo. Si Pro falla por nuestra culpa, te regalamos los días perdidos.</p>
 				</details>
 				<details>
 					<summary>¿Por qué tengo que conectar mi cuenta para ver el libro?</summary>

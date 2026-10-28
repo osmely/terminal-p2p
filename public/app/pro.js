@@ -16,9 +16,10 @@ const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname)
 
 // Lo que se compra son días de Pro: se suman a los que te queden
 const PRO_PLANS = [
-	['week', '7 días', '0,99 USD', '0,14 USD al día'],
-	['month', '30 días', '1,99 USD', '0,07 USD al día'],
-	['year', '365 días', '20 USD', '0,05 USD al día'],
+	['week', '7 días', '1,99 USD', '0,28 USD al día'],
+	['month', '30 días', '4,99 USD', '0,17 USD al día'],
+	['quarter', '90 días', '12,99 USD', '0,14 USD al día'],
+	['year', '365 días', '39,99 USD', '0,11 USD al día'],
 ]
 const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
@@ -98,7 +99,7 @@ async function refreshPro() {
 		pro.print = (await api('/print')).print
 		if (!pro.print) return applyPro({ pro: false })
 		// Además de decir si eres Pro, deja la sesión compartida con el simulador y dice si aún puedes activar
-		// tus 30 días gratis (no empiezan solos: los activas tú desde ★)
+		// tus 14 días gratis (no empiezan solos: los activas tú desde ★)
 		let s = await proFetch('/pro/status', { print: pro.print })
 		// Si cambiaste de token en este navegador, la huella vieja pasa su Pro y su cuenta del simulador a la nueva
 		const old = store.get('pro.print', null)
@@ -134,7 +135,7 @@ function renderProChip() {
 	// El radar es del módulo Pro (TPProRadar); sin Pro, su botón abre la ventana de Pro
 	const r = $('radarBtn')
 	if (r) r.hidden = b.hidden
-	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? 'Prueba Pro 30 días gratis' : 'Terminal P2P Pro'
+	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? 'Prueba Pro 14 días gratis' : 'Terminal P2P Pro'
 }
 
 // ── Ventana Pro ──────────────────────────────────────────────────────
@@ -157,14 +158,14 @@ function showPro() {
 						: `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Podrás comprar más días cuando te queden 5 o menos, desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>. Nada se cobra solo.</p>`
 				}</div>`
 			: pro.canTrial
-				? `<div class="stack pro-box"><h3>★ Prueba Terminal P2P Pro 30 días gratis</h3>
+				? `<div class="stack pro-box"><h3>★ Prueba Terminal P2P Pro 14 días gratis</h3>
 				<ul class="pro-feats">${feats}</ul>
-				<button class="btn primary block" id="proTrial">Activar mis 30 días gratis</button>
+				<button class="btn primary block" id="proTrial">Activar mis 14 días gratis</button>
 				<p class="hint">Sin pagar nada. Cuando terminen, decides si compras días: nada se cobra solo. Funciona en todos los dispositivos donde conectes tu cuenta.</p>
 				<details class="pro-more"><summary>¿Prefieres comprar días ya?</summary><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. ${refund}</p></details></div>`
 				: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
-				<p class="muted">Ya usaste tus 30 días gratis. Compra días de Pro:</p>
+				<p class="muted">Ya usaste tus 14 días gratis. Compra días de Pro:</p>
 				<div class="pro-plans">${plans}</div>
 				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Nada se cobra solo: cada compra la haces tú. ${refund}</p></div>`,
 	)
@@ -172,7 +173,7 @@ function showPro() {
 	$('proTrial')?.addEventListener('click', startTrial)
 }
 
-// Los 30 días gratis empiezan cuando el usuario los activa
+// Los 14 días gratis empiezan cuando el usuario los activa
 async function startTrial() {
 	$('proTrial').disabled = true
 	try {
@@ -184,9 +185,9 @@ async function startTrial() {
 	}
 }
 
-// Recién activados los 30 días gratis
+// Recién activados los 14 días gratis
 function showFreeDays() {
-	openModal(`<div class="stack pro-box"><h3>★ Activaste tus 30 días de Pro gratis</h3>
+	openModal(`<div class="stack pro-box"><h3>★ Activaste tus 14 días de Pro gratis</h3>
 		<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa, y en el <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">simulador</a> operas todos los mercados. Cuando se acaben, puedes comprar más días desde el botón ★.</p>
 		<button class="btn primary block" id="proOk">Listo</button></div>`)
 	$('proOk').onclick = closeModal

@@ -8,7 +8,7 @@
 // Todo lo que depende de la cuenta del usuario corre en su navegador.
 
 import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
-import { authorized, clientEvent, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
+import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { readWho, whoCookie } from './session.ts'
@@ -78,6 +78,7 @@ const SECURITY_HEADERS: Record<string, string> = {
 // Los datos cambian cada 10 minutos: 5 de caché en el borde bastan y ahorran lecturas de D1
 const RATES_TTL_S = 300
 const INFORMAL_TTL_S = 600
+const STATS_TTL_S = 600
 // La landing y el simulador reutilizan estos archivos del terminal en vez de duplicarlos
 const SHARED = ['/vendor/', '/favicon.svg', '/theme.js', '/resize.js', '/hit.js']
 
@@ -138,6 +139,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	}
 	if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
+	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
 	// Plan Pro, en el dominio del terminal. Pedir facturas tiene tope
 	if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
 		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund' || url.pathname === '/pro/telegram/link' || url.pathname === '/pro/trial'
@@ -346,6 +348,23 @@ async function metrics(req: Request, url: URL, env: Env) {
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
 	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days), hitsHtml(await loadHits(env.DB, days))))
+}
+
+// Las cifras públicas del terminal (para la landing): lo publicado, tomado y completado desde aquí, cacheadas 10 minutos
+async function stats(url: URL, env: Env, ctx: ExecutionContext) {
+	const key = new Request(`${url.origin}/data/stats`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, `public, max-age=${STATS_TTL_S}`)
+	let data
+	try {
+		data = await loadPublicStats(env.DB)
+	} catch (err) {
+		console.error(`/data/stats: ${(err as Error).message}`)
+		return jsonError(503, 'Las cifras no están disponibles ahora mismo')
+	}
+	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${STATS_TTL_S}` } })
+	ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
 }
 
 // La tasa informal más reciente (para la landing y la lectura del mercado), cacheada 10 minutos

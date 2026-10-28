@@ -34,15 +34,18 @@ export interface ProEnv extends AlertEnv {
 }
 
 export const PLANS = {
-	week: { usd: 0.99, days: 7, name: '7 días' },
-	month: { usd: 1.99, days: 30, name: '30 días' },
-	year: { usd: 20, days: 365, name: '365 días' },
+	week: { usd: 1.99, days: 7, name: '7 días' },
+	month: { usd: 4.99, days: 30, name: '30 días' },
+	quarter: { usd: 12.99, days: 90, name: '90 días' },
+	year: { usd: 39.99, days: 365, name: '365 días' },
 } as const
 export type Plan = keyof typeof PLANS
+// Para las consultas de cuentas con días comprados (las demás son trial y gift)
+const PAID_PLANS_SQL = Object.keys(PLANS).map((p) => `'${p}'`).join(', ')
 
 // Devolución completa en los días siguientes al primer pago (a mano: QvaPay no tiene devoluciones por API)
 export const REFUND_DAYS = 7
-export const TRIAL_DAYS = 30
+export const TRIAL_DAYS = 14
 // Topes de días gratis nuevos: por IP y día (amplio: muchos comparten IP en Cuba) y en total por día. No hacen
 // imposible inventar cuentas (el servidor no ve el token), pero lo vuelven lento y caro
 export const TRIAL_PER_IP_DAY = 10
@@ -473,7 +476,7 @@ export async function activeLicense(db: D1, uuid: string | null | undefined, now
 }
 
 
-// Los 30 días gratis, cuando el usuario los activa (una vez por usuario de QvaPay y por dispositivo, con topes por
+// Los días gratis, cuando el usuario los activa (una vez por usuario de QvaPay y por dispositivo, con topes por
 // IP y por día). 'used': ese usuario o ese dispositivo ya los usó; 'busy': se llegó a un tope
 async function freeDays(db: D1, username: string, print: string, now: number, ip: string): Promise<'ok' | 'used' | 'busy'> {
 	if (!(await trialAvailable(db, username, print))) return 'used'
@@ -511,13 +514,13 @@ export async function cleanupPro(db: D1, now: number) {
 	await db.prepare('DELETE FROM pro_trial_ips WHERE day < ?').bind(new Date(now - 2 * DAY_MS).toISOString().slice(0, 10)).run()
 }
 
-// Los 30 días gratis. Las llaves dicen quién ya los usó (una sola vez cada una); si alguna ya se usó, no hay otro
+// Los días gratis. Las llaves dicen quién ya los usó (una sola vez cada una); si alguna ya se usó, no hay otro
 export async function startTrial(db: D1, username: string, keys: string[], now: number) {
-	for (const k of keys) if (await db.prepare('SELECT 1 FROM pro_trials WHERE key = ?').bind(k).first()) throw new ProError(409, 'Ya usaste tus 30 días gratis')
+	for (const k of keys) if (await db.prepare('SELECT 1 FROM pro_trials WHERE key = ?').bind(k).first()) throw new ProError(409, `Ya usaste tus ${TRIAL_DAYS} días gratis`)
 	// Las llaves se apuntan antes que los días: de dos peticiones a la vez, solo la que apunta la primera los recibe
 	const license = accountOf(username)
 	const first = await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(keys[0], license, now).run()
-	if (!first.meta?.changes) throw new ProError(409, 'Ya usaste tus 30 días gratis')
+	if (!first.meta?.changes) throw new ProError(409, `Ya usaste tus ${TRIAL_DAYS} días gratis`)
 	for (const k of keys.slice(1)) await db.prepare('INSERT OR IGNORE INTO pro_trials (key, license, created_at) VALUES (?, ?, ?)').bind(k, license, now).run()
 	await addDays(db, username, { kind: 'trial', days: TRIAL_DAYS, note: 'Días gratis activados', actor: 'system' }, now)
 	return license
@@ -669,7 +672,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 				if (l) await attachPrint(db, l.uuid, print, now)
 			}
 			if (l) await db.prepare('UPDATE pro_prints SET seen_at = ? WHERE print = ?').bind(now, print).run()
-			// Los 30 días gratis no empiezan solos: si aún puede, el terminal le ofrece activarlos (POST /pro/trial)
+			// Los días gratis no empiezan solos: si aún puede, el terminal le ofrece activarlos (POST /pro/trial)
 			const canTrial = !l && !!username && (await trialAvailable(db, username, print))
 			// La sesión compartida con el simulador: con ella entra sin otro login y hereda tus días de Pro
 			const res = json(200, { ...(await statusOf(env, l, now)), canTrial })
@@ -677,14 +680,14 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			return res
 		}
 
-		// Activar los 30 días gratis (lo pulsa el usuario en el terminal). Con la cuenta que confirmó QvaPay
+		// Activar los días gratis (lo pulsa el usuario en el terminal). Con la cuenta que confirmó QvaPay
 		if (route === 'POST /pro/trial') {
 			const print = printOf((await readBody(req)).print)
 			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
 			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para activar tus días gratis' })
 			if (await activeLicense(db, accountOf(who.username), now)) return json(409, { error: 'Ya tienes Pro activo' })
 			const r = await freeDays(db, who.username, print, now, await ipPrint(req, env.PRO_KEY))
-			if (r === 'used') return json(409, { error: 'Ya usaste tus 30 días gratis en esta cuenta o en este dispositivo' })
+			if (r === 'used') return json(409, { error: `Ya usaste tus ${TRIAL_DAYS} días gratis en esta cuenta o en este dispositivo` })
 			if (r === 'busy') return json(429, { error: 'Ahora mismo no se pueden activar más días gratis desde tu conexión. Inténtalo mañana.' })
 			const res = json(200, { ...(await statusOf(env, await licenseOfPrint(db, print, now), now)), canTrial: false, started: true })
 			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
@@ -934,7 +937,7 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 		${pageHead(`@${u} ${state}`, `Cuenta <span class="mono">${escHtml(l.uuid)}</span> · ${tg ? `avisos por Telegram desde el ${hDay(tg.linked_at)}` : 'sin avisos por Telegram'} · días gratis usados: ${trials.map((t) => `${escHtml(t.key.startsWith('print:') ? 'un dispositivo' : t.key)} (${hDay(t.created_at)})`).join(', ') || 'ninguno'}`, suspend)}
 		${notice}
 		<div class="cards">
-			<div class="card"><span>Pro hasta</span><b>${hDay(l.expires_at)}</b><small>${left > 0 ? `${left} días` : 'vencido'} · ${escHtml(({ month: 'comprados', year: 'comprados', trial: 'gratis', gift: 'regalados' } as Record<string, string>)[l.plan] ?? l.plan)}</small></div>
+			<div class="card"><span>Pro hasta</span><b>${hDay(l.expires_at)}</b><small>${left > 0 ? `${left} días` : 'vencido'} · ${escHtml((l.plan in PLANS ? 'comprados' : (({ trial: 'gratis', gift: 'regalados' } as Record<string, string>)[l.plan] ?? l.plan)))}</small></div>
 			<div class="card"><span>Pagado</span><b>${hUsd(paidTotal)}</b><small>${pays.length} pagos${refundedTotal ? ` · devuelto ${hUsd(refundedTotal)}` : ''}</small></div>
 			<div class="card"><span>Devolución</span><b>${first === null ? '—' : inTime ? 'En plazo' : 'Fuera'}</b><small>${first === null ? 'sin compras' : `hasta el ${hDay(first + REFUND_DAYS * DAY_MS)}`}</small></div>
 			<div class="card"><span>Cliente desde</span><b>${hDay(l.created_at)}</b><small>${devices.length} dispositivos${devices[0] ? ` · usado ${hDay(devices[0].seen_at)}` : ''}</small></div>
@@ -993,7 +996,7 @@ export async function proReport(db: D1, now: number) {
 	const trialAccounts = new Set(trials.map((t) => t.license))
 	const converted = [...trialAccounts].filter((l) => seen.has(l)).length
 	const active = await db
-		.prepare("SELECT COUNT(*) AS n FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ? AND plan IN ('month', 'year')")
+		.prepare(`SELECT COUNT(*) AS n FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ? AND plan IN (${PAID_PLANS_SQL})`)
 		.bind(now)
 		.first<{ n: number }>()
 	return {
@@ -1008,8 +1011,87 @@ export async function proReport(db: D1, now: number) {
 	}
 }
 
+// Renovaciones: de cada compra que ya llegó a su fin, si la cuenta volvió a comprar (antes de quedarse sin días o
+// después) o se fue; por paquete, y quién sigue abriendo el terminal. Una compra «llega a su fin» cuando la cuenta
+// compra otra vez o cuando se le acaban los días; mientras le queden días, todavía no cuenta. Las devueltas no cuentan
+export async function renewalReport(db: D1, now: number) {
+	const buys = (
+		await db
+			.prepare(
+				`SELECT c.license, c.plan, COALESCE(c.paid_at, c.created_at) AS at, d.expires_before AS before, l.username, l.expires_at AS ends
+				FROM pro_checkouts c JOIN pro_licenses l ON l.uuid = c.license LEFT JOIN pro_days d ON d.checkout = c.id AND d.kind = 'purchase'
+				WHERE c.status = 'paid' AND c.refunded_at IS NULL ORDER BY at`,
+			)
+			.all<{ license: string; plan: string; at: number; before: number | null; username: string; ends: number }>()
+	).results
+	const seen = new Map(
+		(await db.prepare('SELECT license, MAX(seen_at) AS seen FROM pro_prints GROUP BY license').all<{ license: string; seen: number }>()).results.map((x) => [x.license, x.seen]),
+	)
+	const days = (p: string) => PLANS[p as Plan]?.days ?? 0
+	type Row = { plan: string; bought: number; due: number; renewed: number; longer: number }
+	const byPlan = new Map<string, Row>(Object.keys(PLANS).map((p) => [p, { plan: p, bought: 0, due: 0, renewed: 0, longer: 0 }]))
+	const accounts = new Map<string, { username: string; buys: typeof buys }>()
+	for (const b of buys) {
+		const a = accounts.get(b.license) ?? { username: b.username, buys: [] }
+		a.buys.push(b)
+		accounts.set(b.license, a)
+	}
+	let onTime = 0
+	let late = 0
+	let lapsed = 0
+	const gaps: number[] = []
+	for (const { buys: list } of accounts.values()) {
+		list.forEach((b, i) => {
+			const row = byPlan.get(b.plan) ?? byPlan.set(b.plan, { plan: b.plan, bought: 0, due: 0, renewed: 0, longer: 0 }).get(b.plan)!
+			row.bought++
+			const next = list[i + 1]
+			if (next) {
+				row.due++
+				row.renewed++
+				if (days(next.plan) > days(b.plan)) row.longer++
+				// Los días que pasó sin Pro antes de volver a comprar (0 si compró antes de que se le acabaran)
+				const gap = next.before && next.before < next.at ? (next.at - next.before) / DAY_MS : 0
+				if (gap > 0) {
+					late++
+					gaps.push(gap)
+				} else onTime++
+			} else if (b.ends <= now) {
+				row.due++
+				lapsed++
+			}
+		})
+	}
+	const sorted = gaps.sort((a, b) => a - b)
+	const active = (
+		await db
+			.prepare('SELECT uuid, plan FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?')
+			.bind(now)
+			.all<{ uuid: string; plan: string }>()
+	).results
+	// Quién abrió el terminal en los últimos 7 días, de las cuentas con Pro ahora (comprado, gratis o regalado)
+	const week = now - 7 * DAY_MS
+	const usage = (kind: 'paid' | 'trial' | 'gift') => {
+		const xs = active.filter((l) => (kind === 'paid' ? l.plan in PLANS : l.plan === kind))
+		return { total: xs.length, recent: xs.filter((l) => (seen.get(l.uuid) ?? 0) >= week).length }
+	}
+	const clients = [...accounts.entries()]
+		.map(([license, a]) => ({ username: a.username, buys: a.buys.length, plans: a.buys.map((b) => b.plan), first: a.buys[0].at, ends: a.buys[0].ends, seen: seen.get(license) ?? null }))
+		.sort((a, b) => b.buys - a.buys || b.first - a.first)
+	return {
+		due: onTime + late + lapsed,
+		renewed: onTime + late,
+		onTime,
+		late,
+		lapsed,
+		medianGap: sorted.length ? Math.round(sorted[Math.floor((sorted.length - 1) / 2)]) : null,
+		byPlan: [...byPlan.values()],
+		usage: { paid: usage('paid'), trial: usage('trial'), gift: usage('gift') },
+		clients,
+	}
+}
+
 async function reportsPage(env: ProEnv, notice: string, now: number) {
-	const r = await proReport(env.DB, now)
+	const [r, rn] = await Promise.all([proReport(env.DB, now), renewalReport(env.DB, now)])
 	const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)} %` : '—')
 	const thisMonth = r.months.find((x) => x.month === cubaMonth(now))
 	const lastMonth = r.months.find((x) => x.month === cubaMonth(Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 0, 12)))
@@ -1022,6 +1104,38 @@ async function reportsPage(env: ProEnv, notice: string, now: number) {
 				`<tr><td style="text-transform:capitalize">${name(x.month)}</td><td>${x.pays}</td><td>${hUsd(x.gross)}</td><td>${x.refunded ? `<span class="ask">${hUsd(x.refunded)}</span> <span class="note">(${x.refunds})</span>` : '—'}</td><td><b>${hUsd(x.net)}</b></td><td>${x.newPaying}</td><td>${x.renewals}</td><td>${x.trials}</td></tr>`,
 		)
 		.join('')
+	const planRows = rn.byPlan
+		.map((x) => `<tr><td>${escHtml(PLANS[x.plan as Plan]?.name ?? x.plan)}</td><td>${x.bought}</td><td>${x.due}</td><td>${x.renewed}</td><td><b>${pct(x.renewed, x.due)}</b></td><td>${x.longer}</td></tr>`)
+		.join('')
+	const clientRows = rn.clients
+		.slice(0, 50)
+		.map(
+			(c) =>
+				`<tr><td>${userLink(c.username)}</td><td>${c.buys}</td><td>${c.plans.map((p) => PLANS[p as Plan]?.days ?? p).join(' → ')}</td><td>${hDay(c.first)}</td><td>${c.ends > now ? hDay(c.ends) : '<span class="note">vencido</span>'}</td><td>${c.seen ? hDay(c.seen) : '—'}</td></tr>`,
+		)
+		.join('')
+	const use = (u: { total: number; recent: number }) => `${pct(u.recent, u.total)} <span class="note">(${u.recent} de ${u.total})</span>`
+	const renewals = `<h2 class="sec-title">Renovaciones</h2>
+		<div class="cards">
+			${card('Renuevan al acabar', pct(rn.renewed, rn.due), `${rn.renewed} de ${rn.due} compras que ya acabaron`)}
+			${card('Sin quedarse sin días', pct(rn.onTime, rn.renewed), `${rn.onTime} renovaron antes de que se les acabaran`)}
+			${card('Vuelven después', String(rn.late), rn.medianGap === null ? 'tras quedarse sin Pro' : `tras ${rn.medianGap} días sin Pro (mediana)`)}
+			${card('Se fueron', String(rn.lapsed), 'se les acabaron los días y no han vuelto')}
+		</div>
+		<div class="grid2">${panel(
+			'Por paquete',
+			`<div class="wrap"><table><thead><tr><th>Paquete</th><th>Compras</th><th>Ya acabaron</th><th>Renovaron</th><th>Renuevan</th><th>A uno más largo</th></tr></thead><tbody>${planRows}</tbody></table></div>`,
+			{ flush: true, foot: 'Una compra acaba cuando la cuenta vuelve a comprar o se queda sin días; mientras le queden, no cuenta. «A uno más largo»: la siguiente compra fue de más días.' },
+		)}${panel(
+			'Abrieron el terminal en los últimos 7 días',
+			`<div class="wrap"><table><thead><tr><th>Cuentas con Pro ahora</th><th>Lo usaron</th></tr></thead><tbody><tr><td>Días comprados</td><td>${use(rn.usage.paid)}</td></tr><tr><td>Días gratis</td><td>${use(rn.usage.trial)}</td></tr><tr><td>Días regalados</td><td>${use(rn.usage.gift)}</td></tr></tbody></table></div>`,
+			{ flush: true, foot: 'Cuenta como uso la última vez que alguno de sus dispositivos abrió el terminal con Pro.' },
+		)}</div>
+		${panel(
+			'Clientes',
+			`<div class="wrap"><table class="left"><thead><tr><th>Usuario</th><th class="num">Compras</th><th>Paquetes (días)</th><th>Primera compra</th><th>Pro hasta</th><th>Último uso</th></tr></thead><tbody>${clientRows || '<tr><td colspan="6" class="empty">Todavía no hay compras.</td></tr>'}</tbody></table></div>`,
+			{ flush: true, sub: rn.clients.length > 50 ? `Los 50 que más han comprado, de ${rn.clients.length}` : 'Los que más han comprado primero' },
+		)}`
 	return proPage(
 		env,
 		'pro-informes',
@@ -1035,7 +1149,8 @@ async function reportsPage(env: ProEnv, notice: string, now: number) {
 			${card('De gratis a pago', pct(r.converted, r.trialAccounts), `${r.converted} de ${r.trialAccounts} con días gratis`)}
 			${card('Devoluciones', pct(r.refundedCount, r.paidCount), `${r.refundedCount} de ${r.paidCount} pagos`)}
 		</div>
-		${panel('Por meses', `<div class="wrap"><table><thead><tr><th>Mes</th><th>Pagos</th><th>Cobrado</th><th>Devuelto</th><th>Neto</th><th>Nuevos</th><th>Repiten</th><th>Días gratis</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">Todavía no hay datos.</td></tr>'}</tbody></table></div>`, { flush: true, foot: '«Nuevos»: su primera compra. «Repiten»: compras de quien ya había comprado. «Días gratis»: cuentas que empezaron sus 30 días ese mes.' })}`,
+		${panel('Por meses', `<div class="wrap"><table><thead><tr><th>Mes</th><th>Pagos</th><th>Cobrado</th><th>Devuelto</th><th>Neto</th><th>Nuevos</th><th>Repiten</th><th>Días gratis</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">Todavía no hay datos.</td></tr>'}</tbody></table></div>`, { flush: true, foot: '«Nuevos»: su primera compra. «Repiten»: compras de quien ya había comprado. «Días gratis»: cuentas que empezaron sus días gratis ese mes.' })}
+		${renewals}`,
 	)
 }
 
@@ -1316,7 +1431,7 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 	const sum = await db
 		.prepare(
 			`SELECT
-				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan IN ('month', 'year')) AS paying,
+				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan IN (${PAID_PLANS_SQL})) AS paying,
 				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan = 'trial') AS trials,
 				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan = 'gift') AS gifts,
 				(SELECT COUNT(*) FROM pro_trials) AS trialKeys,
@@ -1371,8 +1486,8 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 	}</form>`
 	const toggles = `<div class="toggles">${
 		proOn
-			? `<form method="post" class="flag on"><b>Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (30 días gratis para quien los active) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
-			: `<form method="post" class="flag"><b>Pro está apagado</b><span class="note">No se anuncia ni se ofrece: la web no lo menciona, el terminal no tiene orden inteligente ni compras y el simulador solo tiene BTC y ETH.</span><button name="action" value="pro-on" onclick="return confirm('¿Encender Pro? Se anuncia en la web y el terminal ofrece 30 días gratis a quien los active.')">Encender</button></form>`
+			? `<form method="post" class="flag on"><b>Pro está encendido</b><span class="note">La web lo anuncia, el terminal lo ofrece (${TRIAL_DAYS} días gratis para quien los active) y el simulador abre todos los mercados a quien lo tiene.</span><button class="ghost" name="action" value="pro-off" onclick="return confirm('¿Apagar Pro? Deja de anunciarse y nadie podrá usarlo ni comprarlo hasta que lo enciendas.')">Apagar</button></form>`
+			: `<form method="post" class="flag"><b>Pro está apagado</b><span class="note">No se anuncia ni se ofrece: la web no lo menciona, el terminal no tiene orden inteligente ni compras y el simulador solo tiene BTC y ETH.</span><button name="action" value="pro-on" onclick="return confirm('¿Encender Pro? Se anuncia en la web y el terminal ofrece ${TRIAL_DAYS} días gratis a quien los active.')">Encender</button></form>`
 	}${
 		paused
 			? `<form method="post" class="flag paused"><b>Publicar ofertas está en pausa</b><span class="note">Quien intente publicar desde el terminal ve: «${ORDERS_PAUSED_MSG}» Tomar ofertas y cerrar órdenes siguen funcionando.</span><button name="action" value="orders-resume" onclick="return confirm('¿Reanudar la publicación de ofertas desde el terminal?')">Reanudar</button></form>`
@@ -1498,7 +1613,7 @@ async function accountsPanel(env: ProEnv, now: number, q = '') {
 		)
 		.bind(...(q ? [like(q), like(q)] : []))
 		.all<License & { created_at: number; devices: number; seen: number | null; pays: number; paid: number }>()
-	const planName = (p: string) => ({ month: 'comprados (30)', year: 'comprados (365)', trial: 'gratis', gift: 'regalados' })[p] ?? p
+	const planName = (p: string) => (p in PLANS ? `comprados (${PLANS[p as Plan].days})` : ({ trial: 'gratis', gift: 'regalados' }[p] ?? p))
 	const rows = results
 		.map((l) => {
 			const left = Math.ceil((l.expires_at - now) / DAY_MS)

@@ -31,7 +31,7 @@ function acctSummary() {
 			${stat('Verificación', a.kyc ? '✓ KYC' : 'Sin KYC', a.kyc ? 'identidad verificada' : 'QvaPay la pide para el P2P')}
 			${stat('Comisión P2P', a.gold ? 'GOLD' : '0,25 %', fee)}
 		</div>
-		${TPPro.enabled ? `<button class="btn block" id="acctGoPro">${TPPro.active ? `★ Te quedan ${daysText(daysLeft())} de Pro` : TPPro.canTrial ? '★ Probar Pro 30 días gratis' : '★ Terminal P2P Pro'}</button>` : ''}
+		${TPPro.enabled ? `<button class="btn block" id="acctGoPro">${TPPro.active ? `★ Te quedan ${daysText(daysLeft())} de Pro` : TPPro.canTrial ? '★ Probar Pro 14 días gratis' : '★ Terminal P2P Pro'}</button>` : ''}
 		<p class="hint">Tu token solo está en este navegador. Desconectar lo borra de aquí; tus operaciones en QvaPay no se tocan.</p>
 		<button class="btn danger block" id="acctOut">Desconectar cuenta</button></div>`
 	$('acctGoPro')?.addEventListener('click', () => showAccount('pro'))
@@ -50,7 +50,7 @@ async function acctPro() {
 	if (acctTab !== 'pro' || !$('acctBody')) return
 	const a = d.account
 	if (!a) {
-		$('acctBody').innerHTML = `<div class="stack"><p class="muted">Todavía no tienes días de Pro en esta cuenta.</p><button class="btn primary block" id="acctBuy">${TPPro.canTrial ? '★ Probar Pro 30 días gratis' : 'Ver Terminal P2P Pro'}</button></div>`
+		$('acctBody').innerHTML = `<div class="stack"><p class="muted">Todavía no tienes días de Pro en esta cuenta.</p><button class="btn primary block" id="acctBuy">${TPPro.canTrial ? '★ Probar Pro 14 días gratis' : 'Ver Terminal P2P Pro'}</button></div>`
 		$('acctBuy').onclick = showPro
 		return
 	}
