@@ -903,15 +903,23 @@ const shortDay = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric',
 const showInformal = () => INFORMAL_MARKETS.has(state.coin) && (state.history?.informal?.length ?? 0) > 0
 
 // Leyenda: operaciones y tasa informal del día bajo el cursor o, si no, del último día
+const cubaTime = (ms) => new Date(ms).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Havana' })
 function opsLegend(ms) {
 	const el = $('opsLegend')
 	const daily = state.history?.daily ?? []
+	const vol = state.history?.volume
 	const informal = showInformal() ? state.history.informal : []
 	const near = (xs) => (ms == null ? null : xs.find((x) => Math.abs(x.t - ms) < DAY_MS / 2))
-	const d = ms == null ? (daily.filter((x) => !x.partial).at(-1) ?? daily.at(-1)) : near(daily)
+	// Con el feed: la barra bajo el cursor o, sin cursor, la última que ya terminó
+	const bar = vol && (ms == null ? vol.bars.filter((b) => b.t + vol.bucketMs <= Date.now()).at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs))
+	const d = ms == null ? (daily.filter((x) => !x.partial).at(-1) ?? daily.at(-1)) : bar ? null : near(daily)
 	const i = ms == null ? informal.at(-1) : near(informal)
 	const parts = []
-	if (d) {
+	if (bar) {
+		const split = proSplit() ? ` · ${bar.buy.toLocaleString('es')} compras · ${bar.sell.toLocaleString('es')} ventas` : ''
+		parts.push(`<b>${bar.ops.toLocaleString('es')}</b> operaciones · <b>${Math.round(bar.usd).toLocaleString('es')}</b> USD de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
+	}
+	if (d && !(bar && ms == null)) {
 		const split = d.buy != null && d.sell != null ? ` · ${d.buy.toLocaleString('es')} compras · ${d.sell.toLocaleString('es')} ventas` : ''
 		parts.push(`<b>${d.ops.toLocaleString('es')}</b> operaciones ${d.partial ? 'en las últimas 24 h' : `el ${shortDay(d.t)}`}${split}`)
 	}
@@ -956,18 +964,7 @@ function drawHistory() {
 		const series = (key) => points.filter((p) => p[key] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[key] }))
 		bidSeries.setData(series('buy'))
 		askSeries.setData(series('sell'))
-		const daily = state.history?.daily ?? []
-		// La barra de cada día ocupa los puntos de ese día (en 7 y 30 días hay muchos) y se dibuja como un solo bloque.
-		// Con Pro se parte en compras y ventas; los días sin reparto (antes de que QvaPay lo diera) van enteros
-		const byDay = new Map()
-		for (const p of points) byDay.set(cubaDate(p.t), [...(byDay.get(cubaDate(p.t)) ?? []), p.t])
-		opsSeries.setData(
-			daily.flatMap((d) => {
-				const split = proSplit() && d.buy != null && d.sell != null
-				const bar = { day: d.day, total: split ? d.buy + d.sell : d.ops, buy: split ? d.buy : null, partial: d.partial }
-				return (byDay.get(d.day) ?? [d.t]).map((t) => ({ time: Math.floor(t / 1000) + tz, ...bar }))
-			}),
-		)
+		opsSeries.setData(opsBars(points, tz))
 		const ref = (key) => informal.filter((d) => d[key] != null).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d[key] }))
 		usdSeries.setData(ref('usd'))
 		usdtSeries.setData(ref('usdt'))
@@ -977,15 +974,54 @@ function drawHistory() {
 	const first = state.history?.firstPoint
 	const step = { 600000: 'cada 10 min', 3600000: 'por hora', 86400000: 'por día' }[state.history?.bucketMs] ?? ''
 	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
+	const vol = state.history?.volume
+	const bars = vol ? `operaciones ${vol.bucketMs === 3600000 ? 'por hora' : 'cada 6 h'}` : 'operaciones por día'
 	$('chartNote').textContent = first
-		? `Mediana de lo completado (24 h), ${step} · barras: operaciones por día${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${src} · QvaPay desde ${new Date(first).toLocaleDateString('es')}`
+		? `Mediana de lo completado (24 h), ${step} · barras: ${bars}${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${src} · QvaPay desde ${new Date(first).toLocaleDateString('es')}`
 		: informal.length
 			? `Mercado informal según elTOQUE, por día · QvaPay se registra cada 10 minutos`
 			: 'Se registra cada 10 minutos: vuelve en un rato'
 	$('chartNote').title =
-		'Líneas continuas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.' +
+		'Líneas continuas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. ' +
+		(vol
+			? `Barras: operaciones ${vol.bucketMs === 3600000 ? 'de cada hora' : 'de cada 6 horas'} según el feed de QvaPay (las fijas al completarse; en las de rango, cada parte tomada), desde el ${shortDay(vol.since)}; antes, el promedio de cada día, más tenue. La más clara es la que está en curso.`
+			: 'Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.') +
 		(proSplit() ? ' Con Pro, cada barra se parte en compras (verde) y ventas (rojo).' : '') +
 		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
+}
+
+// Las barras de operaciones. Cada barra ocupa los puntos de su periodo (en 7 y 30 días hay muchos) y se dibuja como
+// un solo bloque. Con el feed (7 y 30 días), una por hora o cada 6 h; los días de antes del feed, el promedio por hora
+// (o por 6 h) de ese día, más tenue. Sin feed o en rangos largos, una por día. Con Pro se parten en compras y ventas
+function opsBars(points, tz) {
+	const vol = state.history?.volume
+	const daily = state.history?.daily ?? []
+	const split = (b) => proSplit() && b.buy != null && b.sell != null
+	const out = []
+	const at = (t, key, b, faint) => out.push({ time: Math.floor(t / 1000) + tz, day: key, total: split(b) ? b.buy + b.sell : b.ops, buy: split(b) ? b.buy : null, partial: faint })
+	const fromDay = vol ? cubaDate(vol.since) : null
+	const per = vol ? DAY_MS / vol.bucketMs : 1
+	const byDay = new Map()
+	for (const p of points) byDay.set(cubaDate(p.t), [...(byDay.get(cubaDate(p.t)) ?? []), p.t])
+	for (const d of daily) {
+		if (fromDay && d.day >= fromDay) continue
+		const b = vol ? { ops: d.ops / per, buy: d.buy != null ? d.buy / per : null, sell: d.sell != null ? d.sell / per : null } : d
+		for (const t of byDay.get(d.day) ?? [d.t]) at(t, `d:${d.day}`, b, d.partial || !!vol)
+	}
+	if (vol) {
+		const now = Date.now()
+		let i = 0
+		for (const b of vol.bars) {
+			const end = b.t + vol.bucketMs
+			while (i < points.length && points[i].t < b.t) i++
+			const inside = []
+			for (let j = i; j < points.length && points[j].t < end; j++) inside.push(points[j].t)
+			for (const t of inside.length ? inside : [b.t + vol.bucketMs / 2]) at(t, `h:${b.t}`, b, end > now)
+		}
+	}
+	// Ordenadas y sin dos barras en el mismo instante (la librería lo exige)
+	out.sort((a, b) => a.time - b.time)
+	return out.filter((x, k) => !k || x.time !== out[k - 1].time)
 }
 
 // Fecha de Cuba (AAAA-MM-DD) de un instante: así agrupa el servidor las operaciones por día

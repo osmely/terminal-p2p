@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { bucketFor, cubaOffset, dailyFrom, rowsFrom, slot, summer } from '../worker/rates.ts'
+import { bucketFor, cubaOffset, dailyFrom, rowsFrom, slot, summer, volumeBars } from '../worker/rates.ts'
 import { cacheable } from '../worker/relay.ts'
 import type { Averages } from '../src/qvapay/types.ts'
 
@@ -72,4 +72,26 @@ test('horario de Cuba: UTC-4 del segundo domingo de marzo al primer domingo de n
 	// En invierno el día de Cuba empieza a las 05:00 UTC y la barra va a las 17:00 UTC
 	const [d] = dailyFrom([{ t: at('2026-12-16T04:50:00Z'), count: 24, count_buy: null, count_sell: null, window_h: 24 }], at('2026-12-20T12:00:00Z'))
 	assert.deepEqual([d.day, new Date(d.t).toISOString()], ['2026-12-15', '2026-12-15T17:00:00.000Z'])
+})
+
+test('volumen: por hora tal cual y cada 6 h desde las 0, 6, 12 y 18 de Cuba; nunca negativo', () => {
+	const H = 3_600_000
+	// 27 oct 2026: Cuba en verano (UTC-4). Las 10:00 UTC son las 6:00 de Cuba
+	const h = (iso: string) => Date.parse(iso)
+	const rows = [
+		{ hour: h('2026-10-27T09:00:00Z'), side: 'sell', ops: 2, usd: 40 },
+		{ hour: h('2026-10-27T10:00:00Z'), side: 'buy', ops: 1, usd: 15.5 },
+		{ hour: h('2026-10-27T10:00:00Z'), side: 'sell', ops: 3, usd: 60 },
+		{ hour: h('2026-10-27T11:00:00Z'), side: 'buy', ops: -1, usd: -10 },
+	]
+	assert.deepEqual(volumeBars(rows, H), [
+		{ t: h('2026-10-27T09:00:00Z'), ops: 2, usd: 40, buy: 0, sell: 2 },
+		{ t: h('2026-10-27T10:00:00Z'), ops: 4, usd: 75.5, buy: 1, sell: 3 },
+		{ t: h('2026-10-27T11:00:00Z'), ops: 0, usd: 0, buy: 0, sell: 0 },
+	])
+	// Cada 6 h: las 5:00 de Cuba van con la barra de las 0:00, las 6:00 y 7:00 con la de las 6:00
+	assert.deepEqual(volumeBars(rows, 6 * H), [
+		{ t: h('2026-10-27T04:00:00Z'), ops: 2, usd: 40, buy: 0, sell: 2 },
+		{ t: h('2026-10-27T10:00:00Z'), ops: 3, usd: 65.5, buy: 0, sell: 3 },
+	])
 })

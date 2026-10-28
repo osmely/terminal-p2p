@@ -7,7 +7,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
-import { ACT_KEEP, ALARM_MS, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, tradeOf, type Act, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
 
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
 const DONE_EVERY_MS = 5 * 60_000
@@ -57,6 +57,8 @@ export class LiveBook {
 	private streamConnects = 0
 	private streamEndedAt: number | null = null
 	private streamGap: number | null = null
+	// Operaciones ya sumadas al volumen en la última hora: el mismo evento puede llegar por el webhook y por el stream
+	private volSeen = new Map<string, number>()
 
 	private ctx: DurableObjectState
 	private env: LiveEnv
@@ -152,7 +154,10 @@ export class LiveBook {
 			// De un dueño que no conocemos aún no sabemos nombre ni reputación: se lee ese lado pronto
 			if (ch.unknownOwner) this.want.add(sideKey(ch.coin, ch.side))
 		}
-		if (ch?.act) this.addAct(ch.coin, ch.act)
+		if (ch?.act) {
+			this.addAct(ch.coin, ch.act)
+			await this.addVolume(e.event, ch.coin, ch.act)
+		}
 		await this.save()
 		if (this.want.size && !this.streaming) await this.soon(1500)
 		return true
@@ -274,6 +279,24 @@ export class LiveBook {
 			top[c.tick] = { ask: this.book.levels(c.tick, 'ask', 5), bid: this.book.levels(c.tick, 'bid', 5) }
 		}
 		return JSON.stringify({ t: 'top', top, at: Date.now() })
+	}
+
+	// Suma la operación a su hora en D1 (una fila por mercado, hora y lado). Si falla, se pierde esa y nada más
+	private async addVolume(event: string, coin: string, a: Act) {
+		const n = tradeOf(event, a)
+		if (!n) return
+		const now = Date.now()
+		const key = `${event}:${a.uuid}:${a.kind}:${a.t}:${a.usd}`
+		if (this.volSeen.has(key)) return
+		for (const [k, t] of this.volSeen) if (now - t > HOUR_MS) this.volSeen.delete(k)
+		this.volSeen.set(key, now)
+		try {
+			await this.env.DB.prepare('INSERT INTO volume (coin, hour, side, ops, usd) VALUES (?, ?, ?, ?, ?) ON CONFLICT (coin, hour, side) DO UPDATE SET ops = ops + excluded.ops, usd = usd + excluded.usd')
+				.bind(coin, Math.floor(a.t / HOUR_MS) * HOUR_MS, a.side === 'ask' ? 'sell' : 'buy', n, n * a.usd)
+				.run()
+		} catch (err) {
+			console.error(`volumen: ${(err as Error).message}`)
+		}
 	}
 
 	private addAct(coin: string, a: Act) {

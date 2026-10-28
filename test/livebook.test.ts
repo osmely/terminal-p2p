@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { test } from 'node:test'
 import type { P2POffer } from '../src/qvapay/types.ts'
-import { Book, feedSign, feedSigned, feedWebhook, sseEvents, type FeedEvent } from '../worker/livebook.ts'
+import { Book, feedSign, feedSigned, feedWebhook, sseEvents, tradeOf, type FeedEvent } from '../worker/livebook.ts'
 
 const T = Date.parse('2026-10-27T15:00:00Z')
 const at = (s: number) => new Date(T + s * 1000).toISOString()
@@ -163,4 +163,25 @@ test('actividad del feed: tomada entera o en parte, retirada, editada y completa
 	const n = b.apply(ev('p2p.created', { uuid: 'z', owner_uuid: 'u-leo' }, 12), T)!.act!
 	b.owners.set('u-leo', { username: 'leo', ops: 9, rating: null, kyc: false, vip: false, gold: false })
 	assert.equal(b.named([n])[0].user, 'leo')
+})
+
+test('volumen: cuentan las fijas al completarse y las partes tomadas de las de rango; la parte que vuelve resta', () => {
+	const b = new Book()
+	const trade = (e: FeedEvent) => {
+		const c = b.apply(e, T)
+		return c?.act ? [tradeOf(e.event, c.act), c.act.usd] : [0, 0]
+	}
+	// Fija: tomarla no cuenta (puede volver); completarla sí, con su monto
+	assert.deepEqual(trade(ev('p2p.created', {})), [0, 20])
+	assert.deepEqual(trade(ev('p2p.applied', {}, 2)), [0, 20])
+	assert.deepEqual(trade(ev('p2p.completed', { status: 'completed' }, 9)), [1, 20])
+	// De rango: cada parte tomada suma, la que vuelve resta y lo que quedaba tomado de una vez también suma
+	const r = { uuid: 'r1', amount: '100', receive: '105000', offer_kind: 'flexible' as const }
+	trade(ev('p2p.range_created', { ...r, available_amount: '100' }, 10))
+	assert.deepEqual(trade(ev('p2p.range_updated', { ...r, available_amount: '70', change: 'taken' }, 11)), [1, 30])
+	assert.deepEqual(trade(ev('p2p.range_updated', { ...r, available_amount: '80', change: 'returned' }, 12)), [-1, 10])
+	assert.deepEqual(trade(ev('p2p.range_closed', { ...r, available_amount: '0', change: 'taken', status: 'open' }, 13)), [1, 80])
+	// Cancelar no es una operación
+	trade(ev('p2p.created', { uuid: 'o2' }, 14))
+	assert.deepEqual(trade(ev('p2p.cancelled', { uuid: 'o2', status: 'cancelled' }, 15)), [0, 20])
 })

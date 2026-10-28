@@ -112,6 +112,18 @@ export interface Act {
 	uuid: string
 }
 
+// Si lo que pasó es una operación para el volumen: +1 una fija completada, una parte tomada de una de rango o lo que
+// quedaba de ella tomado de una vez; −1 una parte que volvió (se canceló o venció su ventana de pago). La toma de una
+// fija no cuenta: cuenta al completarse (si el que la tomó se va, vuelve al libro y no hubo operación)
+export function tradeOf(event: string, a: Act): 1 | -1 | 0 {
+	if (a.kind === 'done') return event === 'p2p.completed' ? 1 : 0
+	if (a.kind === 'partial') return 1
+	if (a.kind === 'taken') return event === 'p2p.range_closed' ? 1 : 0
+	if (a.kind === 'returned') return -1
+	return 0
+}
+export const HOUR_MS = 3_600_000
+
 export interface Applied {
 	coin: string
 	side: Side

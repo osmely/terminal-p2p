@@ -115,7 +115,36 @@ export async function query(db: D1, coin: string, days: number, now = Date.now()
 		// El rango (hasta un año) toca como mucho dos veranos: el del año de inicio y el del actual
 		.bind(coin, since, ...summer(new Date(since).getUTCFullYear()), ...summer(new Date(now).getUTCFullYear()))
 		.all<DayRow>()
-	return { coin, days, bucketMs: bucket, firstPoint: first?.t ?? null, points: results, daily: dailyFrom(last, now) }
+	return { coin, days, bucketMs: bucket, firstPoint: first?.t ?? null, points: results, daily: dailyFrom(last, now), volume: await volumeFor(db, coin, days, now) }
+}
+
+// Operaciones por hora (7 días) o cada 6 h (30 días) desde el feed de QvaPay (tabla volume, ver livebook-do.ts).
+// Las de 6 h empiezan a las 0, 6, 12 y 18 de Cuba. En rangos más largos, null: valen las barras diarias
+export async function volumeFor(db: D1, coin: string, days: number, now = Date.now()) {
+	if (days > 30) return null
+	const bucketMs = days <= 7 ? 3600_000 : 6 * 3600_000
+	const first = await db.prepare('SELECT MIN(hour) AS hour FROM volume WHERE coin = ?').bind(coin).first<{ hour: number | null }>()
+	if (first?.hour == null) return null
+	const { results } = await db
+		.prepare('SELECT hour, side, ops, usd FROM volume WHERE coin = ? AND hour >= ? ORDER BY hour')
+		.bind(coin, now - days * 86_400_000)
+		.all<{ hour: number; side: string; ops: number; usd: number }>()
+	return { bucketMs, since: first.hour, bars: volumeBars(results, bucketMs) }
+}
+
+export function volumeBars(rows: { hour: number; side: string; ops: number; usd: number }[], bucketMs: number) {
+	const bars = new Map<number, { t: number; ops: number; usd: number; buy: number; sell: number }>()
+	for (const r of rows) {
+		const off = cubaOffset(r.hour)
+		const t = Math.floor((r.hour + off) / bucketMs) * bucketMs - off
+		const b = bars.get(t) ?? bars.set(t, { t, ops: 0, usd: 0, buy: 0, sell: 0 }).get(t)!
+		b.ops += r.ops
+		b.usd += r.usd
+		if (r.side === 'buy') b.buy += r.ops
+		else b.sell += r.ops
+	}
+	// Una parte que volvió resta en su hora: nunca menos de cero
+	return [...bars.values()].map((b) => ({ t: b.t, ops: Math.max(0, b.ops), usd: Math.max(0, Math.round(b.usd * 100) / 100), buy: Math.max(0, b.buy), sell: Math.max(0, b.sell) }))
 }
 
 // Cuba: UTC-5, y UTC-4 en verano. El verano va del segundo domingo de marzo al primer domingo
