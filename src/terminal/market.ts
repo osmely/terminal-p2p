@@ -108,6 +108,8 @@ export interface WatchedSide extends Watch {
 	error: string | null
 	// Mediana de lo completado en ese lado (para las reglas «% mejor que lo cerrado»)
 	reference: number | null
+	// true: ese mercado llega en vivo desde el servidor (no se lee con tu cuenta)
+	live: boolean
 }
 
 // Lo que manda el servidor de cada mercado para los indicadores: la intención (con el libro completo), la hora de cada
@@ -243,7 +245,7 @@ export class Market {
 
 	watchedSide(w: Watch): WatchedSide {
 		const c = this.coins.get(w.tick)![w.side]
-		return { ...w, levels: c.levels, updatedAt: c.updatedAt, error: c.error, reference: this.reference(w.tick)?.[w.side === 'ask' ? 'sell' : 'buy'] ?? null }
+		return { ...w, levels: c.levels, updatedAt: c.updatedAt, error: c.error, reference: this.reference(w.tick)?.[w.side === 'ask' ? 'sell' : 'buy'] ?? null, live: this.liveCoins.has(w.tick) }
 	}
 
 	// Alguien acaba de conectar su cuenta: el libro puede leerse ya

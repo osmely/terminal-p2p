@@ -354,10 +354,16 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 
 /* ══ Gráficos ═════════════════════════════════════════════════════════ */
 .chart-wrap { position: relative; flex: 1; min-height: 0; padding: 8px; }
-.range-tabs { position: absolute; top: 14px; left: 16px; z-index: 3; }
+.chart-tools { position: absolute; top: 14px; left: 16px; z-index: 3; display: flex; flex-wrap: wrap; gap: 8px; max-width: calc(100% - 90px); }
 /* Leyenda de las barras de operaciones por día, sobre la franja de abajo del histórico */
 .ops-legend { position: absolute; left: 16px; top: 54px; z-index: 3; max-width: calc(100% - 90px); padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, var(--surface) 85%, transparent); font-size: 11.5px; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ops-legend b { color: var(--text); font-family: var(--mono); }
+.vol-tags { position: absolute; z-index: 4; pointer-events: none; }
+.vtag { position: absolute; left: 0; right: 0; transform: translateY(-50%); padding: 1px 4px; border-radius: 2px; font: 600 11px/14px var(--mono); color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vtag.ops { background: color-mix(in srgb, var(--accent) 85%, #000); }
+.vtag.bid { background: var(--bid); }
+.vtag.ask { background: var(--ask); }
+.vtag.usd { background: var(--text-2); color: var(--bg); }
 .panel-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 /* Gráfico: las pestañas siempre enteras; la nota ocupa lo que sobra (con «…») y si no cabe baja de línea */
 .area-chart .panel-head { flex-wrap: wrap; row-gap: 6px; }
@@ -711,7 +717,7 @@ a.icon-btn { text-decoration: none; }
 	   La leyenda guarda su sitio aunque no haya nada que mostrar, para que el gráfico no salte */
 	.chart-wrap { display: flex; flex-direction: column; gap: 6px; }
 	.chart-wrap > .chart { flex: 1; min-height: 0; }
-	.range-tabs { position: static; align-self: flex-start; }
+	.chart-tools { position: static; align-self: flex-start; max-width: 100%; }
 	.ops-legend { position: static; max-width: none; padding: 0 2px; min-height: 16px; background: none; }
 	.chart-wrap:has(#history:not([hidden])) .ops-legend[hidden] { display: block !important; visibility: hidden; }
 	.pane { max-height: none; }

@@ -93,6 +93,7 @@ test('tiempo real (Pro): lo empujado por el servidor no se lee con el token y le
 	market.setLive('BANK_CUP', 'ask', [level], 1)
 	assert.equal(got.length, 1)
 	assert.equal(got[0].levels[0].uuid, 'x')
+	assert.equal(got[0].live, true)
 	assert.equal(market.snapshot('BANK_CUP').realtime, true)
 	// El radar ya no gasta lecturas de tu cuenta en ese mercado
 	for (let i = 0; i < 3; i++) {

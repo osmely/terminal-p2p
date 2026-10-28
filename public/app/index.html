@@ -103,16 +103,20 @@
 				<span class="panel-note" id="chartNote"></span>
 			</div>
 			<div class="chart-wrap">
-				<div class="seg-tabs range-tabs" id="rangeTabs" role="tablist" hidden>
-					<button class="seg-tab" data-range="7" role="tab">7 días</button>
-					<button class="seg-tab" data-range="30" role="tab">30 días</button>
-					<button class="seg-tab" data-range="365" role="tab">1 año</button>
-					<button class="seg-tab" data-range="3650" role="tab" title="Desde 2020 con la referencia del mercado informal de elTOQUE">Todo</button>
+				<div class="chart-tools" id="chartTools" hidden>
+					<div class="seg-tabs range-tabs" id="rangeTabs" role="tablist">
+						<button class="seg-tab" data-range="7" role="tab">7 días</button>
+						<button class="seg-tab" data-range="30" role="tab">30 días</button>
+						<button class="seg-tab" data-range="365" role="tab">1 año</button>
+						<button class="seg-tab" data-range="3650" role="tab" title="Desde 2020 con la referencia del mercado informal de elTOQUE">Todo</button>
+					</div>
 				</div>
 				<canvas id="depth" class="chart"></canvas>
 				<canvas id="completed" class="chart" hidden></canvas>
 				<div id="history" class="chart" hidden></div>
 				<div class="ops-legend" id="opsLegend" hidden></div>
+				<!-- Etiquetas en el eje derecho, como las de compra y venta: operaciones (o compras y ventas) y USD operados -->
+				<div class="vol-tags" id="volTags" aria-hidden="true"></div>
 			</div>
 		</section>
 

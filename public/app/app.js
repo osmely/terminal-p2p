@@ -890,6 +890,7 @@ let bidSeries = null
 let askSeries = null
 // Operaciones por día: una barra sólida por día, como el volumen de un exchange (con Pro, partida en compras y ventas)
 let opsSeries = null
+let volSeries = null
 let usdSeries = null
 let usdtSeries = null
 // Los datos ya dibujados y el mercado y rango del último encuadre: el libro se refresca cada pocos
@@ -916,7 +917,9 @@ function opsLegend(ms) {
 	const parts = []
 	if (bar) {
 		const split = proSplit() ? ` · ${bar.buy.toLocaleString('en-US')} compras · ${bar.sell.toLocaleString('en-US')} ventas` : ''
-		parts.push(`<b>${bar.ops.toLocaleString('en-US')}</b> operaciones · <b>${Math.round(bar.usd).toLocaleString('en-US')}</b> USD de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
+		// Los USD operados son de Pro, como su línea
+		const usd = proSplit() ? ` · <b>${Math.round(bar.usd).toLocaleString('en-US')}</b> USD operados` : ''
+		parts.push(`<b>${bar.ops.toLocaleString('en-US')}</b> operaciones${usd} de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
 	}
 	if (d && !(bar && ms == null)) {
 		const split = d.buy != null && d.sell != null ? ` · ${d.buy.toLocaleString('en-US')} compras · ${d.sell.toLocaleString('en-US')} ventas` : ''
@@ -943,6 +946,8 @@ function drawHistory() {
 		askSeries = historyChart.addLineSeries({ color: css('--ask'), lineWidth: 2, title: 'venta' })
 		// Operaciones por día: barras en una escala propia, en la franja de abajo
 		opsSeries = historyChart.addCustomSeries(new DayBars(), { priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
+		// Volumen en USD de cada hora (Pro): una línea sobre las barras, en su propia escala dentro de la misma franja
+		volSeries = historyChart.addLineSeries({ priceScaleId: 'usdvol', lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerRadius: 3 })
 		// Referencia del mercado informal (elTOQUE): una mediana por día, en líneas discontinuas. No mueven la escala si
 		// hay tasa de QvaPay (suele estar lejos y aplastaría las líneas de compra y venta); se ven si caen dentro
 		const ownScale = (original) => (bidSeries.data().length || askSeries.data().length ? null : original())
@@ -950,9 +955,16 @@ function drawHistory() {
 		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT', autoscaleInfoProvider: ownScale })
 		// Las barras, bajas (el 15 % de abajo), y las tasas en el resto del alto
 		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
+		historyChart.priceScale('usdvol').applyOptions({ scaleMargins: { top: 0.85, bottom: 0.01 }, visible: false })
 		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.19 } })
 		historyChart.timeScale().subscribeSizeChange(fitHistory)
-		historyChart.subscribeCrosshairMove((p) => opsLegend(p.time ? (p.time - -new Date().getTimezoneOffset() * 60) * 1000 : null))
+		historyChart.subscribeCrosshairMove((p) => {
+			const ms = p.time ? (p.time - -new Date().getTimezoneOffset() * 60) * 1000 : null
+			opsLegend(ms)
+			volTags(ms)
+		})
+		historyChart.timeScale().subscribeVisibleLogicalRangeChange(() => volTags(null))
+		historyChart.timeScale().subscribeSizeChange(() => volTags(null))
 		themeHistory()
 	}
 	const informal = (showInformal() && state.history?.informal) || []
@@ -964,18 +976,21 @@ function drawHistory() {
 		bidSeries.setData(series('buy'))
 		askSeries.setData(series('sell'))
 		opsSeries.setData(opsBars(points, tz))
+		const vol = state.history?.volume
+		volSeries.setData(volLine() ? vol.bars.map((b) => ({ time: Math.floor((b.t + vol.bucketMs / 2) / 1000) + tz, value: b.usd })) : [])
 		const ref = (key) => informal.filter((d) => d[key] != null).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d[key] }))
 		usdSeries.setData(ref('usd'))
 		usdtSeries.setData(ref('usdt'))
 		opsLegend()
 	}
 	fitHistory()
+	requestAnimationFrame(() => volTags(null))
 	const first = state.history?.firstPoint
 	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
 	const vol = state.history?.volume
 	const bars = vol ? `operaciones ${vol.bucketMs === 3600000 ? 'por hora' : 'cada 6 h'}` : 'operaciones por día'
 	$('chartNote').textContent = first
-		? `Tasa de lo completado · barras: ${bars}${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${src} · desde el ${new Date(first).toLocaleDateString('es')}`
+		? `Tasa de lo completado · barras: ${bars}${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${volLine() ? ' · línea: USD operados' : ''}${src} · desde el ${new Date(first).toLocaleDateString('es')}`
 		: informal.length
 			? 'Mercado informal según elTOQUE, por día · aún no hay histórico de QvaPay en este mercado'
 			: 'Aún no hay histórico de este mercado'
@@ -985,6 +1000,7 @@ function drawHistory() {
 			? `Barras: operaciones ${vol.bucketMs === 3600000 ? 'de cada hora' : 'de cada 6 horas'} desde el ${shortDay(vol.since)}; antes, el promedio de cada día, más tenue. La más clara es la que está en curso.`
 			: 'Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.') +
 		(proSplit() ? ' Con Pro, cada barra se parte en compras (verde) y ventas (rojo).' : '') +
+		(volLine() ? ' La línea sobre las barras son los USD operados en cada periodo.' : '') +
 		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
 }
 
@@ -1020,6 +1036,35 @@ function opsBars(points, tz) {
 	// Ordenadas y sin dos barras en el mismo instante (la librería lo exige)
 	out.sort((a, b) => a.time - b.time)
 	return out.filter((x, k) => !k || x.time !== out[k - 1].time)
+}
+
+// Etiquetas en el eje derecho a la altura de cada valor, como las de compra y venta: las operaciones de la barra bajo el
+// puntero (con Pro, sus compras y ventas) y sus USD operados (Pro). Sin puntero, las de la última barra del feed
+function volTags(ms) {
+	const box = $('volTags')
+	const vol = state.history?.volume
+	const bar = historyChart && state.chart === 'history' && vol ? (ms == null ? vol.bars.at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs)) : null
+	if (!bar) return void (box.innerHTML = '')
+	const tags = proSplit()
+		? [
+				{ v: bar.buy, s: opsSeries, text: `${bar.buy.toLocaleString('en-US')} compras`, cls: 'bid' },
+				{ v: bar.buy + bar.sell, s: opsSeries, text: `${bar.sell.toLocaleString('en-US')} ventas`, cls: 'ask' },
+			]
+		: [{ v: bar.ops, s: opsSeries, text: `${bar.ops.toLocaleString('en-US')} op.`, cls: 'ops' }]
+	if (volLine()) tags.push({ v: bar.usd, s: volSeries, text: `${fmtU(bar.usd)} USD`, cls: 'usd' })
+	const el = $('history')
+	const axis = historyChart.priceScale('right').width()
+	const pane = el.clientHeight - historyChart.timeScale().height()
+	const placed = tags
+		.map((t) => ({ ...t, y: t.s.priceToCoordinate(t.v) }))
+		.filter((t) => t.y != null)
+		.sort((a, b) => b.y - a.y)
+	// Que no se pisen: de abajo arriba, cada una al menos 15 px por encima de la anterior
+	for (let i = 0; i < placed.length; i++) placed[i].y = Math.min(placed[i].y, pane - 8, i ? placed[i - 1].y - 15 : Infinity)
+	box.style.left = `${el.offsetLeft + el.clientWidth - axis}px`
+	box.style.top = `${el.offsetTop}px`
+	box.style.width = `${axis}px`
+	box.innerHTML = placed.map((t) => `<span class="vtag ${t.cls}" style="top:${t.y}px">${t.text}</span>`).join('')
 }
 
 // Fecha de Cuba (AAAA-MM-DD) de un instante: así agrupa el servidor las operaciones por día
@@ -1078,6 +1123,9 @@ class DayBars {
 
 // Las barras partidas en compras y ventas son de Pro (con Pro encendido en el panel y activo en este dispositivo)
 const proSplit = () => !!(window.TPPro?.enabled && window.TPPro?.active)
+// La línea del volumen en USD también es de Pro, y solo donde hay datos del feed (7 y 30 días)
+const volLine = () => proSplit() && !!state.history?.volume?.bars?.length
+
 // Al cambiar Pro (al conectar, comprar o apagarse), se vuelve a dibujar con o sin el reparto
 document.addEventListener('tp:pro', () => {
 	historyDrawn = null
@@ -1108,6 +1156,7 @@ function themeHistory() {
 	bidSeries.applyOptions({ color: css('--bid') })
 	askSeries.applyOptions({ color: css('--ask') })
 	usdSeries.applyOptions({ color: css('--warn') })
+	volSeries.applyOptions({ color: css('--text-2') })
 	usdtSeries.applyOptions({ color: css('--accent') })
 }
 
@@ -1121,8 +1170,9 @@ function showChart(name) {
 	state.chart = name
 	store.set('chart', name)
 	for (const t of document.querySelectorAll('[data-chart]')) t.classList.toggle('active', t.dataset.chart === name)
-	$('rangeTabs').hidden = name !== 'history'
+	$('chartTools').hidden = name !== 'history'
 	$('opsLegend').hidden = true
+	if (name !== 'history') $('volTags').innerHTML = ''
 	$('depth').hidden = name !== 'depth'
 	$('completed').hidden = name !== 'completed'
 	$('history').hidden = name !== 'history'
