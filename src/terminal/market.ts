@@ -211,6 +211,12 @@ export class Market {
 		return this.watched.length > 0
 	}
 
+	// Radar: al encenderlo o cambiar una regla, lee ya con el token cada lado vigilado (también los que llegan del
+	// servidor) y se lo pasa al radar. Así revisa lo que hay ahora en QvaPay, no un libro guardado de antes
+	async scanWatched() {
+		for (const w of [...this.watched]) await this.refreshSide(w.tick, w.side)
+	}
+
 	// Los mercados que interesan ahora: los que se están mirando y los del radar (para pedirlos en tiempo real)
 	wanted() {
 		const now = Date.now()

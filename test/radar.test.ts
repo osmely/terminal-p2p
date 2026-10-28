@@ -133,3 +133,26 @@ test('un mercado que se empieza a mirar pide sus completadas en la primera pasad
 	assert.deepEqual(completed, ['ETECSA'])
 	assert.equal(market.snapshot('ETECSA').completedReady, true)
 })
+
+test('radar: al encenderlo revisa lo que ya hay leyendo ahora con el token cada lado vigilado, también los que llegan del servidor', async () => {
+	const { market, reads } = setup()
+	const got: WatchedSide[] = []
+	market.watch(
+		[
+			{ tick: 'BANK_CUP', side: 'ask' },
+			{ tick: 'ETECSA', side: 'bid' },
+		],
+		(w) => got.push(w),
+	)
+	// BANK_CUP llega empujado por el servidor: aun así, la revisión del arranque lo lee con el token
+	market.setLiveCoins(['BANK_CUP'])
+	await market.scanWatched()
+	assert.deepEqual(reads, ['BANK_CUP:ask', 'ETECSA:bid'])
+	assert.deepEqual(
+		got.map((w) => [w.tick, w.side, w.levels[0]?.uuid, w.error]),
+		[
+			['BANK_CUP', 'ask', 'o-BANK_CUP-sell', null],
+			['ETECSA', 'bid', 'o-ETECSA-buy', null],
+		],
+	)
+})

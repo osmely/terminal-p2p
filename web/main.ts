@@ -216,6 +216,7 @@ const radar = {
 		wake()
 	},
 	read: (w: Watch) => market.watchedSide(w),
+	scan: () => market.scanWatched(),
 }
 
 // cross: la mejor oportunidad del libro cruzado (app.js la enseña en la lectura del mercado)
