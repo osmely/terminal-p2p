@@ -523,7 +523,6 @@ function renderGroupBtn(price) {
 }
 
 function renderBook(b, asks, bids) {
-	const N = 30
 	diffBook(b)
 	// Mismo rango para los dos lados, según el primer precio del libro
 	const step = stepOf(asks[0]?.price ?? bids[0]?.price ?? 1)
@@ -534,11 +533,12 @@ function renderBook(b, asks, bids) {
 			return `<div class="empty">${b[s].error ? `QvaPay no deja leer el libro con tu cuenta:<br><b>${esc(b[s].error)}</b>` : 'Sin ofertas con estos filtros'}</div>`
 		let cum = 0
 		if (state.grouped) {
+			// Agrupado y sin agrupar enseñan las mismas ofertas: todas las que hay leídas de ese lado (hasta 60)
 			groups[s] = groupOf(levels, s, step)
-			const rows = [...groups[s].values()].slice(0, N).map((g) => ({ g, cum: (cum += g.usd) }))
+			const rows = [...groups[s].values()].map((g) => ({ g, cum: (cum += g.usd) }))
 			return rows.map(({ g, cum }) => groupRow(g, s, cum, rows.at(-1).cum)).join('')
 		}
-		const rows = levels.slice(0, N).map((l) => ({ l, cum: (cum += l.usd) }))
+		const rows = levels.map((l) => ({ l, cum: (cum += l.usd) }))
 		const max = rows.at(-1).cum
 		const worse = (x, y) => (s === 'ask' ? x > y : x < y)
 		for (const l of goneOf(s)) {
@@ -566,11 +566,12 @@ function renderBook(b, asks, bids) {
 	const flash = markOf('spread')
 	el.style.cssText = flash?.style ?? ''
 	if (ask && bid) {
+		// Con los decimales del precio del mercado (en CUP, 2): un diferencial de 0 es «0,00», no «0,0000»
 		const crossed = bid > ask
 		el.className = `spread ${crossed ? 'crossed' : ''} ${flash?.cls ?? ''}`
 		el.innerHTML = crossed
 			? `<span class="lbl">Libro cruzado</span><span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>`
-			: `<span class="lbl">Diferencial</span><span>${fmtP(ask - bid)} · ${pct(ask / bid - 1)}</span>`
+			: `<span class="lbl">Diferencial</span><span>${(ask - bid).toLocaleString('es', { minimumFractionDigits: decimals(ask), maximumFractionDigits: decimals(ask) })} · ${pct(ask / bid - 1)}</span>`
 	} else {
 		el.className = `spread ${flash?.cls ?? ''}`
 		el.textContent = 'Sin cotización en uno de los lados'
