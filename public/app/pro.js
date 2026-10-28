@@ -23,7 +23,7 @@ const PRO_PLANS = [
 ]
 const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
-	['⚡', 'Libro en tiempo real', 'cada oferta nueva te llega al instante, empujada por el servidor, sin esperar a la próxima lectura (y sin gastar las consultas de tu cuenta)'],
+	['⚡', 'Libro en tiempo real', 'cada oferta nueva te llega al instante'],
 	['📡', 'Radar', 'vigila hasta 3 mercados mientras el terminal está abierto, aunque sea en otra pestaña, y te avisa con sonido, notificación y por Telegram cuando aparece una oferta con tus reglas. Si quieres, la toma sola, con tu tope del día'],
 	['🔀', 'Libro cruzado', 'cuando alguien vende más barato de lo que otro compra: si lo puedes aprovechar, cuántos USD encajan y cuánto te quedaría'],
 	['📊', 'Compras y ventas en el gráfico', 'cada barra de operaciones por día partida en compras (verde) y ventas (rojo), para ver hacia dónde se mueve el mercado'],

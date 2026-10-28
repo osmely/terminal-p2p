@@ -173,7 +173,7 @@ async function acctStats() {
 		<div><p class="hint">Por mes (USD)</p><table class="acct-table"><tr><th>Mes</th><th class="r">Ops</th><th class="r">Compras</th><th class="r">Ventas</th></tr>${months}</table></div>
 		<div><p class="hint">Precio medio por mercado</p><table class="acct-table"><tr><th>Mercado</th><th class="r">Ops</th><th class="r">Compraste a</th><th class="r">Vendiste a</th></tr>${markets}</table></div>
 		${peers ? `<div><p class="hint">Con quién más operas</p><div class="chips-row">${peers}</div></div>` : ''}
-		<p class="hint">${r.partial ? 'Con tus últimas 200 ofertas y tomas' : 'Con todas tus ofertas y tomas'}${s.since ? `, desde el ${acctDay(Date.parse(s.since))}` : ''}. Se calcula en tu navegador con tus datos de QvaPay.</p></div>`
+		<p class="hint">${r.partial ? 'Con tus últimas 200 ofertas y tomas' : 'Con todas tus ofertas y tomas'}${s.since ? `, desde el ${acctDay(Date.parse(s.since))}` : ''}. Con tus datos de QvaPay. No se guarda.</p></div>`
 	for (const b of $('acctBody').querySelectorAll('[data-acct-peer]')) b.onclick = () => showPeer(b.dataset.acctPeer)
 }
 

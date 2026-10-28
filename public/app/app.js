@@ -95,7 +95,7 @@ async function loadBook() {
 		state.book = await getJSON(`/api/book?coin=${state.coin}`)
 		render()
 	} catch (e) {
-		setStatus('Sin conexión con el servidor')
+		setStatus('Sin conexión')
 		$('dot').className = 'dot stale'
 	}
 }
@@ -251,9 +251,9 @@ function renderStatus(b) {
 		$('dot').className = 'dot'
 		return
 	}
-	// El libro llega empujado por el servidor: con Pro, en cuanto cambia; sin Pro, cada 10 s
+	// El libro llega empujado por el servidor (con Pro, en cuanto cambia; sin Pro, cada 10 s): para el usuario, «en vivo»
 	if (b.realtime) {
-		setStatus(TPApi.live?.state().pro ? 'En tiempo real' : 'Actualizado cada 10 s')
+		setStatus('En vivo')
 		$('dot').className = 'dot live'
 		return
 	}
@@ -394,10 +394,8 @@ function renderIntent(bidUsd, askUsd, mid, doneMedian, given) {
 			<line class="g-needle" x1="23" y1="23" x2="23" y2="8" style="transform:${needleDeg(s)}"/><circle class="g-hub" cx="23" cy="23" r="2.6"/>
 		</svg></div>`
 	el.title = r
-		? `Intención del mercado: ${s} de 100 (0 = más venden, 100 = más compran).\n` +
-			`· Profundidad a ±2% del medio: ${fmtU(bidUsd)} USD a la compra frente a ${fmtU(askUsd)} a la venta (${Math.round(r.depth * 100)}% compra). Pesa un 70%.\n` +
-			(r.drift != null ? `· El medio está a ${pct(r.drift)} de la mediana de lo completado. Pesa un 30%.` : '· Sin mediana de lo completado para comparar el precio.')
-		: 'La intención del mercado se calcula con el libro en vivo: conecta tu cuenta de QvaPay.'
+		? `Intención del mercado: ${s} de 100 (0 = más venden, 100 = más compran). ${label} según el libro y las operaciones recientes.`
+		: 'Conecta tu cuenta de QvaPay para ver la intención del mercado.'
 }
 
 // Lo que cambió desde el último libro pintado destella: verde si la oferta es nueva o sube su monto, rojo si baja,
@@ -882,7 +880,7 @@ function drawCompleted() {
 	vline(m, css('--text'), `mediana ${fmtP(m)}`, 0)
 	vline(bids[0]?.price, css('--bid'), `mejor compra ${fmtP(bids[0]?.price)}`, 1)
 	vline(asks[0]?.price, css('--ask'), `mejor venta ${fmtP(asks[0]?.price)}`, 2)
-	$('chartNote').textContent = `${done.count.toLocaleString('es')} operaciones completadas en ${done.window_hours} h (±10% de la mediana)`
+	$('chartNote').textContent = `${done.count.toLocaleString('es')} operaciones completadas en ${done.window_hours} h`
 	$('chartNote').title = $('chartNote').textContent
 }
 
@@ -972,19 +970,18 @@ function drawHistory() {
 	}
 	fitHistory()
 	const first = state.history?.firstPoint
-	const step = { 600000: 'cada 10 min', 3600000: 'por hora', 86400000: 'por día' }[state.history?.bucketMs] ?? ''
 	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
 	const vol = state.history?.volume
 	const bars = vol ? `operaciones ${vol.bucketMs === 3600000 ? 'por hora' : 'cada 6 h'}` : 'operaciones por día'
 	$('chartNote').textContent = first
-		? `Mediana de lo completado (24 h), ${step} · barras: ${bars}${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${src} · QvaPay desde ${new Date(first).toLocaleDateString('es')}`
+		? `Tasa de lo completado · barras: ${bars}${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${src} · desde el ${new Date(first).toLocaleDateString('es')}`
 		: informal.length
-			? `Mercado informal según elTOQUE, por día · QvaPay se registra cada 10 minutos`
-			: 'Se registra cada 10 minutos: vuelve en un rato'
+			? 'Mercado informal según elTOQUE, por día · aún no hay histórico de QvaPay en este mercado'
+			: 'Aún no hay histórico de este mercado'
 	$('chartNote').title =
-		'Líneas continuas: mediana de las operaciones completadas en QvaPay en las últimas 24 h, guardada cada 10 minutos. ' +
+		'Líneas continuas: tasa de las operaciones completadas en QvaPay en las últimas 24 h. ' +
 		(vol
-			? `Barras: operaciones ${vol.bucketMs === 3600000 ? 'de cada hora' : 'de cada 6 horas'} según el feed de QvaPay (las fijas al completarse; en las de rango, cada parte tomada), desde el ${shortDay(vol.since)}; antes, el promedio de cada día, más tenue. La más clara es la que está en curso.`
+			? `Barras: operaciones ${vol.bucketMs === 3600000 ? 'de cada hora' : 'de cada 6 horas'} desde el ${shortDay(vol.since)}; antes, el promedio de cada día, más tenue. La más clara es la que está en curso.`
 			: 'Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.') +
 		(proSplit() ? ' Con Pro, cada barra se parte en compras (verde) y ventas (rojo).' : '') +
 		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
@@ -1205,7 +1202,7 @@ function renderRanking() {
 	if (!data || !data.markets.read) {
 		list.innerHTML = data?.connected
 			? '<li class="empty">Leyendo los libros: el ranking aparece en unos segundos.</li>'
-			: '<li class="empty">El ranking se calcula con el libro en vivo: conecta tu cuenta de QvaPay para verlo.</li>'
+			: '<li class="empty">Conecta tu cuenta de QvaPay para ver el ranking.</li>'
 		$('rankNote').textContent = ''
 		return
 	}
@@ -1225,7 +1222,7 @@ function renderRanking() {
 				.join('')
 		: '<li class="empty">Nadie cumple este criterio con los libros leídos.</li>'
 	const scope = state.rank.scope === 'coin' ? nameOfTick(state.coin) : `${data.markets.read} de ${data.markets.total} mercados leídos`
-	$('rankNote').textContent = `Con las ofertas publicadas ahora en el libro (${scope}). Lo calcula tu navegador con tu cuenta; no se guarda ni se comparte.`
+	$('rankNote').textContent = `Con las ofertas publicadas ahora (${scope}). No se guarda ni se comparte.`
 }
 
 // ── Tooltip de cada oferta ────────────────────────────────────────────

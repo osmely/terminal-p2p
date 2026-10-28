@@ -168,7 +168,7 @@
 				<div class="rates" id="rates">
 					<div class="rate skeleton"></div><div class="rate skeleton"></div><div class="rate skeleton"></div><div class="rate skeleton"></div>
 				</div>
-				<p class="src" id="ratesSrc">Fuente: API pública de QvaPay.</p>
+				<p class="src" id="ratesSrc">Fuente: QvaPay.</p>
 				<div class="informal" id="informal" hidden>
 					<h3>Mercado informal <small>CUP por unidad, mediana de las últimas 24 h</small></h3>
 					<div class="inf-row" id="infRow"></div>
@@ -217,7 +217,7 @@
 					<article class="feat">
 						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 3 8-8M15 7h5v5" /></svg></span>
 						<h3>Histórico de la tasa</h3>
-						<p>Compra y venta de cada moneda guardadas cada 10 minutos, junto a la tasa del mercado informal de elTOQUE desde 2020.</p>
+						<p>La tasa de compra y venta de cada moneda en el tiempo, junto a la del mercado informal de elTOQUE desde 2020.</p>
 					</article>
 					<article class="feat">
 						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2h9" /></svg></span>
@@ -302,7 +302,7 @@
 					<div class="sim-cta"><a class="btn primary" href="https://sim.terminalp2p.com">Abrir el simulador</a><span class="muted">Entras con tu cuenta de Terminal P2P, sin otro registro. BTC y ETH gratis<span data-pro>; todos los mercados con Pro</span>.</span></div>
 				</div>
 				<ul class="sim-points">
-					<li><b>Precios reales</b><span>Gráfico, libro y últimas operaciones del mercado, cada 3 segundos.</span></li>
+					<li><b>Precios reales</b><span>Gráfico, libro y últimas operaciones del mercado, en vivo.</span></li>
 					<li><b>Órdenes de verdad</b><span>Límite, mercado y stop, con take profit y stop loss automáticos.</span></li>
 					<li data-pro><b>Con tu Pro</b><span>Si eres Pro en el terminal, aquí operas todos los mercados al instante.</span></li>
 				</ul>
@@ -358,7 +358,7 @@
 					<li><b>Sin custodia.</b> Nunca toca tu dinero: compras y ventas pasan por el escrow de QvaPay.</li>
 					<li><b>Token solo en tu navegador.</b> Se borra al cerrar la pestaña, salvo que elijas recordarlo.</li>
 					<li><b>Solo acciones del P2P.</b> El terminal no puede transferir ni retirar: solo publicar y tomar ofertas, pagar, liberar, chatear y calificar, y cada paso lo confirmas tú.</li>
-					<li><b>Nadie ve lo tuyo.</b> El libro se lee con el token de quien mira; tus datos no se comparten con otros usuarios.</li>
+					<li><b>Nadie ve lo tuyo.</b> Tus datos no se comparten con otros usuarios.</li>
 					<li><b>Sin rastreadores.</b> La única cookie es la de tu sesión, que comparten el terminal y el simulador: lleva la huella de tu token, nunca el token. Las fuentes se sirven desde este dominio. Solo se cuentan, de forma anónima, las visitas de cada día (y por qué enlace llegaste) y las acciones del P2P (publicar, tomar, completar): sin usuario, token, IP ni ningún identificador.</li>
 					<li><b>Código abierto.</b> Licencia Apache 2.0: puedes revisarlo, o desplegar tu propia copia.<span data-pro> Las funciones Pro van aparte, pero lo que mueve dinero sigue en el código abierto.</span></li>
 				</ul>
@@ -371,7 +371,7 @@
 				<div class="sec-head center"><h2>Preguntas frecuentes</h2></div>
 				<details>
 					<summary>¿Es una web de QvaPay?</summary>
-					<p>No, es un proyecto independiente que usa la API pública de QvaPay. Todas las operaciones se hacen en QvaPay, con su escrow y sus reglas.</p>
+					<p>No, es un proyecto independiente, no afiliado a QvaPay. Todas las operaciones se hacen en QvaPay, con su escrow y sus reglas.</p>
 				</details>
 				<details>
 					<summary>¿Necesito una cuenta de QvaPay?</summary>
@@ -394,8 +394,8 @@
 					<p>Con un token sin permisos de <code>transfer</code> ni <code>withdraw</code>, no se puede sacar dinero de tu cuenta. El terminal además solo puede hacer las acciones del P2P (publicar y tomar ofertas, marcar pagado, liberar, cancelar, chatear y calificar), y cada una la confirmas tú. Liberar solo se permite cuando QvaPay marca la operación como pagada.</p>
 				</details>
 				<details>
-					<summary>¿Qué guarda el servidor?</summary>
-					<p>Datos públicos del mercado (cada 10 minutos, los promedios que QvaPay publica sin cuenta, y la tasa del mercado informal de elTOQUE) y contadores anónimos de las acciones del P2P hechas desde el terminal: tipo de acción, mercado, lado y monto. Sin usuario, token ni IP; la oferta va cifrada de forma irreversible, solo para saber si una oferta publicada aquí llegó a completarse. Y cuántas visitas hubo cada día y por qué enlace llegaron: solo esas sumas, sin cookies ni identificadores. Para mandarle el libro a cada terminal conectado (al instante con Pro, cada 10 s sin Pro), una copia del libro público del P2P que manda QvaPay: solo ofertas públicas y quién las publicó. Si te haces Pro, tu usuario de QvaPay, tu plan y la huella de tus dispositivos; si conectas Telegram, tu chat con el bot y, durante un día, qué ofertas te avisó el radar (para no repetirlas). Nunca tu token.</p>
+					<summary>¿Qué datos guardan?</summary>
+					<p>Datos públicos del mercado y contadores anónimos de visitas y de operaciones hechas desde el terminal, sin usuario, token ni IP. Si te haces Pro, tu usuario de QvaPay y hasta cuándo tienes Pro; si conectas Telegram, tu chat con el bot. Nunca tu token.</p>
 				</details>
 			</div>
 		</section>
@@ -413,7 +413,7 @@
 	<footer class="foot">
 		<div class="wrap foot-in">
 			<span>© 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a> · <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener">Licencia Apache 2.0</a> · <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a> · <a href="/blog/">Blog</a> · <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">Telegram</a></span>
-			<span>Proyecto independiente que usa la API pública de QvaPay.</span>
+			<span>Proyecto independiente, no afiliado a QvaPay.</span>
 		</div>
 	</footer>
 </body>
