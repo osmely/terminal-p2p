@@ -41,7 +41,7 @@ test('te pagaron: avisa al que recibe, no al que paga', () => {
 	const a = tradeAlerts(read([seller('processing')]), [seller('paid')], NOW, new Set())
 	assert.deepEqual(kinds(a), ['paid'])
 	assert.equal(a[0].urgent, true)
-	assert.match(a[0].body, /@otro marcó el pago de 50\.500 CUP/)
+	assert.match(a[0].body, /@otro marcó el pago de 50,500 CUP/)
 	// Quien pagó no recibe aviso de su propio pago
 	assert.deepEqual(tradeAlerts(read([trade({})]), [trade({ status: 'paid' })], NOW, new Set()), [])
 })
@@ -56,7 +56,7 @@ test('tomaron tu oferta publicada', () => {
 	const open = { ...mine, status: 'open' }
 	const a = tradeAlerts(read([], [open]), [mine], NOW, new Set())
 	assert.deepEqual(kinds(a), ['taken'])
-	assert.match(a[0].body, /@otro te compra 50 USD\. Espera su pago de 50\.500 CUP\./)
+	assert.match(a[0].body, /@otro te compra 50 USD\. Espera su pago de 50,500 CUP\./)
 	// Una operación que tomaste tú no es noticia
 	assert.deepEqual(tradeAlerts(read([]), [trade({ id: 'x' })], NOW, new Set()), [])
 })

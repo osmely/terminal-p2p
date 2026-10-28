@@ -243,7 +243,7 @@ test('orden inteligente: si el dueño subió el precio justo antes, queda tomada
 	}
 	const r = await post(buyOrder)
 	assert.deepEqual(statuses(r), ['taken', 'taken'])
-	assert.match(r.notes[0], /@leo cambió el precio justo antes: compraste a 1080.*cancelarla en «Mis operaciones» sin disputa/)
+	assert.match(r.notes[0], /@leo cambió el precio justo antes: compraste a 1,080, por encima de tu 1,050.*cancelarla en «Mis operaciones» sin disputa/)
 	noCancels(fake.calls)
 })
 

@@ -24,7 +24,7 @@ export interface Alert {
 export const EXPIRING_MS = 5 * 60_000
 
 const ACTIVE = new Set(['processing', 'paid', 'revision'])
-const fmt = (n: number) => n.toLocaleString('es', { maximumFractionDigits: 2 })
+const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 const unit = (coin: string) => COINS.find((c) => c.tick === coin)?.unit ?? coin
 const who = (t: Trade) => (t.counterparty ? `@${t.counterparty.username}` : 'La contraparte')
 // Una oferta fija puede tomarse, abandonarse y volver a tomarse: cada trato es otro aviso

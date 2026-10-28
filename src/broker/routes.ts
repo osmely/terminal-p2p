@@ -386,7 +386,7 @@ export class Broker {
 			// Vendiendo, entre lo que tomas y lo que publicas se reserva el total
 			const me = await acc.client.me()
 			acc.me = me
-			if (total > num(me.balance) + 1e-9) return json(200, { ok: false, nothingDone: true, error: `No tienes saldo suficiente: necesitas ${total.toLocaleString('es')} USD y tienes ${num(me.balance).toLocaleString('es')}.`, steps })
+			if (total > num(me.balance) + 1e-9) return json(200, { ok: false, nothingDone: true, error: `No tienes saldo suficiente: necesitas ${total.toLocaleString('en-US')} USD y tienes ${num(me.balance).toLocaleString('en-US')}.`, steps })
 		}
 
 		let chatSent: boolean | undefined
@@ -438,7 +438,7 @@ export class Broker {
 		const held = now ? heldTake(now, flexible, before, order, acc.me.uuid) : error ? 'unknown' : { order, price: null }
 		if (held === 'unknown') {
 			// No se sabe si quedó tomada: no se cuenta como tomada ni como libre (podrías comprar de más) y se avisa
-			notes.push(`No se pudo confirmar si la oferta de @${user} quedó tomada: revísala en «Mis operaciones». Sus ${t.amount.toLocaleString('es')} USD no se sumaron a tu oferta.`)
+			notes.push(`No se pudo confirmar si la oferta de @${user} quedó tomada: revísala en «Mis operaciones». Sus ${t.amount.toLocaleString('en-US')} USD no se sumaron a tu oferta.`)
 			return { step: { ...step, status: 'stuck' as const, error: `no se pudo confirmar si quedó tomada (${error})` }, notes }
 		}
 		if (!held) return { step: { ...step, status: 'failed' as const, error: error ?? 'no quedó tomada' }, notes }
@@ -456,7 +456,7 @@ export class Broker {
 		// cancelar tú sin disputa mientras no la hayas pagado)
 		if (held.price != null && (side === 'buy' ? held.price > limit * (1 + 1e-9) : held.price < limit * (1 - 1e-9)))
 			notes.push(
-				`@${user} cambió el precio justo antes: ${side === 'buy' ? 'compraste' : 'vendiste'} a ${held.price.toLocaleString('es')}, ${side === 'buy' ? 'por encima' : 'por debajo'} de tu ${limit.toLocaleString('es')}.${side === 'buy' ? ' Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.' : ''}`,
+				`@${user} cambió el precio justo antes: ${side === 'buy' ? 'compraste' : 'vendiste'} a ${held.price.toLocaleString('en-US')}, ${side === 'buy' ? 'por encima' : 'por debajo'} de tu ${limit.toLocaleString('en-US')}.${side === 'buy' ? ' Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.' : ''}`,
 			)
 		// Vendiendo, el comprador recibe tus datos por el chat
 		let chatSent: boolean | undefined
@@ -485,7 +485,7 @@ export class Broker {
 		if (side === 'sell') {
 			const me = await acc.client.me()
 			acc.me = me
-			if (t.amount > num(me.balance) + 1e-9) return json(200, { ok: false, error: `No tienes saldo suficiente: necesitas ${t.amount.toLocaleString('es')} USD y tienes ${num(me.balance).toLocaleString('es')}.` })
+			if (t.amount > num(me.balance) + 1e-9) return json(200, { ok: false, error: `No tienes saldo suficiente: necesitas ${t.amount.toLocaleString('en-US')} USD y tienes ${num(me.balance).toLocaleString('en-US')}.` })
 		}
 		const r = await this.takeStep(acc, t, side, coin, limit, details, 'radar')
 		return json(200, { ok: r.step.status === 'taken', ...r })
@@ -604,7 +604,7 @@ export class Broker {
 		if (o.status !== 'open' || o.pause) return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
 		const q = swapOffer(o)
 		const minPrice = Number(b.minPrice)
-		if (minPrice > 0 && q.price < minPrice * (1 - 1e-9)) return json(409, { error: `El precio bajó a ${q.price.toLocaleString('es')} mientras decidías. Revisa el nuevo precio.` })
+		if (minPrice > 0 && q.price < minPrice * (1 - 1e-9)) return json(409, { error: `El precio bajó a ${q.price.toLocaleString('en-US')} mientras decidías. Revisa el nuevo precio.` })
 		const amount = round2(Number(b.amount))
 		if (q.kind === 'flexible' ? !(amount >= (q.orderMin ?? 0) && amount <= q.orderMax!) : amount !== q.usd)
 			return json(409, { error: 'El monto ya no cabe en esa oferta. Actualizo el precio.' })
@@ -616,7 +616,7 @@ export class Broker {
 		// Saldo fresco: no se vende más de lo que tienes
 		const me = await acc.client.me()
 		acc.me = me
-		if (amount > num(me.balance)) return json(400, { error: `No tienes saldo suficiente: tienes ${num(me.balance).toLocaleString('es')} USD` })
+		if (amount > num(me.balance)) return json(400, { error: `No tienes saldo suficiente: tienes ${num(me.balance).toLocaleString('en-US')} USD` })
 		const r = await acc.client.applyOffer(o.uuid, q.kind === 'flexible' ? amount : undefined, { coin: o.coin, side: o.type, usd: amount, via: 'swap' })
 		this.swapQuotes.delete(o.coin)
 		const order = r.order ?? undefined
@@ -648,7 +648,7 @@ export class Broker {
 				if (status !== 'paid') return json(400, { error: `La operación está en «${status ?? 'desconocido'}», no en pagado. No se libera.` })
 				const usd = num((order ? o.Orders?.find((x) => x.uuid === order)?.amount : undefined) ?? o.amount)
 				const r = await c.markReceived(offer, order, { coin: o.coin, side: o.type, usd })
-				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${Number(r.amount).toLocaleString('es')} USD netos (comisión ${Number(r.fee ?? 0).toLocaleString('es')}).` : 'Liberado' })
+				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${Number(r.amount).toLocaleString('en-US')} USD netos (comisión ${Number(r.fee ?? 0).toLocaleString('en-US')}).` : 'Liberado' })
 			}
 			case 'cancel_offer': {
 				// Estado fresco: si alguien la tomó mientras la tenías abierta, cancelarla en QvaPay no la cancela,
@@ -864,11 +864,11 @@ export function takeProblem(o: P2POffer | null, amount: number, side: 'buy' | 's
 		if (ops < SMART_MIN_OPS || rating < SMART_MIN_RATING) return `tiene poco historial (necesita ${SMART_MIN_OPS} operaciones y ${SMART_MIN_RATING} ★)`
 	}
 	const price = num(o.amount) > 0 ? num(o.receive) / num(o.amount) : 0
-	if (side === 'buy' ? price > limit * (1 + 1e-9) : price < limit * (1 - 1e-9)) return `cambió de precio (${price.toLocaleString('es')}) y ya no cruza con el tuyo`
+	if (side === 'buy' ? price > limit * (1 + 1e-9) : price < limit * (1 - 1e-9)) return `cambió de precio (${price.toLocaleString('en-US')}) y ya no cruza con el tuyo`
 	if (o.offer_kind === 'flexible') {
 		const min = num(o.order_min ?? 0)
 		const max = round2(Math.min(num(o.order_max ?? Infinity), num(o.available_amount ?? o.amount)))
-		if (!(amount >= min && amount <= max)) return `ahora admite entre ${min.toLocaleString('es')} y ${max.toLocaleString('es')} USD`
+		if (!(amount >= min && amount <= max)) return `ahora admite entre ${min.toLocaleString('en-US')} y ${max.toLocaleString('en-US')} USD`
 	} else if (Math.abs(num(o.amount) - amount) > 0.005) return 'cambió de monto'
 	return null
 }
@@ -879,7 +879,7 @@ export function takeProblem(o: P2POffer | null, amount: number, side: 'buy' | 's
 export function offerTerms(b: Record<string, unknown>, flexible: boolean, editing = false) {
 	const amount = round2(Number(b.amount))
 	const price = Number(b.price)
-	if (!(amount >= 0.1 && amount <= 10_000)) return { error: 'El monto debe estar entre 0,1 y 10.000 USD' }
+	if (!(amount >= 0.1 && amount <= 10_000)) return { error: 'El monto debe estar entre 0.1 y 10,000 USD' }
 	if (!(price > 0)) return { error: 'Pon el precio por cada USD' }
 	const receive = round2(amount * price)
 	if (!(receive >= 0.1 && receive <= 100_000_000)) return { error: 'El total a recibir está fuera de los límites de QvaPay' }

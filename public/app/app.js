@@ -39,12 +39,12 @@ const INFORMAL_MARKETS = new Set(['BANK_CUP', 'CUPCASH', 'BOLSATM'])
 
 // ── Formato ───────────────────────────────────────────────────────────
 const decimals = (p) => (p >= 100 ? 2 : 4)
-const fmtP = (p) => (p == null || !isFinite(p) ? '—' : p.toLocaleString('es', { minimumFractionDigits: decimals(p), maximumFractionDigits: decimals(p) }))
-// Para el libro, gráficos y estadísticas: desde 1.000, sin decimales
-const fmtU = (n) => (n >= 1000 ? Math.round(n).toLocaleString('es') : n.toLocaleString('es', { maximumFractionDigits: 2 }))
+const fmtP = (p) => (p == null || !isFinite(p) ? '—' : p.toLocaleString('en-US', { minimumFractionDigits: decimals(p), maximumFractionDigits: decimals(p) }))
+// Números con coma para los miles y punto decimal (1,050.25). Para el libro, gráficos y estadísticas: desde 1,000, sin decimales
+const fmtU = (n) => (n >= 1000 ? Math.round(n).toLocaleString('en-US') : n.toLocaleString('en-US', { maximumFractionDigits: 2 }))
 // El dinero de una operación (lo que publicas, pagas o recibes) siempre exacto, con sus céntimos: 22.999,82 CUP
 // no puede salir como 23.000, porque eso es lo que se transfiere
-const fmtM = (n) => n.toLocaleString('es', { minimumFractionDigits: Math.round(n * 100) % 100 ? 2 : 0, maximumFractionDigits: 2 })
+const fmtM = (n) => n.toLocaleString('en-US', { minimumFractionDigits: Math.round(n * 100) % 100 ? 2 : 0, maximumFractionDigits: 2 })
 const pct = (x) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(2)}%`
 const ago = (ms) =>
 	ms < 60_000
@@ -277,7 +277,7 @@ function renderStats(b, asks, bids) {
 		['Diferencial', ask && bid ? pct(ask / bid - 1) : '—', crossed ? 'warn' : ''],
 		['Medio', fmtP(mid), ''],
 		['Mediana completadas', fmtP(doneMedian), '', 'Mediana cerradas'],
-		[`Operaciones ${done?.window_hours ?? 48} h`, done ? done.count.toLocaleString('es') : '—', ''],
+		[`Operaciones ${done?.window_hours ?? 48} h`, done ? done.count.toLocaleString('en-US') : '—', ''],
 		['Profundidad ±2%', mid ? `${fmtU(within(bids, 'bid'))} / ${fmtU(within(asks, 'ask'))}<small class="unit"> USD</small>` : '—', '', 'Prof. ±2% (USD)'],
 	]
 	$('stats').innerHTML = items
@@ -332,7 +332,7 @@ function opsPerMin(b) {
 	return r < 0.01 ? 0 : r
 }
 // o/m: operaciones por minuto
-const opsText = (r) => `${r >= 10 ? Math.round(r) : r.toLocaleString('es', { minimumFractionDigits: r ? 2 : 0, maximumFractionDigits: 2 })} o/m`
+const opsText = (r) => `${r >= 10 ? Math.round(r) : r.toLocaleString('en-US', { minimumFractionDigits: r ? 2 : 0, maximumFractionDigits: 2 })} o/m`
 
 function renderPulse(b) {
 	const el = $('pulse')
@@ -459,7 +459,7 @@ function stepOf(price) {
 	const pow = 10 ** Math.floor(Math.log10(raw))
 	return [1, 2, 5, 10].map((m) => m * pow).find((x) => x >= raw * 0.75) ?? 10 * pow
 }
-const fmtStep = (x) => x.toLocaleString('es', { maximumFractionDigits: 4 })
+const fmtStep = (x) => x.toLocaleString('en-US', { maximumFractionDigits: 4 })
 
 const groups = { ask: new Map(), bid: new Map() }
 
@@ -571,7 +571,7 @@ function renderBook(b, asks, bids) {
 		el.className = `spread ${crossed ? 'crossed' : ''} ${flash?.cls ?? ''}`
 		el.innerHTML = crossed
 			? `<span class="lbl">Libro cruzado</span><span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>`
-			: `<span class="lbl">Diferencial</span><span>${(ask - bid).toLocaleString('es', { minimumFractionDigits: decimals(ask), maximumFractionDigits: decimals(ask) })} · ${pct(ask / bid - 1)}</span>`
+			: `<span class="lbl">Diferencial</span><span>${(ask - bid).toLocaleString('en-US', { minimumFractionDigits: decimals(ask), maximumFractionDigits: decimals(ask) })} · ${pct(ask / bid - 1)}</span>`
 	} else {
 		el.className = `spread ${flash?.cls ?? ''}`
 		el.textContent = 'Sin cotización en uno de los lados'
@@ -595,14 +595,14 @@ function renderInsight(b, asks, bids) {
 		const more = pro?.enabled ? ' Con <b>Pro</b> ves si puedes aprovecharlo, cuántos USD encajan y cuánto te quedaría.' : ''
 		out.push(
 			net > 0
-				? `<li class="warn">Libro cruzado: ${legs} deja <b>${pct(net)}</b> tras la comisión de 0,25%.${more}</li>`
-				: `<li>Libro cruzado, pero no compensa: ${legs} da <b>${pct(net)}</b> tras la comisión de 0,25%.</li>`,
+				? `<li class="warn">Libro cruzado: ${legs} deja <b>${pct(net)}</b> tras la comisión de 0.25%.${more}</li>`
+				: `<li>Libro cruzado, pero no compensa: ${legs} da <b>${pct(net)}</b> tras la comisión de 0.25%.</li>`,
 		)
 	} else if (ask && bid && bid.price > ask.price) {
 		// Con tu comisión real (las cuentas GOLD no la pagan) y solo con ofertas que puedes tomar
 		const acct = typeof bk !== 'undefined' ? bk.acct : null
 		const fee = acct?.connected ? (acct.gold ? 0 : (acct.p2pFee ?? 0.0025)) : 0.0025
-		const feeText = fee ? `tras la comisión de ${(fee * 100).toLocaleString('es')} %` : 'sin comisión (cuenta GOLD)'
+		const feeText = fee ? `tras la comisión de ${(fee * 100).toLocaleString('en-US')} %` : 'sin comisión (cuenta GOLD)'
 		const me = typeof myUsername === 'function' ? myUsername() : null
 		const c = window.TPApi?.cross?.(asks, bids, fee, me)
 		if (c) {
@@ -881,7 +881,7 @@ function drawCompleted() {
 	vline(m, css('--text'), `mediana ${fmtP(m)}`, 0)
 	vline(bids[0]?.price, css('--bid'), `mejor compra ${fmtP(bids[0]?.price)}`, 1)
 	vline(asks[0]?.price, css('--ask'), `mejor venta ${fmtP(asks[0]?.price)}`, 2)
-	$('chartNote').textContent = `${done.count.toLocaleString('es')} operaciones completadas en ${done.window_hours} h`
+	$('chartNote').textContent = `${done.count.toLocaleString('en-US')} operaciones completadas en ${done.window_hours} h`
 	$('chartNote').title = $('chartNote').textContent
 }
 
@@ -915,12 +915,12 @@ function opsLegend(ms) {
 	const i = ms == null ? informal.at(-1) : near(informal)
 	const parts = []
 	if (bar) {
-		const split = proSplit() ? ` · ${bar.buy.toLocaleString('es')} compras · ${bar.sell.toLocaleString('es')} ventas` : ''
-		parts.push(`<b>${bar.ops.toLocaleString('es')}</b> operaciones · <b>${Math.round(bar.usd).toLocaleString('es')}</b> USD de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
+		const split = proSplit() ? ` · ${bar.buy.toLocaleString('en-US')} compras · ${bar.sell.toLocaleString('en-US')} ventas` : ''
+		parts.push(`<b>${bar.ops.toLocaleString('en-US')}</b> operaciones · <b>${Math.round(bar.usd).toLocaleString('en-US')}</b> USD de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
 	}
 	if (d && !(bar && ms == null)) {
-		const split = d.buy != null && d.sell != null ? ` · ${d.buy.toLocaleString('es')} compras · ${d.sell.toLocaleString('es')} ventas` : ''
-		parts.push(`<b>${d.ops.toLocaleString('es')}</b> operaciones ${d.partial ? 'en las últimas 24 h' : `el ${shortDay(d.t)}`}${split}`)
+		const split = d.buy != null && d.sell != null ? ` · ${d.buy.toLocaleString('en-US')} compras · ${d.sell.toLocaleString('en-US')} ventas` : ''
+		parts.push(`<b>${d.ops.toLocaleString('en-US')}</b> operaciones ${d.partial ? 'en las últimas 24 h' : `el ${shortDay(d.t)}`}${split}`)
 	}
 	if (i && (i.usd || i.usdt)) parts.push(`informal ${i.final ? `el ${shortDay(i.t)}` : 'hoy'}: USD <b>${fmtP(i.usd)}</b> · USDT <b>${fmtP(i.usdt)}</b>`)
 	el.hidden = !parts.length || state.chart !== 'history'
@@ -1172,7 +1172,7 @@ function rankMedal(user) {
 }
 
 function rankValue(c, u) {
-	const plural = (n, one, many) => `${n.toLocaleString('es')} ${n === 1 ? one : many}`
+	const plural = (n, one, many) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 	switch (c) {
 		case 'liquidity':
 			return [`${fmtU(u.usdAsk + u.usdBid)} USD`, `${plural(u.offers, 'oferta', 'ofertas')} · ${plural(u.markets.length, 'mercado', 'mercados')}`]

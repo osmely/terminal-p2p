@@ -24,12 +24,12 @@ function showAccount(tab = acctTab) {
 function acctSummary() {
 	const a = bk.acct
 	const stat = (label, value, sub = '') => `<div class="peer-stat"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
-	const fee = feeOf(100) ? `${(a.p2pFee * 100).toLocaleString('es')} % al comprar` : 'sin comisión'
+	const fee = feeOf(100) ? `${(a.p2pFee * 100).toLocaleString('en-US')} % al comprar` : 'sin comisión'
 	$('acctBody').innerHTML = `<div class="stack">
 		<div class="peer-stats">
 			${stat('Saldo en QvaPay', `${fmtM(a.balance ?? 0)}`, 'USD')}
 			${stat('Verificación', a.kyc ? '✓ KYC' : 'Sin KYC', a.kyc ? 'identidad verificada' : 'QvaPay la pide para el P2P')}
-			${stat('Comisión P2P', a.gold ? 'GOLD' : '0,25 %', fee)}
+			${stat('Comisión P2P', a.gold ? 'GOLD' : '0.25 %', fee)}
 		</div>
 		${TPPro.enabled ? `<button class="btn block" id="acctGoPro">${TPPro.active ? `★ Te quedan ${daysText(daysLeft())} de Pro` : TPPro.canTrial ? '★ Probar Pro 14 días gratis' : '★ Terminal P2P Pro'}</button>` : ''}
 		<p class="hint">Tu token solo está en este navegador. Desconectar lo borra de aquí; tus operaciones en QvaPay no se tocan.</p>

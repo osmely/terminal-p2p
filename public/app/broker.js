@@ -622,7 +622,7 @@ async function loadCoinFields() {
 
 const REQ_OPTIONS = {
 	min_completed: ['Operaciones completadas', [5, 10, 25, 50, 100], (v) => `${v} o más`],
-	min_rating: ['Valoración', [4, 4.5], (v) => `${String(v).replace('.', ',')} ★ o más`],
+	min_rating: ['Valoración', [4, 4.5], (v) => `${v} ★ o más`],
 	min_account_days: ['Antigüedad de la cuenta', [7, 30, 90, 180, 365], (v) => `${v} días o más`],
 }
 const reqText = (r) =>
@@ -724,7 +724,7 @@ function bookRank(coin, type, price) {
 const feeOf = (usd) => (bk.acct?.gold || !(bk.acct?.p2pFee > 0) ? 0 : Math.round(usd * bk.acct.p2pFee * 100) / 100)
 const netNote = (usd) => {
 	const fee = feeOf(usd)
-	return fee ? ` · te llegan <b>${fmtM(usd - fee)} USD</b> <span class="muted" title="QvaPay cobra un ${(bk.acct.p2pFee * 100).toLocaleString('es')} % al liberar; las cuentas GOLD no lo pagan">(comisión de QvaPay ${fmtM(fee)})</span>` : ''
+	return fee ? ` · te llegan <b>${fmtM(usd - fee)} USD</b> <span class="muted" title="QvaPay cobra un ${(bk.acct.p2pFee * 100).toLocaleString('en-US')} % al liberar; las cuentas GOLD no lo pagan">(comisión de QvaPay ${fmtM(fee)})</span>` : ''
 }
 
 function smartTeaser(f) {
@@ -933,7 +933,7 @@ async function showCreateOffer(preset = null) {
 			type === 'sell' && f.amount > balance()
 				? `No tienes saldo suficiente: tienes ${fmtM(balance())} USD`
 				: !(f.amount >= 0.1 && f.amount <= 10000)
-				? 'El monto debe estar entre 0,1 y 10.000 USD'
+				? 'El monto debe estar entre 0.1 y 10,000 USD'
 				: !(f.price > 0)
 					? 'Pon el precio por cada USD'
 					: f.kind === 'flexible' && !(f.orderMin > 0 && f.orderMax >= f.orderMin && f.orderMax <= f.amount)
@@ -1413,13 +1413,13 @@ function peerSignals(p, known, offers) {
 	}
 	if ((p?.vip ?? known?.vip) === true) out.push(['ok', 'Cuenta VIP de QvaPay'])
 	if (ops != null) {
-		if (ops >= 200) out.push(['ok', `Mucha experiencia: ${ops.toLocaleString('es')} operaciones completadas`])
+		if (ops >= 200) out.push(['ok', `Mucha experiencia: ${ops.toLocaleString('en-US')} operaciones completadas`])
 		else if (ops < 10) out.push(['warn', `Pocas operaciones (${ops}): cuenta nueva o poco usada`])
-		else out.push(['info', `${ops.toLocaleString('es')} operaciones completadas`])
+		else out.push(['info', `${ops.toLocaleString('en-US')} operaciones completadas`])
 	}
 	if (rating == null) out.push(['warn', 'Sin valoraciones todavía'])
-	else if (rating < 4.5) out.push(['warn', `Valoración baja: ${rating.toFixed(2).replace('.', ',')} de 5`])
-	else if (rating >= 4.8 && (p?.ratings ?? 10) >= 10) out.push(['ok', `Muy bien valorado: ${rating.toFixed(2).replace('.', ',')} de 5${p ? ` (${p.ratings.toLocaleString('es')} valoraciones)` : ''}`])
+	else if (rating < 4.5) out.push(['warn', `Valoración baja: ${rating.toFixed(2)} de 5`])
+	else if (rating >= 4.8 && (p?.ratings ?? 10) >= 10) out.push(['ok', `Muy bien valorado: ${rating.toFixed(2)} de 5${p ? ` (${p.ratings.toLocaleString('en-US')} valoraciones)` : ''}`])
 	if (p && p.opsOwner + p.opsTaker >= 20) {
 		const taker = p.opsTaker / (p.opsOwner + p.opsTaker)
 		if (taker >= 0.75) out.push(['info', `Suele tomar ofertas de otros (${Math.round(taker * 100)}% de sus operaciones)`])
@@ -1502,8 +1502,8 @@ async function showPeer(user) {
 			<div><h3>@${esc(name)}${isMe ? ' <span class="badge info">tú</span>' : ''}</h3><div class="peer-badges">${badges || '<span class="muted small">Sin datos de verificación</span>'}</div></div>
 		</div>
 		<div class="peer-stats">
-			${stat('Operaciones', ops != null ? ops.toLocaleString('es') : '—', p ? `${p.opsOwner.toLocaleString('es')} publicando · ${p.opsTaker.toLocaleString('es')} tomando` : '')}
-			${stat('Valoración', rating != null ? `⭐ ${rating.toFixed(2).replace('.', ',')}` : '—', p ? `${p.ratings.toLocaleString('es')} valoraciones` : '')}
+			${stat('Operaciones', ops != null ? ops.toLocaleString('en-US') : '—', p ? `${p.opsOwner.toLocaleString('en-US')} publicando · ${p.opsTaker.toLocaleString('en-US')} tomando` : '')}
+			${stat('Valoración', rating != null ? `⭐ ${rating.toFixed(2)}` : '—', p ? `${p.ratings.toLocaleString('en-US')} valoraciones` : '')}
 			${stat('Ofertas abiertas', String(d.offers.length), d.offers.length ? `${fmtM(d.offers.reduce((s, o) => s + o.usd, 0))} USD en total` : '')}
 		</div>
 		${rank ? `<p class="rank-line">🏆 Ranking: ${esc(rank)}</p>` : ''}
@@ -1656,7 +1656,7 @@ async function showSwap() {
 			html = `<div class="kv swap-kv">
 				<span>Precio</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
 				<span>Compra</span><b>@${esc(best.user)} <span class="badge ok">VIP</span>${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
-				<span>Reputación</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2).replace('.', ',')}` : 'sin valoraciones'}${best.ops != null ? ` · ${best.ops.toLocaleString('es')} operaciones` : ''}</b><span></span>
+				<span>Reputación</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : 'sin valoraciones'}${best.ops != null ? ` · ${best.ops.toLocaleString('en-US')} operaciones` : ''}</b><span></span>
 			</div>`
 		}
 		$('swQuote').innerHTML = html
