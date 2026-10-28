@@ -941,8 +941,9 @@ function drawHistory() {
 		const ownScale = (original) => (bidSeries.data().length || askSeries.data().length ? null : original())
 		usdSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USD informal', autoscaleInfoProvider: ownScale })
 		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT', autoscaleInfoProvider: ownScale })
-		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.74, bottom: 0 } })
-		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.3 } })
+		// Las barras, bajas (el 15 % de abajo), y las tasas en el resto del alto
+		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
+		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.19 } })
 		historyChart.timeScale().subscribeSizeChange(fitHistory)
 		historyChart.subscribeCrosshairMove((p) => opsLegend(p.time ? (p.time - -new Date().getTimezoneOffset() * 60) * 1000 : null))
 		themeHistory()
