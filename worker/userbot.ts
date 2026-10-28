@@ -79,13 +79,13 @@ export async function tellUser(env: BotEnv, license: string, text: string, reply
 const openApp = (env: AlertEnv, text = 'Abrir el terminal') => button(text, appUrl(env))
 
 export const paidText = (username: string, days: number, amount: number, until: number) =>
-	`✅ <b>Pago confirmado</b>\n\nRecibimos tus ${amount.toLocaleString('es')} USD: <b>${daysText(days)} de Pro</b> para @${tgEsc(username)}.\nTienes Pro hasta el <b>${day(until)}</b>.\n\nGracias por confiar en Terminal P2P 🙌`
+	`✅ <b>Pago confirmado</b>\n\nRecibimos tus ${amount.toLocaleString('en-US')} USD: <b>${daysText(days)} de Pro</b> para @${tgEsc(username)}.\nTienes Pro hasta el <b>${day(until)}</b>.\n\nGracias por confiar en Terminal P2P 🙌`
 
 export const tellPaid = (env: BotEnv, license: string, username: string, days: number, amount: number, until: number, fetcher: typeof fetch = fetch) =>
 	tellUser(env, license, paidText(username, days, amount, until), openApp(env), fetcher)
 
 export const tellRefund = (env: BotEnv, r: { license: string; amount: number; payee: string; status: string; decision_note?: string | null; transfer_ref?: string | null }, fetcher: typeof fetch = fetch) => {
-	const usd = `${r.amount.toLocaleString('es')} USD`
+	const usd = `${r.amount.toLocaleString('en-US')} USD`
 	const text =
 		r.status === 'approved'
 			? `↩️ <b>Devolución aprobada</b>\n\nVamos a transferirte <b>${usd}</b> a la cuenta de QvaPay @${tgEsc(r.payee)}. Ya se quitaron los días de esa compra.\n\nTe escribimos de nuevo en cuanto esté hecha.`
@@ -184,7 +184,7 @@ export function cleanRadarHit(b: Record<string, unknown>): RadarHit | null {
 	return { kind, offer, coin, side, price, usd, peer, limit, ...(total && total > usd ? { total } : {}), ...(kind === 'taken' && side === 'buy' && pay ? { pay, payBy: payBy ?? undefined } : {}) }
 }
 
-const money = (n: number) => n.toLocaleString('es', { maximumFractionDigits: 2 })
+const money = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 const clock = (ms: number) => new Date(ms).toLocaleTimeString('es', { timeZone: 'America/Havana', hour: '2-digit', minute: '2-digit' })
 
 export function radarText(h: RadarHit) {

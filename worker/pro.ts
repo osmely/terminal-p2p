@@ -843,7 +843,7 @@ const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)
 
 // ── Panel: piezas compartidas ────────────────────────────────────────
 // Horas de Cuba, como el resto del proyecto
-const hUsd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('es')} USD`
+const hUsd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('en-US')} USD`
 const hWhen = (ms: number) => new Date(ms).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 const hDay = (ms: number) => new Date(ms).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric' })
 const hShort = (s: string) => `<span title="${escHtml(s)}">${escHtml(s.slice(0, 8))}…</span>`
@@ -1420,7 +1420,7 @@ async function proPage(env: ProEnv, active: AdminTab, title: string, body: strin
 }
 
 const proSearch = (q = '') => `<form method="get" class="row search" action="/admin/pro">${searchIcon}<input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"></form>`
-const proUsd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('es')} USD`
+const proUsd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('en-US')} USD`
 const proShort = (s: string) => `<span class="mono" title="${escHtml(s)}">${escHtml(s.slice(0, 8))}…</span>`
 const like = (q: string) => `%${q}%`
 
@@ -1520,9 +1520,9 @@ async function liveForm(env: ProEnv) {
 	const when = (t: number | null) => (t ? new Date(t).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'nunca')
 	const title = { feed: 'Libro en tiempo real: feed de QvaPay llegando', poll: 'Libro en tiempo real: sin feed, se lee con la app', off: 'Libro en tiempo real: sin feed ni credenciales' }[s.mode]
 	const notes = [
-		`${s.events.toLocaleString('es')} eventos del feed (el último: ${when(s.lastEvent)}).`,
-		live.STAGING || !s.stream ? '' : s.stream.on ? `Stream de QvaPay conectado desde ${when(s.stream.since)} (${(s.stream.events ?? 0).toLocaleString('es')} eventos por el stream; ${s.stream.connects ?? 0} conexiones desde que arrancó${s.stream.gap != null ? `, el último corte duró ${Math.round(s.stream.gap / 1000)} s` : ''}).` : `Stream de QvaPay desconectado${s.stream.error ? `: ${escHtml(s.stream.error)}` : ''}.`,
-		`${s.offers.toLocaleString('es')} ofertas en el libro, ${s.owners.toLocaleString('es')} anunciantes conocidos y ${(s.acts ?? 0).toLocaleString('es')} movimientos de actividad guardados; ${s.clients === 1 ? '1 terminal conectado' : `${s.clients} terminales conectados`} (${s.proClients} con Pro, al instante; el resto, cada 10 s).`,
+		`${s.events.toLocaleString('en-US')} eventos del feed (el último: ${when(s.lastEvent)}).`,
+		live.STAGING || !s.stream ? '' : s.stream.on ? `Stream de QvaPay conectado desde ${when(s.stream.since)} (${(s.stream.events ?? 0).toLocaleString('en-US')} eventos por el stream; ${s.stream.connects ?? 0} conexiones desde que arrancó${s.stream.gap != null ? `, el último corte duró ${Math.round(s.stream.gap / 1000)} s` : ''}).` : `Stream de QvaPay desconectado${s.stream.error ? `: ${escHtml(s.stream.error)}` : ''}.`,
+		`${s.offers.toLocaleString('en-US')} ofertas en el libro, ${s.owners.toLocaleString('en-US')} anunciantes conocidos y ${(s.acts ?? 0).toLocaleString('en-US')} movimientos de actividad guardados; ${s.clients === 1 ? '1 terminal conectado' : `${s.clients} terminales conectados`} (${s.proClients} con Pro, al instante; el resto, cada 10 s).`,
 		s.creds ? `Lectura del listado con la app: ${s.readError ? `falla (${escHtml(s.readError)})` : `bien (la última: ${when(s.lastRead)})`}.` : 'Faltan las credenciales de la app (QVAPAY_APP_ID y QVAPAY_APP_SECRET): sin ellas no se saben los nombres ni la reputación.',
 		s.lastRejected ? `Último evento rechazado: ${escHtml(s.lastRejected.reason)} (${when(s.lastRejected.at)}).` : '',
 		!live.QVAPAY_FEED_SECRET ? 'Falta el secreto del feed (QVAPAY_FEED_SECRET): los eventos se rechazan.' : '',

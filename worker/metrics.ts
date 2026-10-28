@@ -330,7 +330,7 @@ export async function authorized(req: Request, key: string | undefined) {
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
-const n = (v: number) => v.toLocaleString('es', { maximumFractionDigits: 2 })
+const n = (v: number) => v.toLocaleString('en-US', { maximumFractionDigits: 2 })
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—')
 const coinName = (t: string) => COINS.find((c) => c.tick === t)?.name ?? 'Sin identificar'
 const EVENT_NAMES: Record<string, string> = { create: 'Publicar', take: 'Tomar', paid: 'Marcar pagado', release: 'Liberar', cancel: 'Cancelar', rate: 'Calificar', completed: 'Completada' }

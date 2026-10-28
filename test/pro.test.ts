@@ -262,7 +262,7 @@ test('devolver una compra quita solo los días de esa compra; el resto y los dis
 	s.tick(26 * 86_400_000)
 	const { checkout } = await buy(s, P1, 'year')
 	// 4 días del mes + 365 del año; devuelve el año: le quedan sus 4 días
-	assert.match(await (await form({ action: 'refund', checkout: checkout.id, note: 'no le convenció' })).text(), /transfiere <b>39,99 USD<\/b> a <b>@ana<\/b>/)
+	assert.match(await (await form({ action: 'refund', checkout: checkout.id, note: 'no le convenció' })).text(), /transfiere <b>39.99 USD<\/b> a <b>@ana<\/b>/)
 	const st = (await s.post('/pro/status', { print: P1 })).body
 	assert.deepEqual([st.pro, st.expiresAt], [true, T0 + 30 * 86_400_000])
 	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM pro_prints WHERE license = ?').get('qp:ana') as { n: number }).n, 1)
@@ -321,7 +321,7 @@ test('panel: devolver el único pago deja sin Pro y dice cuánto transferir', as
 	const form = (fields: Record<string, string>) =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, T0)
 	const html = await (await form({ action: 'refund', checkout: checkout.id })).text()
-	assert.match(html, /transfiere <b>4,99 USD<\/b> a <b>@ana<\/b>/)
+	assert.match(html, /transfiere <b>4.99 USD<\/b> a <b>@ana<\/b>/)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
 	// No se devuelve dos veces
 	assert.match(await (await form({ action: 'refund', checkout: checkout.id })).text(), /ya se devolvió/)
@@ -416,7 +416,7 @@ test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobab
 	const id = (s.db.prepare("SELECT id FROM pro_checkouts WHERE invoice = 'inv-1'").get() as { id: string }).id
 	assert.match(await panel({ action: 'check', checkout: id }, '?view=pagos'), /ya está activada/)
 	assert.match(await panel(undefined, '?view=pagos'), /<b>@leo<\/b><\/a> <span class="note">pagó @pepe<\/span>/)
-	assert.match(await panel(), /Ingresos totales<\/span><b>4,99 USD/)
+	assert.match(await panel(), /Ingresos totales<\/span><b>4.99 USD/)
 	// Buscar por usuario
 	assert.doesNotMatch(await panel(undefined, '?q=nadie'), /pagó @pepe/)
 	assert.match(await panel(undefined, '?q=PEPE'), /pagó @pepe/)
@@ -443,7 +443,7 @@ test('paga otra cuenta (otra sesión abierta en qvapay.com): Pro queda a nombre 
 			s.now(),
 		).then((x) => x.text())
 	assert.match(await form(), /<b>@Ana<\/b><\/a> <span class="note">pagó @pepe<\/span>/)
-	assert.match(await form({ action: 'refund', checkout: c.id }), /transfiere <b>4,99 USD<\/b> a <b>@pepe<\/b>/)
+	assert.match(await form({ action: 'refund', checkout: c.id }), /transfiere <b>4.99 USD<\/b> a <b>@pepe<\/b>/)
 })
 
 test('repaso diario con QvaPay: activa un pago que se quedó sin activar y recupera uno que aquí no consta', async () => {
@@ -633,7 +633,7 @@ test('devolución en pasos: la pide el usuario desde «Mi cuenta», la apruebas 
 	// En el panel aparece abierta; al aprobarla se le quitan esos 30 días (le quedan los gratis)
 	assert.match(await admin(), /Pendientes <span class="count">1<\/span>/)
 	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
-	assert.match(await admin({ action: 'refund-approve', id, note: 'ok' }), /transfiere <b>4,99 USD<\/b> a <b>@ana<\/b>/)
+	assert.match(await admin({ action: 'refund-approve', id, note: 'ok' }), /transfiere <b>4.99 USD<\/b> a <b>@ana<\/b>/)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.expiresAt, T0 + 14 * 86_400_000)
 	// No se aprueba dos veces
 	assert.match(await admin({ action: 'refund-approve', id }), /no está pendiente de aprobar/)
@@ -720,7 +720,7 @@ test('pagos cobrados sin activar: quedan en «Pendientes» hasta activarlos, y e
 	assert.equal((await s.post('/pro/status', { print: P2, username: 'leo' })).body.plan, 'month')
 	// Sin nada pendiente, el repaso dice que todo está en orden
 	await dailyDigest(s.env, null, s.now(), s.q.fetcher)
-	assert.match(s.q.telegram.at(-1)!.text, /todo en orden[\s\S]*Últimas 24 h: 1 pago \(4,99 USD\)/)
+	assert.match(s.q.telegram.at(-1)!.text, /todo en orden[\s\S]*Últimas 24 h: 1 pago \(4.99 USD\)/)
 	// El botón del panel manda un aviso de prueba
 	assert.match(await admin({ action: 'alert-test' }), /Aviso de prueba enviado/)
 	assert.match(s.q.telegram.at(-1)!.text, /Aviso de prueba/)
@@ -846,14 +846,14 @@ test('avisos al usuario por Telegram: se conecta desde «Mi cuenta» y recibe su
 
 	// Compra: el aviso al grupo y la confirmación al usuario
 	const { checkout } = await buy(s, P1, 'month', 'ana')
-	assert.match(toUser()[0].text, /Pago confirmado[\s\S]*Recibimos tus 4,99 USD: <b>30 días de Pro<\/b> para @ana/)
+	assert.match(toUser()[0].text, /Pago confirmado[\s\S]*Recibimos tus 4.99 USD: <b>30 días de Pro<\/b> para @ana/)
 	// Devolución: pedida (no se le avisa: ya lo ve en «Mi cuenta»), aprobada y transferida
 	await s.post('/pro/refund', { print: P1, username: 'ana', checkout: checkout.id, reason: 'no la uso' })
 	const admin = (fields: Record<string, string>) =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now(), s.q.fetcher).then((r) => r.text())
 	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
 	await admin({ action: 'refund-approve', id })
-	assert.match(toUser()[1].text, /Devolución aprobada[\s\S]*4,99 USD<\/b> a la cuenta de QvaPay @ana/)
+	assert.match(toUser()[1].text, /Devolución aprobada[\s\S]*4.99 USD<\/b> a la cuenta de QvaPay @ana/)
 	await admin({ action: 'refund-transfer', id, ref: 'TX-9' })
 	assert.match(toUser()[2].text, /Devolución enviada[\s\S]*Referencia: <code>TX-9<\/code>/)
 
@@ -952,7 +952,7 @@ test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto e
 	// La misma oferta desde otra pestaña: no se repite. Tomada después: ese aviso sí sale
 	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit })).body.repeated, true)
 	await s.post('/pro/radar/alert', { print: P1, ...hit, kind: 'taken', pay: 23900, payBy: Date.parse('2026-10-25T16:30:00Z') })
-	assert.match(toUser()[1].text, /tomé una oferta por ti[\s\S]*Compraste <b>50 USD<\/b>[\s\S]*Págale <b>23\.900 CUP<\/b> antes de las <b>12:30<\/b> \(hora de Cuba\)/)
+	assert.match(toUser()[1].text, /tomé una oferta por ti[\s\S]*Compraste <b>50 USD<\/b>[\s\S]*Págale <b>23,900 CUP<\/b> antes de las <b>12:30<\/b> \(hora de Cuba\)/)
 	assert.equal(toUser().length, 2)
 	// De una oferta por rango más grande: se dice cuánto tiene
 	await s.post('/pro/radar/alert', { print: P1, ...hit, offer: '0b0e1c2d-3e4f-4a5b-8c6d-aaaaaaaaaaaa', total: 500 })

@@ -42,7 +42,7 @@ interface Row {
 	window_h: number | null
 }
 
-const fmt = (n: number, d = 0) => n.toLocaleString('es', { minimumFractionDigits: d, maximumFractionDigits: d })
+const fmt = (n: number, d = 0) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
 const pct = (x: number) => `${x >= 0 ? '▲ +' : '▼ '}${fmt(x * 100, 1)} %`
 const dayName = (t: number) => new Date(t + cubaOffset(t)).toLocaleDateString('es', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' })
 

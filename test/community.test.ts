@@ -49,11 +49,11 @@ test('tasa del día: el mensaje con la mediana, su cambio, los otros mercados y 
 	const s = setup()
 	const text = (await buildDailyPost(s.env, NINE))!
 	assert.match(text, /Tasa QvaPay hoy<\/b> · miércoles, 28 de octubre/)
-	assert.match(text, /<b>1051 CUP<\/b> · ▲ \+1,1 % en 24 h · ▲ \+4,3 % en 7 días/)
-	assert.match(text, /Compra 1045 · 🔴 Venta 1057/)
+	assert.match(text, /<b>1,051 CUP<\/b> · ▲ \+1\.1 % en 24 h · ▲ \+4\.3 % en 7 días/)
+	assert.match(text, /Compra 1,045 · 🔴 Venta 1,057/)
 	assert.match(text, /432 operaciones en 24 h/)
-	assert.match(text, /Saldo ETECSA: 250 CUP[\s\S]*Clásica: 1,10 USD[\s\S]*MLC: 1,40 MLC/)
-	assert.match(text, /USD 845 · USDT 1075 · MLC 699 CUP/)
+	assert.match(text, /Saldo ETECSA: 250 CUP[\s\S]*Clásica: 1\.10 USD[\s\S]*MLC: 1\.40 MLC/)
+	assert.match(text, /USD 845 · USDT 1,075 · MLC 699 CUP/)
 	assert.match(text, /un 24 % por encima del dólar en efectivo/)
 	assert.match(text, /app\.terminalp2p\.com\/\?de=tasa/)
 	// Con tasas viejas no hay mensaje

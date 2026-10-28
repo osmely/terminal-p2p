@@ -526,7 +526,7 @@ export async function simAdmin(req: Request, env: SimEnv, now = Date.now()): Pro
 	const pnls = accs.map((a) => a.pnl_pct).sort((x, y) => x - y)
 	const median = pnls.length ? pnls[Math.floor(pnls.length / 2)] : null
 	const winners = pnls.filter((p) => p > 0).length
-	const fmtPct = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')} %`
+	const fmtPct = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2)} %`
 
 	const card = (label: string, value: string, small = '') => `<div class="card"><span>${label}</span><b>${value}</b>${small ? `<small>${small}</small>` : ''}</div>`
 	return adminPage(

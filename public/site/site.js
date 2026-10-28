@@ -15,7 +15,7 @@ const MARKETS = [
 ]
 
 const decimals = (p) => (p >= 100 ? 2 : 4)
-const fmt = (p) => (p > 0 ? p.toLocaleString('es', { minimumFractionDigits: decimals(p), maximumFractionDigits: decimals(p) }) : '—')
+const fmt = (p) => (p > 0 ? p.toLocaleString('en-US', { minimumFractionDigits: decimals(p), maximumFractionDigits: decimals(p) }) : '—')
 const pick = (a, median, average) => (a[median] > 0 ? a[median] : a[average] > 0 ? a[average] : 0)
 const period = (h) => (h >= 48 && h % 24 === 0 ? `${h / 24} días` : `${h} h`)
 
@@ -29,7 +29,7 @@ async function loadRates() {
 			return `<article class="rate">
 				<h3>${name}</h3><div class="unit">${unit} por USD de QvaPay</div>
 				<div class="px"><span>Venta</span><b class="ask">${fmt(pick(a, 'median_sell', 'average_sell'))}</b><span>Compra</span><b class="bid">${fmt(pick(a, 'median_buy', 'average_buy'))}</b></div>
-				<div class="ops">${a.count.toLocaleString('es')} operaciones en ${period(a.window_hours ?? 24)}</div>
+				<div class="ops">${a.count.toLocaleString('en-US')} operaciones en ${period(a.window_hours ?? 24)}</div>
 			</article>`
 		})
 		if (!cards.length) throw new Error('vacío')
@@ -69,7 +69,7 @@ async function loadInformal() {
 // En números: lo publicado, tomado y completado desde el terminal (/data/stats, anónimo y cacheado 10 min)
 const cubaDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Havana' })
 const dayName = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('es', { day: 'numeric', month: 'short' })
-const whole = (n) => Math.round(n).toLocaleString('es')
+const whole = (n) => Math.round(n).toLocaleString('en-US')
 async function loadStats() {
 	let s
 	try {

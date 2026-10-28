@@ -54,12 +54,12 @@ const S = {
 
 // ── Formato ───────────────────────────────────────────────────────────
 const decimalsOf = (step) => Math.max(0, Math.min(8, Math.round(-Math.log10(step))))
-const fmtPrice = (p, sym = S.symbol) => (p == null || !isFinite(p) ? '—' : p.toLocaleString('es', { minimumFractionDigits: decimalsOf(S.markets[sym]?.tick ?? 0.01), maximumFractionDigits: decimalsOf(S.markets[sym]?.tick ?? 0.01) }))
-const fmtQty = (q, sym = S.symbol) => (q == null ? '—' : q.toLocaleString('es', { maximumFractionDigits: decimalsOf(S.markets[sym]?.qtyStep ?? 0.0001) }))
-const fmtUsd = (n) => (n == null || !isFinite(n) ? '—' : n.toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+const fmtPrice = (p, sym = S.symbol) => (p == null || !isFinite(p) ? '—' : p.toLocaleString('en-US', { minimumFractionDigits: decimalsOf(S.markets[sym]?.tick ?? 0.01), maximumFractionDigits: decimalsOf(S.markets[sym]?.tick ?? 0.01) }))
+const fmtQty = (q, sym = S.symbol) => (q == null ? '—' : q.toLocaleString('en-US', { maximumFractionDigits: decimalsOf(S.markets[sym]?.qtyStep ?? 0.0001) }))
+const fmtUsd = (n) => (n == null || !isFinite(n) ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
 // 45.373 → 45,4K; 1.250.000 → 1,25M
-const fmtCompact = (n) => (n >= 1e6 ? `${(n / 1e6).toLocaleString('es', { maximumFractionDigits: 2 })}M` : n >= 1e4 ? `${(n / 1e3).toLocaleString('es', { maximumFractionDigits: 1 })}K` : fmtUsd(n))
-const fmtPct = (x) => (x == null || !isFinite(x) ? '—' : `${x >= 0 ? '+' : ''}${x.toFixed(2).replace('.', ',')}%`)
+const fmtCompact = (n) => (n >= 1e6 ? `${(n / 1e6).toLocaleString('en-US', { maximumFractionDigits: 2 })}M` : n >= 1e4 ? `${(n / 1e3).toLocaleString('en-US', { maximumFractionDigits: 1 })}K` : fmtUsd(n))
+const fmtPct = (x) => (x == null || !isFinite(x) ? '—' : `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`)
 const cls = (x) => (x > 0 ? 'up' : x < 0 ? 'down' : '')
 const base = (sym) => S.markets[sym]?.base ?? sym.replace('USDT', '')
 const when = (t) => new Date(t).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -394,7 +394,7 @@ function renderForm() {
 	$('fMarketBox').hidden = S.type !== 'MARKET'
 	$('fQuick').hidden = S.type === 'MARKET'
 	// Límite: el mejor precio o el último. Stop: a qué distancia del precio actual se activa (arriba al comprar, abajo al vender)
-	const off = (ps, sign) => ps.map((p) => `<button type="button" data-off="${sign * p}">${sign > 0 ? '+' : '−'}${String(p).replace('.', ',')}%</button>`).join('')
+	const off = (ps, sign) => ps.map((p) => `<button type="button" data-off="${sign * p}">${sign > 0 ? '+' : '−'}${p}%</button>`).join('')
 	const quick = S.type === 'STOP' ? off([0.5, 1, 2, 5], buy ? 1 : -1) : `<button type="button" data-fill="rest">${buy ? 'Mejor compra' : 'Mejor venta'}</button><button type="button" data-fill="last">Último</button>${off([1, 2], buy ? -1 : 1)}`
 	if ($('fQuick').dataset.k !== `${S.type}:${S.side}`) {
 		$('fQuick').dataset.k = `${S.type}:${S.side}`
@@ -665,7 +665,7 @@ function renderBook() {
 	midB.textContent = last ? fmtPrice(last.last) : '—'
 	if (last && midPrice != null && last.last !== midPrice) flash(mid, last.last > midPrice ? 'up' : 'down')
 	midPrice = last?.last ?? null
-	const spread = asks[0] && bids[0] ? ((asks[0][0] / bids[0][0] - 1) * 100).toFixed(3).replace('.', ',') : null
+	const spread = asks[0] && bids[0] ? ((asks[0][0] / bids[0][0] - 1) * 100).toFixed(3) : null
 	mid.querySelector('small').textContent = spread ? `diferencial ${spread}%` : ''
 	bookDom.first = false
 }
@@ -707,7 +707,7 @@ function cardLabels(body) {
 function renderTab() {
 	for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('active', b.dataset.tab === S.tab)
 	const body = $('tabBody')
-	if (!S.view) return (body.innerHTML = '<p class="empty">Conecta tu cuenta en el terminal para tener tu cuenta de 10.000 USDT ficticios.</p>')
+	if (!S.view) return (body.innerHTML = '<p class="empty">Conecta tu cuenta en el terminal para tener tu cuenta de 10,000 USDT ficticios.</p>')
 	if (S.tab === 'positions') {
 		const ps = liveAccount().positions
 		const pnl = (p) => `${p.pnl == null ? '—' : `${p.pnl >= 0 ? '+' : ''}${fmtUsd(p.pnl)}`}${p.pnlPct != null ? ` (${fmtPct(p.pnlPct)})` : ''}`
@@ -989,11 +989,11 @@ function bind() {
 		}
 	})
 	$('resetBtn').onclick = async () => {
-		if (!confirm('¿Reiniciar tu cuenta? Vuelves a 10.000 USDT y se borran tus posiciones y órdenes.')) return
+		if (!confirm('¿Reiniciar tu cuenta? Vuelves a 10,000 USDT y se borran tus posiciones y órdenes.')) return
 		try {
 			S.tradesSeen = 0
 			applyView(await api('/reset', { method: 'POST' }))
-			toast('Cuenta reiniciada: 10.000 USDT')
+			toast('Cuenta reiniciada: 10,000 USDT')
 		} catch (e) {
 			toast(e.message, 'bad')
 		}

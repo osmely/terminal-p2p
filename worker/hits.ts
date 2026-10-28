@@ -57,7 +57,7 @@ export async function loadHits(db: D1, days: number, now = Date.now()) {
 	}
 }
 
-const n = (v: number | undefined) => (v ?? 0).toLocaleString('es')
+const n = (v: number | undefined) => (v ?? 0).toLocaleString('en-US')
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 export function hitsHtml(h: Awaited<ReturnType<typeof loadHits>>) {
