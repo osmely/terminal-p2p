@@ -11,6 +11,8 @@ import { ACT_KEEP, ALARM_MS, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_M
 
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
 const DONE_EVERY_MS = 5 * 60_000
+// Las mejores de cada lado que ve la mini app
+const BOOK_TOP = 30
 const TAKES_KEEP_MS = 30 * 60_000
 
 interface Sock {
@@ -91,6 +93,7 @@ export class LiveBook {
 		if (url.pathname === '/event' && req.method === 'POST') return this.onEvent(await req.text())
 		if (url.pathname === '/ws') return this.connect(url.searchParams.get('pro') === '1', url.searchParams.get('u') || null)
 		if (url.pathname === '/clients') return Response.json(this.clients())
+		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
 		if (url.pathname === '/status') return Response.json(this.state())
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
 		return new Response('no encontrado', { status: 404 })
@@ -102,6 +105,21 @@ export class LiveBook {
 
 	private feedOn(now = Date.now()) {
 		return this.lastEvent !== null && now - this.lastEvent < FEED_IDLE_MS
+	}
+
+	// Un mercado entero para la mini app de QvaPay (solo mirar, sin cuenta): lo mismo que un terminal sin Pro. Un lado
+	// que aún no está completo se pide a QvaPay y sale vacío (ready: false) hasta la próxima consulta
+	private async bookOf(coin: string) {
+		if (!TICKS.has(coin)) return Response.json({ error: 'Mercado desconocido' }, { status: 400 })
+		const side = (s: Side) => {
+			const k = sideKey(coin, s)
+			const ready = this.synced.has(k)
+			if (!ready || (!this.feedOn() && Date.now() - (this.readAt.get(k) ?? 0) > POLL_MS)) this.want.add(k)
+			return { ready, levels: ready ? this.book.levels(coin, s, BOOK_TOP) : [], total: this.book.count(coin, s) }
+		}
+		const out = { coin, at: Date.now(), feed: this.feedOn(), ask: side('ask'), bid: side('bid') }
+		if (this.want.size && !this.streaming) await this.soon(200)
+		return Response.json(out)
 	}
 
 	// Quién tiene el terminal abierto: la última señal es el último «ping» del terminal (cada 25 s), al que contesta
@@ -116,7 +134,7 @@ export class LiveBook {
 	private state(): LiveState {
 		const now = Date.now()
 		return {
-			version: 7,
+			version: 8,
 			recent: this.recent,
 			mode: this.feedOn(now) ? 'feed' : this.creds() ? 'poll' : 'off',
 			events: this.events,

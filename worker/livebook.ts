@@ -433,6 +433,18 @@ export interface LiveClient {
 	at: number | null
 	seen: number | null
 }
+// Un mercado entero, para la mini app de QvaPay (solo mirar)
+export interface LiveBookSide {
+	ready: boolean
+	levels: Level[]
+	total: number
+}
+export async function liveBookOf(env: LiveEnv, coin: string): Promise<{ coin: string; at: number; feed: boolean; ask: LiveBookSide; bid: LiveBookSide } | null> {
+	if (!env.LIVE) return null
+	const r = await liveStub(env).fetch(`https://live/book?coin=${encodeURIComponent(coin)}`)
+	return r.ok ? r.json() : null
+}
+
 export async function liveClients(env: LiveEnv): Promise<LiveClient[] | null> {
 	if (!env.LIVE) return null
 	return liveStub(env)

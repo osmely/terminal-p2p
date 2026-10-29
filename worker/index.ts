@@ -23,7 +23,8 @@ import { expiryReminders } from './userbot.ts'
 import { dailyPost } from './community.ts'
 import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
-import { feedWebhook, liveClients, liveSocket, type LiveEnv } from './livebook.ts'
+import { feedWebhook, liveBookOf, liveClients, liveSocket, type LiveEnv } from './livebook.ts'
+import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
 import { checkAlerts } from './ratealerts.ts'
 import { LiveBook } from './livebook-do.ts'
@@ -89,6 +90,17 @@ const SHARED = ['/vendor/', '/favicon.svg', '/theme.js', '/resize.js', '/hit.js'
 
 // app.terminalp2p.com (app.localhost en desarrollo) → terminal; sim.* → simulador; el resto → landing
 const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : host.startsWith('sim.') ? 'sim' : 'site')
+// La mini app de QvaPay (terminalp2p.com/mini/): el simulador del panel de QvaPay la abre dentro de su web y le pone su
+// puente (sdk-sim.js). Va en la web, no en el terminal: ahí no hay ningún token que ese script pudiera ver
+const MINI_CSP =
+	"default-src 'self'; script-src 'self' https://www.qvapay.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' https://www.qvapay.com; base-uri 'none'; form-action 'self'"
+function miniApp(url: URL, res: Response) {
+	if (folderFor(url.hostname) !== 'site' || !url.pathname.startsWith('/mini')) return res
+	const out = new Response(res.body, res)
+	out.headers.set('Content-Security-Policy', MINI_CSP)
+	out.headers.delete('X-Frame-Options')
+	return out
+}
 // El simulador usa el botón de Telegram; los precios los pide a este mismo dominio
 const SIM_CSP =
 	"default-src 'self'; script-src 'self' https://telegram.org; frame-src https://oauth.telegram.org; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.me https://*.telegram.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
@@ -162,6 +174,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		return secure(jsonError(404, 'no encontrado'))
 	}
 	if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
+	if (url.pathname === '/data/book' && req.method === 'GET') return secure(await book(url, env, ctx))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
 	// Plan Pro, en el dominio del terminal. Pedir facturas tiene tope
@@ -178,7 +191,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		return secure(await simApi(req, url, env as unknown as SimEnv))
 	}
 	// Las páginas enseñan u ocultan lo de Pro según el interruptor del panel
-	const res = await assets(req, url, env)
+	const res = miniApp(url, await assets(req, url, env))
 	return res.headers.get('Content-Type')?.includes('text/html') ? proMarkup(res, await proEnabled(env.DB)) : res
 }
 
@@ -472,6 +485,34 @@ async function assets(req: Request, url: URL, env: Env) {
 	const out = new Response(res.body, res)
 	out.headers.set('Location', to.pathname + to.search)
 	return out
+}
+
+// El libro de un mercado para la mini app de QvaPay (solo mirar, sin cuenta): las 30 mejores de cada lado, como un
+// terminal sin Pro, con la Tasa QvaPay y lo atípico marcado. 5 s en la caché del borde: todos ven lo mismo y el libro
+// en vivo no recibe una consulta por cada móvil
+const BOOK_TTL_S = 5
+async function book(url: URL, env: Env, ctx: ExecutionContext) {
+	const coin = url.searchParams.get('coin')
+	if (!isCoin(coin)) return jsonError(400, 'Mercado desconocido')
+	const key = new Request(`${url.origin}/data/book?coin=${coin}`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, `public, max-age=${BOOK_TTL_S}`)
+	const live = await liveBookOf(env as unknown as LiveEnv, coin).catch(() => null)
+	if (!live) return jsonError(503, 'El libro no está disponible ahora mismo')
+	const r = await env.DB.prepare('SELECT t, median, median_buy, median_sell FROM rates WHERE coin = ? ORDER BY t DESC LIMIT 1')
+		.bind(coin)
+		.first<{ t: number; median: number | null; median_buy: number | null; median_sell: number | null }>()
+	const ref = { ask: r?.median_sell ?? r?.median ?? null, bid: r?.median_buy ?? r?.median ?? null }
+	const side = (s: 'ask' | 'bid') => ({
+		ready: live[s].ready,
+		total: live[s].total,
+		levels: live[s].levels.map((l) => ({ uuid: l.uuid, price: l.price, usd: l.usd, user: l.user, kind: l.kind, orderMin: l.orderMin, orderMax: l.orderMax, vipOnly: l.vipOnly, outlier: isOutlier(l.price, ref[s], s) })),
+	})
+	const data = { coin, at: live.at, rate: r?.median ?? null, rateAt: r?.t ?? null, ask: side('ask'), bid: side('bid'), markets: COINS.map((c) => ({ tick: c.tick, name: c.name, unit: c.unit })) }
+	const ready = live.ask.ready && live.bid.ready
+	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': ready ? `public, max-age=${BOOK_TTL_S}` : 'no-store' } })
+	if (ready) ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
 }
 
 // Lo que sale de la caché del borde llega con la caché del navegador de la zona (4 h) en vez de la nuestra:

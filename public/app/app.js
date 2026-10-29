@@ -41,8 +41,20 @@ const store = {
 	},
 }
 
+// ?coin=ETECSA (el enlace «Operar» de la mini app de QvaPay): abre ese mercado y se queda como el elegido
+const urlCoin = (() => {
+	const q = new URLSearchParams(location.search)
+	const c = q.get('coin')
+	if (!c) return null
+	q.delete('coin')
+	history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
+	if (!/^[A-Z_]{2,20}$/.test(c)) return null
+	store.set('coin', c)
+	return c
+})()
+
 const state = {
-	coin: store.get('coin', 'BANK_CUP'),
+	coin: urlCoin ?? store.get('coin', 'BANK_CUP'),
 	chart: store.get('chart', 'depth'),
 	range: store.get('range', 7),
 	view: store.get('view', 'book'),
