@@ -24,6 +24,8 @@
 
 	let Q = window.QvaPay ?? null
 	let coin = get('mini.coin', 'BANK_CUP')
+	let tab = get('mini.tab', 'book') === 'chart' ? 'chart' : 'book'
+	let days = Number(get('mini.days', 7)) || 7
 	let markets = []
 	let timer = null
 	let seq = 0
@@ -86,7 +88,80 @@
 		set('mini.coin', coin)
 		$('asks').innerHTML = $('bids').innerHTML = '<p class="empty">Cargando…</p>'
 		load()
+		if (tab === 'chart') loadChart()
 	})
+
+	// ── Libro o gráfico ─────────────────────────────────────────────────
+	function showTab(t) {
+		tab = t
+		set('mini.tab', t)
+		for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('on', b.dataset.tab === t)
+		$('bookView').hidden = t !== 'book'
+		$('chartView').hidden = t !== 'chart'
+		if (t === 'chart') loadChart()
+	}
+	for (const b of document.querySelectorAll('[data-tab]')) b.onclick = () => showTab(b.dataset.tab)
+	for (const b of document.querySelectorAll('[data-days]'))
+		b.onclick = () => {
+			days = Number(b.dataset.days)
+			set('mini.days', String(days))
+			loadChart()
+		}
+
+	// El histórico de la tasa de lo completado (venta y compra), como el del terminal. La librería se carga al abrirlo
+	let chart = null
+	let sell = null
+	let buy = null
+	let chartSeq = 0
+	const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim()
+	const lib = () =>
+		window.LightweightCharts
+			? Promise.resolve()
+			: new Promise((ok, fail) => {
+					const s = document.createElement('script')
+					s.src = '/vendor/lightweight-charts.js'
+					s.onload = ok
+					s.onerror = fail
+					document.head.append(s)
+				})
+	function paintChart() {
+		chart?.applyOptions({
+			layout: { background: { color: 'transparent' }, textColor: css('--muted') },
+			grid: { vertLines: { color: css('--line') }, horzLines: { color: css('--line') } },
+			rightPriceScale: { borderColor: css('--line') },
+			timeScale: { borderColor: css('--line') },
+		})
+		sell?.applyOptions({ color: css('--ask') })
+		buy?.applyOptions({ color: css('--bid') })
+	}
+	async function loadChart() {
+		for (const b of document.querySelectorAll('[data-days]')) b.classList.toggle('on', Number(b.dataset.days) === days)
+		const my = ++chartSeq
+		try {
+			const [, r] = await Promise.all([lib(), fetch(`/data/rates?coin=${encodeURIComponent(coin)}&days=${days}`).then((x) => x.json())])
+			if (my !== chartSeq) return
+			if (!chart) {
+				chart = LightweightCharts.createChart($('chart'), {
+					autoSize: true,
+					localization: { locale: 'es', priceFormatter: (p) => fmtP(p) },
+					timeScale: { timeVisible: true, secondsVisible: false },
+					handleScroll: false,
+					handleScale: false,
+				})
+				sell = chart.addLineSeries({ lineWidth: 2, priceLineVisible: false })
+				buy = chart.addLineSeries({ lineWidth: 2, priceLineVisible: false })
+				paintChart()
+			}
+			// En la hora del móvil (la librería dibuja en UTC)
+			const tz = -new Date().getTimezoneOffset() * 60
+			const line = (k) => (r.points ?? []).filter((p) => p[k] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[k] }))
+			sell.setData(line('sell'))
+			buy.setData(line('buy'))
+			chart.timeScale().fitContent()
+		} catch {
+			if (my === chartSeq) $('chart').innerHTML = '<p class="empty">El gráfico no está disponible ahora mismo.</p>'
+		}
+	}
 	document.addEventListener('click', (e) => {
 		const row = e.target.closest('[data-offer]')
 		if (row) terminal(`#p2p/${row.dataset.offer}`)
@@ -107,6 +182,7 @@
 			if (c.surface) css.setProperty('--surface', c.surface)
 			if (c.text) css.setProperty('--text', c.text)
 			if (c.primary) css.setProperty('--accent', c.primary)
+			paintChart()
 		}
 		Q.getTheme?.().then(theme).catch(() => {})
 		Q.on?.('themeChanged', theme)
@@ -120,5 +196,6 @@
 	if (Q) withQvaPay()
 	else window.addEventListener('qvapay:ready', withQvaPay, { once: true })
 
+	showTab(tab)
 	load()
 })()

@@ -37,6 +37,14 @@
 		.u { font: 13px var(--mono); text-align: right; }
 		.w { color: var(--muted); text-align: right; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 		.empty { padding: 16px 12px; color: var(--muted); text-align: center; }
+		.tabs, .ranges { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+		.tab, .range { height: 34px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: 600 14px system-ui, sans-serif; cursor: pointer; }
+		.tab.on, .range.on { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .15); }
+		.ranges { margin-top: 14px; }
+		.chart { height: 320px; margin-top: 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
+		.legend { color: var(--muted); font-size: 12px; margin: 8px 2px 0; }
+		.legend .ask { color: var(--ask); } .legend .bid { color: var(--bid); }
+		[hidden] { display: none !important; }
 		.about { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 16px 2px 0; }
 		.about b { color: var(--text); }
 		.about ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
@@ -47,14 +55,22 @@
 <body>
 	<header>
 		<select id="coin" aria-label="Mercado"></select>
+		<div class="tabs" role="tablist"><button class="tab" data-tab="book" role="tab">Libro</button><button class="tab" data-tab="chart" role="tab">Gráfico</button></div>
 		<div class="stats">
 			<div class="stat"><span>Mejor venta</span><b class="ask" id="bestAsk">—</b></div>
 			<div class="stat"><span>Mejor compra</span><b class="bid" id="bestBid">—</b></div>
 			<div class="stat"><span>Tasa QvaPay</span><b id="rate">—</b></div>
 		</div>
 	</header>
+	<div id="bookView">
 	<section class="ask"><h2><span>Venden USD</span><span id="askN"></span></h2><div class="rows" id="asks"><p class="empty">Cargando…</p></div></section>
 	<section class="bid"><h2><span>Compran USD</span><span id="bidN"></span></h2><div class="rows" id="bids"><p class="empty">Cargando…</p></div></section>
+	</div>
+	<div id="chartView" hidden>
+		<div class="ranges"><button class="range" data-days="7">7 días</button><button class="range" data-days="30">30 días</button><button class="range" data-days="365">1 año</button></div>
+		<div class="chart" id="chart"></div>
+		<p class="legend"><span class="ask">— venta</span> <span class="bid">— compra</span> · tasa de lo que se completó en el P2P, en tu hora</p>
+	</div>
 	<div class="about">
 		<p><b>MiniApp de Terminal P2P</b>, la plataforma para entender y manejar el P2P de QvaPay como un trader profesional.</p>
 		<ul>
