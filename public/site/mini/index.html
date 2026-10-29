@@ -29,7 +29,15 @@
 		section { margin-top: 14px; }
 		h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 2px 6px; display: flex; justify-content: space-between; }
 		.rows { border-radius: 12px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
-		.row { display: grid; grid-template-columns: 1.1fr .8fr 1.2fr; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); width: 100%; border-left: 0; border-right: 0; border-bottom: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+		.row, .cols { display: grid; grid-template-columns: 1.15fr .75fr .85fr 1.1fr; gap: 6px; align-items: center; padding: 10px 12px; }
+		.row { position: relative; border-top: 1px solid var(--line); width: 100%; border-left: 0; border-right: 0; border-bottom: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+		.row > span { position: relative; }
+		.cols { padding: 0 12px 6px; color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+		.cols span:not(:first-child) { text-align: right; }
+		/* La profundidad: una barra de fondo con lo acumulado hasta esa fila */
+		.bar { position: absolute; top: 0; bottom: 0; right: 0; opacity: .13; }
+		.ask .bar { background: var(--ask); } .bid .bar { background: var(--bid); }
+		.c { font: 13px var(--mono); text-align: right; color: var(--muted); }
 		.row:first-child { border-top: 0; }
 		.row:active { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 		.p { font: 700 14px var(--mono); }
@@ -45,6 +53,10 @@
 		.legend { color: var(--muted); font-size: 12px; margin: 8px 2px 0; }
 		.legend .ask { color: var(--ask); } .legend .bid { color: var(--bid); }
 		[hidden] { display: none !important; }
+		.spread { display: flex; justify-content: space-between; margin: 10px 2px 0; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border: 1px solid var(--line); font: 600 12px system-ui, sans-serif; color: var(--muted); letter-spacing: .04em; }
+		.spread b { color: var(--text); font: 700 13px var(--mono); letter-spacing: 0; }
+		.row.new { animation: flash 1.6s ease-out; }
+		@keyframes flash { 0% { background: color-mix(in srgb, var(--accent) 22%, transparent); } 100% { background: transparent; } }
 		.about { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 16px 2px 0; }
 		.about b { color: var(--text); }
 		.about ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
@@ -63,8 +75,9 @@
 		</div>
 	</header>
 	<div id="bookView">
-	<section class="ask"><h2><span>Venden USD</span><span id="askN"></span></h2><div class="rows" id="asks"><p class="empty">Cargando…</p></div></section>
-	<section class="bid"><h2><span>Compran USD</span><span id="bidN"></span></h2><div class="rows" id="bids"><p class="empty">Cargando…</p></div></section>
+	<section class="ask"><h2><span>Venden USD</span><span id="askN"></span></h2><div class="cols"><span>Precio</span><span>USD</span><span>Acumulado</span><span>Oferta</span></div><div class="rows" id="asks"><p class="empty">Cargando…</p></div></section>
+	<p class="spread"><span>DIFERENCIAL</span><b id="spread">—</b></p>
+	<section class="bid"><h2><span>Compran USD</span><span id="bidN"></span></h2><div class="cols"><span>Precio</span><span>USD</span><span>Acumulado</span><span>Oferta</span></div><div class="rows" id="bids"><p class="empty">Cargando…</p></div></section>
 	</div>
 	<div id="chartView" hidden>
 		<div class="ranges"><button class="range" data-days="7">7 días</button><button class="range" data-days="30">30 días</button><button class="range" data-days="365">1 año</button></div>

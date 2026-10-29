@@ -4,7 +4,8 @@
 ;(() => {
 	const APP = location.hostname.includes('staging') ? 'https://app.staging.terminalp2p.com' : 'https://app.terminalp2p.com'
 	const ROWS = 15
-	const EVERY_MS = 10_000
+	// Lo que dura el libro en la caché del servidor: leer más a menudo no traería nada nuevo
+	const EVERY_MS = 5000
 	const $ = (id) => document.getElementById(id)
 	const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 	const fmtP = (p) => (p == null ? '—' : p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: p < 10 ? 4 : 2 }))
@@ -29,6 +30,10 @@
 	let markets = []
 	let timer = null
 	let seq = 0
+	// Lo que se vio en la lectura anterior de cada lado (uuid → precio y USD), para iluminar lo que cambió
+	let seen = { ask: null, bid: null }
+	// Al abrir un mercado, el libro baja solo hasta el diferencial (donde están las mejores), como en el terminal
+	let toSpread = true
 
 	// Fuera de la app de QvaPay (un navegador normal) se abre en otra pestaña
 	const open = (url) => (Q ? Q.openLink(url) : window.open(url, '_blank', 'noopener'))
@@ -36,13 +41,20 @@
 
 	function rows(levels, side) {
 		const list = levels.filter((l) => !l.outlier).slice(0, ROWS)
+		const before = seen[side]
+		seen[side] = new Map(list.map((l) => [l.uuid, `${l.price}/${l.usd}`]))
 		if (!list.length) return '<p class="empty">Sin ofertas ahora mismo.</p>'
-		return list
-			.map(
-				(l) =>
-					`<button class="row" data-offer="${esc(l.uuid)}"><span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="w">${l.vipOnly ? '★ ' : ''}${l.user && l.user !== '—' ? `@${esc(l.user)}` : '—'}</span></button>`,
-			)
-			.join('')
+		// Nueva o con otro precio o monto desde la lectura anterior (en la primera de un mercado, nada)
+		const moved = (l) => before && before.get(l.uuid) !== `${l.price}/${l.usd}`
+		// Lo acumulado desde la mejor hasta cada fila, y la barra de profundidad en proporción al total de las que se ven
+		let sum = 0
+		const cum = list.map((l) => (sum += l.usd))
+		const html = list.map(
+				(l, i) =>
+					`<button class="row${moved(l) ? ' new' : ''}" data-offer="${esc(l.uuid)}"><i class="bar" style="width:${((cum[i] / sum) * 100).toFixed(1)}%"></i><span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum[i])}</span><span class="w">${l.vipOnly ? '★ ' : ''}${l.user && l.user !== '—' ? `@${esc(l.user)}` : '—'}</span></button>`,
+		)
+		// Como en el libro del terminal: las ventas de la más cara a la más barata, así la mejor queda junto al diferencial
+		return (side === 'ask' ? html.reverse() : html).join('')
 	}
 
 	function render(d) {
@@ -56,11 +68,16 @@
 		$('bestAsk').textContent = fmtP(ask?.price)
 		$('bestBid').textContent = fmtP(bid?.price)
 		$('rate').textContent = d.rate ? `${fmtP(d.rate)}` : '—'
+		$('spread').textContent = ask && bid ? `${fmtP(ask.price - bid.price)} · ${ask.price >= bid.price ? '+' : '−'}${Math.abs((ask.price / bid.price - 1) * 100).toFixed(2)}%` : '—'
 		$('rate').title = unit ? `${unit} por USD` : ''
 		$('asks').innerHTML = d.ask.ready ? rows(d.ask.levels, 'ask') : '<p class="empty">Cargando…</p>'
 		$('bids').innerHTML = d.bid.ready ? rows(d.bid.levels, 'bid') : '<p class="empty">Cargando…</p>'
 		$('askN').textContent = d.ask.ready ? `${d.ask.total} ofertas` : ''
 		$('bidN').textContent = d.bid.ready ? `${d.bid.total} ofertas` : ''
+		if (toSpread && d.ask.ready && d.bid.ready && tab === 'book') {
+			toSpread = false
+			$('spread').scrollIntoView({ block: 'center' })
+		}
 	}
 
 	async function load() {
@@ -86,6 +103,8 @@
 	$('coin').addEventListener('change', () => {
 		coin = $('coin').value
 		set('mini.coin', coin)
+		seen = { ask: null, bid: null }
+		toSpread = true
 		$('asks').innerHTML = $('bids').innerHTML = '<p class="empty">Cargando…</p>'
 		load()
 		if (tab === 'chart') loadChart()
@@ -97,6 +116,10 @@
 		set('mini.tab', t)
 		for (const b of document.querySelectorAll('[data-tab]')) b.classList.toggle('on', b.dataset.tab === t)
 		$('bookView').hidden = t !== 'book'
+		if (t === 'book') {
+			toSpread = !$('asks').querySelector('.row')
+			if (!toSpread) $('spread').scrollIntoView({ block: 'center' })
+		}
 		$('chartView').hidden = t !== 'chart'
 		if (t === 'chart') loadChart()
 	}
