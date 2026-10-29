@@ -27,6 +27,7 @@
 		.stat b { display: block; font: 700 15px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 		.stat .ask { color: var(--ask); } .stat .bid { color: var(--bid); }
 		section { margin-top: 14px; }
+		section.bid { margin-top: 8px; }
 		h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 2px 6px; display: flex; justify-content: space-between; }
 		.rows { border-radius: 12px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
 		.row, .cols { display: grid; grid-template-columns: 1.15fr .75fr .85fr 1.1fr; gap: 6px; align-items: center; padding: 10px 12px; }
@@ -53,7 +54,7 @@
 		.legend { color: var(--muted); font-size: 12px; margin: 8px 2px 0; }
 		.legend .ask { color: var(--ask); } .legend .bid { color: var(--bid); }
 		[hidden] { display: none !important; }
-		.spread { display: flex; justify-content: space-between; margin: 10px 2px 0; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border: 1px solid var(--line); font: 600 12px system-ui, sans-serif; color: var(--muted); letter-spacing: .04em; }
+		.spread { display: flex; justify-content: space-between; margin: 8px 0 0; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border: 1px solid var(--line); font: 600 12px system-ui, sans-serif; color: var(--muted); letter-spacing: .04em; }
 		.spread b { color: var(--text); font: 700 13px var(--mono); letter-spacing: 0; }
 		.row.new { animation: flash 1.6s ease-out; }
 		@keyframes flash { 0% { background: color-mix(in srgb, var(--accent) 22%, transparent); } 100% { background: transparent; } }
@@ -77,7 +78,7 @@
 	<div id="bookView">
 	<section class="ask"><h2><span>Venden USD</span><span id="askN"></span></h2><div class="cols"><span>Precio</span><span>USD</span><span>Acumulado</span><span>Oferta</span></div><div class="rows" id="asks"><p class="empty">Cargando…</p></div></section>
 	<p class="spread"><span>DIFERENCIAL</span><b id="spread">—</b></p>
-	<section class="bid"><h2><span>Compran USD</span><span id="bidN"></span></h2><div class="cols"><span>Precio</span><span>USD</span><span>Acumulado</span><span>Oferta</span></div><div class="rows" id="bids"><p class="empty">Cargando…</p></div></section>
+	<section class="bid"><div class="rows" id="bids"><p class="empty">Cargando…</p></div></section>
 	</div>
 	<div id="chartView" hidden>
 		<div class="ranges"><button class="range" data-days="7">7 días</button><button class="range" data-days="30">30 días</button><button class="range" data-days="365">1 año</button></div>

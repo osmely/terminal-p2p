@@ -3,7 +3,8 @@
 'use strict'
 ;(() => {
 	const APP = location.hostname.includes('staging') ? 'https://app.staging.terminalp2p.com' : 'https://app.terminalp2p.com'
-	const ROWS = 15
+	// Las mejores de cada lado (sin las atípicas): el libro completo está en el terminal
+	const ROWS = 10
 	// Lo que dura el libro en la caché del servidor: leer más a menudo no traería nada nuevo
 	const EVERY_MS = 5000
 	const $ = (id) => document.getElementById(id)
@@ -72,8 +73,7 @@
 		$('rate').title = unit ? `${unit} por USD` : ''
 		$('asks').innerHTML = d.ask.ready ? rows(d.ask.levels, 'ask') : '<p class="empty">Cargando…</p>'
 		$('bids').innerHTML = d.bid.ready ? rows(d.bid.levels, 'bid') : '<p class="empty">Cargando…</p>'
-		$('askN').textContent = d.ask.ready ? `${d.ask.total} ofertas` : ''
-		$('bidN').textContent = d.bid.ready ? `${d.bid.total} ofertas` : ''
+		$('askN').textContent = `las ${ROWS} mejores de cada lado`
 		if (toSpread && d.ask.ready && d.bid.ready && tab === 'book') {
 			toSpread = false
 			$('spread').scrollIntoView({ block: 'center' })
