@@ -549,7 +549,7 @@ function renderProChip() {
 	b.hidden = !S.user || !S.config?.pro
 	b.classList.toggle('on', !!S.pro)
 	b.innerHTML = `★ <span class="pro-label">${S.pro ? proDays() : 'Pro'}</span>`
-	b.title = S.pro ? `Te quedan ${proDays()} de Pro (hasta el ${proDate(S.pro.expiresAt)})` : 'Terminal P2P Pro'
+	b.title = S.pro ? `Te quedan ${proDays()} de Pro (hasta el ${proDate(S.pro.expiresAt)})` : 'Modo Pro'
 }
 
 function openPro() {
@@ -558,13 +558,13 @@ function openPro() {
 	$('proBody').innerHTML = S.pro
 		? `<h2>★ Te quedan ${proDays()} de Pro</h2><p class="muted">${{ trial: 'Días gratis', gift: 'Días regalados' }[S.pro.plan] ?? 'Días comprados'} · hasta el <b>${proDate(S.pro.expiresAt)}</b>. Operas todos los mercados del simulador.</p>
 			<p class="muted">Son los días de Pro de tu cuenta del terminal: si compras más allí, aquí se suman solos.</p>`
-		: `<h2>★ Terminal P2P Pro</h2>
+		: `<h2>★ Modo Pro</h2>
 			<ul class="pro-feats">
 				<li><b>📈 Todos los mercados del simulador</b><span class="muted">Sin Pro, BTC y ETH. Con Pro también ${proMarkets.join(', ')}.</span></li>
 				<li><b>⚡ Orden inteligente en el terminal P2P</b><span class="muted">Si tu precio cruza el libro, toma lo que hay a mejor precio y publica el resto.</span></li>
 			</ul>
 			<a class="btn block go pro" href="${APP_URL}/?pro=open" target="_blank" rel="noopener">Comprar días de Pro en el terminal</a>
-			<p class="muted small">Pro va con tu cuenta del terminal: en cuanto tengas días allí, aquí se desbloquean todos los mercados.</p>`
+			<p class="muted small">Pro va con tu cuenta del terminal: en cuanto tengas días allí, aquí se desbloquean todos los mercados. <a href="${/\.terminalp2p\.com$/.test(location.hostname) ? location.origin.replace('://sim.', '://') : 'https://terminalp2p.com'}/blog/modo-pro/" target="_blank" rel="noopener">Saber más sobre el modo Pro →</a></p>`
 	$('proModal').hidden = false
 }
 

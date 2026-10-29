@@ -1,4 +1,4 @@
-// Plan Pro: si eres Pro y comprar o añadir días con QvaPay. Pro va con tu cuenta de QvaPay: cualquier
+// Modo Pro: si eres Pro y comprar o añadir días con QvaPay. Pro va con tu cuenta de QvaPay: cualquier
 // dispositivo donde la conectes ya es Pro. El token no se guarda en el servidor: solo ve su huella (data.js).
 // Quién pagó lo confirma QvaPay en el servidor. Las funciones Pro llegan en un módulo aparte (/pro/module.js)
 'use strict'
@@ -17,14 +17,17 @@ const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname)
 // Lo que se compra son días de Pro: se suman a los que te queden. Los paquetes y sus precios los da el servidor
 let proPlans = []
 const usdText = (n) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
+// Lo que suma el modo Pro, en corto: el detalle está en la entrada del blog (PRO_INFO_URL)
 const PRO_FEATURES = [
-	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
-	['⚡', 'Libro en tiempo real', 'cada oferta nueva te llega al instante'],
-	['📡', 'Radar', 'vigila hasta 3 mercados mientras el terminal está abierto, aunque sea en otra pestaña, y te avisa con sonido, notificación y por Telegram cuando aparece una oferta con tus reglas. Si quieres, la toma sola, con tu tope del día'],
-	['🔀', 'Libro cruzado', 'cuando alguien vende más barato de lo que otro compra: si lo puedes aprovechar, cuántos USD encajan y cuánto te quedaría'],
-	['📊', 'Compras y ventas en el gráfico', 'cada barra de operaciones por día partida en compras (verde) y ventas (rojo), para ver hacia dónde se mueve el mercado'],
-	['📈', 'Todos los mercados del simulador', 'sin Pro, BTC y ETH; con Pro también SOL, XRP, BNB, DOGE, SUI, PEPE y TAO (sim.terminalp2p.com)'],
+	['⚡', 'Orden inteligente', 'toma y publica a la vez, como en un exchange'],
+	['⏱️', 'Libro al instante', 'cada oferta te llega al momento'],
+	['📡', 'Radar', 'vigila el libro, te avisa y, si quieres, toma'],
+	['🔀', 'Libro cruzado', 'si lo puedes aprovechar y cuánto te queda'],
+	['📊', 'Compras, ventas y USD en el gráfico', 'hacia dónde se mueve el mercado'],
+	['📈', 'Todo el simulador', '7 mercados más en sim.terminalp2p.com'],
 ]
+// La web del mismo entorno (staging.… desde app.staging.…)
+const PRO_INFO_URL = `${/\.terminalp2p\.com$/.test(location.hostname) ? location.origin.replace('://app.', '://') : 'https://terminalp2p.com'}/blog/modo-pro/`
 // El simulador manda aquí para entrar (?connect=sim): se abre la ventana del token y, en cuanto la sesión
 // compartida está lista, se vuelve al simulador. Se recuerda unos minutos en esta pestaña por si tardas
 const SIM_BACK_MS = 10 * 60_000
@@ -158,7 +161,7 @@ function renderProChip() {
 	// El radar es del módulo Pro (TPProRadar); sin Pro, su botón abre la ventana de Pro
 	const r = $('radarBtn')
 	if (r) r.hidden = b.hidden
-	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? 'Prueba Pro 14 días gratis' : 'Terminal P2P Pro'
+	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? 'Prueba el modo Pro 14 días gratis' : 'Modo Pro'
 }
 
 // ── Ventana Pro ──────────────────────────────────────────────────────
@@ -167,9 +170,9 @@ const canRenew = () => !pro.active || pro.plan === 'trial' || pro.expiresAt - Da
 
 function showPro() {
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para usar Pro', true)
-	const feats = PRO_FEATURES.map(([i, t, d]) => `<li><span class="pro-ic">${i}</span><div><b>${t}</b><p class="muted">${d}</p></div></li>`).join('')
+	const feats = `${PRO_FEATURES.map(([i, t, d]) => `<li><span class="pro-ic">${i}</span><div><b>${t}</b><p class="muted">${d}</p></div></li>`).join('')}<li class="pro-more-link"><a class="link" href="${PRO_INFO_URL}" target="_blank" rel="noopener">Saber más sobre el modo Pro →</a></li>`
 	const plans = proPlans.map((p) => `<button class="pro-plan" data-plan="${esc(p.id)}"><b>${esc(p.name)}</b><span class="mono">${usdText(p.usd)}</span><small>${usdText(p.usd / p.days)} al día</small></button>`).join('')
-	const refund = `Si no te convence, te devolvemos el dinero en los 7 días siguientes a tu primera compra: escríbenos a <a class="link" href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.`
+	const refund = 'Si no te convence, te devolvemos el dinero en los 7 días siguientes a tu primera compra: pídela en «Mi cuenta» → ★ Pro.'
 	openModal(
 		pro.active
 			? `<div class="stack pro-box"><h3>★ Te quedan ${daysText(daysLeft())} de Pro</h3>
@@ -181,12 +184,12 @@ function showPro() {
 						: `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Podrás comprar más días cuando te queden 5 o menos, desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>. Nada se cobra solo.</p>`
 				}</div>`
 			: pro.canTrial
-				? `<div class="stack pro-box"><h3>★ Prueba Terminal P2P Pro 14 días gratis</h3>
+				? `<div class="stack pro-box"><h3>★ Prueba el modo Pro 14 días gratis</h3>
 				<ul class="pro-feats">${feats}</ul>
 				<button class="btn primary block" id="proTrial">Activar mis 14 días gratis</button>
 				<p class="hint">Sin pagar nada. Cuando terminen, decides si compras días: nada se cobra solo. Funciona en todos los dispositivos donde conectes tu cuenta.</p>
 				<details class="pro-more"><summary>¿Prefieres comprar días ya?</summary><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. ${refund}</p></details></div>`
-				: `<div class="stack pro-box"><h3>★ Terminal P2P Pro</h3>
+				: `<div class="stack pro-box"><h3>★ Modo Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
 				<p class="muted">Ya usaste tus 14 días gratis. Compra días de Pro:</p>
 				<div class="pro-plans">${plans}</div>
