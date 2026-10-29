@@ -394,6 +394,7 @@ function renderTrades() {
 // ── Detalle de una operación ──────────────────────────────────────────
 async function openTrade(offer, order) {
 	bk.detail = { offer, order }
+	bk.detailSig = null
 	openModal('<p class="muted">Cargando operación…</p>')
 	await refreshDetail()
 }
@@ -422,9 +423,25 @@ async function refreshDetail() {
 	const chatAtEnd = !cb0 || bk.chatToEnd || cb0.scrollHeight - cb0.scrollTop - cb0.clientHeight < 40
 	bk.chatToEnd = false
 	const chatTop = cb0?.scrollTop ?? 0
+	// Si la operación no cambió (lo normal mientras se chatea), solo se redibujan los mensajes: así la caja de texto
+	// no se reemplaza y quien escribe no pierde el foco (en el móvil, ni el teclado)
+	const sig = JSON.stringify({ ...t, chat: null, dryRun: bk.acct.dryRun })
+	if (cb0 && sig === bk.detailSig) {
+		const html = chatHtml(t.chat)
+		if (html !== bk.chatHtml) {
+			bk.chatHtml = cb0.innerHTML = html
+			cb0.scrollTop = chatAtEnd ? cb0.scrollHeight : chatTop
+		}
+		return
+	}
 	const modalTop = $('modal').scrollTop
 	const keep = { txRef: $('txRef')?.value, chatInput: $('chatInput')?.value, seenMoney: $('seenMoney')?.checked }
+	// Si cambió (pagó, liberó…), se redibuja todo y el cursor vuelve a donde estaba
+	const focus = document.activeElement
+	const caret = focus?.id === 'chatInput' || focus?.id === 'txRef' ? { id: focus.id, at: focus.selectionStart } : null
 	renderDetail(t)
+	bk.detailSig = $('chatbox') ? sig : null
+	bk.chatHtml = chatHtml(t.chat)
 	const cb = $('chatbox')
 	if (cb) cb.scrollTop = chatAtEnd ? cb.scrollHeight : chatTop
 	$('modal').scrollTop = modalTop
@@ -433,12 +450,26 @@ async function refreshDetail() {
 		$('txRef').dispatchEvent(new Event('input')) // vuelve a activar "Ya pagué" si ya había referencia
 	}
 	if (keep.chatInput && $('chatInput')) $('chatInput').value = keep.chatInput
+	if (caret && $(caret.id)) {
+		$(caret.id).focus({ preventScroll: true })
+		$(caret.id).setSelectionRange(caret.at, caret.at)
+	}
 	const release = $('modalBody').querySelector('[data-act="release"]')
 	if (keep.seenMoney && $('seenMoney') && release) {
 		$('seenMoney').checked = true
 		release.disabled = false
 	}
 }
+
+const chatHtml = (chat) =>
+	chat.length
+		? chat
+				.map(
+					(m) =>
+						`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${mediaUrl(m.image) ? `<a class="msg-img" href="${esc(mediaUrl(m.image))}" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="${esc(mediaUrl(m.image))}" alt="Imagen" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
+				)
+				.join('')
+		: '<p class="muted small">Sin mensajes.</p>'
 
 function renderDetail(t) {
 	const d = bk.detail
@@ -502,16 +533,7 @@ function renderDetail(t) {
 				: ''
 		}
 		${action}
-		<div><p class="hint">Chat</p><div class="chatbox" id="chatbox">${
-			t.chat.length
-				? t.chat
-						.map(
-							(m) =>
-								`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${mediaUrl(m.image) ? `<a class="msg-img" href="${esc(mediaUrl(m.image))}" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="${esc(mediaUrl(m.image))}" alt="Imagen" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
-						)
-						.join('')
-				: '<p class="muted small">Sin mensajes.</p>'
-		}</div>
+		<div><p class="hint">Chat</p><div class="chatbox" id="chatbox">${chatHtml(t.chat)}</div>
 		<form class="chatform" id="chatform"><label class="btn icon-only chat-attach" title="Enviar una imagen (comprobante, captura)" aria-label="Enviar una imagen"><input type="file" id="chatFile" accept="image/*" hidden /><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.5 3.5 0 015 5l-8.6 8.6a2 2 0 01-2.8-2.8l7.9-7.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label><input class="input" id="chatInput" maxlength="599" placeholder="Escribe un mensaje…" /><button class="btn">Enviar</button></form></div>
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${t.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
 	</div>`
