@@ -99,4 +99,14 @@ test('visitas: solo sumas por día, por parte de la web y por enlace; nada raro 
 	assert.deepEqual(h.total, { site: 2, app: 1, connect: 1, first: 1, sim: 1 })
 	assert.deepEqual(h.byRef[0], { ref: 'grupo', site: 2, app: 1, connect: 1, first: 1 })
 	assert.equal(h.byDay[0].day, '2026-10-28')
+	// Muchos ?de= distintos (cualquiera se los inventa): se ven los 20 que más traen y el resto junto
+	for (let i = 0; i < 30; i++) await saveHit(d1, cleanHit({ site: 'site', kind: 'visit', ref: `x${i}` })!, NINE)
+	const many = await loadHits(d1, 7, NINE)
+	assert.equal(many.byRef.length, 22)
+	assert.deepEqual(many.byRef.at(-1), { ref: '', others: 11, site: 11 })
+	// Las directas, siempre a la vista
+	assert.ok(many.byRef.some((r) => r.ref === '' && !r.others && r.sim === 1))
+	// En un año, por mes
+	const year = await loadHits(d1, 365, NINE)
+	assert.deepEqual([year.period.title, year.byDay[0].day], ['Por mes', 'octubre de 2026'])
 })

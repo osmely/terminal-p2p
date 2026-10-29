@@ -163,3 +163,21 @@ test('el histórico sin Pro no lleva el reparto en compras y ventas ni los USD d
 	})
 	assert.equal(withoutPro({ ...full, volume: null }).volume, null)
 })
+
+test('las listas largas del panel van por páginas y dicen cuántas hay', async () => {
+	const s = setup()
+	const ins = s.db.prepare('INSERT INTO pro_audit (at, action, target, detail) VALUES (?, ?, ?, ?)')
+	for (let i = 1; i <= 120; i++) ins.run(T0 + i, 'note', `u${i}`, `acción ${i}`)
+	let html = await s.panel(undefined, '?view=registro')
+	assert.match(html, /120 acciones/)
+	assert.match(html, /1–100 de 120/)
+	assert.match(html, /href="\/admin\/pro\?view=registro&#38;p=2">Anteriores ›/)
+	// La más reciente primero; la primera que se apuntó, en la segunda página
+	assert.match(html, /acción 120/)
+	assert.doesNotMatch(html, /acción 1<\/td>/)
+	html = await s.panel(undefined, '?view=registro&p=2')
+	assert.match(html, /101–120 de 120/)
+	assert.match(html, /‹ Más recientes/)
+	assert.match(html, /acción 1<\/td>/)
+	assert.doesNotMatch(html, /Anteriores ›/)
+})

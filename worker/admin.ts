@@ -111,7 +111,7 @@ button{display:inline-flex;align-items:center;justify-content:center;gap:6px;hei
 button:hover{filter:brightness(1.08)}
 button.ghost{background:var(--surface);border-color:var(--line2);color:var(--text)}button.ghost:hover{background:var(--raised);filter:none}
 button.danger{background:transparent;border-color:color-mix(in srgb,var(--ask) 45%,transparent);color:var(--ask)}
-.ph-actions a.btn,.panel-a a.btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-weight:500;font-size:13px}.ph-actions a.btn:hover,.panel-a a.btn:hover{background:var(--raised);text-decoration:none}
+.ph-actions a.btn,.panel-a a.btn,.panel-f a.btn{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:8px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-weight:500;font-size:13px}.ph-actions a.btn:hover,.panel-a a.btn:hover,.panel-f a.btn:hover{background:var(--raised);text-decoration:none}
 form.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0}
 .search{position:relative}.search input{width:260px;padding-left:34px}.search svg{position:absolute;left:10px;top:8px;width:16px;height:16px;color:var(--muted)}
 
@@ -168,6 +168,26 @@ export const pageHead = (title: string, sub = '', actions = '') =>
 	`<header class="ph"><div><h1>${title}</h1>${sub ? `<p>${sub}</p>` : ''}</div>${actions ? `<div class="ph-actions">${actions}</div>` : ''}</header>`
 
 // Una sección con su título; `flush` para tablas de borde a borde
+// Filas por periodo en las tablas de días: por día hasta un mes; por semana (desde el lunes) en 90 días; por mes en
+// un año. key: a qué periodo va un día AAAA-MM-DD; label: cómo se enseña
+export function periods(days: number) {
+	const unit = days >= 365 ? 'month' : days >= 90 ? 'week' : 'day'
+	const key = (day: string) => {
+		if (unit === 'day') return day
+		if (unit === 'month') return day.slice(0, 7)
+		const d = new Date(`${day}T12:00:00Z`)
+		d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))
+		return d.toISOString().slice(0, 10)
+	}
+	const label = (k: string) =>
+		unit === 'day'
+			? k
+			: unit === 'month'
+				? new Date(`${k}-15T12:00:00Z`).toLocaleDateString('es', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+				: `semana del ${new Date(`${k}T12:00:00Z`).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'UTC' })}`
+	return { unit, key, label, title: unit === 'month' ? 'Por mes' : unit === 'week' ? 'Por semana' : 'Por día', column: unit === 'month' ? 'Mes' : unit === 'week' ? 'Semana' : 'Día' }
+}
+
 export const panel = (title: string, body: string, o: { sub?: string; actions?: string; flush?: boolean; foot?: string } = {}) =>
 	`<section class="panel"><div class="panel-h"><div><h2>${title}</h2>${o.sub ? `<p>${o.sub}</p>` : ''}</div>${o.actions ? `<div class="panel-a">${o.actions}</div>` : ''}</div><div class="panel-b${o.flush ? ' flush' : ''}">${body}</div>${o.foot ? `<div class="panel-f">${o.foot}</div>` : ''}</section>`
 

@@ -1298,8 +1298,11 @@ const AUDIT_NAME: Record<string, string> = {
 	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba', 'daily-on': 'Encender tasa del día', 'daily-off': 'Apagar tasa del día', 'daily-test': 'Probar tasa del día',
 }
 
-async function auditPage(env: ProEnv, notice: string, now: number) {
-	const { results } = await env.DB.prepare('SELECT * FROM pro_audit ORDER BY at DESC, id DESC LIMIT 300').all<{ at: number; action: string; target: string | null; detail: string | null }>()
+const AUDIT_PAGE = 100
+async function auditPage(env: ProEnv, notice: string, now: number, url?: URL) {
+	const page = pageOf(url, 'p')
+	const total = (await env.DB.prepare('SELECT COUNT(*) AS n FROM pro_audit').first<{ n: number }>())?.n ?? 0
+	const { results } = await env.DB.prepare(`SELECT * FROM pro_audit ORDER BY at DESC, id DESC LIMIT ${AUDIT_PAGE} OFFSET ${(page - 1) * AUDIT_PAGE}`).all<{ at: number; action: string; target: string | null; detail: string | null }>()
 	const rows = results
 		.map((a) => `<tr><td>${hWhen(a.at)}</td><td><b>${escHtml(AUDIT_NAME[a.action] ?? a.action)}</b></td><td>${a.target ? escHtml(a.target) : '—'}</td><td style="white-space:normal">${escHtml(a.detail ?? '')}</td></tr>`)
 		.join('')
@@ -1307,15 +1310,18 @@ async function auditPage(env: ProEnv, notice: string, now: number) {
 		env,
 		'pro-registro',
 		'Registro de Pro',
-		`${pageHead('Registro', 'Todo lo que se hace en este panel (las últimas 300 acciones). No se puede borrar ni editar.')}${notice}
-		${panel('Acciones', `<div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Qué</th><th>Sobre</th><th>Detalle</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="empty">Todavía no hay acciones.</td></tr>'}</tbody></table></div>`, { flush: true })}`,
+		`${pageHead('Registro', 'Todo lo que se hace en este panel, lo más reciente primero. No se puede borrar ni editar.')}${notice}
+		${panel('Acciones', `<div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Qué</th><th>Sobre</th><th>Detalle</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="empty">Todavía no hay acciones.</td></tr>'}</tbody></table></div>`, { flush: true, sub: count(total, 'acción', 'acciones'), foot: pager(url, 'p', page, AUDIT_PAGE, total) || undefined })}`,
 	)
 }
 
 // Incidencias: quién usa (o intenta usar) Pro sin tenerlo. Desde cada una, restringir o bloquear su terminal (lo de
 // «Acceso al terminal») o descartarla si no lo es
-async function incidentsPage(env: ProEnv, notice: string, now: number) {
-	const list = await openIncidents(env.DB)
+const INCIDENTS_PAGE = 50
+async function incidentsPage(env: ProEnv, notice: string, now: number, url?: URL) {
+	const page = pageOf(url, 'p')
+	const total = (await env.DB.prepare('SELECT COUNT(*) AS n FROM pro_incidents WHERE resolved_at IS NULL').first<{ n: number }>())?.n ?? 0
+	const list = await openIncidents(env.DB, INCIDENTS_PAGE, (page - 1) * INCIDENTS_PAGE)
 	const blocked = await activeBlocks(env.DB, now)
 	const limits = new Map(blocked.map((b) => [b.username.toLowerCase(), b.level]))
 	const act = (i: Incident) => {
@@ -1339,7 +1345,7 @@ async function incidentsPage(env: ProEnv, notice: string, now: number) {
 		'pro-incidencias',
 		'Incidencias',
 		`${pageHead('Incidencias', 'Quién usa o intenta usar Pro sin tenerlo, según lo que ve el servidor. Nada se bloquea solo: míralo y decide. Quien tenía el terminal abierto cuando se le acabaron los días tiene un día de margen antes de aparecer aquí.')}${notice}
-		${panel('Abiertas', `<div class="wrap"><table class="left"><thead><tr><th>Última vez</th><th>Usuario</th><th>Qué</th><th class="num">Veces</th><th>Primera vez</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">Ninguna incidencia abierta.</td></tr>'}</tbody></table></div>`, { flush: true })}`,
+		${panel('Abiertas', `<div class="wrap"><table class="left"><thead><tr><th>Última vez</th><th>Usuario</th><th>Qué</th><th class="num">Veces</th><th>Primera vez</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">Ninguna incidencia abierta.</td></tr>'}</tbody></table></div>`, { flush: true, foot: pager(url, 'p', page, INCIDENTS_PAGE, total) || undefined })}`,
 	)
 }
 
@@ -1621,11 +1627,11 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 	const q = (url.searchParams.get('q') ?? '').replace(/^@/, '').trim().toLowerCase()
 	if (client && /^[A-Za-z0-9._-]{1,40}$/.test(client.replace(/^@/, ''))) return clientPage(env, client.replace(/^@/, ''), flash, now)
 	if (view === 'informes') return reportsPage(env, flash, now)
-	if (view === 'registro') return auditPage(env, flash, now)
-	if (view === 'pagos') return paymentsPage(env, flash, now)
-	if (view === 'cuentas') return accountsPage(env, flash, now)
-	if (view === 'incidencias') return incidentsPage(env, flash, now)
-	if (q) return searchPage(env, flash, now, q)
+	if (view === 'registro') return auditPage(env, flash, now, url)
+	if (view === 'pagos') return paymentsPage(env, flash, now, url)
+	if (view === 'cuentas') return accountsPage(env, flash, now, url)
+	if (view === 'incidencias') return incidentsPage(env, flash, now, url)
+	if (q) return searchPage(env, flash, now, q, url)
 	return homePage(env, flash, now)
 }
 
@@ -1633,6 +1639,22 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 async function proPage(env: ProEnv, active: AdminTab, title: string, body: string) {
 	const incidents = await env.DB.prepare('SELECT COUNT(*) AS n FROM pro_incidents WHERE resolved_at IS NULL').first<{ n: number }>()
 	return adminPage(active, title, body, 200, { pro: (await pendingWork(env.DB)).count, 'pro-incidencias': incidents?.n ?? 0 })
+}
+
+// «1 cuenta», «3 cuentas»
+const count = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
+
+// Las listas largas van por páginas (?<key>=N, desde 1): nunca se cortan sin avisar
+const pageOf = (url: URL | undefined, key: string) => Math.max(1, Math.trunc(Number(url?.searchParams.get(key) ?? 1)) || 1)
+function pager(url: URL | undefined, key: string, page: number, size: number, total: number) {
+	if (!url || total <= size) return ''
+	const link = (p: number) => {
+		const u = new URL(url)
+		u.searchParams.set(key, String(p))
+		return escHtml(`${u.pathname}${u.search}`)
+	}
+	const pages = Math.ceil(total / size)
+	return `<div class="row" style="justify-content:space-between"><span>${((page - 1) * size + 1).toLocaleString('en-US')}–${Math.min(total, page * size).toLocaleString('en-US')} de ${total.toLocaleString('en-US')}</span><span class="row">${page > 1 ? `<a class="btn" href="${link(page - 1)}">‹ Más recientes</a>` : ''}${page < pages ? `<a class="btn" href="${link(page + 1)}">Anteriores ›</a>` : ''}</span></div>`
 }
 
 const proSearch = (q = '') => `<form method="get" class="row search" action="/admin/pro">${searchIcon}<input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"></form>`
@@ -1766,22 +1788,29 @@ async function liveForm(env: ProEnv) {
 type PayRow = Checkout & { refunded_at: number | null; owner: string | null; first_paid: number | null; rstatus: string | null }
 // De dónde se pidió: el simulador (con la cuenta de Telegram) o un dispositivo del terminal (solo su huella)
 const origin = (c: PayRow) => (c.tg ? 'Simulador' : `Terminal · ${c.requester ? `@${escHtml(c.requester)}` : proShort(c.print)}`)
-const checkouts = (db: D1, where: string, order: string, limit: number, q: string) =>
+const checkoutsWhere = (where: string, q: string) =>
+	`WHERE ${where} ${q ? 'AND (LOWER(l.username) LIKE ? OR LOWER(c.payer) LIKE ? OR LOWER(c.requester) LIKE ? OR c.id LIKE ? OR c.invoice LIKE ?)' : ''}`
+const checkoutsArgs = (q: string) => (q ? [like(q), like(q), like(q), like(q), like(q)] : [])
+const countCheckouts = async (db: D1, where: string, q: string) =>
+	(await db.prepare(`SELECT COUNT(*) AS n FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license ${checkoutsWhere(where, q)}`).bind(...checkoutsArgs(q)).first<{ n: number }>())?.n ?? 0
+const checkouts = (db: D1, where: string, order: string, limit: number, q: string, offset = 0) =>
 	db
 		.prepare(
 			`SELECT c.*, COALESCE(c.payer, l.username) AS payer, l.username AS owner, (SELECT r.status FROM pro_refunds r WHERE r.checkout = c.id) AS rstatus,
 				(SELECT MIN(COALESCE(f.paid_at, f.created_at)) FROM pro_checkouts f WHERE f.license = c.license AND f.status = 'paid') AS first_paid
 			FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license
-			WHERE ${where} ${q ? 'AND (LOWER(l.username) LIKE ? OR LOWER(c.payer) LIKE ? OR LOWER(c.requester) LIKE ? OR c.id LIKE ? OR c.invoice LIKE ?)' : ''}
-			ORDER BY ${order} LIMIT ${limit}`,
+			${checkoutsWhere(where, q)}
+			ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`,
 		)
-		.bind(...(q ? [like(q), like(q), like(q), like(q), like(q)] : []))
+		.bind(...checkoutsArgs(q))
 		.all<PayRow>()
 		.then((r) => r.results)
 
 // Pagos: quién pagó (lo dice QvaPay), desde dónde se pidió y su factura
-async function paymentsPanel(env: ProEnv, now: number, q = '') {
-	const paid = await checkouts(env.DB, "c.status = 'paid'", 'COALESCE(c.paid_at, c.created_at) DESC', 300, q)
+const PAYS_PAGE = 50
+async function paymentsPanel(env: ProEnv, now: number, q = '', url?: URL) {
+	const page = pageOf(url, 'pp')
+	const [paid, total] = await Promise.all([checkouts(env.DB, "c.status = 'paid'", 'COALESCE(c.paid_at, c.created_at) DESC', PAYS_PAGE, q, (page - 1) * PAYS_PAGE), countCheckouts(env.DB, "c.status = 'paid'", q)])
 	const rows = paid
 		.map((c) => {
 			const inTime = c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS
@@ -1796,7 +1825,7 @@ async function paymentsPanel(env: ProEnv, now: number, q = '') {
 	return panel(
 		'Pagos',
 		`<div class="wrap"><table class="left"><thead><tr><th>Pagado</th><th>Cuenta</th><th>Días</th><th class="num">Importe</th><th>Pedido desde</th><th>Factura</th><th>Devolución</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">Todavía no hay pagos.</td></tr>'}</tbody></table></div>`,
-		{ sub: q ? '' : 'Los últimos 300', flush: true, actions: '<a class="btn" href="/admin/pro?export=pagos">Descargar CSV</a>' },
+		{ sub: `${count(total, 'pago', 'pagos')}, los más recientes primero`, flush: true, actions: '<a class="btn" href="/admin/pro?export=pagos">Descargar CSV</a>', foot: pager(url, 'pp', page, PAYS_PAGE, total) || undefined },
 	)
 }
 
@@ -1818,7 +1847,12 @@ async function unpaidPanel(env: ProEnv, now: number, q = '') {
 }
 
 // Cuentas: días, vencimiento, dispositivos y lo pagado
-async function accountsPanel(env: ProEnv, now: number, q = '') {
+const ACCOUNTS_PAGE = 50
+async function accountsPanel(env: ProEnv, now: number, q = '', url?: URL) {
+	const page = pageOf(url, 'pc')
+	const where = `l.merged_into IS NULL ${q ? 'AND (LOWER(l.username) LIKE ? OR l.uuid LIKE ?)' : ''}`
+	const args = q ? [like(q), like(q)] : []
+	const total = (await env.DB.prepare(`SELECT COUNT(*) AS n FROM pro_licenses l WHERE ${where}`).bind(...args).first<{ n: number }>())?.n ?? 0
 	const { results } = await env.DB
 		.prepare(
 			`SELECT l.uuid, l.username, l.plan, l.expires_at, l.revoked, l.created_at,
@@ -1826,9 +1860,9 @@ async function accountsPanel(env: ProEnv, now: number, q = '') {
 				(SELECT MAX(p.seen_at) FROM pro_prints p WHERE p.license = l.uuid) AS seen,
 				(SELECT COUNT(*) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid') AS pays,
 				(SELECT COALESCE(SUM(c.amount), 0) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid' AND c.refunded_at IS NULL) AS paid
-			FROM pro_licenses l WHERE l.merged_into IS NULL ${q ? 'AND (LOWER(l.username) LIKE ? OR l.uuid LIKE ?)' : ''} ORDER BY l.revoked, l.expires_at DESC LIMIT 500`,
+			FROM pro_licenses l WHERE ${where} ORDER BY l.revoked, l.expires_at DESC LIMIT ${ACCOUNTS_PAGE} OFFSET ${(page - 1) * ACCOUNTS_PAGE}`,
 		)
-		.bind(...(q ? [like(q), like(q)] : []))
+		.bind(...args)
 		.all<License & { created_at: number; devices: number; seen: number | null; pays: number; paid: number }>()
 	const planName = (p: string) => (p in PLANS ? `comprados (${PLANS[p as Plan].days})` : ({ trial: 'gratis', gift: 'regalados' }[p] ?? p))
 	// Quién tiene el terminal restringido o bloqueado
@@ -1845,18 +1879,21 @@ async function accountsPanel(env: ProEnv, now: number, q = '') {
 	return panel(
 		'Cuentas',
 		`<div class="wrap"><table class="left"><thead><tr><th>Usuario</th><th>Estado</th><th>Últimos días</th><th>Pro hasta</th><th>Desde</th><th>Dispositivos</th><th class="num">Pagado</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="empty">Todavía no hay usuarios Pro.</td></tr>'}</tbody></table></div>`,
-		{ sub: q ? '' : `${results.length} cuentas · haz clic en un usuario para ver su ficha`, flush: true },
+		{ sub: `${count(total, 'cuenta', 'cuentas')} · haz clic en un usuario para ver su ficha`, flush: true, foot: pager(url, 'pc', page, ACCOUNTS_PAGE, total) || undefined },
 	)
 }
 
 // Movimientos de días: todo lo que cambió los días de cada cuenta, con el motivo
-async function movesPanel(env: ProEnv, q = '') {
+const MOVES_PAGE = 50
+async function movesPanel(env: ProEnv, q = '', url?: URL) {
+	const page = pageOf(url, 'pm')
+	const from = `FROM pro_days d JOIN pro_licenses l ON l.uuid = d.license ${q ? 'WHERE LOWER(l.username) LIKE ? OR d.checkout LIKE ?' : ''}`
+	const args = q ? [like(q), like(q)] : []
+	const total = (await env.DB.prepare(`SELECT COUNT(*) AS n ${from}`).bind(...args).first<{ n: number }>())?.n ?? 0
 	const moves = (
 		await env.DB
-			.prepare(
-				`SELECT d.*, l.username FROM pro_days d JOIN pro_licenses l ON l.uuid = d.license ${q ? 'WHERE LOWER(l.username) LIKE ? OR d.checkout LIKE ?' : ''} ORDER BY d.created_at DESC, d.id DESC LIMIT ${q ? 300 : 100}`,
-			)
-			.bind(...(q ? [like(q), like(q)] : []))
+			.prepare(`SELECT d.*, l.username ${from} ORDER BY d.created_at DESC, d.id DESC LIMIT ${MOVES_PAGE} OFFSET ${(page - 1) * MOVES_PAGE}`)
+			.bind(...args)
 			.all<{ username: string; kind: string; days: number; expires_after: number; note: string | null; actor: string; created_at: number }>()
 	).results
 	const rows = moves
@@ -1868,12 +1905,12 @@ async function movesPanel(env: ProEnv, q = '') {
 	return panel(
 		'Movimientos de días',
 		`<div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Usuario</th><th>Qué</th><th class="num">Días</th><th>Pro hasta</th><th>Motivo</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">Todavía no hay movimientos.</td></tr>'}</tbody></table></div>`,
-		{ sub: q ? '' : 'Los últimos 100', flush: true },
+		{ sub: `${count(total, 'movimiento', 'movimientos')}, los más recientes primero`, flush: true, foot: pager(url, 'pm', page, MOVES_PAGE, total) || undefined },
 	)
 }
 
-async function paymentsPage(env: ProEnv, flash: string, now: number) {
-	return proPage(env, 'pro-pagos', 'Pagos de Pro', `${pageHead('Pagos', 'Quién pagó lo confirma QvaPay. Desde aquí se devuelve una compra: se le quitan sus días y luego haces tú la transferencia.', proSearch())}${flash}${await paymentsPanel(env, now)}${await unpaidPanel(env, now)}`)
+async function paymentsPage(env: ProEnv, flash: string, now: number, url: URL) {
+	return proPage(env, 'pro-pagos', 'Pagos de Pro', `${pageHead('Pagos', 'Quién pagó lo confirma QvaPay. Desde aquí se devuelve una compra: se le quitan sus días y luego haces tú la transferencia.', proSearch())}${flash}${await paymentsPanel(env, now, '', url)}${await unpaidPanel(env, now)}`)
 }
 
 // Las cuentas con el terminal restringido o bloqueado ahora mismo, y el formulario para cualquier usuario
@@ -1892,23 +1929,23 @@ async function blocksPanel(env: ProEnv, now: number) {
 	)
 }
 
-async function accountsPage(env: ProEnv, flash: string, now: number) {
+async function accountsPage(env: ProEnv, flash: string, now: number, url: URL) {
 	return proPage(
 		env,
 		'pro-cuentas',
 		'Cuentas de Pro',
-		`${pageHead('Cuentas', 'Una cuenta por usuario de QvaPay, con todos sus dispositivos.', proSearch())}${flash}${await accountsPanel(env, now)}
+		`${pageHead('Cuentas', 'Una cuenta por usuario de QvaPay, con todos sus dispositivos.', proSearch())}${flash}${await accountsPanel(env, now, '', url)}
 		${panel('Dar o quitar días', daysForm(), { sub: 'Un regalo, una compensación por un fallo o una corrección. Si aún no ha conectado su cuenta, se le activan al conectarla' })}
 		${await blocksPanel(env, now)}
-		${await movesPanel(env)}`,
+		${await movesPanel(env, '', url)}`,
 	)
 }
 
-async function searchPage(env: ProEnv, flash: string, now: number, q: string) {
+async function searchPage(env: ProEnv, flash: string, now: number, q: string, url: URL) {
 	return proPage(
 		env,
 		'pro',
 		`Buscar «${escHtml(q)}»`,
-		`${pageHead(`Resultados para «${escHtml(q)}»`, '<a href="/admin/pro">Quitar la búsqueda</a>', proSearch(q))}${flash}${await accountsPanel(env, now, q)}${await paymentsPanel(env, now, q)}${await unpaidPanel(env, now, q)}${await movesPanel(env, q)}`,
+		`${pageHead(`Resultados para «${escHtml(q)}»`, '<a href="/admin/pro">Quitar la búsqueda</a>', proSearch(q))}${flash}${await accountsPanel(env, now, q, url)}${await paymentsPanel(env, now, q, url)}${await unpaidPanel(env, now, q)}${await movesPanel(env, q, url)}`,
 	)
 }

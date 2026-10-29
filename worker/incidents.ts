@@ -91,9 +91,10 @@ export async function relayIncident(env: IncidentEnv, key: string | undefined, r
 	await recordIncident(env, { kind: 'module_after_expiry', username: who?.username ?? lic.n, license: lic.u, detail: `Su Pro venció el ${new Date(l?.expires_at ?? lic.e).toISOString().slice(0, 10)}` }, now, fetcher)
 }
 
-export const openIncidents = (db: D1) =>
+export const openIncidents = (db: D1, limit = 50, offset = 0) =>
 	db
-		.prepare('SELECT * FROM pro_incidents WHERE resolved_at IS NULL ORDER BY last_at DESC LIMIT 200')
+		.prepare('SELECT * FROM pro_incidents WHERE resolved_at IS NULL ORDER BY last_at DESC, id DESC LIMIT ? OFFSET ?')
+		.bind(limit, offset)
 		.all<Incident>()
 		.then((r) => r.results)
 

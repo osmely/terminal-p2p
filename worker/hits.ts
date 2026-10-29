@@ -2,7 +2,7 @@
 // navegadores conectan su cuenta y por qué enlace llegaron (?de=…). Solo se suma 1 a un contador del día: sin
 // cookies, sin IP, sin ningún identificador del navegador ni de la cuenta. Lo manda public/app/hit.js
 
-import { panel } from './admin.ts'
+import { panel, periods } from './admin.ts'
 import { cubaDate } from './informal.ts'
 import type { D1 } from './rates.ts'
 
@@ -33,27 +33,41 @@ export async function saveHit(db: D1, h: Hit, now = Date.now()) {
 		.run()
 }
 
+const REFS_SHOWN = 20
+
 export async function loadHits(db: D1, days: number, now = Date.now()) {
 	const since = cubaDate(now - (days - 1) * 86_400_000)
 	const { results } = await db.prepare('SELECT day, site, kind, ref, n FROM hits WHERE day >= ? ORDER BY day DESC').bind(since).all<{ day: string; site: string; kind: string; ref: string; n: number }>()
+	// En los rangos largos, por semana o por mes (admin.ts)
+	const per = periods(days)
 	const byDay = new Map<string, Record<string, number>>()
 	const byRef = new Map<string, Record<string, number>>()
 	const total: Record<string, number> = {}
 	for (const r of results) {
 		const key = r.kind === 'visit' ? r.site : r.kind
-		const d = byDay.get(r.day) ?? {}
+		const d = byDay.get(per.key(r.day)) ?? {}
 		d[key] = (d[key] ?? 0) + r.n
-		byDay.set(r.day, d)
+		byDay.set(per.key(r.day), d)
 		const f = byRef.get(r.ref) ?? {}
 		f[key] = (f[key] ?? 0) + r.n
 		byRef.set(r.ref, f)
 		total[key] = (total[key] ?? 0) + r.n
 	}
 	const reach = (v: Record<string, number>) => (v.site ?? 0) + (v.app ?? 0) + (v.sim ?? 0)
+	// Cualquiera puede inventarse un ?de=: se enseñan los REFS_SHOWN que más traen y el resto, juntos. Las directas
+	// (sin ?de=) se ven siempre
+	const byReach = (a: [string, Record<string, number>], b: [string, Record<string, number>]) => reach(b[1]) - reach(a[1])
+	const named = [...byRef].filter(([ref]) => ref).sort(byReach)
+	const direct = byRef.get('')
+	const rest = named.slice(REFS_SHOWN)
+	const refs = [...named.slice(0, REFS_SHOWN), ...(direct ? [['', direct] as [string, Record<string, number>]] : [])].sort(byReach)
+	const others: Record<string, number> = {}
+	for (const [, v] of rest) for (const [k, x] of Object.entries(v)) others[k] = (others[k] ?? 0) + x
 	return {
 		total,
-		byDay: [...byDay].map(([day, v]) => ({ day, ...v }) as Record<string, number | string>),
-		byRef: [...byRef].sort((a, b) => reach(b[1]) - reach(a[1])).map(([ref, v]) => ({ ref, ...v }) as Record<string, number | string>),
+		period: { title: per.title, column: per.column },
+		byDay: [...byDay].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([day, v]) => ({ day: per.label(day), ...v }) as Record<string, number | string>),
+		byRef: [...refs.map(([ref, v]) => ({ ref, ...v }) as Record<string, number | string>), ...(rest.length ? [{ ref: '', others: rest.length, ...others } as Record<string, number | string>] : [])],
 	}
 }
 
@@ -72,6 +86,6 @@ export function hitsHtml(h: Awaited<ReturnType<typeof loadHits>>) {
 <div class="card"><span>Cuentas conectadas</span><b>${n(h.total.connect)}</b><small>navegadores por día, sumados</small></div>
 <div class="card"><span>Conectan por primera vez</span><b>${n(h.total.first)}</b><small>navegadores nuevos</small></div>
 </div>
-${panel('De dónde llegan', table('Enlace', h.byRef.map((r) => `<tr><td>${r.ref ? `<code>?de=${esc(String(r.ref))}</code>` : '<span class="note">directo o sin marcar</span>'}</td>${cols(r)}</tr>`).join('')), { sub: 'Por el ?de= del enlace con el que entraron (se recuerda al pasar de la web al terminal)', flush: true })}
-${panel('Visitas por día', table('Día', h.byDay.map((d) => `<tr><td>${d.day}</td>${cols(d)}</tr>`).join('')), { sub: 'Hora de Cuba · una visita por sesión del navegador · conectadas: una por navegador y día', flush: true })}`
+${panel('De dónde llegan', table('Enlace', h.byRef.map((r) => `<tr><td>${r.others ? `<span class="note">otros ${n(r.others as number)} enlaces</span>` : r.ref ? `<code>?de=${esc(String(r.ref))}</code>` : '<span class="note">directo o sin marcar</span>'}</td>${cols(r)}</tr>`).join('')), { sub: 'Por el ?de= del enlace con el que entraron (se recuerda al pasar de la web al terminal)', flush: true })}
+${panel(`Visitas ${h.period.title.toLowerCase()}`, table(h.period.column, h.byDay.map((d) => `<tr><td>${esc(String(d.day))}</td>${cols(d)}</tr>`).join('')), { sub: 'Hora de Cuba · una visita por sesión del navegador · conectadas: una por navegador y día', flush: true })}`
 }

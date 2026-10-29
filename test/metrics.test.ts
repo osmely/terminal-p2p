@@ -65,7 +65,7 @@ test('evento de publicar y de liberar, sin datos de usuario', async () => {
 		SALT,
 		NOW,
 	)
-	assert.deepEqual({ ...create, offer: create!.offer.length }, { t: NOW, event: 'create', status: 'ok', offer: 24, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 25, source: 'relay', via: '' })
+	assert.deepEqual({ ...create, offer: create!.offer.length }, { t: NOW, event: 'create', status: 'ok', offer: 24, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 25, source: 'relay', via: '', err: '' })
 	assert.ok(!JSON.stringify(create).includes('9200') && !JSON.stringify(create).includes('ana'))
 
 	const release = await relayEvent(
@@ -76,7 +76,13 @@ test('evento de publicar y de liberar, sin datos de usuario', async () => {
 	assert.deepEqual([release!.event, release!.usd, release!.offer, release!.ord], ['release', 10.5, await fingerprint(OFFER, SALT), await fingerprint(ORDER, SALT)])
 
 	const failed = await relayEvent({ method: 'POST', path: `/p2p/${OFFER}/apply`, query: new URLSearchParams(), body: '{}', meta: null, response: new Response('{}', { status: 400 }) }, SALT, NOW)
-	assert.equal(failed!.status, 'error')
+	assert.deepEqual([failed!.status, failed!.err], ['error', '400'])
+	// Con código, el código; sin él, el estado y el mensaje sin números, @usuarios, correos ni identificadores
+	const coded = await relayEvent({ method: 'POST', path: `/p2p/${OFFER}/apply`, query: new URLSearchParams(), meta: null, response: Response.json({ error: 'La oferta está pausada', code: 'OFFER_PAUSED' }, { status: 409 }) }, SALT, NOW)
+	assert.equal(coded!.err, 'OFFER_PAUSED')
+	const msg = await relayEvent({ method: 'POST', path: `/p2p/${OFFER}/rate`, query: new URLSearchParams(), meta: null, response: Response.json({ error: `P2P: ya calificaste a @pepe por 25.5 USD (pepe@mail.com, ${OFFER})` }, { status: 422 }) }, SALT, NOW)
+	assert.equal(msg!.err, '422: P2P: ya calificaste a @… por # USD …)')
+	assert.equal(create!.err, '')
 })
 
 test('aviso del navegador: solo "completed" con un identificador válido', async () => {
@@ -106,7 +112,7 @@ test('embudos: publicadas, con contraparte, completadas', () => {
 	assert.deepEqual([s.created, s.createdTaken, s.createdCompleted], [2, 1, 1])
 	assert.deepEqual([s.taken, s.takenPaid, s.takenCompleted], [2, 1, 1])
 	assert.deepEqual([s.completed, s.volume], [2, 80])
-	assert.deepEqual(s.errors, { create: 1 })
+	assert.deepEqual(s.errors, { create: { tries: 3, failed: 1, why: { 'sin motivo (de antes de apuntarlo)': 1 } } })
 	assert.deepEqual(
 		s.byCoin.map((c) => [c.coin, c.created, c.taken, c.completed, c.volume]),
 		[
@@ -173,4 +179,19 @@ test('cifras públicas: totales desde la primera acción, las últimas 24 h y el
 		],
 	)
 	assert.deepEqual(publicStats([], NOW).since, null)
+})
+
+test('«Por día» en los rangos largos: por semana en 90 días y por mes en un año', async () => {
+	const { panelHtml } = await import('../worker/metrics.ts')
+	const ev = (t: string, offer: string): MetricEvent => ({ t: Date.parse(`${t}T15:00:00Z`), event: 'create', status: 'ok', offer, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 10, source: 'relay', via: '' })
+	const rows = [ev('2026-09-03', 'a'), ev('2026-10-20', 'b'), ev('2026-10-22', 'c'), ev('2026-10-28', 'd')]
+	const year = panelHtml(summarize(rows, 365))
+	assert.match(year, /Por mes/)
+	assert.match(year, /octubre de 2026<\/td><td>3</)
+	assert.match(year, /septiembre de 2026<\/td><td>1</)
+	const quarter = panelHtml(summarize(rows, 90))
+	assert.match(quarter, /Por semana/)
+	// 20 y 22 de octubre, la misma semana (desde el lunes 19)
+	assert.match(quarter, /semana del 19 oct<\/td><td>2</)
+	assert.match(panelHtml(summarize(rows, 30)), /Por día[\s\S]*2026-10-28/)
 })

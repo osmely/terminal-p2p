@@ -9,7 +9,7 @@
 
 import { p2pFee } from '../src/qvapay/fees.ts'
 import { COINS } from '../src/terminal/market.ts'
-import { pageHead, panel } from './admin.ts'
+import { pageHead, panel, periods } from './admin.ts'
 import { cubaDate } from './informal.ts'
 import type { D1 } from './rates.ts'
 
@@ -27,6 +27,25 @@ export interface MetricEvent {
 	source: 'relay' | 'client'
 	// Parte del terminal desde la que se hizo: 'swap' para «Vender ya», '' para el resto
 	via: string
+	// Si QvaPay la rechazó, por qué: su código o el estado HTTP con su mensaje (errorOf). '' si salió bien
+	err?: string
+}
+
+// El motivo de un rechazo de QvaPay, sin nada que identifique a nadie: su código si lo da (OFFER_PAUSED) o el estado
+// HTTP con el mensaje, sin números, @usuarios ni correos, y corto
+export function errorOf(status: number, body: Record<string, unknown>) {
+	const code = typeof body.code === 'string' && /^[A-Z][A-Z0-9_]{2,40}$/.test(body.code) ? body.code : ''
+	if (code) return code
+	const raw = [body.error, body.message].find((v) => typeof v === 'string') as string | undefined
+	const msg = (raw ?? '')
+		.replace(/\S+@\S+/g, '')
+		.replace(/@\w+/g, '@…')
+		.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/gi, '…')
+		.replace(/\b\d+([.,]\d+)*\b/g, '#')
+		.replace(/\s+/g, ' ')
+		.trim()
+		.slice(0, 80)
+	return msg ? `${status}: ${msg}` : String(status)
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -99,7 +118,7 @@ export async function relayEvent(
 	const meta = parseMeta(a.meta)
 	const req = tryJson(a.body)
 	const ok = a.response.ok
-	const res = ok && (action.event === 'create' || action.event === 'release') ? tryJson(await a.response.text().catch(() => '')) : {}
+	const res = !ok || action.event === 'create' || action.event === 'release' ? tryJson(await a.response.text().catch(() => '')) : {}
 	let offer = action.offer
 	let { coin, side, usd } = meta
 	if (action.event === 'create') {
@@ -126,6 +145,7 @@ export async function relayEvent(
 		usd,
 		source: 'relay',
 		via: meta.via,
+		err: ok ? '' : errorOf(a.response.status, res),
 	}
 }
 
@@ -149,8 +169,8 @@ export async function clientEvent(body: unknown, salt: string, now = Date.now())
 
 export async function saveEvent(db: D1, e: MetricEvent) {
 	await db
-		.prepare('INSERT INTO events (t, event, status, offer, ord, coin, side, usd, source, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-		.bind(e.t, e.event, e.status, e.offer, e.ord, e.coin, e.side, e.usd, e.source, e.via)
+		.prepare('INSERT INTO events (t, event, status, offer, ord, coin, side, usd, source, via, err) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+		.bind(e.t, e.event, e.status, e.offer, e.ord, e.coin, e.side, e.usd, e.source, e.via, e.err ?? '')
 		.all()
 }
 
@@ -170,7 +190,8 @@ export interface Summary {
 	swaps: number
 	swapsCompleted: number
 	swapVolume: number
-	errors: Record<string, number>
+	// Por acción: cuántas se intentaron, cuántas rechazó QvaPay y por qué (motivo → veces)
+	errors: Record<string, { tries: number; failed: number; why: Record<string, number> }>
 	byCoin: { coin: string; created: number; taken: number; completed: number; volume: number }[]
 	byDay: { day: string; created: number; taken: number; paid: number; completed: number; volume: number }[]
 }
@@ -202,8 +223,17 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 	const swapOffers = new Set(ok.filter((e) => e.event === 'take' && e.via === 'swap').map((e) => e.offer))
 	const swapDone = [...doneKeys].filter((k) => swapOffers.has(offerOfKey(k)))
 
-	const errors: Record<string, number> = {}
-	for (const e of rows) if (e.status === 'error') errors[e.event] = (errors[e.event] ?? 0) + 1
+	const errors: Summary['errors'] = {}
+	for (const e of rows) {
+		if (e.source !== 'relay') continue
+		const x = (errors[e.event] ??= { tries: 0, failed: 0, why: {} })
+		x.tries++
+		if (e.status !== 'error') continue
+		x.failed++
+		const why = e.err || 'sin motivo (de antes de apuntarlo)'
+		x.why[why] = (x.why[why] ?? 0) + 1
+	}
+	for (const k of Object.keys(errors)) if (!errors[k].failed) delete errors[k]
 
 	const coins = new Map<string, Summary['byCoin'][number]>()
 	const row = (c: string) => coins.get(c) ?? (coins.set(c, { coin: c, created: 0, taken: 0, completed: 0, volume: 0 }), coins.get(c)!)
@@ -252,12 +282,13 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 	}
 }
 
+// Como mucho tantas acciones en memoria. Si alguna vez se llega, cuentan las más recientes (y el panel lo dice)
+const MAX_EVENTS = 100_000
+const EVENT_COLS = 't, event, status, offer, ord, coin, side, usd, source, via, err'
+
 export async function loadSummary(db: D1, days: number, now = Date.now()) {
-	const { results } = await db
-		.prepare('SELECT t, event, status, offer, ord, coin, side, usd, source, via FROM events WHERE t >= ? ORDER BY t LIMIT 100000')
-		.bind(now - days * 86_400_000)
-		.all<MetricEvent>()
-	return summarize(results, days)
+	const { results } = await db.prepare(`SELECT ${EVENT_COLS} FROM events WHERE t >= ? ORDER BY t DESC LIMIT ${MAX_EVENTS}`).bind(now - days * 86_400_000).all<MetricEvent>()
+	return { ...summarize(results.reverse(), days), truncated: results.length >= MAX_EVENTS }
 }
 
 // ── Cifras públicas para la web (/data/stats) ─────────────────────────
@@ -295,8 +326,8 @@ export function publicStats(rows: MetricEvent[], now = Date.now()): PublicStats 
 }
 
 export async function loadPublicStats(db: D1, now = Date.now()) {
-	const { results } = await db.prepare('SELECT t, event, status, offer, ord, coin, side, usd, source, via FROM events ORDER BY t LIMIT 100000').all<MetricEvent>()
-	return publicStats(results, now)
+	const { results } = await db.prepare(`SELECT ${EVENT_COLS} FROM events ORDER BY t DESC LIMIT ${MAX_EVENTS}`).all<MetricEvent>()
+	return publicStats(results.reverse(), now)
 }
 
 // ── Panel privado (HTTP Basic con la clave METRICS_KEY) ───────────────
@@ -333,9 +364,52 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const n = (v: number) => v.toLocaleString('en-US', { maximumFractionDigits: 2 })
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—')
 const coinName = (t: string) => COINS.find((c) => c.tick === t)?.name ?? 'Sin identificar'
+// Los códigos de QvaPay que más salen, en claro (el resto se enseña tal cual)
+const ERROR_NAMES: Record<string, string> = {
+	INSUFFICIENT_SCOPE: 'el token no tiene ese permiso',
+	PEER_REQUIREMENTS_NOT_MET: 'no cumple los requisitos del anunciante',
+	OFFER_PAUSED: 'la oferta está pausada',
+	FLEXIBLE_NOT_ENABLED: 'su cuenta no puede tomar por rango',
+	ORDER_ALREADY_ACTIVE: 'ya tenía una orden en esa oferta',
+	ORDER_IN_DISPUTE: 'la orden está en disputa',
+	KYC_REQUIRED: 'le falta el KYC',
+	DUPLICATE_REQUEST: 'petición repetida',
+	FLEXIBLE_OFFER_EXISTS: 'ya tiene una oferta por rango así',
+	OFFER_HAS_OPEN_ORDERS: 'la oferta tiene órdenes en curso',
+	OFFER_NOT_EDITABLE: 'la tomaron mientras la editaba',
+	FLEXIBLE_AMOUNT_REQUIRED: 'faltó el monto',
+	INVALID_REQUIREMENTS: 'requisito no válido',
+	TP_ACCOUNT_BLOCKED: 'cuenta bloqueada en Terminal P2P',
+	TP_ACCOUNT_RESTRICTED: 'cuenta restringida en Terminal P2P',
+	TP_ORDERS_PAUSED: 'ofertas pausadas desde el panel',
+}
+// Sin código, lo que suele querer decir cada estado
+const STATUS_NAMES: Record<string, string> = { '400': 'datos no válidos', '401': 'token no válido', '403': 'sin permiso', '404': 'ya no existe', '409': 'ya no estaba disponible', '422': 'datos no válidos', '423': 'bloqueado', '429': 'demasiadas seguidas', '500': 'error de QvaPay', '502': 'QvaPay no respondió', '503': 'QvaPay no disponible' }
+const errorName = (why: string) => {
+	const name = ERROR_NAMES[why] ?? (/^\d{3}$/.test(why) ? STATUS_NAMES[why] : null)
+	return name ? `${esc(name)} <span class="note">${esc(why)}</span>` : esc(why)
+}
+
 const EVENT_NAMES: Record<string, string> = { create: 'Publicar', take: 'Tomar', paid: 'Marcar pagado', release: 'Liberar', cancel: 'Cancelar', rate: 'Calificar', completed: 'Completada' }
 
-export function panelHtml(s: Summary, visits = '') {
+// En los rangos largos, «Por día» se agrupa por semana (90 días) o por mes (1 año): una fila por periodo
+type Period = Summary['byDay'][number] & { label: string }
+function byPeriod(byDay: Summary['byDay'], days: number) {
+	const p = periods(days)
+	const map = new Map<string, Period>()
+	for (const d of byDay) {
+		const k = p.key(d.day)
+		const r = map.get(k) ?? (map.set(k, { day: k, label: p.label(k), created: 0, taken: 0, paid: 0, completed: 0, volume: 0 }), map.get(k)!)
+		r.created += d.created
+		r.taken += d.taken
+		r.paid += d.paid
+		r.completed += d.completed
+		r.volume += d.volume
+	}
+	return { ...p, rows: [...map.values()].sort((a, b) => (a.day < b.day ? 1 : -1)) }
+}
+
+export function panelHtml(s: Summary & { truncated?: boolean }, visits = '') {
 	const card = (label: string, value: string, sub = '') => `<div class="card"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
 	const step = (label: string, value: number, of: number | null) => `<li><b>${n(value)}</b><span>${label}</span>${of != null ? `<em>${pct(value, of)}</em>` : ''}</li>`
 	const ranges = [7, 30, 90, 365].map((d) => `<a href="?days=${d}" class="${d === s.days ? 'on' : ''}">${d === 365 ? '1 año' : `${d} días`}</a>`).join('')
@@ -343,6 +417,7 @@ export function panelHtml(s: Summary, visits = '') {
 	const table = (head: string[], rows: string) =>
 		rows ? `<div class="wrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="empty">Aún no hay acciones en este periodo.</p>'
 	return `${pageHead('Métricas', 'Visitas y acciones del P2P hechas desde el terminal. Anónimas: sin usuario, token, IP ni cookies.', `<nav class="ranges">${ranges}</nav>`)}
+${s.truncated ? `<p class="note">Este periodo tiene más de ${n(MAX_EVENTS)} acciones: las cifras son de las ${n(MAX_EVENTS)} más recientes.</p>` : ''}
 ${visits ? `<h2 class="sec-title">Visitas</h2>${visits}<h2 class="sec-title">Acciones del P2P</h2>` : ''}
 <div class="cards">
 ${card('Ofertas publicadas aquí', n(s.created))}
@@ -364,14 +439,33 @@ ${panel(
 	table(['Mercado', 'Publicadas', 'Tomadas', 'Completadas', 'Volumen (USD)'], s.byCoin.map((c) => `<tr><td>${esc(coinName(c.coin))}</td><td>${n(c.created)}</td><td>${n(c.taken)}</td><td>${n(c.completed)}</td><td>${n(c.volume)}</td></tr>`).join('')),
 	{ flush: true },
 )}
-${panel(
-	'Por día',
-	table(['Día', 'Publicadas', 'Tomadas', 'Pagadas', 'Completadas', 'Volumen (USD)'], s.byDay.map((d) => `<tr><td>${d.day}</td><td>${n(d.created)}</td><td>${n(d.taken)}</td><td>${n(d.paid)}</td><td>${n(d.completed)}</td><td>${n(d.volume)}</td></tr>`).join('')),
-	{ sub: 'Hora de Cuba', flush: true },
-)}
+${(() => {
+	const p = byPeriod(s.byDay, s.days)
+	return panel(
+		p.title,
+		table([p.column, 'Publicadas', 'Tomadas', 'Pagadas', 'Completadas', 'Volumen (USD)'], p.rows.map((d) => `<tr><td>${esc(d.label)}</td><td>${n(d.created)}</td><td>${n(d.taken)}</td><td>${n(d.paid)}</td><td>${n(d.completed)}</td><td>${n(d.volume)}</td></tr>`).join('')),
+		{ sub: 'Hora de Cuba', flush: true },
+	)
+})()}
 ${panel(
 	'Errores de QvaPay',
-	`<p class="note" style="margin:0">${errors.length ? errors.map(([k, v]) => `${EVENT_NAMES[k] ?? k}: <b>${n(v)}</b>`).join(' · ') : 'Ninguno en este periodo.'}</p>`,
-	{ foot: 'Una operación completada se cuenta si se liberó desde el terminal o si quien la empezó aquí la vio completada en «Mis operaciones». Las acciones hechas en la web de QvaPay no se ven.' },
+	errors.length
+		? `<div class="wrap"><table class="left"><thead><tr><th>Acción</th><th class="num">Rechazadas</th><th>Por qué</th></tr></thead><tbody>${errors
+				.sort((a, b) => b[1].failed - a[1].failed)
+				.map(
+					([k, v]) =>
+						`<tr><td>${EVENT_NAMES[k] ?? esc(k)}</td><td class="num">${n(v.failed)} <span class="note">de ${n(v.tries)} (${pct(v.failed, v.tries)})</span></td><td style="white-space:normal">${Object.entries(v.why)
+							.sort((a, b) => b[1] - a[1])
+							.slice(0, 6)
+							.map(([w, c]) => `${errorName(w)}: <b>${n(c)}</b>`)
+							.join('<br>')}</td></tr>`,
+				)
+				.join('')}</tbody></table></div>`
+		: '<p class="note" style="margin:0">Ninguno en este periodo.</p>',
+	{
+		flush: errors.length > 0,
+		sub: 'Acciones hechas desde el terminal que QvaPay no aceptó. Algunas son normales (otro tomó antes la oferta); muchas iguales suelen ser un fallo nuestro',
+		foot: 'Una operación completada se cuenta si se liberó desde el terminal o si quien la empezó aquí la vio completada en «Mis operaciones». Las acciones hechas en la web de QvaPay no se ven.',
+	},
 )}`
 }
