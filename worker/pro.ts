@@ -12,6 +12,7 @@ import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, tgEsc, type AlertEnv } from './alerts.ts'
+import { seal, sendBackup, snapshot } from './backup.ts'
 import { GRACE_MS, INCIDENT_NAME, openIncidents, recordIncident, resolveIncident, type Incident } from './incidents.ts'
 import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tellDays, tellPaid, tellRefund, tellUser, unlink, botWebhook } from './userbot.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
@@ -33,6 +34,8 @@ export interface ProEnv extends AlertEnv {
 	METRICS_KEY?: string
 	// El grupo de la comunidad, donde sale la «Tasa QvaPay del día»
 	COMMUNITY_CHAT?: string
+	// Clave con que se cifra la copia diaria que va a Telegram (secreto; guárdala tú: sin ella no se puede restaurar)
+	BACKUP_KEY?: string
 }
 
 export const PLANS = {
@@ -510,16 +513,16 @@ export async function recover(env: ProEnv, invoice: string, now: number, fetcher
 }
 
 // Todas las tablas de Pro (sin los códigos de respaldo por recoger, que se ven una sola vez)
-export async function proSnapshot(db: D1, now: number) {
-	const all = async (t: string) => (await db.prepare(`SELECT * FROM ${t}`).all<Record<string, unknown>>()).results
-	const checkouts = (await all('pro_checkouts')).map(({ backup_code: _, ...c }) => c)
-	return { at: new Date(now).toISOString(), licenses: await all('pro_licenses'), days: await all('pro_days'), prints: await all('pro_prints'), checkouts, trials: await all('pro_trials') }
-}
-
-export async function backupPro(env: ProEnv, now: number) {
+// La copia de cada día: en el KV (en claro, 120 días) y, cifrada, a tu grupo de avisos por Telegram (backup.ts)
+export async function backupPro(env: ProEnv, now: number, fetcher: typeof fetch = fetch) {
 	if (!env.PRO?.put) return null
 	const key = `backup/pro/${new Date(now).toISOString().slice(0, 10)}`
-	await env.PRO.put(key, JSON.stringify(await proSnapshot(env.DB, now)), { expirationTtl: BACKUP_TTL_S })
+	await env.PRO.put(key, JSON.stringify(await snapshot(env.DB, now)), { expirationTtl: BACKUP_TTL_S })
+	try {
+		await sendBackup(env, now, fetcher)
+	} catch (err) {
+		console.error(`pro, copia a Telegram: ${(err as Error).message}`)
+	}
 	return key
 }
 
@@ -1290,7 +1293,7 @@ async function reportsPage(env: ProEnv, notice: string, now: number) {
 
 const AUDIT_NAME: Record<string, string> = {
 	days: 'Días', refund: 'Devolución (directa)', 'refund-approve': 'Devolución aprobada', 'refund-reject': 'Devolución rechazada', 'refund-transfer': 'Devolución transferida', 'refund-pay': 'Devolución pagada con QvaPay', note: 'Nota',
-	'access-set': 'Restringir o bloquear', 'access-lift': 'Levantar límite', 'incident-resolve': 'Descartar incidencia', revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
+	'access-set': 'Restringir o bloquear', 'access-lift': 'Levantar límite', 'incident-resolve': 'Descartar incidencia', 'backup-send': 'Mandar copia a Telegram', revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
 	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba', 'daily-on': 'Encender tasa del día', 'daily-off': 'Apagar tasa del día', 'daily-test': 'Probar tasa del día',
 }
 
@@ -1339,10 +1342,17 @@ async function incidentsPage(env: ProEnv, notice: string, now: number) {
 	)
 }
 
-async function proExport(db: D1, kind: string, now: number) {
+async function proExport(env: ProEnv, kind: string, now: number) {
+	const db = env.DB
 	const day = new Date(now).toISOString().slice(0, 10)
+	if (kind === 'cifrada') {
+		if (!env.BACKUP_KEY) return new Response('Falta BACKUP_KEY: ponla con npx wrangler secret put BACKUP_KEY', { status: 503 })
+		return new Response(await seal(JSON.stringify(await snapshot(db, now)), env.BACKUP_KEY), {
+			headers: { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="terminalp2p-pro-${day}.copia"`, 'Cache-Control': 'no-store' },
+		})
+	}
 	if (kind === 'copia')
-		return new Response(JSON.stringify(await proSnapshot(db, now), null, 1), {
+		return new Response(JSON.stringify(await snapshot(db, now), null, 1), {
 			headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="terminalp2p-pro-${day}.json"`, 'Cache-Control': 'no-store' },
 		})
 	const cell = (v: unknown) => {
@@ -1411,7 +1421,7 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 	const db = env.DB
 	// Descargas: los pagos en CSV (para devolver o cuadrar cuentas fuera de aquí) y la copia de todo Pro
 	const exp = new URL(req.url).searchParams.get('export')
-	if (req.method === 'GET' && exp) return proExport(db, exp, now)
+	if (req.method === 'GET' && exp) return proExport(env, exp, now)
 	let notice = ''
 	const url = new URL(req.url)
 	// La ficha de un usuario (?u=), también al volver de una acción hecha desde ella
@@ -1485,6 +1495,10 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 					await setBlock(db, username, level, reason, until, now)
 					notice = `<p class="ok"><b>@${escHtml(username)}</b> queda ${level === 'blocked' ? '<b>bloqueada</b>: el terminal, Pro y el simulador dejan de funcionarle' : '<b>restringida</b>: no publica, toma ni edita ofertas desde el terminal'} ${until ? `hasta el ${hWhen(until)}` : 'hasta que la levantes'} (en menos de un minuto en todas partes). Motivo: ${escHtml(reason)}.</p>`
 				}
+			}
+			if (action === 'backup-send') {
+				const r = await sendBackup(env, now, fetcher)
+				notice = r ? `<p class="ok">Copia cifrada del ${r.day} mandada a tu grupo de avisos (${Math.ceil(r.bytes / 1024)} KB).</p>` : '<p class="note">No se mandó: falta BACKUP_KEY o el bot de avisos.</p>'
 			}
 			if (action === 'incident-resolve') {
 				const r = await resolveIncident(db, Math.trunc(Number(f.get('id'))), now)
@@ -1698,8 +1712,9 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 	}${dailyForm}${await liveForm(env)}</div>`
 	const upkeep = `<div class="stack">
 		<form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y apunta en Pendientes las que aquí no constan">Repasar pagos con QvaPay</button></form>
-		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días). La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
-		<p class="note"><a href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a href="/admin/pro?export=copia">Copia completa (JSON)</a></p></div>`
+		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días)${env.BACKUP_KEY ? ', que además te llega cifrada a tu grupo de avisos' : ''}. La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
+		<p class="note"><a href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a href="/admin/pro?export=copia">Copia completa (JSON)</a>${env.BACKUP_KEY ? ' · <a href="/admin/pro?export=cifrada">Copia cifrada</a>' : ''}</p>
+		${env.BACKUP_KEY ? '<form method="post" class="row"><button class="ghost" name="action" value="backup-send">Mandar la copia cifrada a Telegram ahora</button></form>' : '<p class="note">Para tener la copia también fuera de Cloudflare, pon una clave con <code>npx wrangler secret put BACKUP_KEY</code> y guárdala en tu gestor de contraseñas.</p>'}</div>`
 	return proPage(
 		env,
 		'pro',

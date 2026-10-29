@@ -498,15 +498,16 @@ test('copias: CSV de pagos con quién pagó, copia completa sin códigos de resp
 	assert.equal(head, 'pagado,pago,pago_uuid,para,dias,importe_usd,factura_qvapay,id,devuelto,devolucion,transferido,ref_transferencia')
 	assert.match(row, /,pepe,u-pepe,Ana,30,4.99,inv-1,pro-/)
 	const copy = JSON.parse(await (await get('export=copia')).text())
-	assert.equal(copy.checkouts.length, 1)
-	assert.equal('backup_code' in copy.checkouts[0], false)
-	assert.equal(copy.licenses[0].uuid, 'qp:ana')
+	assert.equal(copy.v, 2)
+	assert.equal(copy.tables.pro_checkouts.length, 1)
+	assert.equal('backup_code' in copy.tables.pro_checkouts[0], false)
+	assert.equal(copy.tables.pro_licenses[0].uuid, 'qp:ana')
 	// Sin la clave del panel no se descarga nada
 	assert.equal((await proAdmin(new Request('https://app.terminalp2p.com/admin/pro?export=pagos'), s.env, s.now())).status, 401)
 	const key = await backupPro(s.env, s.now())
 	assert.equal(key, `backup/pro/${new Date(s.now()).toISOString().slice(0, 10)}`)
 	assert.equal(kv.get(key!)?.ttl, 120 * 86_400)
-	assert.equal(JSON.parse(kv.get(key!)!.value).checkouts[0].payer, 'pepe')
+	assert.equal(JSON.parse(kv.get(key!)!.value).tables.pro_checkouts[0].payer, 'pepe')
 })
 
 test('ningún código ni migración borra licencias, pagos o días gratis usados', () => {
