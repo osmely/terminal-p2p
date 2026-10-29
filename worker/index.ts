@@ -143,7 +143,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 			// Una cuenta de QvaPay conectada de verdad en este navegador (la cookie que firma el relé con el perfil de QvaPay)
 			const who = env.PRO_KEY ? await readWho(req.headers.get('cookie'), print, env.PRO_KEY, Date.now()) : null
 			const ok = !!who && (await accessOf(env.DB, { username: who.username, print }))?.level !== 'blocked'
-			return { ok, pro: ok && (await proEnabled(env.DB)) && !!(await licenseOfPrint(env.DB, print, Date.now())) }
+			return { ok, pro: ok && (await proEnabled(env.DB)) && !!(await licenseOfPrint(env.DB, print, Date.now())), username: who?.username }
 		})
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
 	if (url.pathname === '/data/hit' && req.method === 'POST') return secure(await hit(req, url, env))

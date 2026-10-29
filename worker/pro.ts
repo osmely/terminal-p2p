@@ -17,7 +17,8 @@ import { GRACE_MS, INCIDENT_NAME, openIncidents, recordIncident, resolveIncident
 import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tellDays, tellPaid, tellRefund, tellUser, unlink, botWebhook } from './userbot.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
-import { liveSimulate, liveStatus, type LiveEnv } from './livebook.ts'
+import { COINS } from '../src/terminal/market.ts'
+import { liveClients, liveSimulate, liveStatus, type LiveClient, type LiveEnv } from './livebook.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
 import { cleanDiag, DIAG_MAX_BYTES, DIAG_PER_DAY, diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
 
@@ -1865,6 +1866,7 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 	if (view === 'registro') return auditPage(env, flash, now, url)
 	if (view === 'pagos') return paymentsPage(env, flash, now, url)
 	if (view === 'cuentas') return accountsPage(env, flash, now, url)
+	if (view === 'envivo') return livePage(env, flash, now)
 	if (view === 'incidencias') return incidentsPage(env, flash, now, url)
 	if (q) return searchPage(env, flash, now, q, url)
 	return homePage(env, flash, now)
@@ -2173,6 +2175,52 @@ async function accountsPage(env: ProEnv, flash: string, now: number, url: URL) {
 		${panel('Dar o quitar días', daysForm(), { sub: 'Un regalo, una compensación por un fallo o una corrección. Si aún no ha conectado su cuenta, se le activan al conectarla' })}
 		${await blocksPanel(env, now)}
 		${await movesPanel(env, '', url)}`,
+	)
+}
+
+// ── En vivo: quién tiene el terminal abierto ahora ───────────────────
+// Los terminales con una cuenta de QvaPay conectada reciben el libro en vivo: cada uno es una conexión abierta, con la
+// cuenta que confirmó QvaPay. No se guarda nada: es lo que hay en este momento (la página se recarga sola)
+const LIVE_REFRESH_S = 15
+const COIN_NAME = new Map(COINS.map((c) => [c.tick as string, c.name]))
+const agoText = (ms: number) => (ms < 60_000 ? `hace ${Math.max(1, Math.round(ms / 1000))} s` : ms < 3_600_000 ? `hace ${Math.round(ms / 60_000)} min` : `hace ${(ms / 3_600_000).toFixed(1)} h`)
+
+export function liveRows(clients: LiveClient[]) {
+	const by = new Map<string, { u: string | null; tabs: number; pro: boolean; subs: Set<string>; at: number; seen: number }>()
+	for (const c of clients) {
+		const k = c.u?.toLowerCase() ?? '—'
+		const x = by.get(k) ?? { u: c.u, tabs: 0, pro: false, subs: new Set<string>(), at: Infinity, seen: 0 }
+		x.tabs++
+		x.pro ||= c.pro
+		for (const s of c.subs) x.subs.add(s)
+		if (c.at) x.at = Math.min(x.at, c.at)
+		x.seen = Math.max(x.seen, c.seen ?? c.at ?? 0)
+		by.set(k, x)
+	}
+	return [...by.values()].sort((a, b) => a.at - b.at)
+}
+
+async function livePage(env: ProEnv, flash: string, now: number) {
+	const clients = await liveClients(env as unknown as LiveEnv)
+	const rows = clients ? liveRows(clients) : []
+	const known = rows.filter((r) => r.u)
+	const table = !clients
+		? '<p class="empty">El libro en vivo no responde ahora mismo.</p>'
+		: rows.length
+			? `<div class="wrap"><table class="left"><thead><tr><th>Cuenta</th><th>Pro</th><th>Mirando</th><th class="num">Pestañas</th><th>Conectada desde</th><th>Última señal</th></tr></thead><tbody>${rows
+					.map(
+						(r) =>
+							`<tr><td>${r.u ? userLink(r.u) : '<span class="note">sin identificar</span>'}</td><td>${r.pro ? '<span class="pill approved-ok">Pro</span>' : '<span class="note">—</span>'}</td><td style="white-space:normal">${[...r.subs].map((s) => escHtml(COIN_NAME.get(s) ?? s)).join(', ') || '<span class="note">ningún mercado (pestaña en segundo plano)</span>'}</td><td class="num">${r.tabs}</td><td>${Number.isFinite(r.at) ? `${hWhenS(r.at)} <span class="note">(${agoText(now - r.at).replace('hace ', '')})</span>` : '—'}</td><td>${r.seen ? agoText(Math.max(0, now - r.seen)) : '—'}</td></tr>`,
+					)
+					.join('')}</tbody></table></div>`
+			: '<p class="empty">Nadie tiene el terminal abierto con su cuenta conectada ahora mismo.</p>'
+	return proPage(
+		env,
+		'live',
+		'En vivo',
+		`<meta http-equiv="refresh" content="${LIVE_REFRESH_S}">${pageHead('En vivo', `Quién tiene el terminal abierto ahora, con su cuenta de QvaPay conectada. Se actualiza cada ${LIVE_REFRESH_S} s; no se guarda nada.`, '<a class="btn" href="/admin/pro?view=envivo">Actualizar</a>')}${flash}
+		<div class="cards"><div class="card"><span>Cuentas conectadas</span><b>${known.length.toLocaleString('en-US')}</b><small>ahora mismo</small></div><div class="card"><span>Pestañas abiertas</span><b>${(clients?.length ?? 0).toLocaleString('en-US')}</b><small>con el libro en vivo</small></div><div class="card"><span>Con Pro</span><b>${known.filter((r) => r.pro).length.toLocaleString('en-US')}</b><small>de las conectadas</small></div></div>
+		${panel('Terminales abiertos', table, { flush: !!rows.length, sub: 'Solo los que tienen su cuenta conectada (reciben el libro en vivo). Quien mira sin conectar no sale aquí: eso lo cuentan las visitas de Métricas. La última señal llega cada 25 s mientras la pestaña sigue abierta.' })}`,
 	)
 }
 

@@ -2,7 +2,7 @@
 // métricas del P2P, el simulador y Pro (inicio con lo pendiente, pagos, cuentas, informes y registro), con una
 // barra lateral para moverse entre todo
 
-export type AdminTab = 'metrics' | 'sim' | 'pro' | 'pro-pagos' | 'pro-cuentas' | 'pro-incidencias' | 'pro-informes' | 'pro-registro'
+export type AdminTab = 'metrics' | 'sim' | 'live' | 'pro' | 'pro-pagos' | 'pro-cuentas' | 'pro-incidencias' | 'pro-informes' | 'pro-registro'
 
 // Iconos de trazo (24×24), en línea para no depender de nada externo
 const icon = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`
@@ -15,6 +15,7 @@ const ICONS = {
 	report: icon('<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/>'),
 	list: icon('<path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/>'),
 	flag: icon('<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'),
+	pulse: icon('<path d="M2 12h4l3-8 4 16 3-8h6"/>'),
 }
 
 const NAV: [string, [AdminTab, string, string, string][]][] = [
@@ -23,6 +24,7 @@ const NAV: [string, [AdminTab, string, string, string][]][] = [
 		[
 			['metrics', 'Métricas', '/admin/metrics', ICONS.chart],
 			['sim', 'Simulador', '/admin/sim', ICONS.candles],
+			['live', 'En vivo', '/admin/pro?view=envivo', ICONS.pulse],
 		],
 	],
 	[

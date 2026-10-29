@@ -411,7 +411,8 @@ export async function feedWebhook(req: Request, env: LiveEnv, ctx: { waitUntil(p
 
 // Un terminal se conecta para recibir el libro: solo con una cuenta de QvaPay conectada y confirmada en ese navegador.
 // gate dice si lo está y si tiene Pro (al instante; sin Pro, cada FREE_EVERY_MS)
-export async function liveSocket(req: Request, url: URL, env: LiveEnv, gate: (print: string) => Promise<{ ok: boolean; pro: boolean }>) {
+// gate: si esa huella puede recibir el libro, si es Pro y de qué cuenta es (para ver en el panel quién está conectado ahora)
+export async function liveSocket(req: Request, url: URL, env: LiveEnv, gate: (print: string) => Promise<{ ok: boolean; pro: boolean; username?: string }>) {
 	if (req.headers.get('Upgrade') !== 'websocket') return Response.json({ error: 'Se espera un WebSocket' }, { status: 426 })
 	if (!env.LIVE) return Response.json({ error: 'El libro en vivo no está disponible' }, { status: 503 })
 	const print = url.searchParams.get('p') ?? ''
@@ -419,7 +420,25 @@ export async function liveSocket(req: Request, url: URL, env: LiveEnv, gate: (pr
 	if (!g.ok) return Response.json({ error: 'Conecta tu cuenta de QvaPay para ver el libro' }, { status: 403 })
 	// Sin LIVE_FREE, solo los Pro (el resto sigue leyendo el libro con su token)
 	if (!g.pro && env.LIVE_FREE !== '1') return Response.json({ error: 'El libro en tiempo real es parte de Pro' }, { status: 403 })
-	return liveStub(env).fetch(`https://live/ws?pro=${g.pro ? 1 : 0}`, { headers: req.headers })
+	const q = new URLSearchParams({ pro: g.pro ? '1' : '0', u: g.username ?? '' })
+	return liveStub(env).fetch(`https://live/ws?${q}`, { headers: req.headers })
+}
+
+// Los terminales conectados ahora mismo: de qué cuenta, si es Pro, qué mercados miran, desde cuándo y su última señal.
+// No se guarda en ninguna parte: es lo que tiene abierto el libro en vivo en este momento
+export interface LiveClient {
+	u: string | null
+	pro: boolean
+	subs: string[]
+	at: number | null
+	seen: number | null
+}
+export async function liveClients(env: LiveEnv): Promise<LiveClient[] | null> {
+	if (!env.LIVE) return null
+	return liveStub(env)
+		.fetch('https://live/clients')
+		.then((r: Response) => r.json() as Promise<LiveClient[]>)
+		.catch(() => null)
 }
 
 export async function liveStatus(env: LiveEnv): Promise<LiveState | null> {

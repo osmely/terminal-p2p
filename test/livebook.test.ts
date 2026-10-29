@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { test } from 'node:test'
 import type { P2POffer } from '../src/qvapay/types.ts'
-import { Book, feedSign, feedSigned, feedWebhook, sseEvents, tradeOf, type FeedEvent } from '../worker/livebook.ts'
+import { Book, feedSign, feedSigned, feedWebhook, liveSocket, sseEvents, tradeOf, type FeedEvent, type LiveEnv } from '../worker/livebook.ts'
+import { liveRows } from '../worker/pro.ts'
 
 const T = Date.parse('2026-10-27T15:00:00Z')
 const at = (s: number) => new Date(T + s * 1000).toISOString()
@@ -184,4 +185,25 @@ test('volumen: cuentan las fijas al completarse y las partes tomadas de las de r
 	// Cancelar no es una operación
 	trade(ev('p2p.created', { uuid: 'o2' }, 14))
 	assert.deepEqual(trade(ev('p2p.cancelled', { uuid: 'o2', status: 'cancelled' }, 15)), [0, 20])
+})
+
+test('en vivo (panel): cada conexión lleva su cuenta; se juntan por cuenta con sus pestañas, mercados, desde cuándo y última señal', async () => {
+	// El libro en vivo recibe de qué cuenta es cada conexión (la que confirmó QvaPay)
+	let asked = ''
+	const env = { LIVE_FREE: '1', LIVE: { idFromName: () => 'id', get: () => ({ fetch: async (u: string) => ((asked = u), new Response('ok')) }) } } as unknown as LiveEnv
+	const req = new Request('https://app.terminalp2p.com/live?p=' + 'a'.repeat(64), { headers: { Upgrade: 'websocket' } })
+	await liveSocket(req, new URL(req.url), env, async () => ({ ok: true, pro: true, username: 'Ana' }))
+	assert.equal(asked, 'https://live/ws?pro=1&u=Ana')
+	const rows = liveRows([
+		{ u: 'Ana', pro: false, subs: ['BANK_CUP'], at: T + 5000, seen: T + 9000 },
+		{ u: 'leo', pro: false, subs: [], at: T + 1000, seen: null },
+		{ u: 'ana', pro: true, subs: ['ETECSA', 'BANK_CUP'], at: T + 2000, seen: T + 7000 },
+	])
+	assert.deepEqual(
+		rows.map((r) => [r.u, r.tabs, r.pro, [...r.subs], r.at, r.seen]),
+		[
+			['leo', 1, false, [], T + 1000, T + 1000],
+			['Ana', 2, true, ['BANK_CUP', 'ETECSA'], T + 2000, T + 9000],
+		],
+	)
 })

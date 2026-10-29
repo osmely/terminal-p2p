@@ -16,6 +16,9 @@ const TAKES_KEEP_MS = 30 * 60_000
 interface Sock {
 	subs: string[]
 	pro: boolean
+	// De qué cuenta es y desde cuándo está conectado (para el panel: quién tiene el terminal abierto ahora)
+	u?: string | null
+	at?: number
 }
 
 export class LiveBook {
@@ -86,7 +89,8 @@ export class LiveBook {
 	async fetch(req: Request) {
 		const url = new URL(req.url)
 		if (url.pathname === '/event' && req.method === 'POST') return this.onEvent(await req.text())
-		if (url.pathname === '/ws') return this.connect(url.searchParams.get('pro') === '1')
+		if (url.pathname === '/ws') return this.connect(url.searchParams.get('pro') === '1', url.searchParams.get('u') || null)
+		if (url.pathname === '/clients') return Response.json(this.clients())
 		if (url.pathname === '/status') return Response.json(this.state())
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
 		return new Response('no encontrado', { status: 404 })
@@ -100,10 +104,19 @@ export class LiveBook {
 		return this.lastEvent !== null && now - this.lastEvent < FEED_IDLE_MS
 	}
 
+	// Quién tiene el terminal abierto: la última señal es el último «ping» del terminal (cada 25 s), al que contesta
+	// Cloudflare sin despertar este objeto
+	private clients() {
+		return this.ctx.getWebSockets().map((ws) => {
+			const s = ws.deserializeAttachment() as Sock | null
+			return { u: s?.u ?? null, pro: !!s?.pro, subs: s?.subs ?? [], at: s?.at ?? null, seen: this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null }
+		})
+	}
+
 	private state(): LiveState {
 		const now = Date.now()
 		return {
-			version: 6,
+			version: 7,
 			recent: this.recent,
 			mode: this.feedOn(now) ? 'feed' : this.creds() ? 'poll' : 'off',
 			events: this.events,
@@ -187,11 +200,11 @@ export class LiveBook {
 		if (!at || at > Date.now() + ms) await this.ctx.storage.setAlarm(Date.now() + ms)
 	}
 
-	private connect(pro: boolean) {
+	private connect(pro: boolean, u: string | null) {
 		const pair = new WebSocketPair()
 		const [client, server] = Object.values(pair)
 		this.ctx.acceptWebSocket(server)
-		server.serializeAttachment({ subs: [], pro } satisfies Sock)
+		server.serializeAttachment({ subs: [], pro, u, at: Date.now() } satisfies Sock)
 		server.send(JSON.stringify({ t: 'hello', feed: this.feedOn(), pro, every: pro ? 0 : FREE_EVERY_MS }))
 		return new Response(null, { status: 101, webSocket: client })
 	}
@@ -209,7 +222,7 @@ export class LiveBook {
 		const subs = [...new Set(m.sub.map(String).filter((c) => TICKS.has(c)))].slice(0, TICKS.size)
 		const was = ws.deserializeAttachment() as Sock | null
 		const before = new Set(was?.subs ?? [])
-		ws.serializeAttachment({ subs, pro: !!was?.pro } satisfies Sock)
+		ws.serializeAttachment({ ...was, subs, pro: !!was?.pro } satisfies Sock)
 		// La lista de mercados siempre va al día (el mejor precio de cada uno)
 		if (!before.size) ws.send(this.topMsg())
 		for (const coin of subs) {
