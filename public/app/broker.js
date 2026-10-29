@@ -296,6 +296,8 @@ async function loadTrades() {
 		if (moved) refreshBalance(true)
 		document.title = r.pending ? `(${r.pending}) ${BASE_TITLE}` : BASE_TITLE
 		deliver(r.alerts ?? [])
+		// El módulo Pro sigue tus ofertas publicadas (mantenerlas las primeras del libro)
+		document.dispatchEvent(new CustomEvent('tp:offers'))
 	} catch (e) {
 		// La sesión ya no tiene cuenta (token revocado o desconectado en el servidor)
 		if (e.status === 401) {
@@ -367,7 +369,7 @@ function renderTrades() {
 						(o) => `<tr data-offer="${o.offerUuid}">
 							<td class="c-side">${side(o)}</td><td class="c-mkt">${esc(nameOf(o.coin))}</td>
 							<td class="r num c-usd" data-l="USD">${fmtM(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(o.price)}</td><td class="r num c-total" data-l="Total">${fmtM((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
-							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? `Pausada hasta ${new Date(o.pause.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}` : 'Pausada'}</span>` : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}</td>
+							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? `Pausada hasta ${new Date(o.pause.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}` : 'Pausada'}</span>` : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}${window.TPProKeep?.chip(o) ?? ''}</td>
 							<td class="muted c-date">${o.updatedAt ? new Date(o.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
 							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}">Cancelar</button></td></tr>`,
 					)
@@ -1093,6 +1095,7 @@ function renderManage(o) {
 				<button class="btn" id="edSave">Guardar cambios</button></div>`
 				: ''
 		}
+		${keepSlot(o, editable)}
 		${req ? `<p class="hint">Requisitos: ${esc(req)}</p>` : ''}
 		${
 			o.details.length
@@ -1207,6 +1210,15 @@ function renderManage(o) {
 	})
 	$('modalBody').querySelector('[data-open-trade]')?.addEventListener('click', () => openTrade(o.offer, null))
 	for (const r of $('modalBody').querySelectorAll('[data-order-row]')) r.onclick = () => openTrade(o.offer, r.dataset.orderRow)
+	if ($('mgKeep')) window.TPPro?.active ? window.TPProKeep?.manage(o) : $('mgKeepPro')?.addEventListener('click', showPro)
+}
+
+// Mantener tu oferta la primera del libro (Pro): el módulo Pro rellena el hueco #mgKeep; sin Pro, se dice que existe.
+// Solo en ofertas que se pueden editar y que están en el libro (las privadas no salen en él)
+function keepSlot(o, editable) {
+	if (!editable || o.isPrivate || !window.TPPro?.enabled) return ''
+	if (window.TPPro.active) return '<div id="mgKeep"></div>'
+	return `<p class="hint" id="mgKeep">★ Con Pro, el terminal la mantiene la primera del libro: si alguien publica mejor precio, ajusta el tuyo sin salirse de tus límites. <button class="link" id="mgKeepPro">Ver Pro</button></p>`
 }
 
 // ── Tomar una oferta del libro ────────────────────────────────────────

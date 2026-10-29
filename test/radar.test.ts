@@ -62,7 +62,7 @@ test('radar: con nada más que mirar, los demás mercados siguen a su ritmo (uno
 	assert.equal(market.nextDelayMs(), 60_000)
 })
 
-test('radar: como mucho 3 lados, sin repetir ni mercados que no existen', () => {
+test('lo que vigila el módulo Pro (radar y mantener tus ofertas las primeras): como mucho 6 lados, sin repetir ni mercados que no existen', () => {
 	const { market } = setup()
 	market.watch(
 		[
@@ -72,6 +72,9 @@ test('radar: como mucho 3 lados, sin repetir ni mercados que no existen', () => 
 			{ tick: 'ETECSA', side: 'bid' },
 			{ tick: 'ZELLE', side: 'ask' },
 			{ tick: 'CLASICA', side: 'bid' },
+			{ tick: 'BANK_CUP', side: 'bid' },
+			{ tick: 'BANK_MLC', side: 'ask' },
+			{ tick: 'TROPIPAY', side: 'ask' },
 		],
 		() => {},
 	)
@@ -79,6 +82,9 @@ test('radar: como mucho 3 lados, sin repetir ni mercados que no existen', () => 
 		{ tick: 'BANK_CUP', side: 'ask' },
 		{ tick: 'ETECSA', side: 'bid' },
 		{ tick: 'ZELLE', side: 'ask' },
+		{ tick: 'CLASICA', side: 'bid' },
+		{ tick: 'BANK_CUP', side: 'bid' },
+		{ tick: 'BANK_MLC', side: 'ask' },
 	])
 })
 

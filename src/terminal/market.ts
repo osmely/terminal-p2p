@@ -143,8 +143,9 @@ const COMPLETED_EVERY_MS = 5 * 60_000
 const COMPLETED_GAP_MS = 20_000
 const NO_READER_RETRY_MS = 15_000
 const HISTORY_EVERY_MS = 60_000
-// Radar de Pro: hasta 3 lados que se leen antes que nada (cada ~8 s) y también con la pestaña oculta
-const WATCH_MAX = 3
+// Lo que vigila el módulo Pro (radar: hasta 3 lados; mantener tus ofertas las primeras: hasta 3): se lee antes que
+// nada (cada ~8 s) y también con la pestaña oculta
+const WATCH_MAX = 6
 const WATCH_REFRESH_MS = 8_000
 const HISTORY_KEEP_MS = 14 * 24 * 3600_000
 

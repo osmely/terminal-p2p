@@ -208,12 +208,25 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 	return json(404, { error: 'no encontrado' })
 }
 
+// Lo que vigila el libro desde el módulo Pro (el radar, mantener tu oferta la primera): cada uno dice qué lados y a
+// quién pasarle cada lectura nueva; el mercado vigila todos juntos y a cada uno le llega solo lo suyo
+const watchers = new Map<string, { list: Watch[]; onRead: (w: WatchedSide) => void }>()
+function watchFor(key: string, list: Watch[], onRead: ((w: WatchedSide) => void) | null) {
+	if (list.length && onRead) watchers.set(key, { list, onRead })
+	else watchers.delete(key)
+	const all = [...watchers.values()]
+	market.watch(
+		all.flatMap((x) => x.list),
+		all.length ? (w) => all.forEach((x) => x.list.some((l) => l.tick === w.tick && l.side === w.side) && x.onRead(w)) : null,
+	)
+	syncLive()
+	wake()
+}
+
 // Radar de Pro (lo usa el módulo Pro): qué lados vigilar, y la función a la que se le pasa cada lectura nueva
 const radar = {
 	watch(list: Watch[], onRead: ((w: WatchedSide) => void) | null) {
-		market.watch(list, onRead)
-		syncLive()
-		wake()
+		watchFor('radar', list, onRead)
 	},
 	read: (w: Watch) => market.watchedSide(w),
 	scan: () => market.scanWatched(),
@@ -221,4 +234,5 @@ const radar = {
 
 // cross: la mejor oportunidad del libro cruzado (app.js la enseña en la lectura del mercado)
 // live: el libro en tiempo real de Pro (pro.js lo enciende con la huella de tu token)
-;(window as unknown as { TPApi: { fetch: typeof api; cross: typeof bestCross; radar: typeof radar; live: typeof live } }).TPApi = { fetch: api, cross: bestCross, radar, live }
+// watch: como radar.watch, para otras piezas del módulo Pro, cada una con su nombre (mantener tu oferta la primera: 'keep')
+;(window as unknown as { TPApi: { fetch: typeof api; cross: typeof bestCross; radar: typeof radar; live: typeof live; watch: typeof watchFor } }).TPApi = { fetch: api, cross: bestCross, radar, live, watch: watchFor }
