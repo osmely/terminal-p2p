@@ -41,6 +41,9 @@ function memD1() {
 function fakeQvaPay() {
 	const invoices = new Map<string, { remote_id: string; amount: number; status: string; PaidBy: { uuid: string; username: string } | null }>()
 	const calls: string[] = []
+	// Transferencias desde la cuenta de la app (devoluciones): una por clave de idempotencia, como QvaPay
+	const transfers: { amount: number; to: string; key: string; tx: string }[] = []
+	const transferMode = { value: 'ok' as 'ok' | 'noperm' | 'busy' }
 	// Avisos a Telegram: se apuntan aquí
 	const telegram: { chat_id: string; text: string; url: string }[] = []
 	const fetcher = (async (input: string | URL, init?: RequestInit) => {
@@ -70,12 +73,22 @@ function fakeQvaPay() {
 			const list = [...invoices].reverse().map(([uuid, i]) => ({ uuid, remote_id: i.remote_id, amount: i.amount, status: i.status, created_at: new Date(T0).toISOString() }))
 			return Response.json({ transactions: list.slice((page - 1) * take, page * take) })
 		}
+		if (url.endsWith('/transaction/transfer')) {
+			if (transferMode.value === 'noperm') return Response.json({ error: 'App no tiene habilitado el envío de transferencias. Activa allowed_transfer para esta app.' }, { status: 403 })
+			if (transferMode.value === 'busy') return Response.json({ error: 'En proceso', code: 'DUPLICATE_REQUEST' }, { status: 409 })
+			const b = JSON.parse(String(init?.body))
+			const had = transfers.find((t) => t.key === b.idempotency_key)
+			if (had) return Response.json({ success: true, transaction: had.tx, duplicate: true })
+			const tx = `tx-${transfers.length + 1}`
+			transfers.push({ amount: b.amount, to: b.to, key: b.idempotency_key, tx })
+			return Response.json({ success: true, message: 'Transferencia completada correctamente', transaction: tx })
+		}
 		const m = url.match(/\/v2\/transactions\/(.+)$/)
 		if (m) return Response.json({ transaction: invoices.get(decodeURIComponent(m[1])) ?? null })
 		return new Response('{}', { status: 404 })
 	}) as typeof fetch
 	const pay = (uuid: string, username = 'ana', amount?: number) => Object.assign(invoices.get(uuid)!, { status: 'paid', PaidBy: { uuid: `u-${username}`, username }, ...(amount ? { amount } : {}) })
-	return { fetcher, pay, calls, invoices, telegram }
+	return { fetcher, pay, calls, invoices, telegram, transfers, transferMode }
 }
 
 const T0 = Date.parse('2026-10-25T12:00:00Z')
@@ -262,7 +275,7 @@ test('devolver una compra quita solo los días de esa compra; el resto y los dis
 	s.tick(26 * 86_400_000)
 	const { checkout } = await buy(s, P1, 'year')
 	// 4 días del mes + 365 del año; devuelve el año: le quedan sus 4 días
-	assert.match(await (await form({ action: 'refund', checkout: checkout.id, note: 'no le convenció' })).text(), /transfiere <b>39.99 USD<\/b> a <b>@ana<\/b>/)
+	assert.match(await (await form({ action: 'refund', checkout: checkout.id, note: 'no le convenció' })).text(), /págale <b>39.99 USD<\/b> a <b>@ana<\/b>/)
 	const st = (await s.post('/pro/status', { print: P1 })).body
 	assert.deepEqual([st.pro, st.expiresAt], [true, T0 + 30 * 86_400_000])
 	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM pro_prints WHERE license = ?').get('qp:ana') as { n: number }).n, 1)
@@ -321,7 +334,7 @@ test('panel: devolver el único pago deja sin Pro y dice cuánto transferir', as
 	const form = (fields: Record<string, string>) =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, T0)
 	const html = await (await form({ action: 'refund', checkout: checkout.id })).text()
-	assert.match(html, /transfiere <b>4.99 USD<\/b> a <b>@ana<\/b>/)
+	assert.match(html, /págale <b>4.99 USD<\/b> a <b>@ana<\/b>/)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
 	// No se devuelve dos veces
 	assert.match(await (await form({ action: 'refund', checkout: checkout.id })).text(), /ya se devolvió/)
@@ -443,7 +456,7 @@ test('paga otra cuenta (otra sesión abierta en qvapay.com): Pro queda a nombre 
 			s.now(),
 		).then((x) => x.text())
 	assert.match(await form(), /<b>@Ana<\/b><\/a> <span class="note">pagó @pepe<\/span>/)
-	assert.match(await form({ action: 'refund', checkout: c.id }), /transfiere <b>4.99 USD<\/b> a <b>@pepe<\/b>/)
+	assert.match(await form({ action: 'refund', checkout: c.id }), /págale <b>4.99 USD<\/b> a <b>@pepe<\/b>/)
 })
 
 test('repaso diario con QvaPay: activa un pago que se quedó sin activar y recupera uno que aquí no consta', async () => {
@@ -633,7 +646,7 @@ test('devolución en pasos: la pide el usuario desde «Mi cuenta», la apruebas 
 	// En el panel aparece abierta; al aprobarla se le quitan esos 30 días (le quedan los gratis)
 	assert.match(await admin(), /Pendientes <span class="count">1<\/span>/)
 	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
-	assert.match(await admin({ action: 'refund-approve', id, note: 'ok' }), /transfiere <b>4.99 USD<\/b> a <b>@ana<\/b>/)
+	assert.match(await admin({ action: 'refund-approve', id, note: 'ok' }), /págale <b>4.99 USD<\/b> a <b>@ana<\/b>/)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.expiresAt, T0 + 14 * 86_400_000)
 	// No se aprueba dos veces
 	assert.match(await admin({ action: 'refund-approve', id }), /no está pendiente de aprobar/)
@@ -1059,4 +1072,44 @@ test('los precios salen del servidor: el terminal los recibe con el estado de Pr
 	const s = setup()
 	const st = (await s.post('/pro/status', { print: P1, username: 'ana' })).body
 	assert.deepEqual(st.plans.map((p: { id: string; usd: number; days: number }) => [p.id, p.usd, p.days]), [['week', 1.99, 7], ['month', 4.99, 30], ['quarter', 12.99, 90], ['year', 39.99, 365]])
+})
+
+test('pagar la devolución con QvaPay: lo que pagó esa compra, a la cuenta que la pagó, una sola vez; si QvaPay no puede, sigue aprobada', async () => {
+	const s = setup()
+	const admin = (fields?: Record<string, string>) =>
+		proAdmin(
+			new Request('https://app.terminalp2p.com/admin/pro', { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+			s.env,
+			s.now(),
+			s.q.fetcher,
+		).then((r) => r.text())
+	// Pro a nombre de ana, pero la pagó pepe desde otra sesión: se le devuelve a pepe, por su uuid
+	const c = (await s.post('/pro/checkout', { print: P1, plan: 'week', username: 'ana' })).body
+	s.q.pay('inv-1', 'pepe')
+	await s.status(c.id)
+	await s.post('/pro/refund', { print: P1, username: 'ana', checkout: c.id, reason: 'no la uso' })
+	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
+	// Sin aprobar no se paga
+	assert.match(await admin({ action: 'refund-pay', id }), /no está aprobada pendiente de transferir/)
+	assert.equal(s.q.transfers.length, 0)
+	// Aprobada: sale el botón con el monto y a quién
+	assert.match(await admin({ action: 'refund-approve', id }), /Pagar 1.99 USD a @pepe con QvaPay/)
+	// La app sin el permiso de transferir: lo dice y sigue aprobada
+	s.q.transferMode.value = 'noperm'
+	assert.match(await admin({ action: 'refund-pay', id }), /no tiene activadas las transferencias/)
+	assert.equal((s.db.prepare('SELECT status FROM pro_refunds').get() as { status: string }).status, 'approved')
+	// QvaPay aún procesando una igual: que se vuelva a pulsar
+	s.q.transferMode.value = 'busy'
+	assert.match(await admin({ action: 'refund-pay', id }), /todavía está procesando/)
+	// Ahora sí: 1.99 USD al uuid de pepe, con la devolución como clave de idempotencia
+	s.q.transferMode.value = 'ok'
+	const html = await admin({ action: 'refund-pay', id })
+	assert.match(html, /Devolución pagada: 1.99 USD a <b>@pepe<\/b>[\s\S]*tx-1/)
+	assert.deepEqual(s.q.transfers, [{ amount: 1.99, to: 'u-pepe', key: `tp-refund-${id}`, tx: 'tx-1' }])
+	assert.deepEqual({ ...s.db.prepare('SELECT status, transfer_ref FROM pro_refunds').get() }, { status: 'transferred', transfer_ref: 'tx-1' })
+	// Otro clic: ya está transferida, no se paga otra vez
+	assert.match(await admin({ action: 'refund-pay', id }), /no está aprobada pendiente de transferir/)
+	assert.equal(s.q.transfers.length, 1)
+	// En el registro
+	assert.match(await (await proAdmin(new Request('https://app.terminalp2p.com/admin/pro?view=registro', { headers: { Authorization: `Basic ${btoa('x:panel')}` } }), s.env, s.now())).text(), /Devolución pagada con QvaPay/)
 })

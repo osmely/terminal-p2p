@@ -268,6 +268,33 @@ export async function transferRefund(db: D1, id: string, ref: string | null, now
 	return (await refundRow(db, id))!
 }
 
+// Pagar una devolución aprobada desde la cuenta de la app (QvaPay: POST /transaction/transfer con las credenciales de
+// la app; hace falta «Transferencias internas» en sus permisos avanzados). El monto y a quién salen de la base, nunca
+// del formulario: lo que pagó esa compra, a la cuenta (uuid) que la pagó. La clave de idempotencia es la devolución:
+// aunque se pulse dos veces o se corte la conexión, QvaPay no paga dos veces. Si QvaPay no la hace, sigue aprobada
+export async function payRefund(env: ProEnv, id: string, now: number, fetcher: typeof fetch = fetch) {
+	const db = env.DB
+	const r = await db
+		.prepare('SELECT r.*, c.amount AS paid, c.payer_uuid FROM pro_refunds r JOIN pro_checkouts c ON c.id = r.checkout WHERE r.id = ?')
+		.bind(id)
+		.first<Refund & { paid: number; payer_uuid: string | null }>()
+	if (!r || r.status !== 'approved') throw new ProError(409, 'Esa devolución no está aprobada pendiente de transferir')
+	if (!r.payer_uuid) throw new ProError(409, 'No consta la cuenta de QvaPay que pagó esa compra: hazla a mano y márcala transferida')
+	if (!(r.amount > 0 && r.amount <= r.paid)) throw new ProError(409, 'El monto de la devolución no cuadra con lo que se pagó')
+	if (!env.QVAPAY_APP_ID || !env.QVAPAY_APP_SECRET) throw new ProError(503, 'Faltan las credenciales de la app de QvaPay')
+	const res = await fetcher(`${QVAPAY}/transaction/transfer`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'app-id': env.QVAPAY_APP_ID, 'app-secret': env.QVAPAY_APP_SECRET },
+		body: JSON.stringify({ amount: r.amount, to: r.payer_uuid, description: 'Devolución de Terminal P2P Pro', idempotency_key: `tp-refund-${r.id}` }),
+	})
+	const data = (await res.json().catch(() => ({}))) as { success?: boolean; transaction?: string; error?: string; message?: string; code?: string }
+	if (res.status === 409) throw new ProError(409, 'QvaPay todavía está procesando esa transferencia: vuelve a pulsar en unos segundos (no se paga dos veces)')
+	if (res.status === 403 && /allowed_transfer/i.test(data.error ?? ''))
+		throw new ProError(403, 'La app de QvaPay no tiene activadas las transferencias (Permisos avanzados de API → Transferencias internas). Actívalas o hazla a mano')
+	if (!res.ok || !data.transaction) throw new ProError(502, `QvaPay no hizo la transferencia: ${data.error ?? data.message ?? res.status}. Sigue aprobada: vuelve a intentarlo o hazla a mano`)
+	return transferRefund(db, r.id, data.transaction, now)
+}
+
 // Rechazar: no se toca nada; el motivo lo ve el usuario en «Mi cuenta»
 export async function rejectRefund(db: D1, id: string, note: string, now: number) {
 	if (!note) throw new ProError(400, 'Escribe el motivo del rechazo: lo verá el usuario')
@@ -938,8 +965,9 @@ function refundHtml(r: Refund & { username?: string }, u?: string) {
 			<button name="action" value="refund-approve" onclick="return confirm('¿Aprobar? Se le quitan los días de esa compra. Luego le transfieres ${hUsd(r.amount)} a @${escHtml(r.payee)}.')">Aprobar</button>
 			<button class="ghost" name="action" value="refund-reject">Rechazar</button></form>`
 	else if (r.status === 'approved')
-		act = `<p>Transfiere <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> desde tu cuenta de QvaPay ${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')}</p>
-			<form method="post" class="row">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><input name="ref" placeholder="referencia de la transferencia en QvaPay" style="flex:1 1 240px"><button name="action" value="refund-transfer">Marcar transferida</button></form>`
+		act = `<form method="post" class="row" onsubmit="return confirm('¿Pagar ${hUsd(r.amount)} a @${escHtml(r.payee)} desde la cuenta de la app? Sale al momento y no se puede deshacer.')">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><button name="action" value="refund-pay">Pagar ${hUsd(r.amount)} a @${escHtml(r.payee)} con QvaPay</button><span class="note">a la cuenta que pagó la compra, desde la de la app</span></form>
+			<details class="note" style="margin-top:8px"><summary>¿La transferiste tú a mano?</summary><p>${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')}</p>
+			<form method="post" class="row">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><input name="ref" placeholder="referencia de la transferencia en QvaPay" style="flex:1 1 240px"><button class="ghost" name="action" value="refund-transfer">Marcar transferida</button></form></details>`
 	else if (r.status === 'transferred') act = `<p class="note">Transferida el ${hWhen(r.transferred_at ?? r.decided_at ?? r.requested_at)}${r.transfer_ref ? ` · ref. ${refLink(r.transfer_ref)}` : ''}</p>`
 	else act = `<p class="note">Rechazada el ${hWhen(r.decided_at ?? r.requested_at)}: «${escHtml(r.decision_note ?? '')}»</p>`
 	return `<div class="rf">${head}${reason}${r.decision_note && r.status !== 'rejected' ? `<p class="note">Tu nota: ${escHtml(r.decision_note)}</p>` : ''}${act}</div>`
@@ -1250,7 +1278,7 @@ async function reportsPage(env: ProEnv, notice: string, now: number) {
 }
 
 const AUDIT_NAME: Record<string, string> = {
-	days: 'Días', refund: 'Devolución (directa)', 'refund-approve': 'Devolución aprobada', 'refund-reject': 'Devolución rechazada', 'refund-transfer': 'Devolución transferida', note: 'Nota',
+	days: 'Días', refund: 'Devolución (directa)', 'refund-approve': 'Devolución aprobada', 'refund-reject': 'Devolución rechazada', 'refund-transfer': 'Devolución transferida', 'refund-pay': 'Devolución pagada con QvaPay', note: 'Nota',
 	'access-set': 'Restringir o bloquear', 'access-lift': 'Levantar límite', 'incident-resolve': 'Descartar incidencia', revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
 	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba', 'daily-on': 'Encender tasa del día', 'daily-off': 'Apagar tasa del día', 'daily-test': 'Probar tasa del día',
 }
@@ -1409,17 +1437,22 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 			if (action === 'refund') {
 				const r = await adminRefund(db, String(f.get('checkout') ?? ''), note, now)
 				await tellRefund(env, r, fetcher)
-				notice = `<p class="ok">Devolución aprobada: se le quitaron los días de esa compra. Ahora transfiere <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> desde tu cuenta de QvaPay ${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')} y márcala como transferida.</p>`
+				notice = `<p class="ok">Devolución aprobada: se le quitaron los días de esa compra. Ahora págale <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> con el botón «Pagar con QvaPay» de la devolución (o transfiérelo tú a mano y márcala transferida).</p>`
 			}
 			if (action === 'refund-approve') {
 				const r = await approveRefund(db, String(f.get('id') ?? ''), note, now)
 				await tellRefund(env, r, fetcher)
-				notice = `<p class="ok">Aprobada: se le quitaron los días de esa compra. Ahora transfiere <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> desde tu cuenta de QvaPay ${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')} y márcala como transferida.</p>`
+				notice = `<p class="ok">Aprobada: se le quitaron los días de esa compra. Ahora págale <b>${hUsd(r.amount)}</b> a <b>@${escHtml(r.payee)}</b> con el botón «Pagar con QvaPay» de la devolución (o transfiérelo tú a mano y márcala transferida).</p>`
 			}
 			if (action === 'refund-reject') {
 				await rejectRefund(db, String(f.get('id') ?? ''), note ?? '', now)
 				await tellRefund(env, (await refundRow(db, String(f.get('id') ?? '')))!, fetcher)
 				notice = '<p class="ok">Rechazada. El usuario ve el motivo en «Mi cuenta».</p>'
+			}
+			if (action === 'refund-pay') {
+				const r = await payRefund(env, String(f.get('id') ?? ''), now, fetcher)
+				await tellRefund(env, r, fetcher)
+				notice = `<p class="ok">Devolución pagada: ${hUsd(r.amount)} a <b>@${escHtml(r.payee)}</b> desde la cuenta de la app (transferencia ${escHtml(r.transfer_ref ?? '')}).</p>`
 			}
 			if (action === 'refund-transfer') {
 				const r = await transferRefund(db, String(f.get('id') ?? ''), String(f.get('ref') ?? '').trim().slice(0, 120) || null, now)
