@@ -844,7 +844,7 @@ async function showCreateOffer(preset = null) {
 	}
 	const renderDetails = () => {
 		const coin = $('ofCoin').value
-		const saved = store.get(`details.${coin}`, {})
+		const saved = store.getMine(`details.${coin}`, {})
 		const list = fields[coin] ?? []
 		$('ofRemember').checked = Object.keys(saved).length > 0
 		$('ofDetails').innerHTML = list.length
@@ -1005,8 +1005,8 @@ async function showCreateOffer(preset = null) {
 			try {
 				const r = await api('/offer/create', f)
 				markOrigin(r.offer)
-				if ($('ofRemember').checked) store.set(`details.${f.coin}`, Object.fromEntries(f.details.map((d) => [d.name, d.value])))
-				else store.set(`details.${f.coin}`, {})
+				if ($('ofRemember').checked) store.setMine(`details.${f.coin}`, Object.fromEntries(f.details.map((d) => [d.name, d.value])))
+				else store.setMine(`details.${f.coin}`, {})
 				toast(r.message || 'Oferta publicada')
 				bk.tab = 'offers'
 				await loadTrades()
@@ -1618,7 +1618,7 @@ async function showSwap() {
 		const box = $('swDetailsBox')
 		if (!box) return
 		box.hidden = !bk.acct.connected
-		const saved = store.get(`details.${sw.coin}`, {})
+		const saved = store.getMine(`details.${sw.coin}`, {})
 		const list = fields[sw.coin] ?? []
 		$('swRemember').checked = Object.keys(saved).length > 0
 		$('swDetails').innerHTML = list.length
@@ -1771,8 +1771,8 @@ async function showSwap() {
 		try {
 			const r = await api('/swap', { offer: best.offer, amount: a, minPrice: best.price, details: d })
 			markOrigin(r.offer)
-			if ($('swRemember').checked) store.set(`details.${sw.coin}`, Object.fromEntries(d.map((x) => [x.name, x.value])))
-			else store.set(`details.${sw.coin}`, {})
+			if ($('swRemember').checked) store.setMine(`details.${sw.coin}`, Object.fromEntries(d.map((x) => [x.name, x.value])))
+			else store.setMine(`details.${sw.coin}`, {})
 			toast(r.chatSent ? `Venta en marcha: @${best.user} ya tiene tus datos para pagarte` : 'Venta en marcha. No se pudo enviar el chat: manda tus datos de pago a mano', !r.chatSent)
 			bk.tab = 'active'
 			await loadTrades()

@@ -16,6 +16,29 @@ const store = {
 			localStorage.setItem(k, JSON.stringify(v))
 		} catch {}
 	},
+	// Lo que es de cada cuenta (datos de cobro, la factura en curso): con dos cuentas en el mismo navegador, cada una
+	// ve lo suyo. Sin cuenta conectada no hay nada. Lo guardado antes de separarlo pasa a la primera cuenta que lo lee
+	mineKey(k) {
+		const u = typeof bk !== 'undefined' ? String(bk.acct?.username ?? '').toLowerCase() : ''
+		return u ? `${k}:${u}` : null
+	},
+	getMine(k, d) {
+		const key = this.mineKey(k)
+		if (!key) return d
+		const v = this.get(key, undefined)
+		if (v !== undefined) return v
+		const old = this.get(k, undefined)
+		if (old === undefined) return d
+		this.set(key, old)
+		try {
+			localStorage.removeItem(k)
+		} catch {}
+		return old
+	},
+	setMine(k, v) {
+		const key = this.mineKey(k)
+		if (key) this.set(key, v)
+	},
 }
 
 const state = {

@@ -152,8 +152,8 @@ async function refreshPro() {
 			} catch {}
 			return location.assign(SIM_URL)
 		}
-		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && store.get('pro.renewTold', '') !== new Date().toDateString()) {
-			store.set('pro.renewTold', new Date().toDateString())
+		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && store.getMine('pro.renewTold', '') !== new Date().toDateString()) {
+			store.setMine('pro.renewTold', new Date().toDateString())
 			toast(`Te quedan ${daysText(daysLeft())} de Pro. Añade más desde el botón ★.`)
 		}
 		resumeCheckout()
@@ -232,7 +232,7 @@ function showFreeDays() {
 async function startCheckout(plan) {
 	try {
 		const c = await proFetch('/pro/checkout', { print: pro.print, plan })
-		store.set('pro.checkout', { id: c.id, url: c.url, at: Date.now() })
+		store.setMine('pro.checkout', { id: c.id, url: c.url, at: Date.now() })
 		window.open(c.url, '_blank', 'noopener')
 		showWaiting()
 	} catch (e) {
@@ -241,7 +241,7 @@ async function startCheckout(plan) {
 }
 
 function showWaiting() {
-	const c = store.get('pro.checkout', null)
+	const c = store.getMine('pro.checkout', null)
 	if (!c) return
 	openModal(`<div class="stack pro-box"><h3>Esperando tu pago</h3>
 		<p class="muted">Paga la factura en QvaPay. Cuando QvaPay lo confirme, esto se actualiza solo.</p>
@@ -254,23 +254,23 @@ function showWaiting() {
 function pollCheckout() {
 	if (proPolling) return
 	const tick = async () => {
-		const c = store.get('pro.checkout', null)
+		const c = store.getMine('pro.checkout', null)
 		if (!c || Date.now() - c.at > CHECKOUT_MAX_MS) {
 			proPolling = null
-			store.set('pro.checkout', null)
+			store.setMine('pro.checkout', null)
 			return
 		}
 		try {
 			const r = await proFetch('/pro/checkout/status', { id: c.id, print: pro.print })
 			if (r.status === 'paid') {
 				proPolling = null
-				store.set('pro.checkout', null)
+				store.setMine('pro.checkout', null)
 				applyPro(r)
 				return showWelcome()
 			}
 			if (r.status === 'expired') {
 				proPolling = null
-				store.set('pro.checkout', null)
+				store.setMine('pro.checkout', null)
 				if ($('proWait')) $('proWait').textContent = 'La factura caducó sin pagarse. Puedes pedir otra.'
 				return
 			}
@@ -279,7 +279,7 @@ function pollCheckout() {
 			// los días van igual a la cuenta que lo pagó
 			if (e.status === 404) {
 				proPolling = null
-				store.set('pro.checkout', null)
+				store.setMine('pro.checkout', null)
 				return
 			}
 		}
@@ -304,10 +304,10 @@ function resumeCheckout() {
 		return showPro()
 	}
 	if (back === 'cancel') {
-		store.set('pro.checkout', null)
+		store.setMine('pro.checkout', null)
 		return toast('Pago cancelado: no se cobró nada')
 	}
-	if (store.get('pro.checkout', null)) back === 'ok' && $('modal').hidden ? showWaiting() : pollCheckout()
+	if (store.getMine('pro.checkout', null)) back === 'ok' && $('modal').hidden ? showWaiting() : pollCheckout()
 }
 
 function showWelcome() {
