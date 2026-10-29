@@ -29,12 +29,14 @@ function showAccount(tab = acctTab) {
 function acctSummary() {
 	const a = bk.acct
 	const stat = (label, value, sub = '') => `<div class="peer-stat"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
-	const fee = feeOf(100) ? `${(a.p2pFee * 100).toLocaleString('en-US')} % al comprar` : 'sin comisión'
+	// La comisión sale de un solo sitio: la que manda el terminal (P2P_FEE en src/qvapay/fees.ts); GOLD no la paga
+	const pct = `${((a.p2pFee ?? 0) * 100).toLocaleString('en-US')} %`
+	const fee = feeOf(100) ? `${pct} al comprar` : 'sin comisión'
 	$('acctBody').innerHTML = `<div class="stack">
 		<div class="peer-stats">
 			${stat('Saldo en QvaPay', `${fmtM(a.balance ?? 0)}`, 'USD')}
 			${stat('Verificación', a.kyc ? '✓ KYC' : 'Sin KYC', a.kyc ? 'identidad verificada' : 'QvaPay la pide para el P2P')}
-			${stat('Comisión P2P', a.gold ? 'GOLD' : '0.25 %', fee)}
+			${stat('Comisión P2P', a.gold ? 'GOLD' : pct, fee)}
 		</div>
 		${TPPro.enabled ? `<button class="btn block" id="acctGoPro">${TPPro.active ? `★ Te quedan ${daysText(daysLeft())} de Pro` : TPPro.canTrial ? `★ Probar Pro ${proTrialDays} días gratis` : '★ Terminal P2P Pro'}</button>` : ''}
 		<button class="btn block" id="acctDiag">¿Algo salió mal? Envíanos un diagnóstico</button>
