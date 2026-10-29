@@ -112,7 +112,7 @@ function setup(extra: Partial<ProEnv> = {}) {
 
 // Compra completa: factura, pago en QvaPay y el navegador recoge el resultado
 async function buy(s: ReturnType<typeof setup>, print = P1, plan = 'month', username = 'ana') {
-	const c = await s.post('/pro/checkout', { print, plan })
+	const c = await s.post('/pro/checkout', { print, plan, username })
 	const inv = [...s.q.invoices.keys()].at(-1)!
 	s.q.pay(inv, username)
 	return { checkout: c.body, result: (await s.status(c.body.id, print)).body }
@@ -120,7 +120,7 @@ async function buy(s: ReturnType<typeof setup>, print = P1, plan = 'month', user
 
 test('comprar: factura de QvaPay y quién pagó lo confirma QvaPay', async () => {
 	const s = setup()
-	const c = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	const c = await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
 	assert.equal(c.status, 200)
 	assert.match(c.body.url, /^https:\/\/www\.qvapay\.com\/pay\/inv-1$/)
 	assert.deepEqual(s.q.invoices.get('inv-1')?.amount, 4.99)
@@ -166,25 +166,25 @@ test('renovar suma el periodo', async () => {
 test('con días de Pro de sobra no se compran más hasta que queden 5; una factura pendiente de los mismos días se reutiliza', async () => {
 	const s = setup()
 	// Dos clics en «Mensual»: la misma factura, no dos
-	const a = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
-	assert.deepEqual((await s.post('/pro/checkout', { print: P1, plan: 'month' })).body, a)
+	const a = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).body
+	assert.deepEqual((await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).body, a)
 	assert.equal(s.q.invoices.size, 1)
 	// Otro plan sí es otra factura
-	assert.notEqual((await s.post('/pro/checkout', { print: P1, plan: 'year' })).body.id, a.id)
+	assert.notEqual((await s.post('/pro/checkout', { print: P1, plan: 'year', username: 'ana' })).body.id, a.id)
 	s.q.pay('inv-1', 'ana')
 	assert.equal((await s.status(a.id)).body.status, 'paid')
 	// Ya es Pro con 30 días: no puede pagar otra vez
-	const r = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	const r = await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
 	assert.equal(r.status, 409)
 	assert.match(r.body.error, /cuando te queden 5 o menos/)
 	// En los últimos 5 días, sí
 	s.tick(26 * 86_400_000)
-	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'month' })).status, 200)
+	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).status, 200)
 })
 
 test('no se da por pagada si QvaPay no lo confirma, si paga menos o si el aviso es falso', async () => {
 	const s = setup()
-	const c = await s.post('/pro/checkout', { print: P1, plan: 'year' })
+	const c = await s.post('/pro/checkout', { print: P1, plan: 'year', username: 'ana' })
 	// Un aviso cualquiera no basta: se consulta a QvaPay y sigue pendiente
 	await s.post('/api/pro/webhook', { remote_id: c.body.id, status: 'paid' })
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
@@ -272,9 +272,9 @@ test('devolver una compra quita solo los días de esa compra; el resto y los dis
 
 test('sin credenciales de QvaPay no se puede comprar, y una huella mal formada se rechaza', async () => {
 	const s = setup({ QVAPAY_APP_SECRET: undefined })
-	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'month' })).status, 503)
+	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).status, 503)
 	assert.equal((await s.post('/pro/status', { print: 'token-en-claro' })).status, 400)
-	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'vitalicio' })).status, 400)
+	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'vitalicio', username: 'ana' })).status, 400)
 })
 
 test('huella del token: siempre la misma para el mismo token, distinta entre tokens y sin revelarlo', async () => {
@@ -308,7 +308,7 @@ test('14 días gratis cuando el usuario los activa: nunca solos, una vez por usu
 	assert.match((await s.post('/pro/trial', { print: P3, username: 'eva' })).body.error, /Ya usaste tus 14 días gratis/)
 	// A los 10 días compra 30 días: le quedaban 4 gratis, que se suman
 	s.tick(10 * 86_400_000)
-	const c = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	const c = await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
 	s.q.pay([...s.q.invoices.keys()].at(-1)!, 'ana')
 	const paid = (await s.status(c.body.id)).body
 	assert.equal(paid.plan, 'month')
@@ -331,17 +331,17 @@ test('factura pagada sin que nadie la mire: la confirma la consulta de estado de
 	const { settlePending } = await import('../worker/pro.ts')
 	const s = setup()
 	// Pide la factura, cierra la pestaña y paga desde el móvil: al volver, la consulta de estado la confirma
-	await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
 	s.q.pay('inv-1', 'ana')
 	const st = (await s.post('/pro/status', { print: P1 })).body
 	assert.deepEqual([st.pro, st.username], [true, 'ana'])
 	// Otro dispositivo paga y nadie vuelve: el cron la confirma igual
-	await s.post('/pro/checkout', { print: P2, plan: 'month' })
+	await s.post('/pro/checkout', { print: P2, plan: 'month', username: 'leo' })
 	s.q.pay('inv-2', 'leo')
 	await settlePending(s.env, s.now(), {}, s.q.fetcher)
 	assert.equal(s.db.prepare("SELECT status FROM pro_checkouts WHERE invoice = 'inv-2'").get()?.status, 'paid')
 	// Las facturas de hace más de una hora ya no se consultan
-	await s.post('/pro/checkout', { print: P3, plan: 'month' })
+	await s.post('/pro/checkout', { print: P3, plan: 'month', username: 'eva' })
 	s.tick(61 * 60_000)
 	const before = s.q.calls.length
 	await settlePending(s.env, s.now(), {}, s.q.fetcher)
@@ -351,7 +351,7 @@ test('factura pagada sin que nadie la mire: la confirma la consulta de estado de
 test('si la base falla al sumar los días, el pago no queda como pagado sin ellos: vuelve a pendiente y se activa luego', async () => {
 	const { settlePending } = await import('../worker/pro.ts')
 	const s = setup()
-	await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
 	s.q.pay('inv-1', 'ana')
 	const batch = s.env.DB.batch
 	s.env.DB.batch = async () => {
@@ -368,9 +368,9 @@ test('si la base falla al sumar los días, el pago no queda como pagado sin ello
 
 test('pide una factura, luego otra, y paga la primera: la pantalla que espera la segunda también se entera', async () => {
 	const s = setup()
-	const first = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	const first = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).body
 	s.tick(60_000)
-	const second = (await s.post('/pro/checkout', { print: P1, plan: 'year' })).body
+	const second = (await s.post('/pro/checkout', { print: P1, plan: 'year', username: 'ana' })).body
 	s.tick(60_000)
 	s.q.pay('inv-1', 'ana')
 	const r = (await s.status(second.id)).body
@@ -378,13 +378,13 @@ test('pide una factura, luego otra, y paga la primera: la pantalla que espera la
 	assert.equal((await s.status(first.id)).body.status, 'paid')
 	// Al renovar, el pago anterior (de antes de pedir esta) no cuenta como pago de esta
 	s.tick(26 * 86_400_000)
-	const renewal = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	const renewal = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).body
 	assert.equal((await s.status(renewal.id)).body.status, 'pending')
 })
 
 test('el estado de una factura solo se lo da a quien la pidió', async () => {
 	const s = setup()
-	const c = (await s.post('/pro/checkout', { print: P1, plan: 'month' })).body
+	const c = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).body
 	s.q.pay('inv-1', 'ana')
 	assert.equal((await s.status(c.id, P2)).status, 404)
 	assert.equal((await s.status(c.id)).body.status, 'paid')
@@ -397,8 +397,8 @@ test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobab
 	// @leo la pide en el terminal y la paga otra cuenta de QvaPay (@pepe)
 	await s.post('/pro/checkout', { print: P2, plan: 'month', username: 'leo' })
 	s.q.pay('inv-1', 'pepe')
-	// Otra se pide desde un dispositivo sin cuenta conocida y queda sin confirmar (nadie la mira y pasa más de una hora)
-	await s.post('/pro/checkout', { print: P1, plan: 'year' })
+	// @ana pide otra y no la paga (nadie la mira y pasa más de una hora)
+	await s.post('/pro/checkout', { print: P1, plan: 'year', username: 'ana' })
 	s.tick(2 * 60 * 60_000)
 	const panel = (fields?: Record<string, string>, query = '') =>
 		proAdmin(
@@ -410,7 +410,7 @@ test('panel: quién pagó, desde dónde se pidió, facturas sin pagar (comprobab
 	let html = await panel(undefined, '?view=pagos')
 	assert.match(html, /Facturas sin pagar/)
 	assert.match(html, /Terminal · @leo/)
-	assert.match(html, /Terminal · <span/)
+	assert.match(html, /Terminal · @ana/)
 	assert.match(html, /caducada/)
 	// Comprobar a mano: QvaPay la da por pagada y se activa
 	const id = (s.db.prepare("SELECT id FROM pro_checkouts WHERE invoice = 'inv-1'").get() as { id: string }).id
@@ -523,7 +523,7 @@ test('topes contra abusos: días gratis por IP y día y facturas pendientes en t
 	// Con demasiadas facturas pendientes en la última hora, no se crean más
 	const ins = s.db.prepare("INSERT INTO pro_checkouts (id, print, plan, amount, invoice, status, created_at) VALUES (?, ?, 'month', 4.99, ?, 'pending', ?)")
 	for (let i = 0; i < PENDING_MAX; i++) ins.run(`pro-x${i}`, 'x', `inv-x${i}`, s.now())
-	const r = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	const r = await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
 	assert.equal(r.status, 503)
 	// Las rutas de códigos ya no existen
 	assert.deepEqual([(await s.post('/pro/claim', { print: P1, code: '123 456' })).status, (await s.post('/pro/pair', { print: P1 })).status], [404, 404])
@@ -639,8 +639,9 @@ test('devolución en pasos: la pide el usuario desde «Mi cuenta», la apruebas 
 	assert.match(await admin({ action: 'refund-approve', id }), /no está pendiente de aprobar/)
 	assert.match(await admin({ action: 'refund-transfer', id, ref: 'TX-123' }), /transferida/)
 	assert.deepEqual({ ...s.db.prepare('SELECT status, transfer_ref FROM pro_refunds').get() }, { status: 'transferred', transfer_ref: 'TX-123' })
+	// El usuario ve cuándo se le devolvió y la referencia de la transferencia
 	acc = (await s.post('/pro/account', { print: P1, username: 'ana' })).body
-	assert.equal(acc.purchases[0].refund.status, 'transferred')
+	assert.deepEqual(acc.purchases[0].refund, { status: 'transferred', note: null, at: T0, transferredAt: T0, ref: 'TX-123' })
 	assert.match(await admin(), /Nada pendiente/)
 })
 
@@ -883,11 +884,11 @@ test('importe con comisión: se activa; importe que no cuadra: el repaso lo deja
 	const admin = (fields: Record<string, string>) =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now(), s.q.fetcher).then((r) => r.text())
 	// QvaPay informa el importe tras una comisión pequeña: cuenta como pagada
-	const a = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	const a = await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
 	s.q.pay('inv-1', 'ana', 4.95)
 	assert.equal((await s.status(a.body.id)).body.status, 'paid')
 	// Pagada en QvaPay pero con un importe que no cuadra: no se activa sola, y el repaso no se la salta
-	const b = await s.post('/pro/checkout', { print: P2, plan: 'year' })
+	const b = await s.post('/pro/checkout', { print: P2, plan: 'year', username: 'leo' })
 	s.q.pay('inv-2', 'leo', 5)
 	assert.equal((await s.status(b.body.id, P2)).body.status, 'pending')
 	const r = await reconcile(s.env, s.now(), s.q.fetcher)
@@ -964,4 +965,98 @@ test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto e
 	// Al día siguiente se limpia y vuelve a avisar
 	s.tick(25 * 3_600_000)
 	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit })).body.sent, true)
+})
+
+// El panel con la clave: cada acción como un formulario del propio panel (sigue la redirección)
+const panelOf = (s: ReturnType<typeof setup>) => (fields?: Record<string, string>, query = '') =>
+	proAdmin(
+		new Request(`https://app.terminalp2p.com/admin/pro${query}`, { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+		s.env,
+		s.now(),
+		s.q.fetcher,
+	).then((r) => r.text())
+
+test('pedir factura exige la cuenta de QvaPay confirmada y tiene tope por cuenta: un abuso solo frena a quien lo hace', async () => {
+	const { PENDING_PER_ACCOUNT } = await import('../worker/pro.ts')
+	const s = setup()
+	// Con una huella inventada y sin la cookie del relé: ni factura ni llamada a QvaPay
+	const r = await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	assert.equal(r.status, 403)
+	assert.match(r.body.error, /Conecta tu cuenta de QvaPay/)
+	assert.equal(s.q.invoices.size, 0)
+	// La misma cuenta desde muchos dispositivos: hasta PENDING_PER_ACCOUNT facturas sin pagar en la hora
+	const prints = Array.from({ length: PENDING_PER_ACCOUNT + 1 }, (_, i) => i.toString(16).padStart(64, '7'))
+	const got = []
+	for (const print of prints) got.push((await s.post('/pro/checkout', { print, plan: 'month', username: 'ana' })).status)
+	assert.deepEqual(got, [...Array(PENDING_PER_ACCOUNT).fill(200), 429])
+	// Otra cuenta compra sin problema
+	assert.equal((await s.post('/pro/checkout', { print: P2, plan: 'month', username: 'leo' })).status, 200)
+	// Pasada la hora, @ana puede volver a pedir
+	s.tick(61 * 60_000)
+	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).status, 200)
+})
+
+test('pagar no levanta una suspensión: no puede pedir factura, y si paga una de antes sigue suspendida y te avisa', async () => {
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100' })
+	s.db.prepare("INSERT INTO pro_telegram (license, chat_id, linked_at) VALUES ('qp:ana', 555, 0)").run()
+	const panel = panelOf(s)
+	const before = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).body
+	await buy(s, P2, 'week', 'leo')
+	// @ana tiene cuenta (con días gratis) y la suspendes
+	await s.trial(P3, 'ana')
+	await panel({ action: 'revoke', uuid: 'qp:ana' })
+	const r = await s.post('/pro/checkout', { print: P1, plan: 'year', username: 'ana' })
+	assert.equal(r.status, 403)
+	assert.match(r.body.error, /suspendida/)
+	// Paga la factura que pidió antes: los días se suman, pero no es Pro y no se le dice que lo es
+	s.q.pay('inv-1', 'ana')
+	await s.status(before.id)
+	const l = s.db.prepare("SELECT revoked, expires_at FROM pro_licenses WHERE uuid = 'qp:ana'").get() as { revoked: number; expires_at: number }
+	assert.deepEqual([l.revoked, l.expires_at], [1, T0 + 44 * 86_400_000])
+	assert.equal((await s.post('/pro/status', { print: P1, username: 'ana' })).body.pro, false)
+	assert.match(s.q.telegram.at(-1)!.text, /Pagó una cuenta suspendida[\s\S]*@ana compró <b>30 días<\/b>[\s\S]*sigue suspendida/)
+	assert.equal(s.q.telegram.filter((m) => String(m.chat_id) === '555').length, 0)
+	// Reactivada, vuelve a ser Pro con todos sus días
+	await panel({ action: 'restore', uuid: 'qp:ana' })
+	assert.equal((await s.post('/pro/status', { print: P1, username: 'ana' })).body.expiresAt, T0 + 44 * 86_400_000)
+})
+
+test('regalar o quitar días avisa al usuario por Telegram (si lo marcas), con tu motivo', async () => {
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100' })
+	s.db.prepare("INSERT INTO pro_telegram (license, chat_id, linked_at) VALUES ('qp:ana', 555, 0)").run()
+	const toUser = () => s.q.telegram.filter((m) => String(m.chat_id) === '555')
+	const panel = panelOf(s)
+	assert.match(await panel({ action: 'days', username: 'ana', days: '7', note: 'compensación por la caída del lunes', tell: '1' }), /Le avisamos por Telegram/)
+	assert.match(toUser()[0].text, /Te regalamos 7 días de Pro[\s\S]*Motivo: «compensación por la caída del lunes»/)
+	assert.match(await panel({ action: 'days', username: 'ana', days: '-2', note: 'se dieron de más', tell: '1' }), /2 días menos/)
+	assert.match(toUser()[1].text, /Ajuste en tus días de Pro[\s\S]*se quitaron 2 días/)
+	// Sin marcar, no se le escribe
+	await panel({ action: 'days', username: 'ana', days: '1', note: 'corrección' })
+	assert.equal(toUser().length, 2)
+})
+
+test('devoluciones: una rechazada se puede devolver luego desde el panel, y aprobar nunca deja una «aprobada» sin quitar los días', async () => {
+	const s = setup()
+	const panel = panelOf(s)
+	const { checkout } = await buy(s, P1, 'month', 'ana')
+	await s.post('/pro/refund', { print: P1, username: 'ana', checkout: checkout.id, reason: 'no la uso' })
+	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
+	await panel({ action: 'refund-reject', id, note: 'ya la usó' })
+	// Cambias de idea: la misma devolución pasa a aprobada y se le quitan los días
+	assert.match(await panel({ action: 'refund', checkout: checkout.id, note: 'al final sí' }), /Devolución aprobada/)
+	assert.deepEqual({ ...s.db.prepare('SELECT status, requested_by, decision_note FROM pro_refunds').get() }, { status: 'approved', requested_by: 'admin', decision_note: 'al final sí' })
+	assert.equal((s.db.prepare("SELECT COUNT(*) AS n FROM pro_days WHERE kind = 'refund'").get() as { n: number }).n, 1)
+	// Una pedida cuya compra ya no se puede devolver sigue pedida, no aprobada sin quitar nada
+	const { approveRefund, requestRefund } = await import('../worker/pro.ts')
+	const b = await buy(s, P2, 'month', 'leo')
+	const rid = await requestRefund(s.env.DB, 'qp:leo', b.checkout.id, 'no', 'user', s.now())
+	s.db.prepare('UPDATE pro_checkouts SET refunded_at = 1 WHERE id = ?').run(b.checkout.id)
+	await assert.rejects(approveRefund(s.env.DB, rid, null, s.now()), /ya se devolvió/)
+	assert.equal((s.db.prepare('SELECT status FROM pro_refunds WHERE id = ?').get(rid) as { status: string }).status, 'requested')
+})
+
+test('los precios salen del servidor: el terminal los recibe con el estado de Pro', async () => {
+	const s = setup()
+	const st = (await s.post('/pro/status', { print: P1, username: 'ana' })).body
+	assert.deepEqual(st.plans.map((p: { id: string; usd: number; days: number }) => [p.id, p.usd, p.days]), [['week', 1.99, 7], ['month', 4.99, 30], ['quarter', 12.99, 90], ['year', 39.99, 365]])
 })

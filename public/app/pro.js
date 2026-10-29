@@ -14,13 +14,9 @@ const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname)
 		? `${location.protocol}//sim.localhost:5180`
 		: 'https://sim.terminalp2p.com'
 
-// Lo que se compra son días de Pro: se suman a los que te queden
-const PRO_PLANS = [
-	['week', '7 días', '1.99 USD', '0.28 USD al día'],
-	['month', '30 días', '4.99 USD', '0.17 USD al día'],
-	['quarter', '90 días', '12.99 USD', '0.14 USD al día'],
-	['year', '365 días', '39.99 USD', '0.11 USD al día'],
-]
+// Lo que se compra son días de Pro: se suman a los que te queden. Los paquetes y sus precios los da el servidor
+let proPlans = []
+const usdText = (n) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
 const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'si tu precio ya cruza el libro, toma lo que hay a mejor precio y publica solo el resto, como en un exchange'],
 	['⚡', 'Libro en tiempo real', 'cada oferta nueva te llega al instante'],
@@ -48,6 +44,25 @@ const wantsSim = () => {
 	}
 }
 let simConnectShown = false
+// La web y el simulador mandan aquí para Pro (?pro=open): sin cuenta conectada se pide conectarla y, en cuanto lo
+// está, se abre la ventana de Pro. Se recuerda un rato en esta pestaña por si tardas en crear el token
+const PRO_WANT_MS = 30 * 60_000
+if (new URLSearchParams(location.search).get('pro') === 'open') {
+	const q = new URLSearchParams(location.search)
+	q.delete('pro')
+	history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
+	try {
+		sessionStorage.setItem('tp.wantPro', String(Date.now()))
+	} catch {}
+}
+const wantsPro = () => {
+	try {
+		return Date.now() - Number(sessionStorage.getItem('tp.wantPro') ?? 0) < PRO_WANT_MS
+	} catch {
+		return false
+	}
+}
+let proConnectShown = false
 const CHECKOUT_POLL_MS = 4000
 const CHECKOUT_MAX_MS = 60 * 60_000
 const RENEW_SOON_MS = 5 * 86_400_000
@@ -56,7 +71,7 @@ let proPolling = null
 async function proFetch(path, body) {
 	const r = await fetch(path, body === undefined ? { cache: 'no-store' } : { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 	const d = await r.json().catch(() => ({}))
-	if (!r.ok) throw new Error(d.error || 'Algo falló. Inténtalo de nuevo.')
+	if (!r.ok) throw Object.assign(new Error(d.error || 'Algo falló. Inténtalo de nuevo.'), { status: r.status })
 	return d
 }
 const daysLeft = () => Math.max(0, Math.ceil((pro.expiresAt - Date.now()) / 86_400_000))
@@ -64,8 +79,10 @@ const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
 const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
 
 function applyPro(s) {
-	Object.assign(pro, { enabled: s.enabled === true, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
-	
+	// Bloqueada desde el panel: Pro ni se ofrece
+	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
+	if (Array.isArray(s.plans)) proPlans = s.plans
+
 	if (pro.active && !pro.loaded) {
 		pro.loaded = true
 		const s2 = document.createElement('script')
@@ -92,6 +109,9 @@ async function refreshPro() {
 		if (wantsSim() && !simConnectShown && typeof showConnect === 'function') {
 			simConnectShown = true
 			showConnect()
+		} else if (wantsPro() && !proConnectShown && typeof showConnect === 'function') {
+			proConnectShown = true
+			showConnect('Conecta tu cuenta de QvaPay para probar Pro')
 		}
 		return applyPro({ pro: false })
 	}
@@ -145,7 +165,7 @@ const canRenew = () => !pro.active || pro.plan === 'trial' || pro.expiresAt - Da
 function showPro() {
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para usar Pro', true)
 	const feats = PRO_FEATURES.map(([i, t, d]) => `<li><span class="pro-ic">${i}</span><div><b>${t}</b><p class="muted">${d}</p></div></li>`).join('')
-	const plans = PRO_PLANS.map(([id, name, price, per]) => `<button class="pro-plan" data-plan="${id}"><b>${name}</b><span class="mono">${price}</span><small>${per}</small></button>`).join('')
+	const plans = proPlans.map((p) => `<button class="pro-plan" data-plan="${esc(p.id)}"><b>${esc(p.name)}</b><span class="mono">${usdText(p.usd)}</span><small>${usdText(p.usd / p.days)} al día</small></button>`).join('')
 	const refund = `Si no te convence, te devolvemos el dinero en los 7 días siguientes a tu primera compra: escríbenos a <a class="link" href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.`
 	openModal(
 		pro.active
@@ -238,7 +258,15 @@ function pollCheckout() {
 				if ($('proWait')) $('proWait').textContent = 'La factura caducó sin pagarse. Puedes pedir otra.'
 				return
 			}
-		} catch {}
+		} catch (e) {
+			// Ese pago no existe o es de otro token (cambiaste de cuenta): se deja de preguntar. Si llegara a pagarse,
+			// los días van igual a la cuenta que lo pagó
+			if (e.status === 404) {
+				proPolling = null
+				store.set('pro.checkout', null)
+				return
+			}
+		}
 		proPolling = setTimeout(tick, CHECKOUT_POLL_MS)
 	}
 	proPolling = setTimeout(tick, 0)
@@ -252,8 +280,13 @@ function resumeCheckout() {
 		history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
 	}
 	if (!pro.enabled) return
-	// El simulador manda aquí para hacerse Pro
-	if (back === 'open') return showPro()
+	// Venías de la web o del simulador para hacerte Pro
+	if (wantsPro()) {
+		try {
+			sessionStorage.removeItem('tp.wantPro')
+		} catch {}
+		return showPro()
+	}
 	if (back === 'cancel') {
 		store.set('pro.checkout', null)
 		return toast('Pago cancelado: no se cobró nada')
@@ -274,3 +307,5 @@ document.addEventListener('click', (e) => e.target.closest('#radarBtn') && (pro.
 // nota sin recargar (y la licencia firmada de un día se renueva sola)
 setInterval(() => !document.hidden && bk.acct.connected && refreshPro(), 5 * 60_000)
 document.addEventListener('visibilitychange', () => !document.hidden && bk.acct.connected && refreshPro())
+// La cuenta ya se leyó antes de cargar este archivo (pasa sin token): lo que loadAccount no pudo llamar
+if (bk.acctReady) refreshPro()

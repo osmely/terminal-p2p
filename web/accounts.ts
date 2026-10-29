@@ -7,6 +7,8 @@ import { QvaPayClient, QvaPayError } from '../src/qvapay/client.ts'
 
 export const TOKEN_KEY = 'tp.token'
 const SID = 'browser'
+// Bloqueada en Terminal P2P: así de seguido se vuelve a probar (al levantarlo, entra sola)
+export const BLOCKED_RETRY_MS = 60_000
 
 export interface TokenStorage {
 	session: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
@@ -20,10 +22,14 @@ export class BrowserAccounts implements AccountStore {
 	// El token de la cuenta en memoria: si en el almacenamiento ya hay otro (o ninguno), se desconectó o cambió en otra pestaña
 	private token: string | null = null
 	private loading: Promise<Account | null> | null = null
+	// El token que el relé dio por bloqueado y cuándo: el token se queda guardado y un rato no se vuelve a preguntar
+	private block: { token: string; at: number; err: QvaPayError } | null = null
+	private readonly now: () => number
 
-	constructor(opts: { storage: TokenStorage; baseUrl: string }) {
+	constructor(opts: { storage: TokenStorage; baseUrl: string; now?: () => number }) {
 		this.storage = opts.storage
 		this.baseUrl = opts.baseUrl
+		this.now = opts.now ?? Date.now
 	}
 
 	newSid() {
@@ -35,6 +41,7 @@ export class BrowserAccounts implements AccountStore {
 		const client = new QvaPayClient({ token, dryRun: false, baseUrl: this.baseUrl })
 		const me = await client.me()
 		this.clear()
+		this.block = null
 		safe(() => (opts.remember ? this.storage.local : this.storage.session).setItem(TOKEN_KEY, token))
 		this.acc = { sid: SID, me, client, print: await tokenPrint(token) }
 		// Sin almacenamiento (bloqueado, modo privado) el token vive solo en memoria y no hay otra pestaña que mirar
@@ -45,6 +52,8 @@ export class BrowserAccounts implements AccountStore {
 	async get(): Promise<Account | null> {
 		if (this.acc && (this.token === null || this.stored() === this.token)) return this.acc
 		this.acc = null
+		const b = this.block
+		if (b && b.token === this.stored() && this.now() - b.at < BLOCKED_RETRY_MS) throw b.err
 		// Varias llamadas a la vez comparten la misma carga
 		this.loading ??= this.load().finally(() => (this.loading = null))
 		return this.loading
@@ -58,7 +67,16 @@ export class BrowserAccounts implements AccountStore {
 	async disconnect() {
 		this.acc = null
 		this.token = null
+		this.block = null
 		this.clear()
+	}
+
+	// El relé dijo que esta cuenta está bloqueada: se olvida en memoria (el token sigue guardado)
+	blocked(_sid: string | undefined, err: QvaPayError) {
+		const token = this.token ?? this.stored()
+		this.acc = null
+		this.token = null
+		if (token) this.block = { token, at: this.now(), err }
 	}
 
 	private stored() {
@@ -76,6 +94,7 @@ export class BrowserAccounts implements AccountStore {
 		} catch (err) {
 			// Token revocado o caducado: se borra de este navegador
 			if (err instanceof QvaPayError && err.status === 401) this.clear()
+			if (err instanceof QvaPayError && err.code === 'TP_ACCOUNT_BLOCKED') this.block = { token, at: this.now(), err }
 			throw err
 		}
 	}

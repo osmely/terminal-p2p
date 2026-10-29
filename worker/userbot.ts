@@ -95,6 +95,15 @@ export const tellRefund = (env: BotEnv, r: { license: string; amount: number; pa
 	return tellUser(env, r.license, text, undefined, fetcher)
 }
 
+// Días que le das o le quitas desde el panel (un regalo, una compensación, una corrección), con tu motivo
+export function tellDays(env: BotEnv, license: string, username: string, days: number, note: string, until: number, fetcher: typeof fetch = fetch) {
+	const text =
+		days > 0
+			? `🎁 <b>Te regalamos ${daysText(days)} de Pro</b>\n\n@${tgEsc(username)}, ya los tienes en tu cuenta.\nMotivo: «${tgEsc(note)}»\n\nTienes Pro hasta el <b>${day(until)}</b>.`
+			: `<b>Ajuste en tus días de Pro</b>\n\n@${tgEsc(username)}, se quitaron ${daysText(-days)} de tu cuenta.\nMotivo: «${tgEsc(note)}»\n\nTienes Pro hasta el <b>${day(until)}</b>.`
+	return tellUser(env, license, text, days > 0 ? openApp(env) : undefined, fetcher)
+}
+
 // Cada día (a media mañana en Cuba): a quien le quedan 3 días o menos, y a quien se le acabaron ayer u hoy. Uno
 // por vencimiento: si renueva, el siguiente vencimiento vuelve a avisar
 export async function expiryReminders(env: BotEnv, now: number, fetcher: typeof fetch = fetch) {

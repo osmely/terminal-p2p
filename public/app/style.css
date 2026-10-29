@@ -173,6 +173,7 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .acct-list li { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); }
 .acct-refund { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .acct-refund:empty, .acct-ask:empty { display: none; }
+.acct-ref { word-break: break-all; user-select: all; }
 .acct-moves li { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: baseline; font-size: 13px; padding: 6px 2px; border-bottom: 1px solid var(--line); }
 .acct-moves b.bid { color: var(--bid); }
 .acct-moves b.ask { color: var(--ask); }

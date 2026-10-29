@@ -24,7 +24,11 @@ async function api(path, body) {
 	const opts = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Broker': '1' }, body: JSON.stringify(body) }
 	const r = await TPApi.fetch(`/api/broker${path}`, opts)
 	const data = await r.json().catch(() => ({}))
-	if (!r.ok) throw Object.assign(new Error(data.error || `Error ${r.status}`), { status: r.status })
+	if (!r.ok) {
+		// Bloqueada en Terminal P2P con el terminal abierto: se relee la cuenta, que lo dice y la desconecta
+		if (data.code === 'TP_ACCOUNT_BLOCKED' && path !== '/me') loadAccount()
+		throw Object.assign(new Error(data.error || `Error ${r.status}`), { status: r.status, code: data.code })
+	}
 	return data
 }
 
@@ -158,11 +162,14 @@ async function loadAccount() {
 		bk.acct = { connected: false, dryRun: true }
 	}
 	renderAccount()
+	if (bk.acct.blocked) showBlocked(bk.acct.blocked)
 	if (bk.acct.connected) {
 		loadTrades()
 		// Contador anónimo de cuentas conectadas por día (hit.js): sin usuario ni nada que lo identifique
 		window.TPHit?.connected()
 	} else renderTrades()
+	// Sin token esto acaba antes de que cargue pro.js: entonces es pro.js quien llama a refreshPro al cargar
+	bk.acctReady = true
 	if (typeof refreshPro === 'function') refreshPro()
 }
 
@@ -216,9 +223,21 @@ function renderAccount() {
 	})
 }
 
-function showConnect() {
+// Bloqueada desde el panel de Terminal P2P: se dice una vez por pestaña (el token sigue guardado; al levantarlo, entra sola)
+let blockedShown = false
+function showBlocked(msg) {
+	if (blockedShown) return
+	blockedShown = true
+	openModal(`<div class="stack"><h3>Cuenta bloqueada en Terminal P2P</h3>
+		<p class="muted">${esc(msg)}</p>
+		<button class="btn primary block" id="blockedOk">Entendido</button></div>`)
+	$('blockedOk').onclick = closeModal
+}
+
+// title: por qué se pide (p. ej. al venir de la web a probar Pro)
+function showConnect(title = 'Conectar tu cuenta de QvaPay') {
 	openModal(`<div class="stack">
-		<h3>Conectar tu cuenta de QvaPay</h3>
+		<h3>${esc(title)}</h3>
 		<p class="muted">Operas con tu propia cuenta: el dinero sigue en el escrow de QvaPay, nunca pasa por aquí.</p>
 		<p class="ref-note">¿Aún no tienes cuenta? <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crea una en QvaPay</a> <small>(usuario referido)</small></p>
 		<div class="notice">

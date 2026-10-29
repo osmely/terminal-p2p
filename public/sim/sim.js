@@ -810,6 +810,11 @@ async function loadSession() {
 	S.markets = Object.fromEntries(cfg.markets.map((m) => [m.symbol, m]))
 	S.user = me.player
 	S.pro = me.pro
+	// Bloqueada desde el panel de Terminal P2P: se dice una vez, en vez de pedirle que entre
+	if (me.blocked && !S.blockedTold) {
+		S.blockedTold = true
+		toast(me.blocked, 'bad')
+	}
 	if (!S.markets[S.symbol]) return selectSymbol('BTCUSDT')
 	render()
 }

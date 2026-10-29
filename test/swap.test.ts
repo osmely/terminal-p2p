@@ -323,3 +323,15 @@ test('radar vendiendo: pide tus datos, nunca más que tu saldo y se los manda al
 	assert.match(fake.calls[1], /^chat:b1:Hola\. Vendo 50 USD[\s\S]*Tarjeta: 9200 1111/)
 	noCancels(fake.calls)
 })
+
+test('radar: con la cuenta restringida en el terminal, la toma falla con su código para que el radar se apague', async () => {
+	const { QvaPayError } = await import('../src/qvapay/client.ts')
+	const { fake, post } = await radarSetup()
+	const msg = 'Tu cuenta tiene limitado el uso de Terminal P2P: desde aquí no puedes publicar, tomar ni editar ofertas.'
+	;(fake.client as unknown as { applyOffer: () => Promise<never> }).applyOffer = async () => {
+		throw new QvaPayError(403, msg, 'TP_ACCOUNT_RESTRICTED', { error: msg, code: 'TP_ACCOUNT_RESTRICTED' })
+	}
+	const r = (await post({ offer: 's2', amount: 50, side: 'buy', coin: 'BANK_CUP', price: 1050 })).body
+	assert.equal(r.ok, false)
+	assert.deepEqual([r.step.status, r.step.code, r.step.error], ['failed', 'TP_ACCOUNT_RESTRICTED', msg])
+})

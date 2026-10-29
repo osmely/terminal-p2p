@@ -82,3 +82,35 @@ test('sin almacenamiento (bloqueado) la cuenta sigue conectada en memoria', asyn
 	await acc.connect('browser', 'tok')
 	assert.ok(await acc.get())
 })
+
+test('cuenta bloqueada en Terminal P2P: /me lo dice, el token se queda guardado, un minuto sin preguntar y al levantarlo vuelve sola', async (t) => {
+	const real = globalThis.fetch
+	let blocked = false
+	let calls = 0
+	globalThis.fetch = (async () => {
+		calls++
+		if (blocked) return new Response(JSON.stringify({ error: 'Tu cuenta tiene bloqueado el uso de Terminal P2P.', code: 'TP_ACCOUNT_BLOCKED' }), { status: 403 })
+		return new Response(JSON.stringify({ uuid: 'u1', username: 'pepe', balance: 1, kyc: true, golden_check: false, p2p_enabled: true }))
+	}) as typeof fetch
+	t.after(() => (globalThis.fetch = real))
+	let now = 1_000_000
+	const local = memStorage()
+	const acc = new BrowserAccounts({ storage: { session: memStorage(), local }, baseUrl: 'https://x/qp', now: () => now })
+	await acc.connect('browser', 'tok', { remember: true })
+	const broker = new Broker({ accounts: acc, market: { wake() {} }, dryRun: false })
+	const me = async () => (await broker.handle(new Request('https://terminalp2p.com/api/broker/me')))!.json()
+	assert.equal((await me()).connected, true)
+	// Con el terminal abierto: la siguiente revisión de la cuenta ya lo sabe
+	blocked = true
+	assert.deepEqual(await me(), { connected: false, dryRun: false, blocked: 'Tu cuenta tiene bloqueado el uso de Terminal P2P.' })
+	assert.equal(local.m.get('tp.token'), 'tok')
+	// Durante un minuto no se vuelve a preguntar
+	const before = calls
+	assert.equal((await me()).blocked, 'Tu cuenta tiene bloqueado el uso de Terminal P2P.')
+	assert.equal(await acc.reader(), null)
+	assert.equal(calls, before)
+	// Levantado: pasado el minuto vuelve a entrar con el mismo token
+	blocked = false
+	now += 61_000
+	assert.equal((await me()).connected, true)
+})

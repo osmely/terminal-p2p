@@ -15,6 +15,7 @@ import { adminPage, askKey, pageHead, panel } from './admin.ts'
 import { cubaDate } from './informal.ts'
 import { authorized } from './metrics.ts'
 import { readSession, readWho, sessionCookie, sessionToken } from './session.ts'
+import { accessOf, BLOCKED_MSG } from './blocks.ts'
 import { proEnabled } from './flags.ts'
 import type { D1 } from './rates.ts'
 
@@ -369,6 +370,9 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		const now = Date.now()
 		const print = await readSession(req.headers.get('cookie'), env.PRO_KEY, now)
 		const who = print ? await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now) : null
+		// Una cuenta bloqueada en el panel no juega (por su cuenta confirmada o por una huella ya vista de ella)
+		if (print && (await accessOf(env.DB, { username: who?.username, print }, now))?.level === 'blocked')
+			return route === 'GET /api/me' ? json(200, { player: null, pro: null, blocked: BLOCKED_MSG }) : json(403, { error: BLOCKED_MSG })
 		const player = print ? await playerOf(env.DB, print, now, who?.username) : null
 		
 		if (route === 'GET /api/me') {

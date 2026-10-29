@@ -32,7 +32,12 @@ export interface AccountStore {
 	connect(sid: string, token: string, opts?: { remember?: boolean }): Promise<Account>
 	disconnect(sid: string): Promise<void>
 	newSid(): string
+	// Bloqueada en Terminal P2P: se olvida la cuenta en memoria (el token se queda guardado) y un rato no se pregunta
+	blocked?(sid: string | undefined, err: QvaPayError): void
 }
+
+// Bloqueada desde el panel de Terminal P2P (el relé responde 403 con este código)
+const isBlocked = (err: unknown): err is QvaPayError => err instanceof QvaPayError && err.code === 'TP_ACCOUNT_BLOCKED'
 
 const log = logger('broker')
 
@@ -67,7 +72,8 @@ interface Seen {
 
 // Una toma de la orden inteligente o del radar. pay: comprando, a quién pagar, cuánto y hasta cuándo
 type Pay = { details: { name: string; value: string }[]; expiresAt: string | null; coinAmount: number }
-type TakeStep = { offer: string; user: string; status: 'pending' | 'taken' | 'skipped' | 'failed' | 'stuck'; order: string | null; error?: string; pay?: Pay }
+// code: el de QvaPay o el nuestro (p. ej. TP_ACCOUNT_RESTRICTED: tu cuenta tiene limitado el terminal)
+type TakeStep = { offer: string; user: string; status: 'pending' | 'taken' | 'skipped' | 'failed' | 'stuck'; order: string | null; error?: string; code?: string; pay?: Pay }
 
 interface Ctx {
 	req: Request
@@ -154,16 +160,36 @@ export class Broker {
 		} catch (err) {
 			const msg = friendly(err)
 			if (!(err instanceof QvaPayError)) log.error(`${route}: ${(err as Error).message}`)
-			return json(err instanceof QvaPayError && err.status < 500 ? 400 : 500, { error: msg })
+			if (isBlocked(err)) this.accounts.blocked?.(ctx.sid, err)
+			// Los códigos nuestros (TP_…) llegan al terminal para que pueda reaccionar (p. ej. avisar del bloqueo)
+			const code = err instanceof QvaPayError && err.code?.startsWith('TP_') ? err.code : undefined
+			return json(err instanceof QvaPayError && err.status < 500 ? 400 : 500, { error: msg, ...(code ? { code } : {}) })
 		}
 	}
 
 	// ── Cuenta ──────────────────────────────────────────────────────────
 
 	private async me({ sid }: Ctx) {
-		const acc = await this.accounts.get(sid).catch(() => null)
+		// Bloqueada en Terminal P2P: sale desconectada, con el motivo para que el terminal lo diga
+		const off = (err: QvaPayError) => {
+			this.accounts.blocked?.(sid, err)
+			return json(200, { connected: false, dryRun: this.dryRun, blocked: friendly(err) })
+		}
+		let acc: Account | null
+		try {
+			acc = await this.accounts.get(sid)
+		} catch (err) {
+			if (isBlocked(err)) return off(err)
+			acc = null
+		}
 		if (!acc) return json(200, { connected: false, dryRun: this.dryRun })
-		const me = await acc.client.me().catch(() => acc.me)
+		let me: Account['me']
+		try {
+			me = await acc.client.me()
+		} catch (err) {
+			if (isBlocked(err)) return off(err)
+			me = acc.me
+		}
 		acc.me = me
 		// Cambian poco: se piden como mucho cada STATS_MS (el saldo, en cambio, en cada /me)
 		if (!acc.stats || Date.now() - acc.stats.at > STATS_MS) {
@@ -428,11 +454,13 @@ export class Broker {
 		const flexible = o!.offer_kind === 'flexible'
 		const before = new Set((o!.Orders ?? []).map((x) => x.uuid))
 		let error: string | undefined
+		let code: string | undefined
 		let order: string | null = null
 		try {
 			order = (await acc.client.applyOffer(o!.uuid, flexible ? t.amount : undefined, { coin, side: o!.type, usd: t.amount, via })).order ?? null
 		} catch (e) {
 			error = friendly(e)
+			code = e instanceof QvaPayError ? e.code : undefined
 		}
 		const now = await acc.client.getOffer(o!.uuid).catch(() => null)
 		const held = now ? heldTake(now, flexible, before, order, acc.me.uuid) : error ? 'unknown' : { order, price: null }
@@ -441,7 +469,7 @@ export class Broker {
 			notes.push(`No se pudo confirmar si la oferta de @${user} quedó tomada: revísala en «Mis operaciones». Sus ${t.amount.toLocaleString('en-US')} USD no se sumaron a tu oferta.`)
 			return { step: { ...step, status: 'stuck' as const, error: `no se pudo confirmar si quedó tomada (${error})` }, notes }
 		}
-		if (!held) return { step: { ...step, status: 'failed' as const, error: error ?? 'no quedó tomada' }, notes }
+		if (!held) return { step: { ...step, status: 'failed' as const, error: error ?? 'no quedó tomada', ...(code ? { code } : {}) }, notes }
 		step.status = 'taken'
 		step.order = held.order
 		if (side === 'buy' && now) {

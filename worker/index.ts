@@ -12,6 +12,7 @@ import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relay
 import { collect, isCoin, query, RANGES } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { readWho, whoCookie } from './session.ts'
+import { accessOf, profileAccess, relayAccess } from './blocks.ts'
 import { sha256 } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
@@ -22,7 +23,7 @@ import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 import { feedWebhook, liveSocket, type LiveEnv } from './livebook.ts'
 import { LiveBook } from './livebook-do.ts'
-import { licenseOfPrint } from './pro.ts'
+import { licenseOfPrint, PLANS, type Plan } from './pro.ts'
 
 // El libro en tiempo real de Pro (un Durable Object)
 export { LiveBook }
@@ -103,6 +104,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		// del terminal. 423 y no 5xx: el terminal no lo reintenta y enseña el aviso tal cual
 		if (req.method === 'POST' && url.pathname === `${RELAY_PREFIX}/p2p/create` && (await ordersPaused(env.DB)))
 			return secure(new Response(JSON.stringify({ error: ORDERS_PAUSED_MSG, code: 'TP_ORDERS_PAUSED' }), { status: 423, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }))
+		// Cuentas restringidas o bloqueadas desde el panel: se cortan aquí, antes de llegar a QvaPay
+		const limited = await relayAccess(env.DB, env.PRO_KEY, req, url.pathname.slice(RELAY_PREFIX.length))
+		if (limited) return secure(limited)
 		const res = await relay(req, url, ctx, async (w) => {
 			if (!env.METRICS_SALT) return
 			const e = await relayEvent(w, env.METRICS_SALT)
@@ -110,7 +114,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		})
 		// El perfil que devuelve QvaPay dice de verdad quién es el dueño de ese token: queda firmado con su huella
 		if (req.method === 'GET' && url.pathname === `${RELAY_PREFIX}/user` && res.ok && env.PRO_KEY) {
-			const set = await whoCookie(url, req.headers.get('authorization'), await res.clone().json().catch(() => null), env.PRO_KEY)
+			const me = await res.clone().json().catch(() => null)
+			const blocked = await profileAccess(env.DB, req, me)
+			if (blocked) return secure(blocked)
+			const set = await whoCookie(url, req.headers.get('authorization'), me, env.PRO_KEY)
 			if (set) res.headers.append('Set-Cookie', set)
 		}
 		return secure(res)
@@ -120,7 +127,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/live' && folderFor(url.hostname) === 'app')
 		return liveSocket(req, url, env as unknown as LiveEnv, async (print) => {
 			// Una cuenta de QvaPay conectada de verdad en este navegador (la cookie que firma el relé con el perfil de QvaPay)
-			const ok = !!env.PRO_KEY && !!(await readWho(req.headers.get('cookie'), print, env.PRO_KEY, Date.now()))
+			const who = env.PRO_KEY ? await readWho(req.headers.get('cookie'), print, env.PRO_KEY, Date.now()) : null
+			const ok = !!who && (await accessOf(env.DB, { username: who.username, print }))?.level !== 'blocked'
 			return { ok, pro: ok && (await proEnabled(env.DB)) && !!(await licenseOfPrint(env.DB, print, Date.now())) }
 		})
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
@@ -158,9 +166,18 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	return res.headers.get('Content-Type')?.includes('text/html') ? proMarkup(res, await proEnabled(env.DB)) : res
 }
 
-// En las páginas, lo marcado data-pro solo se ve con Pro encendido (en el panel) y lo marcado data-nopro solo con Pro apagado
+// En las páginas, lo marcado data-pro solo se ve con Pro encendido (en el panel) y lo marcado data-nopro solo con Pro apagado.
+// Los precios (data-price="month"…) salen de PLANS: el HTML lleva uno de reserva, pero el que vale es el del servidor
 function proMarkup(res: Response, on: boolean) {
-	return new HTMLRewriter().on(on ? '[data-nopro]' : '[data-pro]', { element: (el) => void el.remove() }).transform(res)
+	return new HTMLRewriter()
+		.on(on ? '[data-nopro]' : '[data-pro]', { element: (el) => void el.remove() })
+		.on('[data-price]', {
+			element: (el) => {
+				const p = PLANS[el.getAttribute('data-price') as Plan]
+				if (p) el.setInnerContent(`${p.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD`)
+			},
+		})
+		.transform(res)
 }
 
 const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook', '/pro/telegram/webhook', '/api/p2p/feed'])

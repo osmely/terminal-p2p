@@ -5,6 +5,11 @@
 
 const ACCT_KIND = { trial: 'Días gratis', purchase: 'Compra', gift: 'Regalo', refund: 'Devolución', adjust: 'Ajuste', import: 'Días que tenías' }
 const ACCT_REFUND = { requested: 'Devolución pedida: la revisamos pronto', approved: 'Devolución aprobada: te transferimos el dinero en breve', transferred: 'Devuelto', rejected: 'Devolución rechazada' }
+// La referencia de una devolución: si es el uuid de la transferencia, enlaza a su detalle en QvaPay
+const acctRef = (ref) =>
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)
+		? `<a class="link mono acct-ref" href="https://www.qvapay.com/transaction/${ref}" target="_blank" rel="noopener">${ref}</a>`
+		: `<span class="mono acct-ref">${esc(ref)}</span>`
 const acctDay = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' })
 const acctMonth = (ym) => new Date(`${ym}-15T12:00:00Z`).toLocaleDateString('es', { month: 'long', year: 'numeric' })
 let acctTab = 'summary'
@@ -62,8 +67,14 @@ async function acctPro() {
 			: `<div class="acct-days"><b>Sin días</b><span class="muted">tu Pro venció el ${acctDay(a.expiresAt)}</span></div>`
 	const purchases = d.purchases
 		.map((p) => {
-			const state = p.refund
-				? `<span class="chip ${p.refund.status === 'rejected' ? 'cancelled' : p.refund.status === 'transferred' ? 'completed' : 'paid'}">${ACCT_REFUND[p.refund.status]}</span>${p.refund.note ? `<small class="muted">${esc(p.refund.note)}</small>` : ''}`
+			const r = p.refund
+			// Devuelta: cuándo y con qué transferencia de QvaPay
+			const sent =
+				r?.status === 'transferred'
+					? `<small class="muted">${r.transferredAt ? `El ${acctDay(r.transferredAt)} a` : 'A'} tu cuenta de QvaPay</small>${r.ref ? `<small class="muted">Transferencia: ${acctRef(r.ref)}</small>` : ''}`
+					: ''
+			const state = r
+				? `<span class="chip ${r.status === 'rejected' ? 'cancelled' : r.status === 'transferred' ? 'completed' : 'paid'}">${ACCT_REFUND[r.status]}</span>${r.note ? `<small class="muted">${esc(r.note)}</small>` : ''}${sent}`
 				: p.canRefund
 					? `<button class="link small" data-refund="${esc(p.id)}">Pedir devolución</button>`
 					: ''
