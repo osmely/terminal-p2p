@@ -16,14 +16,14 @@ let acctTab = 'summary'
 
 function showAccount(tab = acctTab) {
 	if (!bk.acct.connected) return showConnect()
-	acctTab = tab === 'pro' && !TPPro.enabled ? 'summary' : tab
-	const tabs = [['summary', 'Resumen'], ...(TPPro.enabled ? [['pro', '★ Pro']] : []), ['stats', 'Estadísticas']]
+	acctTab = (tab === 'pro' || tab === 'alerts') && !TPPro.enabled ? 'summary' : tab
+	const tabs = [['summary', 'Resumen'], ...(TPPro.enabled ? [['pro', '★ Pro'], ['alerts', '★ Avisos']] : []), ['stats', 'Estadísticas']]
 	openModal(`<div class="stack acct-modal">
 		<div class="peer-head">${avatar(bk.acct.username, bk.acct.image, 'lg')}<div><h3>@${esc(bk.acct.username)}</h3><p class="muted small">Mi cuenta</p></div></div>
 		<div class="seg-tabs" role="tablist">${tabs.map(([id, name]) => `<button class="seg-tab ${id === acctTab ? 'active' : ''}" data-acct-tab="${id}">${name}</button>`).join('')}</div>
 		<div id="acctBody"></div></div>`)
 	for (const b of $('modalBody').querySelectorAll('[data-acct-tab]')) b.onclick = () => showAccount(b.dataset.acctTab)
-	;({ summary: acctSummary, pro: acctPro, stats: acctStats })[acctTab]()
+	;({ summary: acctSummary, pro: acctPro, alerts: acctAlertsTab, stats: acctStats })[acctTab]()
 }
 
 function acctSummary() {
@@ -97,7 +97,6 @@ async function acctPro() {
 	$('acctBody').innerHTML = `<div class="stack">
 		${head}
 		${tg}
-		${a.active ? '<hr class="acct-sep"><div id="acctAlerts"></div>' : ''}
 		<hr class="acct-sep">
 		${canRenew() ? '<button class="btn primary block" id="acctBuy">Comprar días</button>' : `<p class="hint">Podrás comprar más días cuando te queden 5 o menos.</p>`}
 		<div><p class="hint">Tus compras</p>${purchases ? `<ul class="acct-list">${purchases}</ul>` : '<p class="muted small">Aún no has comprado días.</p>'}
@@ -116,6 +115,16 @@ async function acctPro() {
 		}
 	})
 	for (const b of $('acctBody').querySelectorAll('[data-refund]')) b.onclick = () => acctAskRefund(b.dataset.refund)
+}
+
+// La pestaña ★ Avisos: los avisos de tasa por Telegram (con Pro); sin Pro, qué son y cómo tenerlos
+function acctAlertsTab() {
+	if (!TPPro.active) {
+		$('acctBody').innerHTML = `<div class="stack"><p class="muted">Con Pro te escribimos por Telegram cuando la Tasa QvaPay de un mercado suba o baje del valor que pongas.</p><button class="btn primary block" id="acctBuy">${TPPro.canTrial ? `★ Probar Pro ${proTrialDays} días gratis` : 'Ver Terminal P2P Pro'}</button></div>`
+		$('acctBuy').onclick = showPro
+		return
+	}
+	$('acctBody').innerHTML = '<div id="acctAlerts"><p class="muted">Cargando…</p></div>'
 	acctAlerts()
 }
 
@@ -142,7 +151,7 @@ async function acctAlerts(d) {
 	const coin = d.alerts.at(-1)?.coin ?? state.coin
 	$('acctAlerts').innerHTML = `<div class="stack tight">
 		<p class="hint">Avisos de tasa por Telegram</p>
-		${d.telegram ? '' : '<p class="notice warn">Conecta el bot de Telegram (arriba) para que te lleguen.</p>'}
+		${d.telegram ? '' : '<div class="acct-tg"><p class="notice warn">Para que te lleguen, conecta el bot de Telegram.</p><button class="btn block" id="alTg">Recibir avisos en Telegram</button></div>'}
 		${list ? `<ul class="acct-list">${list}</ul>` : '<p class="muted small">Te escribimos cuando la Tasa QvaPay de un mercado suba o baje del valor que pongas.</p>'}
 		${
 			d.alerts.length < d.max
@@ -161,6 +170,7 @@ async function acctAlerts(d) {
 		$('alNow').textContent = d.rates[c] ? `La Tasa QvaPay de ${nameOf(c)} ahora: ${fmtP(d.rates[c])} ${unitOf(c)}` : ''
 		$('alPrice').placeholder = d.rates[c] ? fmtP(d.rates[c]) : ''
 	}
+	$('alTg')?.addEventListener('click', acctTelegram)
 	if ($('alCoin')) {
 		$('alCoin').onchange = sync
 		sync()
@@ -194,7 +204,7 @@ async function acctTelegram() {
 		if (tab) tab.location.href = url
 		else location.href = url
 		toast('Pulsa «Iniciar» en Telegram y vuelve aquí')
-		window.addEventListener('focus', () => acctTab === 'pro' && $('acctBody') && acctPro(), { once: true })
+		window.addEventListener('focus', () => (acctTab === 'pro' || acctTab === 'alerts') && $('acctBody') && showAccount(acctTab), { once: true })
 	} catch (e) {
 		tab?.close()
 		toast(e.message, true)
