@@ -79,6 +79,9 @@ const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
 const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
 
 function applyPro(s) {
+	// Tenía el módulo Pro cargado y ya no tiene Pro (se le acabaron los días, suspendida, bloqueada o desconectó):
+	// se recarga para que la orden inteligente y el radar desaparezcan de la memoria
+	if (pro.loaded && !s.pro) return location.reload()
 	// Bloqueada desde el panel: Pro ni se ofrece
 	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
 	if (Array.isArray(s.plans)) proPlans = s.plans

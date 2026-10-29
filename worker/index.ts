@@ -9,11 +9,12 @@
 
 import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
 import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
-import { collect, isCoin, query, RANGES } from './rates.ts'
+import { collect, isCoin, query, RANGES, withoutPro, type RatesData } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { readWho, whoCookie } from './session.ts'
 import { accessOf, profileAccess, relayAccess } from './blocks.ts'
-import { sha256 } from './crypto.ts'
+import { relayIncident } from './incidents.ts'
+import { sha256, verify } from './crypto.ts'
 import { adminPage, askKey } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
@@ -107,6 +108,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		// Cuentas restringidas o bloqueadas desde el panel: se cortan aquí, antes de llegar a QvaPay
 		const limited = await relayAccess(env.DB, env.PRO_KEY, req, url.pathname.slice(RELAY_PREFIX.length))
 		if (limited) return secure(limited)
+		// Una copia del módulo Pro en uso (la marca que manda el terminal): ¿es de esta cuenta y con días? En segundo plano
+		if (req.headers.has('x-tp-pro')) ctx.waitUntil(relayIncident(env as unknown as ProEnv, env.PRO_KEY, req).catch((e) => console.error(`incidencias: ${(e as Error).message}`)))
 		const res = await relay(req, url, ctx, async (w) => {
 			if (!env.METRICS_SALT) return
 			const e = await relayEvent(w, env.METRICS_SALT)
@@ -298,15 +301,30 @@ async function dailyPro(env: ProEnv, at: number) {
 	}
 }
 
-// Datos públicos y agregados: se cachean 2 minutos en el borde (si hay datos)
+// ¿Trae una licencia Pro en vigor? (la firmada que da /pro/status; vale un día y el terminal la renueva)
+async function hasPro(env: Env, license: string | null, now = Date.now()) {
+	if (!license || !env.PRO_KEY) return false
+	const l = await verify<{ e?: number; x?: number }>(license, env.PRO_KEY)
+	return !!l && (l.e ?? 0) > now && (l.x ?? 0) > now
+}
+
+// Datos públicos y agregados: se cachean 2 minutos en el borde (si hay datos). Con Pro (?l=licencia), también el
+// reparto en compras y ventas y los USD de cada barra
 async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	const coin = url.searchParams.get('coin')
 	const days = Number(url.searchParams.get('days') ?? 7)
 	if (!isCoin(coin) || !RANGES.includes(days as (typeof RANGES)[number])) return jsonError(400, 'coin o days inválidos')
+	const pro = await hasPro(env, url.searchParams.get('l'))
+	const out = async (full: Response) => {
+		if (pro) return new Response(full.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' } })
+		const cacheControl = full.headers.get('Cache-Control') ?? 'no-store'
+		return new Response(JSON.stringify(withoutPro((await full.json()) as RatesData)), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': cacheControl } })
+	}
 
-	const key = new Request(`${url.origin}/data/rates?coin=${coin}&days=${days}`)
+	// En la caché del borde, lo completo; a cada uno se le da su parte
+	const key = new Request(`${url.origin}/data/rates?coin=${coin}&days=${days}&v=full`)
 	const hit = await caches.default.match(key)
-	if (hit) return fromCache(hit, `public, max-age=${RATES_TTL_S}`)
+	if (hit) return out(await fromCache(hit, `public, max-age=${RATES_TTL_S}`))
 
 	let data
 	try {
@@ -321,7 +339,7 @@ async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	})
 	// Una respuesta vacía no se guarda: el primer punto debe verse en cuanto exista
 	if (!empty) ctx.waitUntil(caches.default.put(key, res.clone()))
-	return res
+	return out(res)
 }
 
 // Aviso anónimo del navegador: una operación que empezó aquí se completó

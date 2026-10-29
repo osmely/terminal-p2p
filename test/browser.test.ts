@@ -114,3 +114,21 @@ test('cuenta bloqueada en Terminal P2P: /me lo dice, el token se queda guardado,
 	now += 61_000
 	assert.equal((await me()).connected, true)
 })
+
+test('con el módulo Pro cargado, cada petición al relé lleva su marca (X-TP-Pro); sin él, no', async (t) => {
+	const real = globalThis.fetch
+	const seen: (string | null)[] = []
+	globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+		seen.push(new Headers(init?.headers).get('x-tp-pro'))
+		return new Response(JSON.stringify({ uuid: 'u1', username: 'pepe', balance: 1, kyc: true, golden_check: false, p2p_enabled: true }))
+	}) as typeof fetch
+	t.after(() => {
+		globalThis.fetch = real
+		delete (globalThis as { TPProMark?: string }).TPProMark
+	})
+	const acc = new BrowserAccounts({ storage: { session: memStorage(), local: memStorage() }, baseUrl: 'https://x/qp' })
+	const a = await acc.connect('browser', 'tok')
+	;(globalThis as { TPProMark?: string }).TPProMark = 'licencia.firmada'
+	await a.client.me()
+	assert.deepEqual(seen, [null, 'licencia.firmada'])
+})

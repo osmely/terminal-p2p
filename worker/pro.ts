@@ -12,6 +12,7 @@ import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, tgEsc, type AlertEnv } from './alerts.ts'
+import { GRACE_MS, INCIDENT_NAME, openIncidents, recordIncident, resolveIncident, type Incident } from './incidents.ts'
 import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tellDays, tellPaid, tellRefund, tellUser, unlink, botWebhook } from './userbot.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
@@ -529,6 +530,8 @@ export const ipPrint = async (req: Request, key: string) => hex(await hmac(key, 
 // Limpieza diaria: las huellas de IP solo valen para el tope del día
 export async function cleanupPro(db: D1, now: number) {
 	await db.prepare('DELETE FROM pro_trial_ips WHERE day < ?').bind(new Date(now - 2 * DAY_MS).toISOString().slice(0, 10)).run()
+	// Las incidencias descartadas, a los seis meses
+	await db.prepare('DELETE FROM pro_incidents WHERE resolved_at < ?').bind(now - 180 * DAY_MS).run()
 }
 
 // Los días gratis. Las llaves dicen quién ya los usó (una sola vez cada una); si alguna ya se usó, no hay otro
@@ -805,7 +808,16 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		if (route === 'POST /pro/radar/alert') {
 			const b = await readBody(req)
 			const l = await licenseOfPrint(db, printOf(b.print), now)
-			if (!l) return json(403, { error: 'El radar es parte de Pro' })
+			if (!l) {
+				// Sin Pro: si esta huella tuvo Pro y se le acabó hace más del margen, el radar sigue corriendo donde no debe
+				const was = await db
+					.prepare('SELECT l.uuid, l.username, l.expires_at FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?')
+					.bind(printOf(b.print))
+					.first<{ uuid: string; username: string; expires_at: number }>()
+				if (!was || was.expires_at < now - GRACE_MS)
+					await recordIncident(env, { kind: 'radar_no_pro', username: was?.username ?? null, license: was?.uuid ?? null, detail: was ? `Su Pro venció el ${hDay(was.expires_at)}` : 'Desde un dispositivo sin Pro' }, now, fetcher)
+				return json(403, { error: 'El radar es parte de Pro' })
+			}
 			if ((await accessOf(db, { username: l.username }, now))?.level === 'blocked') return accessError('blocked')
 			const hit = cleanRadarHit(b)
 			if (!hit) return json(400, { error: 'Aviso no válido' })
@@ -858,14 +870,26 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 
 		// El módulo Pro, firmado con el usuario de la licencia (si aparece una copia, se sabe de quién salió)
 		if (route === 'GET /pro/module.js') {
-			const lic = await verify<{ u: string; n: string; e: number; x: number }>(String(url.searchParams.get('l') ?? ''), env.PRO_KEY)
-			if (!lic || lic.x < now || lic.e < now) return json(403, { error: 'Licencia no válida' })
-			const l = await db.prepare('SELECT revoked FROM pro_licenses WHERE uuid = ?').bind(lic.u).first<{ revoked: number }>()
-			if (!l || l.revoked) return json(403, { error: 'Licencia revocada' })
+			const raw = String(url.searchParams.get('l') ?? '')
+			const lic = raw ? await verify<{ u: string; n: string; e: number; x: number }>(raw, env.PRO_KEY) : null
+			if (!lic) {
+				if (raw) await recordIncident(env, { kind: 'module_forged', detail: 'La firma de la licencia no es nuestra' }, now, fetcher)
+				return json(403, { error: 'Licencia no válida' })
+			}
+			const l = await db.prepare('SELECT revoked, expires_at FROM pro_licenses WHERE uuid = ?').bind(lic.u).first<{ revoked: number; expires_at: number }>()
+			// Una licencia vieja (de días ya vencidos, pasado el margen) solo es incidencia si hoy tampoco tiene Pro
+			if (lic.e < now - GRACE_MS && !(l && !l.revoked && l.expires_at > now))
+				await recordIncident(env, { kind: 'module_expired', username: lic.n, license: lic.u, detail: `Su Pro venció el ${hDay(l?.expires_at ?? lic.e)}` }, now, fetcher)
+			if (lic.x < now || lic.e < now) return json(403, { error: 'Licencia no válida' })
+			if (!l || l.revoked) {
+				if (l?.revoked) await recordIncident(env, { kind: 'module_revoked', username: lic.n, license: lic.u }, now, fetcher)
+				return json(403, { error: 'Licencia revocada' })
+			}
 			if ((await accessOf(db, { username: lic.n }, now))?.level === 'blocked') return accessError('blocked')
 			const code = await env.PRO?.get('module.js')
 			if (!code) return json(404, { error: 'El módulo Pro aún no está publicado' })
-			const mark = `/* Terminal P2P Pro · licencia de @${lic.n} (${lic.u}) · uso personal, no lo compartas */\nwindow.TPProUser=${JSON.stringify(lic.n)};\n`
+			// TPProMark: la licencia con que se descargó; el terminal la manda al relé (X-TP-Pro) para reconocer las copias
+			const mark = `/* Terminal P2P Pro · licencia de @${lic.n} (${lic.u}) · uso personal, no lo compartas */\nwindow.TPProUser=${JSON.stringify(lic.n)};window.TPProMark=${JSON.stringify(raw)};\n`
 			return new Response(mark + code, { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'private, no-store' } })
 		}
 
@@ -1227,7 +1251,7 @@ async function reportsPage(env: ProEnv, notice: string, now: number) {
 
 const AUDIT_NAME: Record<string, string> = {
 	days: 'Días', refund: 'Devolución (directa)', 'refund-approve': 'Devolución aprobada', 'refund-reject': 'Devolución rechazada', 'refund-transfer': 'Devolución transferida', note: 'Nota',
-	'access-set': 'Restringir o bloquear', 'access-lift': 'Levantar límite', revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
+	'access-set': 'Restringir o bloquear', 'access-lift': 'Levantar límite', 'incident-resolve': 'Descartar incidencia', revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
 	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba', 'daily-on': 'Encender tasa del día', 'daily-off': 'Apagar tasa del día', 'daily-test': 'Probar tasa del día',
 }
 
@@ -1242,6 +1266,37 @@ async function auditPage(env: ProEnv, notice: string, now: number) {
 		'Registro de Pro',
 		`${pageHead('Registro', 'Todo lo que se hace en este panel (las últimas 300 acciones). No se puede borrar ni editar.')}${notice}
 		${panel('Acciones', `<div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Qué</th><th>Sobre</th><th>Detalle</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="empty">Todavía no hay acciones.</td></tr>'}</tbody></table></div>`, { flush: true })}`,
+	)
+}
+
+// Incidencias: quién usa (o intenta usar) Pro sin tenerlo. Desde cada una, restringir o bloquear su terminal (lo de
+// «Acceso al terminal») o descartarla si no lo es
+async function incidentsPage(env: ProEnv, notice: string, now: number) {
+	const list = await openIncidents(env.DB)
+	const blocked = await activeBlocks(env.DB, now)
+	const limits = new Map(blocked.map((b) => [b.username.toLowerCase(), b.level]))
+	const act = (i: Incident) => {
+		const done = `<form method="post" style="display:inline"><input type="hidden" name="id" value="${i.id}"><button class="ghost" name="action" value="incident-resolve">Descartar</button></form>`
+		if (!i.username) return done
+		const limit = limits.get(i.username)
+		if (limit) return `<span class="pill rejected">${ACCESS_NAME[limit]}</span> ${done}`
+		const reason = escHtml(`Incidencia: ${INCIDENT_NAME[i.kind]}`)
+		const set = (level: AccessLevel, days: number, label: string, cls: string) =>
+			`<form method="post" style="display:inline" onsubmit="return confirm('¿${label} a @${escHtml(i.username!)}${days ? ` ${days} días` : ' hasta que lo levantes'}?')"><input type="hidden" name="action" value="access-set"><input type="hidden" name="username" value="${escHtml(i.username!)}"><input type="hidden" name="level" value="${level}"><input type="hidden" name="days" value="${days}"><input type="hidden" name="reason" value="${reason}"><button class="${cls}">${label}</button></form>`
+		return `${set('restricted', 7, 'Restringir', 'ghost')} ${set('blocked', 0, 'Bloquear', 'danger')} ${done}`
+	}
+	const rows = list
+		.map(
+			(i) =>
+				`<tr><td>${hWhen(i.last_at)}</td><td>${i.username ? userLink(i.username) : '<span class="note">sin identificar</span>'}</td><td style="white-space:normal"><b>${escHtml(INCIDENT_NAME[i.kind] ?? i.kind)}</b>${i.detail ? `<br><span class="note">${escHtml(i.detail)}</span>` : ''}${i.license && i.license !== `qp:${i.username}` ? `<br><span class="note">licencia ${userLink(i.license.slice(3))}</span>` : ''}</td><td class="num">${i.count}</td><td>${hWhen(i.first_at)}</td><td class="num">${act(i)}</td></tr>`,
+		)
+		.join('')
+	return proPage(
+		env,
+		'pro-incidencias',
+		'Incidencias',
+		`${pageHead('Incidencias', 'Quién usa o intenta usar Pro sin tenerlo, según lo que ve el servidor. Nada se bloquea solo: míralo y decide. Quien tenía el terminal abierto cuando se le acabaron los días tiene un día de margen antes de aparecer aquí.')}${notice}
+		${panel('Abiertas', `<div class="wrap"><table class="left"><thead><tr><th>Última vez</th><th>Usuario</th><th>Qué</th><th class="num">Veces</th><th>Primera vez</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">Ninguna incidencia abierta.</td></tr>'}</tbody></table></div>`, { flush: true })}`,
 	)
 }
 
@@ -1344,7 +1399,8 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 					const r = await addDays(db, username, { kind: days > 0 ? 'gift' : 'adjust', days, note, actor: 'admin' }, now)
 					// Si tiene los avisos conectados (y no está suspendida), se entera al momento
 					const told = f.get('tell') === '1' && !r.suspended && (await tellDays(env, r.license, username, days, note, r.after, fetcher))
-					notice = `<p class="ok">${days > 0 ? `${days} días para` : `${-days} días menos a`} <b>@${escHtml(username)}</b>: tiene Pro hasta el ${new Date(r.after).toLocaleDateString('es')}.${told ? ' Le avisamos por Telegram.' : ''}</p>`
+					const n = Math.abs(days) === 1 ? '1 día' : `${Math.abs(days)} días`
+					notice = `<p class="ok">${days > 0 ? `${n} para` : `${n} menos a`} <b>@${escHtml(username)}</b>: tiene Pro hasta el ${hDay(r.after)}.${told ? ' Le avisamos por Telegram.' : ''}</p>`
 				}
 			}
 			// Devolver un pago (te lo pidió por otro lado): queda aprobada, se restan solo los días de esa compra y falta
@@ -1385,6 +1441,10 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 					await setBlock(db, username, level, reason, until, now)
 					notice = `<p class="ok"><b>@${escHtml(username)}</b> queda ${level === 'blocked' ? '<b>bloqueada</b>: el terminal, Pro y el simulador dejan de funcionarle' : '<b>restringida</b>: no publica, toma ni edita ofertas desde el terminal'} ${until ? `hasta el ${hWhen(until)}` : 'hasta que la levantes'} (en menos de un minuto en todas partes). Motivo: ${escHtml(reason)}.</p>`
 				}
+			}
+			if (action === 'incident-resolve') {
+				const r = await resolveIncident(db, Math.trunc(Number(f.get('id'))), now)
+				notice = r.meta?.changes ? '<p class="ok">Incidencia descartada.</p>' : '<p class="note">Esa incidencia ya estaba cerrada.</p>'
 			}
 			if (action === 'access-lift') {
 				const username = String(f.get('username') ?? '').replace(/^@/, '').trim()
@@ -1503,13 +1563,15 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 	if (view === 'registro') return auditPage(env, flash, now)
 	if (view === 'pagos') return paymentsPage(env, flash, now)
 	if (view === 'cuentas') return accountsPage(env, flash, now)
+	if (view === 'incidencias') return incidentsPage(env, flash, now)
 	if (q) return searchPage(env, flash, now, q)
 	return homePage(env, flash, now)
 }
 
 // Las páginas de Pro llevan en el menú cuántas cosas esperan algo de ti
 async function proPage(env: ProEnv, active: AdminTab, title: string, body: string) {
-	return adminPage(active, title, body, 200, { pro: (await pendingWork(env.DB)).count })
+	const incidents = await env.DB.prepare('SELECT COUNT(*) AS n FROM pro_incidents WHERE resolved_at IS NULL').first<{ n: number }>()
+	return adminPage(active, title, body, 200, { pro: (await pendingWork(env.DB)).count, 'pro-incidencias': incidents?.n ?? 0 })
 }
 
 const proSearch = (q = '') => `<form method="get" class="row search" action="/admin/pro">${searchIcon}<input name="q" value="${escHtml(q)}" placeholder="Buscar usuario o factura"></form>`

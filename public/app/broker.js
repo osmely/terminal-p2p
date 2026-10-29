@@ -227,6 +227,8 @@ function renderAccount() {
 let blockedShown = false
 function showBlocked(msg) {
 	if (blockedShown) return
+	// Con el módulo Pro cargado, se recarga primero (al volver, el aviso sale sin él)
+	if (window.TPPro?.loaded) return location.reload()
 	blockedShown = true
 	openModal(`<div class="stack"><h3>Cuenta bloqueada en Terminal P2P</h3>
 		<p class="muted">${esc(msg)}</p>

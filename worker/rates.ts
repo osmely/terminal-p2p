@@ -194,4 +194,15 @@ export function dailyFrom(rows: DayRow[], now = Date.now()) {
 	})
 }
 
+// Lo de cada barra que es de Pro: el reparto en compras y ventas y los USD operados. Sin licencia no se manda (el
+// terminal es público: lo que solo escondiera el navegador se vería sin Pro)
+export type RatesData = { daily: { buy?: number | null; sell?: number | null }[]; volume: { bars: { buy?: number; sell?: number; buyUsd?: number; sellUsd?: number; usd?: number }[] } | null }
+export function withoutPro<T extends RatesData>(d: T): T {
+	return {
+		...d,
+		daily: d.daily.map(({ buy: _b, sell: _s, ...r }) => r),
+		volume: d.volume && { ...d.volume, bars: d.volume.bars.map(({ buy: _b, sell: _s, buyUsd: _bu, sellUsd: _su, usd: _u, ...r }) => r) },
+	}
+}
+
 export const isCoin = (v: string | null): v is string => v !== null && TICKS.has(v)

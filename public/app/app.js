@@ -108,10 +108,14 @@ async function loadOverview() {
 	} catch {}
 }
 
-// Histórico público de la tasa: lo guarda el servidor (solo agregados de QvaPay)
+// Histórico público de la tasa: lo guarda el servidor (solo agregados de QvaPay). Con Pro, con la licencia: el reparto
+// en compras y ventas y los USD de cada barra solo llegan así
+let historyPro = false
 async function loadHistory() {
+	const pro = window.TPPro
+	historyPro = !!(pro?.enabled && pro?.active && pro?.license)
 	try {
-		const r = await fetch(`/data/rates?coin=${state.coin}&days=${state.range}`, { cache: 'no-cache' })
+		const r = await fetch(`/data/rates?coin=${state.coin}&days=${state.range}${historyPro ? `&l=${encodeURIComponent(pro.license)}` : ''}`, { cache: 'no-cache' })
 		if (!r.ok) throw new Error(String(r.status))
 		state.history = await r.json()
 		if (state.chart === 'history') drawHistory()
@@ -578,18 +582,15 @@ function renderBook(b, asks, bids) {
 	}
 }
 
-// Con menos operaciones, la venta de un libro cruzado lleva aviso (a quien vende le pagas tú primero)
-const CROSS_MIN_OPS = 50
-
 function renderInsight(b, asks, bids) {
 	const out = []
 	const ask = asks[0]
 	const bid = bids[0]
 	const unit = b.coin.unit
-	// Sin Pro, la primera venta y la primera compra del libro; con Pro, solo lo que puedes tomar, cuántos USD
-	// encajan y cuánto te queda
+	// Sin Pro, la primera venta y la primera compra del libro. Con Pro, el módulo privado (TPProCross) dice solo lo que
+	// puedes tomar, cuántos USD encajan y cuánto te queda
 	const pro = window.TPPro
-	if (ask && bid && bid.price > ask.price && !pro?.active) {
+	if (ask && bid && bid.price > ask.price && !window.TPProCross) {
 		const net = bid.price / ask.price - 1 - 0.0025
 		const legs = `comprar a <b>${fmtP(ask.price)}</b> (@${esc(ask.user)}, ${ask.ops} ops) y vender a <b>${fmtP(bid.price)}</b> (@${esc(bid.user)}, ${bid.ops} ops)`
 		const more = pro?.enabled ? ' Con <b>Pro</b> ves si puedes aprovecharlo, cuántos USD encajan y cuánto te quedaría.' : ''
@@ -598,22 +599,7 @@ function renderInsight(b, asks, bids) {
 				? `<li class="warn">Libro cruzado: ${legs} deja <b>${pct(net)}</b> tras la comisión de 0.25%.${more}</li>`
 				: `<li>Libro cruzado, pero no compensa: ${legs} da <b>${pct(net)}</b> tras la comisión de 0.25%.</li>`,
 		)
-	} else if (ask && bid && bid.price > ask.price) {
-		// Con tu comisión real (las cuentas GOLD no la pagan) y solo con ofertas que puedes tomar
-		const acct = typeof bk !== 'undefined' ? bk.acct : null
-		const fee = acct?.connected ? (acct.gold ? 0 : (acct.p2pFee ?? 0.0025)) : 0.0025
-		const feeText = fee ? `tras la comisión de ${(fee * 100).toLocaleString('en-US')} %` : 'sin comisión (cuenta GOLD)'
-		const me = typeof myUsername === 'function' ? myUsername() : null
-		const c = window.TPApi?.cross?.(asks, bids, fee, me)
-		if (c) {
-			const who = (l) => `@${esc(l.user)}, ${l.ops} ops`
-			const fresh = c.ask.ops < CROSS_MIN_OPS ? ` Ojo: @${esc(c.ask.user)} tiene solo ${c.ask.ops} operaciones.` : ''
-			const left = c.leftUsd ? ` Te sobran ${fmtU(c.leftUsd)} USD (la compra es fija y más pequeña).` : ''
-			out.push(
-				`<li class="warn">Libro cruzado: compra <b>${fmtU(c.buyUsd)} USD</b> a <b>${fmtP(c.ask.price)}</b> (${who(c.ask)}) y vende <b>${fmtU(c.sellUsd)}</b> a <b>${fmtP(c.bid.price)}</b> (${who(c.bid)}): te quedan unos <b>${fmtU(Math.round(c.profit))} ${unit}</b> (<b>${pct(c.pct)}</b>) ${feeText}. Son dos operaciones aparte: primero le pagas a @${esc(c.ask.user)} y esperas a que libere; mientras, la compra puede desaparecer.${left}${fresh}</li>`,
-			)
-		} else out.push(`<li>Libro cruzado, pero no lo puedes aprovechar: no compensa ${feeText}, los montos no encajan o son ofertas que no puedes tomar (solo VIP, requisitos, precio atípico).</li>`)
-	}
+	} else if (ask && bid && bid.price > ask.price) out.push(window.TPProCross(b, asks, bids))
 	const done = b.completed
 	const m = done ? median(done.offers) : null
 	if (m && ask) out.push(`<li>La mejor venta está a <b>${pct(ask.price / m - 1)}</b> de la mediana de lo que realmente se completó (${fmtP(m)} ${unit}).</li>`)
@@ -916,9 +902,9 @@ function opsLegend(ms) {
 	const i = ms == null ? informal.at(-1) : near(informal)
 	const parts = []
 	if (bar) {
-		const split = proSplit() ? ` · ${bar.buy.toLocaleString('en-US')} compras · ${bar.sell.toLocaleString('en-US')} ventas` : ''
+		const split = proSplit() && bar.buy != null ? ` · ${bar.buy.toLocaleString('en-US')} compras · ${bar.sell.toLocaleString('en-US')} ventas` : ''
 		// Los USD operados son de Pro, como su línea
-		const usd = proSplit() ? ` · <b>${Math.round(bar.usd).toLocaleString('en-US')}</b> USD operados` : ''
+		const usd = proSplit() && bar.usd != null ? ` · <b>${Math.round(bar.usd).toLocaleString('en-US')}</b> USD operados` : ''
 		parts.push(`<b>${bar.ops.toLocaleString('en-US')}</b> operaciones${usd} de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
 	}
 	if (d && !(bar && ms == null)) {
@@ -1045,7 +1031,7 @@ function volTags(ms) {
 	const vol = state.history?.volume
 	const bar = historyChart && state.chart === 'history' && vol ? (ms == null ? vol.bars.at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs)) : null
 	if (!bar) return void (box.innerHTML = '')
-	const tags = proSplit()
+	const tags = proSplit() && bar.buy != null
 		? [
 				{ v: bar.buy, s: opsSeries, text: `${bar.buy.toLocaleString('en-US')} compras`, cls: 'bid' },
 				{ v: bar.buy + bar.sell, s: opsSeries, text: `${bar.sell.toLocaleString('en-US')} ventas`, cls: 'ask' },
@@ -1121,14 +1107,16 @@ class DayBars {
 	}
 }
 
-// Las barras partidas en compras y ventas son de Pro (con Pro encendido en el panel y activo en este dispositivo)
-const proSplit = () => !!(window.TPPro?.enabled && window.TPPro?.active)
+// Las barras partidas en compras y ventas son de Pro: el servidor solo manda el reparto con la licencia
+const proSplit = () => !!(window.TPPro?.enabled && window.TPPro?.active && (state.history?.volume?.bars?.[0]?.buy != null || state.history?.daily?.some((d) => d.buy != null)))
 // La línea del volumen en USD también es de Pro, y solo donde hay datos del feed (7 y 30 días)
-const volLine = () => proSplit() && !!state.history?.volume?.bars?.length
+const volLine = () => proSplit() && state.history.volume?.bars?.[0]?.usd != null
 
 // Al cambiar Pro (al conectar, comprar o apagarse), se vuelve a dibujar con o sin el reparto
 document.addEventListener('tp:pro', () => {
 	historyDrawn = null
+	// Si cambia si tienes Pro, se piden de nuevo (con o sin el reparto)
+	if (!!(window.TPPro?.enabled && window.TPPro?.active && window.TPPro?.license) !== historyPro) return void loadHistory()
 	if (historyChart && state.chart === 'history') drawHistory()
 })
 

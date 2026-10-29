@@ -19,6 +19,8 @@ const log = logger('qvapay')
 
 export const API_BASE = 'https://api.qvapay.com'
 
+const proMark = () => (globalThis as { TPProMark?: unknown }).TPProMark as string | undefined
+
 export class QvaPayError extends Error {
 	readonly status: number
 	readonly code?: string
@@ -237,6 +239,8 @@ export class QvaPayClient {
 							Accept: 'application/json',
 							...(opts.body !== undefined && !opts.form ? { 'Content-Type': 'application/json' } : {}),
 							...(opts.meta ? { 'X-TP-Meta': new URLSearchParams(Object.entries(opts.meta).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])).toString() } : {}),
+							// Con el módulo Pro cargado, la licencia con que se descargó (el relé reconoce así las copias; no llega a QvaPay)
+							...(proMark() ? { 'X-TP-Pro': proMark() } : {}),
 						},
 						body: opts.form ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
 						signal: AbortSignal.timeout(20_000),
