@@ -25,7 +25,7 @@ import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 import { feedWebhook, liveSocket, type LiveEnv } from './livebook.ts'
 import { LiveBook } from './livebook-do.ts'
-import { licenseOfPrint, PLANS, type Plan } from './pro.ts'
+import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 
 // El libro en tiempo real de Pro (un Durable Object)
 export { LiveBook }
@@ -181,10 +181,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 }
 
 // En las páginas, lo marcado data-pro solo se ve con Pro encendido (en el panel) y lo marcado data-nopro solo con Pro apagado.
-// Los precios (data-price="month"…) salen de PLANS: el HTML lleva uno de reserva, pero el que vale es el del servidor
+// Los precios (data-price="month"…) salen de PLANS y los días gratis (data-trial) de TRIAL_DAYS: el HTML lleva unos de
+// reserva, pero los que valen son los del servidor
 function proMarkup(res: Response, on: boolean) {
 	return new HTMLRewriter()
 		.on(on ? '[data-nopro]' : '[data-pro]', { element: (el) => void el.remove() })
+		.on('[data-trial]', { element: (el) => void el.setInnerContent(String(TRIAL_DAYS)) })
 		.on('[data-price]', {
 			element: (el) => {
 				const p = PLANS[el.getAttribute('data-price') as Plan]

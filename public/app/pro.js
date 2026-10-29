@@ -16,6 +16,8 @@ const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname)
 
 // Lo que se compra son días de Pro: se suman a los que te queden. Los paquetes y sus precios los da el servidor
 let proPlans = []
+// Los días gratis: los dice el servidor con el estado de Pro
+let proTrialDays = 7
 const usdText = (n) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
 // Lo que suma el modo Pro, en corto: el detalle está en la entrada del blog (PRO_INFO_URL)
 const PRO_FEATURES = [
@@ -93,6 +95,7 @@ function applyPro(s) {
 	// Bloqueada desde el panel: Pro ni se ofrece
 	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
 	if (Array.isArray(s.plans)) proPlans = s.plans
+	if (s.trialDays > 0) proTrialDays = s.trialDays
 
 	if (pro.active && !pro.loaded) {
 		pro.loaded = true
@@ -130,7 +133,7 @@ async function refreshPro() {
 		pro.print = (await api('/print')).print
 		if (!pro.print) return applyPro({ pro: false })
 		// Además de decir si eres Pro, deja la sesión compartida con el simulador y dice si aún puedes activar
-		// tus 14 días gratis (no empiezan solos: los activas tú desde ★)
+		// tus días gratis (no empiezan solos: los activas tú desde ★)
 		let s = await proFetch('/pro/status', { print: pro.print })
 		// Sin Pro y sin saber de quién es el token (ver proFetch): con el perfil al día, otra vez
 		if (!s.pro && !s.canTrial && !s.trialUsed && !s.blocked && s.enabled) {
@@ -171,7 +174,7 @@ function renderProChip() {
 	// El radar es del módulo Pro (TPProRadar); sin Pro, su botón abre la ventana de Pro
 	const r = $('radarBtn')
 	if (r) r.hidden = b.hidden
-	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? 'Prueba el modo Pro 14 días gratis' : 'Modo Pro'
+	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? `Prueba el modo Pro ${proTrialDays} días gratis` : 'Modo Pro'
 }
 
 // ── Ventana Pro ──────────────────────────────────────────────────────
@@ -194,14 +197,14 @@ function showPro() {
 						: `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Podrás comprar más días cuando te queden 5 o menos, desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>. Nada se cobra solo.</p>`
 				}</div>`
 			: pro.canTrial
-				? `<div class="stack pro-box"><h3>★ Prueba el modo Pro 14 días gratis</h3>
+				? `<div class="stack pro-box"><h3>★ Prueba el modo Pro ${proTrialDays} días gratis</h3>
 				<ul class="pro-feats">${feats}</ul>
-				<button class="btn primary block" id="proTrial">Activar mis 14 días gratis</button>
+				<button class="btn primary block" id="proTrial">Activar mis ${proTrialDays} días gratis</button>
 				<p class="hint">Sin pagar nada. Cuando terminen, decides si compras días: nada se cobra solo. Funciona en todos los dispositivos donde conectes tu cuenta.</p>
 				<details class="pro-more"><summary>¿Prefieres comprar días ya?</summary><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. ${refund}</p></details></div>`
 				: `<div class="stack pro-box"><h3>★ Modo Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
-				<p class="muted">${pro.trialUsed ? 'Ya usaste tus 14 días gratis. ' : ''}Compra días de Pro:</p>
+				<p class="muted">${pro.trialUsed ? `Ya usaste tus ${proTrialDays} días gratis. ` : ''}Compra días de Pro:</p>
 				<div class="pro-plans">${plans}</div>
 				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Nada se cobra solo: cada compra la haces tú. ${refund}</p></div>`,
 	)
@@ -209,7 +212,7 @@ function showPro() {
 	$('proTrial')?.addEventListener('click', startTrial)
 }
 
-// Los 14 días gratis empiezan cuando el usuario los activa
+// Los días gratis empiezan cuando el usuario los activa
 async function startTrial() {
 	$('proTrial').disabled = true
 	try {
@@ -221,9 +224,9 @@ async function startTrial() {
 	}
 }
 
-// Recién activados los 14 días gratis
+// Recién activados los días gratis
 function showFreeDays() {
-	openModal(`<div class="stack pro-box"><h3>★ Activaste tus 14 días de Pro gratis</h3>
+	openModal(`<div class="stack pro-box"><h3>★ Activaste tus ${proTrialDays} días de Pro gratis</h3>
 		<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa, y en el <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">simulador</a> operas todos los mercados. Cuando se acaben, puedes comprar más días desde el botón ★.</p>
 		<button class="btn primary block" id="proOk">Listo</button></div>`)
 	$('proOk').onclick = closeModal

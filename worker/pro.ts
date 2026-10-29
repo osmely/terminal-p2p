@@ -41,9 +41,8 @@ export interface ProEnv extends AlertEnv {
 
 export const PLANS = {
 	week: { usd: 1.99, days: 7, name: '7 días' },
-	month: { usd: 4.99, days: 30, name: '30 días' },
-	quarter: { usd: 12.99, days: 90, name: '90 días' },
-	year: { usd: 39.99, days: 365, name: '365 días' },
+	month: { usd: 3.99, days: 30, name: '30 días' },
+	quarter: { usd: 9.99, days: 90, name: '90 días' },
 } as const
 export type Plan = keyof typeof PLANS
 // Para las consultas de cuentas con días comprados (las demás son trial y gift)
@@ -51,7 +50,8 @@ const PAID_PLANS_SQL = Object.keys(PLANS).map((p) => `'${p}'`).join(', ')
 
 // Devolución completa en los días siguientes al primer pago (a mano: QvaPay no tiene devoluciones por API)
 export const REFUND_DAYS = 7
-export const TRIAL_DAYS = 14
+// Los días gratis: el terminal y la web los reciben de aquí (statusOf, data-trial en worker/index.ts)
+export const TRIAL_DAYS = 7
 // Topes de días gratis nuevos: por IP y día (amplio: muchos comparten IP en Cuba) y en total por día. No hacen
 // imposible inventar cuentas (el servidor no ve el token), pero lo vuelven lento y caro
 export const TRIAL_PER_IP_DAY = 10
@@ -192,11 +192,11 @@ export async function refundCheckout(db: D1, checkout: string, note: string | nu
 }
 
 // Lo que el terminal necesita saber: si eres Pro, hasta cuándo y la licencia firmada para recoger el módulo
-// Y los paquetes con sus precios: así solo están escritos en PLANS (la web los recibe igual, worker/index.ts)
+// Y los paquetes con sus precios y los días gratis: así solo están escritos aquí (la web los recibe igual, worker/index.ts)
 export async function statusOf(env: ProEnv, l: License | null, now: number) {
-	if (!l) return { pro: false, enabled: true, plans: planList() }
+	if (!l) return { pro: false, enabled: true, plans: planList(), trialDays: TRIAL_DAYS }
 	const license = await sign({ u: l.uuid, n: l.username, e: l.expires_at, x: now + LICENSE_MS }, env.PRO_KEY!)
-	return { pro: true, enabled: true, username: l.username, plan: l.plan, expiresAt: l.expires_at, license, plans: planList() }
+	return { pro: true, enabled: true, username: l.username, plan: l.plan, expiresAt: l.expires_at, license, plans: planList(), trialDays: TRIAL_DAYS }
 }
 export const planList = () => (Object.keys(PLANS) as Plan[]).map((id) => ({ id, name: PLANS[id].name, usd: PLANS[id].usd, days: PLANS[id].days }))
 
@@ -783,7 +783,7 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			t.account = username ?? l?.username
 			if ((await accessOf(db, { username: username ?? l?.username, print }, now))?.level === 'blocked') {
 				Object.assign(t, { kind: 'denied', detail: 'Cuenta bloqueada: sin Pro ni simulador', dk: hourKey('denied', print, now) })
-				const res = json(200, { pro: false, enabled: true, canTrial: false, blocked: true, plans: planList() })
+				const res = json(200, { pro: false, enabled: true, canTrial: false, blocked: true, plans: planList(), trialDays: TRIAL_DAYS })
 				res.headers.set('Set-Cookie', sessionCookie(url, '', 0))
 				return res
 			}

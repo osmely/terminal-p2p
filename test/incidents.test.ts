@@ -76,8 +76,8 @@ test('el módulo con una licencia vencida (pasado el margen), de una cuenta susp
 	const mod = await s.pro('GET', `/pro/module.js?l=${encodeURIComponent(license)}`)
 	assert.equal(mod.status, 200)
 	assert.match(mod.body, /window\.TPProMark="/)
-	// Se le acaban los 14 días: a las pocas horas, con el terminal abierto, todavía no es incidencia
-	s.tick(14 * DAY + 3 * 3600_000)
+	// Se le acaban los 7 días: a las pocas horas, con el terminal abierto, todavía no es incidencia
+	s.tick(7 * DAY + 3 * 3600_000)
 	assert.equal((await s.pro('GET', `/pro/module.js?l=${encodeURIComponent(license)}`)).status, 403)
 	assert.deepEqual(s.incidents(), [])
 	// Pasado el margen, sí (y una sola fila que cuenta las veces)
@@ -120,7 +120,7 @@ test('avisos del radar sin Pro desde un dispositivo que lo tuvo (pasado el marge
 	await s.pro('POST', '/pro/status', { print: P1 }, 'ana')
 	await s.pro('POST', '/pro/trial', { print: P1 }, 'ana')
 	const hit = { print: P1, offer: '0b0e1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d', kind: 'found', coin: 'BANK_CUP', side: 'ask', price: 500, usd: 10 }
-	s.tick(14 * DAY + 3600_000)
+	s.tick(7 * DAY + 3600_000)
 	assert.equal((await s.pro('POST', '/pro/radar/alert', hit)).status, 403)
 	assert.deepEqual(s.incidents(), [])
 	s.tick(DAY)
