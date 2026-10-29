@@ -309,16 +309,24 @@ test('huella del token: siempre la misma para el mismo token, distinta entre tok
 test('14 días gratis cuando el usuario los activa: nunca solos, una vez por usuario de QvaPay y por dispositivo; si compra, se suman', async () => {
 	const s = setup()
 	// Sin usuario conectado (solo la huella) no hay nada
-	assert.deepEqual([(await s.post('/pro/status', { print: P1 })).body.pro, (await s.post('/pro/status', { print: P1 })).body.canTrial], [false, false])
+	const anon = (await s.post('/pro/status', { print: P1 })).body
+	// …y tampoco se le dice que ya los usó: no se sabe de quién es el token
+	assert.deepEqual([anon.pro, anon.canTrial, anon.trialUsed], [false, false, false])
 	// Conectar la cuenta no da Pro ni crea nada: se le ofrece activarlo
 	const st = (await s.post('/pro/status', { print: P1, username: 'Ana' })).body
 	assert.deepEqual([st.pro, st.canTrial, st.started], [false, true, undefined])
 	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM pro_licenses').get() as { n: number }).n, 0)
 	// Activarlos pide la cuenta confirmada por QvaPay
-	assert.equal((await s.post('/pro/trial', { print: P1 })).status, 403)
+	const noWho = await s.post('/pro/trial', { print: P1 })
+	// …y dice por qué, para que el terminal pida el perfil otra vez y reintente
+	assert.deepEqual([noWho.status, noWho.body.code], [403, 'TP_WHO'])
 	const r = await s.post('/pro/trial', { print: P1, username: 'Ana' })
 	assert.deepEqual([r.body.pro, r.body.plan, r.body.expiresAt, r.body.started, r.body.canTrial], [true, 'trial', T0 + 14 * 86_400_000, true, false])
 	assert.equal((await s.post('/pro/trial', { print: P1, username: 'Ana' })).status, 409)
+	// Cuando se le acaben, sí se le dice que ya los usó
+	s.tick(15 * 86_400_000)
+	assert.deepEqual([(await s.post('/pro/status', { print: P1, username: 'Ana' })).body].map((b) => [b.pro, b.canTrial, b.trialUsed])[0], [false, false, true])
+	s.tick(-15 * 86_400_000)
 	// Otro token (otro dispositivo) con la misma cuenta: entra solo en sus mismos días, sin ofrecerle otros
 	const other = (await s.post('/pro/status', { print: P2, username: 'ana' })).body
 	assert.deepEqual([other.pro, other.canTrial, other.expiresAt], [true, false, T0 + 14 * 86_400_000])

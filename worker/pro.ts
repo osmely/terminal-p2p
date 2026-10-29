@@ -754,8 +754,11 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			if (l) await db.prepare('UPDATE pro_prints SET seen_at = ? WHERE print = ?').bind(now, print).run()
 			// Los días gratis no empiezan solos: si aún puede, el terminal le ofrece activarlos (POST /pro/trial)
 			const canTrial = !l && !!username && (await trialAvailable(db, username, print))
+			// «Ya los usaste» solo si se sabe de quién es el token (con dos cuentas en el mismo navegador, la otra pestaña
+			// no lo sabe hasta que vuelve a pedir su perfil)
+			const trialUsed = !l && !!username && !canTrial
 			// La sesión compartida con el simulador: con ella entra sin otro login y hereda tus días de Pro
-			const res = json(200, { ...(await statusOf(env, l, now)), canTrial })
+			const res = json(200, { ...(await statusOf(env, l, now)), canTrial, trialUsed })
 			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
 			return res
 		}
@@ -764,7 +767,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		if (route === 'POST /pro/trial') {
 			const print = printOf((await readBody(req)).print)
 			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
-			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para activar tus días gratis' })
+			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para activar tus días gratis', code: 'TP_WHO' })
 			if ((await accessOf(db, { username: who.username, print }, now))?.level === 'blocked') return accessError('blocked')
 			if (await activeLicense(db, accountOf(who.username), now)) return json(409, { error: 'Ya tienes Pro activo' })
 			const r = await freeDays(db, who.username, print, now, await ipPrint(req, env.PRO_KEY))
@@ -790,7 +793,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			// Pro queda a nombre de la cuenta confirmada de este dispositivo. Sin ella no hay factura: así nadie puede
 			// llenar la app de QvaPay de facturas con huellas inventadas y dejar a los demás sin poder comprar
 			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
-			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para comprar Pro' })
+			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para comprar Pro', code: 'TP_WHO' })
 			if ((await accessOf(db, { username: who.username, print }, now))?.level === 'blocked') return accessError('blocked')
 			return json(200, await createCheckout(env, { print, username: who.username }, String(b.plan) as Plan, url.origin, now, fetcher))
 		}

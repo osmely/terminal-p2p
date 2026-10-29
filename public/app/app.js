@@ -46,6 +46,7 @@ const fmtU = (n) => (n >= 1000 ? Math.round(n).toLocaleString('en-US') : n.toLoc
 // no puede salir como 23.000, porque eso es lo que se transfiere
 const fmtM = (n) => n.toLocaleString('en-US', { minimumFractionDigits: Math.round(n * 100) % 100 ? 2 : 0, maximumFractionDigits: 2 })
 const pct = (x) => `${x >= 0 ? '+' : ''}${(x * 100).toFixed(2)}%`
+const plural = (n, one, many) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 const ago = (ms) =>
 	ms < 60_000
 		? `${Math.round(ms / 1000)} s`
@@ -902,13 +903,13 @@ function opsLegend(ms) {
 	const i = ms == null ? informal.at(-1) : near(informal)
 	const parts = []
 	if (bar) {
-		const split = proSplit() && bar.buy != null ? ` · ${bar.buy.toLocaleString('en-US')} compras · ${bar.sell.toLocaleString('en-US')} ventas` : ''
+		const split = proSplit() && bar.buy != null ? ` · ${plural(bar.buy, 'compra', 'compras')} · ${plural(bar.sell, 'venta', 'ventas')}` : ''
 		// Los USD operados son de Pro, como su línea
 		const usd = proSplit() && bar.usd != null ? ` · <b>${Math.round(bar.usd).toLocaleString('en-US')}</b> USD operados` : ''
-		parts.push(`<b>${bar.ops.toLocaleString('en-US')}</b> operaciones${usd} de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
+		parts.push(`<b>${bar.ops.toLocaleString('en-US')}</b> ${bar.ops === 1 ? 'operación' : 'operaciones'}${usd} de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
 	}
 	if (d && !(bar && ms == null)) {
-		const split = d.buy != null && d.sell != null ? ` · ${d.buy.toLocaleString('en-US')} compras · ${d.sell.toLocaleString('en-US')} ventas` : ''
+		const split = d.buy != null && d.sell != null ? ` · ${plural(d.buy, 'compra', 'compras')} · ${plural(d.sell, 'venta', 'ventas')}` : ''
 		parts.push(`<b>${d.ops.toLocaleString('en-US')}</b> operaciones ${d.partial ? 'en las últimas 24 h' : `el ${shortDay(d.t)}`}${split}`)
 	}
 	if (i && (i.usd || i.usdt)) parts.push(`informal ${i.final ? `el ${shortDay(i.t)}` : 'hoy'}: USD <b>${fmtP(i.usd)}</b> · USDT <b>${fmtP(i.usdt)}</b>`)
@@ -1025,16 +1026,17 @@ function opsBars(points, tz) {
 }
 
 // Etiquetas en el eje derecho a la altura de cada valor, como las de compra y venta: las operaciones de la barra bajo el
-// puntero (con Pro, sus compras y ventas) y sus USD operados (Pro). Sin puntero, las de la última barra del feed
+// puntero (con Pro, sus compras y ventas) y sus USD operados (Pro). Sin puntero, las de la última que ya terminó (como
+// el texto de encima: la hora en curso aún no está completa)
 function volTags(ms) {
 	const box = $('volTags')
 	const vol = state.history?.volume
-	const bar = historyChart && state.chart === 'history' && vol ? (ms == null ? vol.bars.at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs)) : null
+	const bar = historyChart && state.chart === 'history' && vol ? (ms == null ? vol.bars.filter((b) => b.t + vol.bucketMs <= Date.now()).at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs)) : null
 	if (!bar) return void (box.innerHTML = '')
 	const tags = proSplit() && bar.buy != null
 		? [
-				{ v: bar.buy, s: opsSeries, text: `${bar.buy.toLocaleString('en-US')} compras`, cls: 'bid' },
-				{ v: bar.buy + bar.sell, s: opsSeries, text: `${bar.sell.toLocaleString('en-US')} ventas`, cls: 'ask' },
+				{ v: bar.buy, s: opsSeries, text: plural(bar.buy, 'compra', 'compras'), cls: 'bid' },
+				{ v: bar.buy + bar.sell, s: opsSeries, text: plural(bar.sell, 'venta', 'ventas'), cls: 'ask' },
 			]
 		: [{ v: bar.ops, s: opsSeries, text: `${bar.ops.toLocaleString('en-US')} op.`, cls: 'ops' }]
 	if (volLine()) tags.push({ v: bar.usd, s: volSeries, text: `${fmtU(bar.usd)} USD`, cls: 'usd' })
@@ -1210,7 +1212,6 @@ function rankMedal(user) {
 }
 
 function rankValue(c, u) {
-	const plural = (n, one, many) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 	switch (c) {
 		case 'liquidity':
 			return [`${fmtU(u.usdAsk + u.usdBid)} USD`, `${plural(u.offers, 'oferta', 'ofertas')} · ${plural(u.markets.length, 'mercado', 'mercados')}`]

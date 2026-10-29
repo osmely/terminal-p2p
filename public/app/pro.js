@@ -71,9 +71,12 @@ const CHECKOUT_MAX_MS = 60 * 60_000
 const RENEW_SOON_MS = 5 * 86_400_000
 let proPolling = null
 
-async function proFetch(path, body) {
+async function proFetch(path, body, again = true) {
 	const r = await fetch(path, body === undefined ? { cache: 'no-store' } : { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 	const d = await r.json().catch(() => ({}))
+	// El servidor no sabe de quién es el token: la cookie que lo dice es una por navegador y, con otra cuenta en otra
+	// pestaña, puede ser de aquella. Pedir el perfil a QvaPay la deja con esta cuenta; se reintenta una vez
+	if (r.status === 403 && d.code === 'TP_WHO' && again && bk.acct.connected) return api('/me').then(() => proFetch(path, body, false))
 	if (!r.ok) throw Object.assign(new Error(d.error || 'Algo falló. Inténtalo de nuevo.'), { status: r.status })
 	return d
 }
@@ -86,7 +89,7 @@ function applyPro(s) {
 	// se recarga para que la orden inteligente y el radar desaparezcan de la memoria
 	if (pro.loaded && !s.pro) return location.reload()
 	// Bloqueada desde el panel: Pro ni se ofrece
-	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
+	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
 	if (Array.isArray(s.plans)) proPlans = s.plans
 
 	if (pro.active && !pro.loaded) {
@@ -127,6 +130,11 @@ async function refreshPro() {
 		// Además de decir si eres Pro, deja la sesión compartida con el simulador y dice si aún puedes activar
 		// tus 14 días gratis (no empiezan solos: los activas tú desde ★)
 		let s = await proFetch('/pro/status', { print: pro.print })
+		// Sin Pro y sin saber de quién es el token (ver proFetch): con el perfil al día, otra vez
+		if (!s.pro && !s.canTrial && !s.trialUsed && !s.blocked && s.enabled) {
+			await api('/me').catch(() => {})
+			s = await proFetch('/pro/status', { print: pro.print })
+		}
 		// Si cambiaste de token en este navegador, la huella vieja pasa su Pro y su cuenta del simulador a la nueva
 		const old = store.get('pro.print', null)
 		if (old && old !== pro.print) {
@@ -191,7 +199,7 @@ function showPro() {
 				<details class="pro-more"><summary>¿Prefieres comprar días ya?</summary><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. ${refund}</p></details></div>`
 				: `<div class="stack pro-box"><h3>★ Modo Pro</h3>
 				<ul class="pro-feats">${feats}</ul>
-				<p class="muted">Ya usaste tus 14 días gratis. Compra días de Pro:</p>
+				<p class="muted">${pro.trialUsed ? 'Ya usaste tus 14 días gratis. ' : ''}Compra días de Pro:</p>
 				<div class="pro-plans">${plans}</div>
 				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Nada se cobra solo: cada compra la haces tú. ${refund}</p></div>`,
 	)
