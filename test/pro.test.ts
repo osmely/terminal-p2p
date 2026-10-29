@@ -871,14 +871,14 @@ test('avisos al usuario por Telegram: se conecta desde «Mi cuenta» y recibe su
 	await admin({ action: 'refund-transfer', id, ref: 'TX-9' })
 	assert.match(toUser()[2].text, /Devolución enviada[\s\S]*Referencia: <code>TX-9<\/code>/)
 
-	// Devuelta la compra, le quedan los 14 días gratis (su último plan es el comprado): a 2 días, el aviso (una vez); al terminar, otro
+	// Devuelta la compra, le quedan los 14 días gratis (y vuelven a ser gratis): a 2 días, el aviso (una vez); al terminar, otro
 	s.tick(12 * 86_400_000)
 	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 1)
-	assert.match(toUser()[3].text, /A tu Pro le quedan 2 días<\/b>[\s\S]*renueva desde el terminal/)
+	assert.match(toUser()[3].text, /A tus días gratis de Pro les quedan 2 días<\/b>[\s\S]*compra días desde el terminal/)
 	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 0)
 	s.tick(2 * 86_400_000 + 60_000)
 	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 1)
-	assert.match(toUser()[4].text, /Tu Pro terminó[\s\S]*tu historial siguen guardados/)
+	assert.match(toUser()[4].text, /Terminaron tus días gratis de Pro[\s\S]*tu historial siguen guardados/)
 
 	// /stop lo desconecta y no le llega nada más
 	assert.match((await tg('/stop')).body!.text!, /ya no te escribiremos/)
@@ -1112,4 +1112,19 @@ test('pagar la devolución con QvaPay: lo que pagó esa compra, a la cuenta que 
 	assert.equal(s.q.transfers.length, 1)
 	// En el registro
 	assert.match(await (await proAdmin(new Request('https://app.terminalp2p.com/admin/pro?view=registro', { headers: { Authorization: `Basic ${btoa('x:panel')}` } }), s.env, s.now())).text(), /Devolución pagada con QvaPay/)
+})
+
+test('comprar sobre los días gratis y devolverlo: le quedan los gratis y vuelven a ser gratis (puede comprar cuando quiera)', async () => {
+	const s = setup()
+	const form = (fields: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now(), s.q.fetcher)
+	await s.trial(P1, 'ana')
+	const { checkout, result } = await buy(s, P1, 'week')
+	assert.equal(result.expiresAt, T0 + 21 * 86_400_000)
+	assert.equal((s.db.prepare('SELECT plan FROM pro_licenses').get() as { plan: string }).plan, 'week')
+	await form({ action: 'refund', checkout: checkout.id, note: 'prueba' })
+	const st = (await s.post('/pro/status', { print: P1, username: 'ana' })).body
+	assert.deepEqual([st.plan, st.expiresAt], ['trial', T0 + 14 * 86_400_000])
+	// Con días gratis puede volver a comprar ya
+	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'week', username: 'ana' })).status, 200)
 })

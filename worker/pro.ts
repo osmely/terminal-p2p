@@ -147,8 +147,19 @@ export async function addDays(
 	// Sumar cuenta desde hoy si ya había vencido; restar nunca deja la cuenta antes de hoy (ni toca una ya vencida)
 	const after =
 		days >= 0 ? Math.max(now, before ?? 0) + days * DAY_MS : before !== null && before > now ? Math.max(now, before + days * DAY_MS) : (before ?? now)
-	// El tipo de días que tiene ahora: el de lo último que sumó (los gratis permiten comprar más cuando quiera)
-	const plan = days > 0 && m.kind !== 'adjust' ? (m.plan ?? m.kind) : (old?.plan ?? m.plan ?? m.kind)
+	// El tipo de días que tiene ahora: el de lo último que sumó (los gratis permiten comprar más cuando quiera). Al
+	// devolver una compra, el de lo último que sumó y sigue en pie (si compró sobre los gratis, vuelven a ser gratis)
+	const kept =
+		m.kind === 'refund'
+			? await db
+					.prepare(
+						"SELECT d.kind, c.plan FROM pro_days d LEFT JOIN pro_checkouts c ON c.id = d.checkout WHERE d.license = ? AND d.days > 0 AND d.kind != 'adjust' AND (d.checkout IS NULL OR c.refunded_at IS NULL) ORDER BY d.id DESC LIMIT 1",
+					)
+					.bind(id)
+					.first<{ kind: string; plan: string | null }>()
+			: null
+	const keptPlan = kept?.kind === 'purchase' ? kept.plan : kept?.kind === 'trial' || kept?.kind === 'gift' ? kept.kind : null
+	const plan = days > 0 && m.kind !== 'adjust' ? (m.plan ?? m.kind) : (keptPlan ?? old?.plan ?? m.plan ?? m.kind)
 	// La cuenta y su movimiento van juntos (batch es una transacción): o quedan los dos o ninguno. Pagar no levanta
 	// una suspensión: los días se suman y sigue suspendida hasta que la reactives (o le devuelvas el dinero)
 	await db.batch([
