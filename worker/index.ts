@@ -25,6 +25,7 @@ import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 import { feedWebhook, liveClients, liveSocket, type LiveEnv } from './livebook.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
+import { checkAlerts } from './ratealerts.ts'
 import { LiveBook } from './livebook-do.ts'
 import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 
@@ -165,7 +166,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
 	// Plan Pro, en el dominio del terminal. Pedir facturas tiene tope
 	if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
-		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund' || url.pathname === '/pro/telegram/link' || url.pathname === '/pro/trial'
+		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund' || url.pathname === '/pro/telegram/link' || url.pathname === '/pro/trial' || url.pathname === '/pro/alerts/add'
 			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 			// La consulta de estado da los días gratis y la sesión del simulador: con tope por IP (amplio)
 			if (url.pathname === '/pro/status' && !(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiadas consultas seguidas: espera un minuto'))
@@ -287,6 +288,13 @@ export default {
 		} catch (err) {
 			console.error(`histórico: ${(err as Error).message}`)
 		}
+		// Con la tasa nueva guardada, los avisos de tasa de Pro por Telegram
+		if (env.TELEGRAM_BOT_TOKEN)
+			try {
+				if (await proEnabled(env.DB, at)) await checkAlerts(env as unknown as ProEnv, at)
+			} catch (err) {
+				console.error(`avisos de tasa: ${(err as Error).message}`)
+			}
 		if (!env.ELTOQUE_TOKEN) return
 		try {
 			await syncInformal(env.DB, env.ELTOQUE_TOKEN, at)

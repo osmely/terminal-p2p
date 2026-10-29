@@ -21,6 +21,7 @@ export const BACKUP_TABLES = [
 	'pro_trials',
 	'pro_telegram',
 	'pro_tg_sent',
+	'pro_rate_alerts',
 	'pro_notes',
 	'pro_issues',
 	'pro_incidents',

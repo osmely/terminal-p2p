@@ -20,6 +20,7 @@ import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from '
 import { COINS } from '../src/terminal/market.ts'
 import { liveClients, liveSimulate, liveStatus, type LiveClient, type LiveEnv } from './livebook.ts'
 import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
+import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS } from './ratealerts.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
 import { cleanDiag, DIAG_MAX_BYTES, DIAG_PER_DAY, diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
 
@@ -909,6 +910,24 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Desconectó los avisos de Telegram' })
 			if (license) await unlink(db, license)
 			return json(200, await accountView(db, license, now))
+		}
+		// Avisos de tasa por Telegram (ratealerts.ts): los suyos, poner uno y quitar uno. Solo con Pro activo
+		if (route === 'POST /pro/alerts' || route === 'POST /pro/alerts/add' || route === 'POST /pro/alerts/delete') {
+			const b = await readBody(req)
+			const print = printOf(b.print)
+			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Avisos de tasa' })
+			const l = license ? await db.prepare('SELECT expires_at, revoked FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first<{ expires_at: number; revoked: number }>() : null
+			if (!license || !l || l.revoked || l.expires_at <= now) return json(403, { error: 'Los avisos de tasa son parte de Pro' })
+			if (route === 'POST /pro/alerts/add') {
+				const err = await addAlert(db, license, b, now)
+				if (err) return json(400, { error: err })
+				t.detail = `Puso un aviso de tasa: ${String(b.coin)} cuando ${b.dir === 'up' ? 'suba de' : 'baje de'} ${Number(b.price)}`
+			} else if (route === 'POST /pro/alerts/delete') {
+				await deleteAlert(db, license, Number(b.id))
+				t.detail = 'Quitó un aviso de tasa'
+			} else t.skip = true
+			return json(200, { alerts: await listAlerts(db, license), telegram: await linked(db, license), rates: await latestRates(db, COINS.map((c) => c.tick), now), max: MAX_ALERTS })
 		}
 		if (route === 'POST /pro/telegram/webhook') {
 			t.skip = true

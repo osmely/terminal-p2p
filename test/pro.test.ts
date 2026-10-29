@@ -1264,3 +1264,53 @@ test('en vivo: el historial del día guarda quién estuvo (primera y última vez
 	// Un día que no existe o del futuro: hoy
 	assert.match(await admin('?view=envivo&d=2099-01-01'), /<h2 class="sec-title">Hoy<\/h2>/)
 })
+
+test('avisos de tasa por Telegram: solo con Pro, hasta 5; avisan una vez al cruzar y se rearman al volver con margen; nunca con una tasa vieja', async () => {
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot' })
+	const { checkAlerts } = await import('../worker/ratealerts.ts')
+	const rate = (median: number, t = s.now()) => s.db.prepare('INSERT OR REPLACE INTO rates (coin, t, median) VALUES (?, ?, ?)').run('BANK_CUP', Math.floor(t / 600_000) * 600_000, median)
+	// Sin Pro, no
+	assert.equal((await s.post('/pro/alerts', { print: P1, username: 'ana' })).status, 403)
+	await s.trial(P1, 'ana')
+	s.db.prepare('INSERT INTO pro_telegram (license, chat_id, linked_at) VALUES (?, ?, ?)').run('qp:ana', 555, s.now())
+	rate(1100)
+	const add = (b: Record<string, unknown>) => s.post('/pro/alerts/add', { print: P1, username: 'ana', ...b })
+	assert.equal((await add({ coin: 'NADA', dir: 'up', price: 1 })).body.error, 'Elige un mercado')
+	const r = await add({ coin: 'BANK_CUP', dir: 'up', price: 1150 })
+	assert.deepEqual([r.body.alerts.length, r.body.telegram, r.body.rates.BANK_CUP, r.body.max], [1, true, 1100, 5])
+	for (let i = 0; i < 4; i++) await add({ coin: 'ETECSA', dir: 'down', price: 500 + i })
+	assert.match((await add({ coin: 'BANK_CUP', dir: 'down', price: 1000 })).body.error, /hasta 5 avisos/)
+	// Por debajo de 1,150 no avisa; al cruzar, una vez
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+	s.tick(600_000)
+	rate(1152.3)
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 1)
+	const msg = s.q.telegram.at(-1)!
+	assert.equal(msg.chat_id, 555)
+	assert.match(msg.text, /Tasa QvaPay · CUP Transferencia[\s\S]*subió a <b>1,152.30 CUP<\/b>[\s\S]*cuando suba de 1,150.00/)
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+	// Baja un poco (dentro del margen): sigue sin rearmarse; baja más del 0.5 %: se rearma y avisa al volver a cruzar
+	s.tick(600_000)
+	rate(1148)
+	await checkAlerts(s.env, s.now(), s.q.fetcher)
+	rate(1151)
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+	rate(1140)
+	await checkAlerts(s.env, s.now(), s.q.fetcher)
+	rate(1155)
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 1)
+	// La lista dice cuándo avisó
+	const list = (await s.post('/pro/alerts', { print: P1, username: 'ana' })).body.alerts
+	assert.deepEqual([list[0].armed, list[0].fired_rate], [0, 1155])
+	// Con una tasa de hace más de 30 minutos no avisa nada
+	const id = list.find((x: { coin: string }) => x.coin === 'ETECSA').id
+	s.db.prepare('INSERT OR REPLACE INTO rates (coin, t, median) VALUES (?, ?, ?)').run('ETECSA', s.now() - 3600_000, 400)
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+	// Quitar uno
+	assert.equal((await s.post('/pro/alerts/delete', { print: P1, username: 'ana', id })).body.alerts.length, 4)
+	// Sin Pro (se acabaron los días), sus avisos no salen
+	s.tick(8 * 86_400_000)
+	rate(1300)
+	s.db.prepare('UPDATE pro_rate_alerts SET armed = 1').run()
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+})

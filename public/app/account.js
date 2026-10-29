@@ -93,10 +93,11 @@ async function acctPro() {
 		.join('')
 	const tg = d.telegram
 		? `<div class="acct-tg on"><span>✓ Recibes los avisos de tu Pro en Telegram</span><button class="link small" id="tgOff">Dejar de recibirlos</button></div>`
-		: `<div class="acct-tg"><button class="btn block" id="tgOn">Recibir avisos en Telegram</button><p class="hint">Te escribimos cuando se confirme un pago, 3 días antes de que se acaben tus días y en cada paso de una devolución. Nada más.</p></div>`
+		: `<div class="acct-tg"><button class="btn block" id="tgOn">Recibir avisos en Telegram</button><p class="hint">Te escribimos cuando se confirme un pago, 3 días antes de que se acaben tus días, en cada paso de una devolución y con los avisos de tasa que pongas. Nada más.</p></div>`
 	$('acctBody').innerHTML = `<div class="stack">
 		${head}
 		${tg}
+		${a.active ? '<div id="acctAlerts"></div>' : ''}
 		${canRenew() ? '<button class="btn primary block" id="acctBuy">Comprar días</button>' : `<p class="hint">Podrás comprar más días cuando te queden 5 o menos.</p>`}
 		<div><p class="hint">Tus compras</p>${purchases ? `<ul class="acct-list">${purchases}</ul>` : '<p class="muted small">Aún no has comprado días.</p>'}
 		${d.refundUntil && d.refundUntil > Date.now() && d.purchases.some((p) => p.canRefund) ? `<p class="hint">Puedes pedir la devolución hasta el ${acctDay(d.refundUntil)} (${d.refundDays} días desde tu primera compra).</p>` : ''}</div>
@@ -113,6 +114,72 @@ async function acctPro() {
 		}
 	})
 	for (const b of $('acctBody').querySelectorAll('[data-refund]')) b.onclick = () => acctAskRefund(b.dataset.refund)
+	acctAlerts()
+}
+
+// Avisos de tasa por Telegram (Pro): «avísame cuando la Tasa QvaPay de un mercado suba de / baje de X». Los mira el
+// servidor cada 10 minutos con la tasa que publica QvaPay (la mediana de lo completado)
+async function acctAlerts(d) {
+	if (!$('acctAlerts')) return
+	if (!d)
+		try {
+			d = await proFetch('/pro/alerts', { print: TPPro.print })
+		} catch (e) {
+			$('acctAlerts').innerHTML = `<p class="hint">${esc(e.message)}</p>`
+			return
+		}
+	if (!$('acctAlerts')) return
+	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin), unit: unitOf(state.coin) }]
+	const now = (coin) => (d.rates[coin] ? `ahora ${fmtP(d.rates[coin])}` : 'sin tasa ahora')
+	const list = d.alerts
+		.map(
+			(x) =>
+				`<li><span>${esc(nameOf(x.coin))} · cuando ${x.dir === 'up' ? 'suba de' : 'baje de'} <b class="mono">${fmtP(x.price)}</b><small class="muted"> · ${now(x.coin)}${x.armed ? '' : ` · avisó el ${acctDay(x.fired_at)} (${fmtP(x.fired_rate)})`}</small></span><button class="link small" data-alert-del="${x.id}">Quitar</button></li>`,
+		)
+		.join('')
+	const coin = d.alerts.at(-1)?.coin ?? state.coin
+	$('acctAlerts').innerHTML = `<div class="stack tight">
+		<p class="hint">Avisos de tasa por Telegram</p>
+		${d.telegram ? '' : '<p class="notice warn">Conecta el bot de Telegram (arriba) para que te lleguen.</p>'}
+		${list ? `<ul class="acct-list">${list}</ul>` : '<p class="muted small">Te escribimos cuando la Tasa QvaPay de un mercado suba o baje del valor que pongas.</p>'}
+		${
+			d.alerts.length < d.max
+				? `<div class="grid2">
+				<label class="field">Mercado<select class="input" id="alCoin">${markets.map((m) => `<option value="${m.tick}" ${m.tick === coin ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+				<label class="field">Avisarme cuando<select class="input" id="alDir"><option value="up">suba de</option><option value="down">baje de</option></select></label>
+			</div>
+			<label class="field">Tasa por USD<input class="input" id="alPrice" inputmode="decimal" /></label>
+			<p class="hint" id="alNow"></p>
+			<button class="btn block" id="alAdd">Añadir aviso</button>`
+				: `<p class="hint">Tienes ${d.max} avisos, el máximo: quita alguno para poner otro.</p>`
+		}
+	</div>`
+	const sync = () => {
+		const c = $('alCoin').value
+		$('alNow').textContent = d.rates[c] ? `La Tasa QvaPay de ${nameOf(c)} ahora: ${fmtP(d.rates[c])} ${unitOf(c)}` : ''
+		$('alPrice').placeholder = d.rates[c] ? fmtP(d.rates[c]) : ''
+	}
+	if ($('alCoin')) {
+		$('alCoin').onchange = sync
+		sync()
+		$('alAdd').onclick = async () => {
+			const price = Number(String($('alPrice').value).replace(/,/g, ''))
+			try {
+				acctAlerts(await proFetch('/pro/alerts/add', { print: TPPro.print, coin: $('alCoin').value, dir: $('alDir').value, price }))
+				toast('Aviso puesto')
+			} catch (e) {
+				toast(e.message, true)
+			}
+		}
+	}
+	for (const b of $('acctAlerts').querySelectorAll('[data-alert-del]'))
+		b.onclick = async () => {
+			try {
+				acctAlerts(await proFetch('/pro/alerts/delete', { print: TPPro.print, id: Number(b.dataset.alertDel) }))
+			} catch (e) {
+				toast(e.message, true)
+			}
+		}
 }
 
 // El bot solo puede escribir a quien le escribió antes: se abre con un enlace de un solo uso y, al volver aquí,
