@@ -15,6 +15,11 @@ export interface TokenStorage {
 	local: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 }
 
+// La marca del módulo Pro (la licencia con que se descargó; el terminal la manda al relé) es de la cuenta que lo cargó:
+// en cuanto cambia la cuenta se borra, para que la nueva nunca salga con la marca de otra (sería una «copia» para el
+// servidor). El módulo se va del todo al recargar, cuando pro.js ve que la nueva cuenta no tiene Pro
+const forgetProMark = () => void delete (globalThis as { TPProMark?: unknown }).TPProMark
+
 export class BrowserAccounts implements AccountStore {
 	private readonly storage: TokenStorage
 	private readonly baseUrl: string
@@ -38,6 +43,8 @@ export class BrowserAccounts implements AccountStore {
 
 	// Valida el token contra QvaPay antes de guardarlo
 	async connect(_sid: string, token: string, opts: { remember?: boolean } = {}): Promise<Account> {
+		// Antes de la primera petición con el token nuevo (si no vale, la cuenta de antes sigue, solo que sin marca)
+		forgetProMark()
 		const client = new QvaPayClient({ token, dryRun: false, baseUrl: this.baseUrl })
 		const me = await client.me()
 		this.clear()
@@ -51,6 +58,8 @@ export class BrowserAccounts implements AccountStore {
 
 	async get(): Promise<Account | null> {
 		if (this.acc && (this.token === null || this.stored() === this.token)) return this.acc
+		// Otra pestaña cambió o quitó la cuenta
+		if (this.acc) forgetProMark()
 		this.acc = null
 		const b = this.block
 		if (b && b.token === this.stored() && this.now() - b.at < BLOCKED_RETRY_MS) throw b.err
@@ -65,6 +74,7 @@ export class BrowserAccounts implements AccountStore {
 	}
 
 	async disconnect() {
+		forgetProMark()
 		this.acc = null
 		this.token = null
 		this.block = null

@@ -594,7 +594,8 @@ export async function createCheckout(env: ProEnv, who: { print: string; username
 	const db = env.DB
 	const l = await db.prepare('SELECT plan, expires_at, revoked FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(accountOf(who.username)).first<{ plan: string; expires_at: number; revoked: number }>()
 	if (l?.revoked) throw new ProError(403, 'Tu cuenta Pro está suspendida. Escríbenos a @terminalp2p si crees que es un error.')
-	if (l && l.plan !== 'trial' && l.expires_at - now > RENEW_DAYS * DAY_MS) throw new ProError(409, `Aún te quedan días de Pro. Podrás añadir más cuando te queden ${RENEW_DAYS} o menos.`)
+	// Con días comprados, se compran más en los últimos RENEW_DAYS; con días gratis o regalados (no pagó), cuando quiera
+	if (l && l.plan !== 'trial' && l.plan !== 'gift' && l.expires_at - now > RENEW_DAYS * DAY_MS) throw new ProError(409, `Aún te quedan días de Pro. Podrás añadir más cuando te queden ${RENEW_DAYS} o menos.`)
 	// Si ya tiene una factura pendiente del mismo plan, la misma: así no se pagan dos por error
 	const open = await db
 		.prepare("SELECT id, invoice FROM pro_checkouts WHERE status = 'pending' AND created_at > ? AND plan = ? AND print = ? AND invoice IS NOT NULL ORDER BY created_at DESC LIMIT 1")
@@ -894,14 +895,22 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		}
 
 		// Cambiaste de token en este navegador: la huella vieja autoriza a la nueva
+		// Cambió el token en este navegador: lo de la huella vieja pasa a la nueva, pero solo si las dos son de la misma
+		// cuenta de QvaPay (la del token nuevo la confirma QvaPay, cookie del relé). Si no, es otra persona que entró en
+		// el mismo navegador: no se le pasa nada (ni el Pro ni la cuenta del simulador)
 		if (route === 'POST /pro/rotate') {
 			const b = await readBody(req)
 			const from = printOf(b.from)
 			const to = printOf(b.to)
-			// La cuenta del simulador que iba con la huella vieja pasa a la nueva (si la nueva no tiene ya una)
-			await db.prepare('UPDATE sim_ids SET key = ? WHERE key = ? AND NOT EXISTS (SELECT 1 FROM sim_ids WHERE key = ?)').bind(`print:${to}`, `print:${from}`, `print:${to}`).run()
+			const who = await readWho(req.headers.get('cookie'), to, env.PRO_KEY, now)
+			const owned = await db
+				.prepare('SELECT l.uuid, l.username FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?')
+				.bind(from)
+				.first<{ uuid: string; username: string }>()
+			const same = !!who && !!owned && who.username.toLowerCase() === owned.username.toLowerCase()
+			if (same) await db.prepare('UPDATE sim_ids SET key = ? WHERE key = ? AND NOT EXISTS (SELECT 1 FROM sim_ids WHERE key = ?)').bind(`print:${to}`, `print:${from}`, `print:${to}`).run()
 			if (!(await proEnabled(db, now))) return json(200, { pro: false, enabled: false })
-			const l = await licenseOfPrint(db, from, now)
+			const l = same ? await licenseOfPrint(db, from, now) : null
 			if (!l) return json(200, await statusOf(env, await licenseOfPrint(db, to, now), now))
 			const owner = await db.prepare('SELECT license FROM pro_prints WHERE print = ?').bind(to).first<{ license: string }>()
 			if (owner && owner.license !== l.uuid) return json(409, { error: 'Ese dispositivo ya pertenece a otra licencia' })

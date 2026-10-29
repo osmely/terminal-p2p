@@ -132,3 +132,31 @@ test('con el módulo Pro cargado, cada petición al relé lleva su marca (X-TP-P
 	await a.client.me()
 	assert.deepEqual(seen, [null, 'licencia.firmada'])
 })
+
+test('al cambiar de cuenta, la marca del módulo Pro de la anterior se borra antes de la primera petición de la nueva', async (t) => {
+	const real = globalThis.fetch
+	const seen: { token: string; mark: string | null }[] = []
+	globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+		const h = new Headers(init?.headers)
+		seen.push({ token: (h.get('authorization') ?? '').replace('Bearer ', ''), mark: h.get('x-tp-pro') })
+		return new Response(JSON.stringify({ uuid: 'u1', username: 'pepe', balance: 1, kyc: true, golden_check: false, p2p_enabled: true }))
+	}) as typeof fetch
+	t.after(() => {
+		globalThis.fetch = real
+		delete (globalThis as { TPProMark?: string }).TPProMark
+	})
+	const local = memStorage()
+	const acc = new BrowserAccounts({ storage: { session: memStorage(), local }, baseUrl: 'https://x/qp' })
+	await acc.connect('browser', 'tokA', { remember: true })
+	;(globalThis as { TPProMark?: string }).TPProMark = 'marca.de.A'
+	await (await acc.get())!.client.me()
+	// Conecta otra cuenta en la misma pestaña: ni su comprobación ni nada después lleva la marca de A
+	await acc.connect('browser', 'tokB', { remember: true })
+	await (await acc.get())!.client.me()
+	assert.deepEqual(seen.map((x) => [x.token, x.mark]), [['tokA', null], ['tokA', 'marca.de.A'], ['tokB', null], ['tokB', null]])
+	// Y si la cambia otra pestaña (el token guardado ya es otro), igual
+	;(globalThis as { TPProMark?: string }).TPProMark = 'marca.de.B'
+	local.setItem('tp.token', 'tokC')
+	await (await acc.get())!.client.me()
+	assert.equal(seen.at(-1)!.mark, null)
+})

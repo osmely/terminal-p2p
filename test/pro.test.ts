@@ -210,15 +210,22 @@ test('no se da por pagada si QvaPay no lo confirma, si paga menos o si el aviso 
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
 })
 
-test('cambiar de token: la huella vieja autoriza a la nueva y deja de valer', async () => {
+test('cambiar de token: la huella vieja pasa a la nueva solo si QvaPay confirma que es la misma cuenta', async () => {
 	const s = setup()
 	await buy(s)
-	const r = await s.post('/pro/rotate', { from: P1, to: P2 })
+	// Sin saber de quién es el token nuevo, nada
+	assert.equal((await s.post('/pro/rotate', { from: P1, to: P2 })).body.pro, false)
+	// Otra cuenta que entra en el mismo navegador: tampoco (antes así se podía regalar el Pro a cualquiera)
+	assert.equal((await s.post('/pro/rotate', { from: P1, to: P2, print: P2, username: 'leo' })).body.pro, false)
+	assert.equal((await s.post('/pro/status', { print: P2, username: 'leo' })).body.pro, false)
+	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
+	// La misma cuenta con un token nuevo: pasa, y la huella vieja deja de valer
+	const r = await s.post('/pro/rotate', { from: P1, to: P3, print: P3, username: 'ana' })
 	assert.equal(r.body.pro, true)
-	assert.equal((await s.post('/pro/status', { print: P2 })).body.pro, true)
+	assert.equal((await s.post('/pro/status', { print: P3 })).body.pro, true)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
 	// Una huella que no es Pro no autoriza nada
-	assert.equal((await s.post('/pro/rotate', { from: P3, to: P4 })).body.pro, false)
+	assert.equal((await s.post('/pro/rotate', { from: P2, to: P4, print: P4, username: 'leo' })).body.pro, false)
 })
 
 test('el módulo Pro sale firmado con el usuario, y nunca sin licencia válida o revocada', async () => {
@@ -1135,4 +1142,18 @@ test('comprar sobre los días gratis y devolverlo: le quedan los gratis y vuelve
 	assert.deepEqual([st.plan, st.expiresAt], ['trial', T0 + 14 * 86_400_000])
 	// Con días gratis puede volver a comprar ya
 	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'week', username: 'ana' })).status, 200)
+})
+
+test('con días regalados (como con los gratis) se pueden comprar más cuando quiera; con comprados, en los últimos 5', async () => {
+	const s = setup()
+	const form = (fields: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now(), s.q.fetcher)
+	await s.post('/pro/status', { print: P1, username: 'ana' })
+	await form({ action: 'days', username: 'ana', days: '30', note: 'compensación' })
+	// 30 días regalados por delante: igual puede comprar
+	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'week', username: 'ana' })).status, 200)
+	// Pagada esa compra, sus días ya son comprados: hasta los últimos 5, no
+	s.q.pay('inv-1', 'ana')
+	await s.status([...s.db.prepare('SELECT id FROM pro_checkouts').all()].map((r) => (r as { id: string }).id)[0])
+	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'week', username: 'ana' })).status, 409)
 })

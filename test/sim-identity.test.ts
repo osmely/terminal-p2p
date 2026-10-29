@@ -52,6 +52,7 @@ const P1 = 'a'.repeat(64)
 const P2 = 'b'.repeat(64)
 const P3 = 'c'.repeat(64)
 const P4 = 'd'.repeat(64)
+const P5 = 'e'.repeat(64)
 
 function setup() {
 	const { db, d1 } = memD1()
@@ -118,14 +119,21 @@ test('Pro se hereda del terminal; la cuenta pasa al dueño de la licencia y sigu
 	assert.equal((await s.sim('GET', '/api/me', c2)).body.player.id, id)
 })
 
-test('cambiar de token en el terminal: la cuenta del simulador pasa a la huella nueva', async () => {
+test('cambiar de token en el terminal: la cuenta del simulador sigue a su dueño, nunca pasa a otra cuenta', async () => {
 	const s = setup()
-	const old = (await s.terminal('/pro/status', { print: P3 })).cookie
-	const id = (await s.sim('GET', '/api/me', old)).body.player.id
-	// El terminal ve una huella distinta: primero pregunta con la nueva y luego pide pasar lo de la vieja
-	const fresh = (await s.terminal('/pro/status', { print: P4 })).cookie
-	assert.equal((await s.terminal('/pro/rotate', { from: P3, to: P4 })).body.pro, false)
-	assert.equal((await s.sim('GET', '/api/me', fresh)).body.player.id, id)
+	// El simulador ve las dos cookies (son de terminalp2p.com): la sesión (tpid) y de quién es el token (tpw)
+	const as = async (print: string, username: string) => `${(await s.terminal('/pro/status', { print, username })).cookie}; ${(await whoHeader({ print, username })).Cookie}`
+	const id = (await s.sim('GET', '/api/me', await as(P3, 'Leo'))).body.player.id
+	// El mismo dueño con un token nuevo: la misma cuenta del juego
+	await s.terminal('/pro/rotate', { from: P3, to: P4, print: P4, username: 'Leo' })
+	assert.equal((await s.sim('GET', '/api/me', await as(P4, 'Leo'))).body.player.id, id)
+	// Otra persona que entra en el mismo navegador: su propia cuenta del juego, no la de Leo
+	await s.terminal('/pro/rotate', { from: P4, to: P5, print: P5, username: 'Eva' })
+	assert.notEqual((await s.sim('GET', '/api/me', await as(P5, 'Eva'))).body.player.id, id)
+	// Sin saber de quién es el token nuevo, la cuenta de la huella vieja no pasa a la nueva
+	const anon = (await s.sim('GET', '/api/me', (await s.terminal('/pro/status', { print: P1 })).cookie)).body.player.id
+	await s.terminal('/pro/rotate', { from: P1, to: P2 })
+	assert.notEqual((await s.sim('GET', '/api/me', (await s.terminal('/pro/status', { print: P2 })).cookie)).body.player.id, anon)
 })
 
 test('con Pro apagado en el panel: sin días gratis ni compras, y el simulador solo con BTC y ETH', async () => {

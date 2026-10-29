@@ -165,8 +165,8 @@ function renderProChip() {
 }
 
 // ── Ventana Pro ──────────────────────────────────────────────────────
-// Con días de Pro solo se compran más cuando quedan pocos (el servidor también lo exige); con los gratis, siempre
-const canRenew = () => !pro.active || pro.plan === 'trial' || pro.expiresAt - Date.now() <= RENEW_SOON_MS
+// Con días comprados solo se compran más cuando quedan pocos (el servidor también lo exige); con los gratis o regalados, siempre
+const canRenew = () => !pro.active || pro.plan === 'trial' || pro.plan === 'gift' || pro.expiresAt - Date.now() <= RENEW_SOON_MS
 
 function showPro() {
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para usar Pro', true)

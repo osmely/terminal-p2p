@@ -95,7 +95,7 @@ async function acctPro() {
 		${tg}
 		${canRenew() ? '<button class="btn primary block" id="acctBuy">Comprar días</button>' : `<p class="hint">Podrás comprar más días cuando te queden 5 o menos.</p>`}
 		<div><p class="hint">Tus compras</p>${purchases ? `<ul class="acct-list">${purchases}</ul>` : '<p class="muted small">Aún no has comprado días.</p>'}
-		${d.refundUntil && d.refundUntil > Date.now() ? `<p class="hint">Puedes pedir la devolución hasta el ${acctDay(d.refundUntil)} (${d.refundDays} días desde tu primera compra).</p>` : ''}</div>
+		${d.refundUntil && d.refundUntil > Date.now() && d.purchases.some((p) => p.canRefund) ? `<p class="hint">Puedes pedir la devolución hasta el ${acctDay(d.refundUntil)} (${d.refundDays} días desde tu primera compra).</p>` : ''}</div>
 		<div><p class="hint">Historial de tus días</p><ul class="acct-moves">${moves || '<li class="muted">Sin movimientos.</li>'}</ul></div></div>`
 	$('acctBuy')?.addEventListener('click', showPro)
 	$('tgOn')?.addEventListener('click', acctTelegram)
