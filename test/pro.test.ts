@@ -24,7 +24,7 @@ async function whoHeader(body: unknown, now = Date.now()): Promise<Record<string
 
 // D1 sobre SQLite en memoria, con las migraciones del proyecto
 function memD1() {
-	const db = new DatabaseSync(':memory:')
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5 } }) // como D1: no más de 5 términos por UNION
 	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
 	// Pro encendido en el panel (las pruebas de Pro apagado lo apagan)
 	db.exec("INSERT INTO app_flags (key, value, updated_at) VALUES ('pro', '1', 0)")
@@ -600,7 +600,7 @@ test('el relé deja firmada la cuenta del perfil de QvaPay junto a la huella de 
 })
 
 test('migración al libro de movimientos: las licencias sueltas de un usuario se juntan sumando lo que les quedaba', () => {
-	const db = new DatabaseSync(':memory:')
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5 } }) // como D1: no más de 5 términos por UNION
 	const files = readdirSync('migrations').sort()
 	for (const f of files.filter((f) => f < '0019')) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
 	const now = Date.now()
@@ -1164,4 +1164,70 @@ test('con días regalados (como con los gratis) se pueden comprar más cuando qu
 	s.q.pay('inv-1', 'ana')
 	await s.status([...s.db.prepare('SELECT id FROM pro_checkouts').all()].map((r) => (r as { id: string }).id)[0])
 	assert.equal((await s.post('/pro/checkout', { print: P1, plan: 'week', username: 'ana' })).status, 409)
+})
+
+test('traceo: lo que el servidor hace con cada cuenta queda en su línea de tiempo, sin repetir lo que se repite solo', async () => {
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100' })
+	const log = () => s.db.prepare('SELECT account, kind, ok, detail FROM user_log ORDER BY id').all() as { account: string; kind: string; ok: number; detail: string }[]
+	// Abrir el terminal tres veces en la misma hora: una sola línea
+	for (let i = 0; i < 3; i++) await s.post('/pro/status', { print: P1, username: 'Ana' })
+	assert.deepEqual(log().map((r) => [r.account, r.kind]), [['ana', 'status']])
+	assert.match(log()[0].detail, /sin Pro \(puede probarlo gratis\)/)
+	// Lo que hace sí, y también cuando el servidor dice que no (con el motivo)
+	await s.post('/pro/trial', { print: P1, username: 'Ana' })
+	await s.post('/pro/trial', { print: P1, username: 'Ana' })
+	await s.post('/pro/checkout', { print: P1, plan: 'month' })
+	const rows = log().slice(1)
+	assert.deepEqual(rows.map((r) => [r.kind, r.ok]), [['trial', 1], ['trial', 0], ['checkout', 0]])
+	assert.match(rows[0].detail, /Activó sus 14 días gratis, hasta el/)
+	assert.match(rows[1].detail, /409: Ya tienes Pro activo/)
+	// Sin cookie, la cuenta sale de su licencia (la huella ya es de ana)
+	assert.equal(rows[2].account, 'ana')
+	assert.match(rows[2].detail, /403: Conecta tu cuenta de QvaPay para comprar Pro/)
+	// La pregunta por una factura se repite cada pocos segundos: no se apunta
+	await s.status('nada')
+	assert.equal(log().length, 4)
+	// A la hora siguiente, abrir el terminal vuelve a contar
+	s.tick(3_600_000)
+	await s.post('/pro/status', { print: P1, username: 'Ana' })
+	assert.match(log().at(-1)!.detail, /Pro gratis hasta el/)
+})
+
+test('traceo: diagnóstico desde «Mi cuenta» (también con Pro apagado), aviso al grupo y en la ficha del panel con lo de otras tablas', async () => {
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-100' })
+	const admin = (query: string) =>
+		proAdmin(new Request(`https://app.terminalp2p.com/admin/pro${query}`, { headers: { Authorization: `Basic ${btoa('x:panel')}` } }), s.env, s.now()).then((r) => r.text())
+	await s.trial(P1, 'ana')
+	await buy(s, P1, 'week', 'ana')
+	const { setProEnabled } = await import('../worker/flags.ts')
+	await setProEnabled(s.env.DB, false, s.now())
+	// Sin contar qué pasó, no
+	assert.equal((await s.post('/pro/diag', { print: P1, username: 'ana', note: '', entries: [] })).status, 400)
+	const entries = [
+		{ t: T0, kind: 'api', msg: 'POST /take → 400: Saldo insuficiente', data: { uuid: 'x', amount: 10, ok: false, details: { card: '9200 1234' } } },
+		{ t: T0 + 1000, kind: 'toast', msg: 'Saldo insuficiente', data: { ok: false }, extra: 'fuera' },
+		{ kind: 'mal' },
+	]
+	const r = await s.post('/pro/diag', { print: P1, username: 'ana', note: 'no pude tomar la oferta', entries })
+	assert.equal(r.status, 200)
+	const d = s.db.prepare('SELECT account, note, body, entries FROM user_diag').get() as { account: string; note: string; body: string; entries: number }
+	assert.deepEqual([d.account, d.note, d.entries], ['ana', 'no pude tomar la oferta', 2])
+	// Solo campos sueltos: nada anidado (ahí podrían ir datos de pago) ni campos de más
+	assert.doesNotMatch(d.body, /9200|fuera/)
+	const tg = s.q.telegram.at(-1)!
+	assert.match(tg.text, /Diagnóstico<\/b>\n@ana: «no pude tomar la oferta»\n2 líneas/)
+	assert.equal(tg.url, `https://app.terminalp2p.com/admin/pro?diag=${r.body.id}`)
+	// Su página en el panel
+	const page = await admin(`?diag=${r.body.id}`)
+	assert.match(page, /Diagnóstico de <a href="\/admin\/pro\?u=ana"><b>@ana<\/b><\/a>/)
+	assert.match(page, /POST \/take → 400: Saldo insuficiente/)
+	// La ficha junta el diagnóstico con los días, el pago y lo que hizo en el terminal
+	const card = await admin('?u=ana&actf=all')
+	assert.match(card, /id="actividad"/)
+	for (const what of ['📋 Diagnóstico', '💵 Pagó', '📅 Días gratis', '📅 Compra', '🎁 Días gratis', '🧾 Factura', '👁 Terminal']) assert.ok(card.includes(what), what)
+	// «Lo que hizo» deja fuera abrir el terminal
+	assert.ok(!(await admin('?u=ana')).includes('👁 Terminal'))
+	// Tope por día
+	for (let i = 0; i < 4; i++) await s.post('/pro/diag', { print: P1, username: 'ana', note: `otra ${i}`, entries: [] })
+	assert.equal((await s.post('/pro/diag', { print: P1, username: 'ana', note: 'una más', entries: [] })).status, 429)
 })

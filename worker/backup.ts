@@ -27,6 +27,8 @@ export const BACKUP_TABLES = [
 	'pro_audit',
 	'user_blocks',
 	'user_block_prints',
+	// Los diagnósticos que mandan los usuarios (el traceo, user_log, va en la completa de los domingos)
+	'user_diag',
 ] as const
 
 // Copias de antes (v1), con otros nombres

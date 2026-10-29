@@ -19,6 +19,7 @@ import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEna
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
 import { liveSimulate, liveStatus, type LiveEnv } from './livebook.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
+import { cleanDiag, DIAG_MAX_BYTES, DIAG_PER_DAY, diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
 
 export interface ProEnv extends AlertEnv {
 	DB: D1
@@ -716,21 +717,59 @@ const printOf = (v: unknown) => {
 	return p
 }
 
+// Lo que cada ruta deja en el traceo de la cuenta (userlog.ts): la ruta rellena lo que sabe y, al responder, se apunta
+// una línea; también cuando el servidor dice que no. Sin `kind`, solo se apuntan los errores
+interface Trace {
+	kind?: LogKind
+	account?: string | null
+	print?: string | null
+	detail?: string
+	dk?: string
+	skip?: boolean
+}
+
 export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now(), fetcher: typeof fetch = fetch): Promise<Response | null> {
 	const path = url.pathname
 	if (!path.startsWith('/pro/') && path !== '/api/pro/webhook') return null
 	if (!env.PRO_KEY) return json(503, { error: 'Pro aún no está disponible' })
+	const t: Trace = {}
+	const res = await proRoute(req, url, env as ProEnv & { PRO_KEY: string }, now, fetcher, t)
+	await traceRoute(req, env, `${req.method} ${path}`, res, t, now)
+	return res
+}
+
+async function traceRoute(req: Request, env: ProEnv, route: string, res: Response, t: Trace, now: number) {
+	const failed = res.status >= 400
+	if (t.skip || (!t.kind && !failed)) return
+	// De quién: lo que supo la ruta o, si no, la cuenta que confirmó QvaPay para esa huella o la dueña de su licencia
+	let account = t.account ?? null
+	if (!account && t.print) {
+		account =
+			(await readWho(req.headers.get('cookie'), t.print, env.PRO_KEY!, now))?.username ??
+			(await env.DB.prepare('SELECT l.username FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?').bind(t.print).first<{ username: string }>())?.username ??
+			null
+	}
+	if (!account && !t.print) return
+	const error = failed ? String(((await res.clone().json().catch(() => ({}))) as { error?: unknown }).error ?? `error ${res.status}`) : ''
+	const detail = failed ? `${t.kind ? (t.detail ? `${t.detail} · ` : '') : `${route} · `}${res.status}: ${error}` : t.detail
+	await logUser(env.DB, { account, print: t.print, kind: t.kind ?? 'error', ok: !failed, detail, dk: failed ? null : t.dk }, now)
+}
+
+async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string }, now: number, fetcher: typeof fetch, t: Trace): Promise<Response> {
+	const path = url.pathname
 	const db = env.DB
 	const route = `${req.method} ${path}`
 	try {
 		// Con Pro apagado en el panel: nadie es Pro ni puede comprar, y no empiezan los días gratis. La consulta de
 		// estado sigue dejando la sesión del simulador, y los avisos de pago de QvaPay se siguen atendiendo
-		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook', 'POST /pro/telegram/webhook', 'POST /pro/telegram/unlink'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
+		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook', 'POST /pro/telegram/webhook', 'POST /pro/telegram/unlink', 'POST /pro/diag'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
 		// ¿Este dispositivo es Pro?
 		if (route === 'POST /pro/status') {
 			const b = await readBody(req)
 			const print = printOf(b.print)
+			Object.assign(t, { kind: 'status', print, dk: hourKey('status', print, now) })
 			if (!(await proEnabled(db, now))) {
+				t.detail = 'Abrió el terminal (Pro apagado)'
 				const off = json(200, { pro: false, enabled: false })
 				off.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
 				return off
@@ -741,7 +780,9 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
 			const username = who?.username
 			// Una cuenta bloqueada no es Pro ni entra en el simulador (se le cierra la sesión compartida)
+			t.account = username ?? l?.username
 			if ((await accessOf(db, { username: username ?? l?.username, print }, now))?.level === 'blocked') {
+				Object.assign(t, { kind: 'denied', detail: 'Cuenta bloqueada: sin Pro ni simulador', dk: hourKey('denied', print, now) })
 				const res = json(200, { pro: false, enabled: true, canTrial: false, blocked: true, plans: planList() })
 				res.headers.set('Set-Cookie', sessionCookie(url, '', 0))
 				return res
@@ -749,7 +790,10 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			// Un dispositivo nuevo con tu cuenta entra solo en tu Pro (comprado o de los días gratis)
 			if (!l && username) {
 				l = await activeLicense(db, accountOf(username), now)
-				if (l) await attachPrint(db, l.uuid, print, now)
+				if (l) {
+					await attachPrint(db, l.uuid, print, now)
+					await logUser(db, { account: username, print, kind: 'device', detail: 'Dispositivo nuevo: entró en su Pro' }, now)
+				}
 			}
 			if (l) await db.prepare('UPDATE pro_prints SET seen_at = ? WHERE print = ?').bind(now, print).run()
 			// Los días gratis no empiezan solos: si aún puede, el terminal le ofrece activarlos (POST /pro/trial)
@@ -757,6 +801,9 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			// «Ya los usaste» solo si se sabe de quién es el token (con dos cuentas en el mismo navegador, la otra pestaña
 			// no lo sabe hasta que vuelve a pedir su perfil)
 			const trialUsed = !l && !!username && !canTrial
+			t.detail = l
+				? `Abrió el terminal · Pro ${({ trial: 'gratis', gift: 'regalado' } as Record<string, string>)[l.plan] ?? 'comprado'} hasta el ${hDay(l.expires_at)}`
+				: `Abrió el terminal · sin Pro${canTrial ? ' (puede probarlo gratis)' : trialUsed ? ' (ya usó los días gratis)' : username ? '' : ' · sin saber de quién es el token'}`
 			// La sesión compartida con el simulador: con ella entra sin otro login y hereda tus días de Pro
 			const res = json(200, { ...(await statusOf(env, l, now)), canTrial, trialUsed })
 			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
@@ -767,13 +814,16 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		if (route === 'POST /pro/trial') {
 			const print = printOf((await readBody(req)).print)
 			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
+			Object.assign(t, { kind: 'trial', print, account: who?.username, detail: 'Activar los días gratis' })
 			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para activar tus días gratis', code: 'TP_WHO' })
 			if ((await accessOf(db, { username: who.username, print }, now))?.level === 'blocked') return accessError('blocked')
 			if (await activeLicense(db, accountOf(who.username), now)) return json(409, { error: 'Ya tienes Pro activo' })
 			const r = await freeDays(db, who.username, print, now, await ipPrint(req, env.PRO_KEY))
 			if (r === 'used') return json(409, { error: `Ya usaste tus ${TRIAL_DAYS} días gratis en esta cuenta o en este dispositivo` })
 			if (r === 'busy') return json(429, { error: 'Ahora mismo no se pueden activar más días gratis desde tu conexión. Inténtalo mañana.' })
-			const res = json(200, { ...(await statusOf(env, await licenseOfPrint(db, print, now), now)), canTrial: false, started: true })
+			const started = await licenseOfPrint(db, print, now)
+			t.detail = `Activó sus ${TRIAL_DAYS} días gratis${started ? `, hasta el ${hDay(started.expires_at)}` : ''}`
+			const res = json(200, { ...(await statusOf(env, started, now)), canTrial: false, started: true })
 			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
 			return res
 		}
@@ -793,13 +843,19 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			// Pro queda a nombre de la cuenta confirmada de este dispositivo. Sin ella no hay factura: así nadie puede
 			// llenar la app de QvaPay de facturas con huellas inventadas y dejar a los demás sin poder comprar
 			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
+			const plan = String(b.plan) as Plan
+			Object.assign(t, { kind: 'checkout', print, account: who?.username, detail: `Comprar ${PLANS[plan]?.name ?? plan}` })
 			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para comprar Pro', code: 'TP_WHO' })
 			if ((await accessOf(db, { username: who.username, print }, now))?.level === 'blocked') return accessError('blocked')
-			return json(200, await createCheckout(env, { print, username: who.username }, String(b.plan) as Plan, url.origin, now, fetcher))
+			const c = await createCheckout(env, { print, username: who.username }, plan, url.origin, now, fetcher)
+			t.detail = `Pidió la factura de ${PLANS[plan].name} (${PLANS[plan].usd} USD) · ${c.id}`
+			return json(200, c)
 		}
 
 		// El navegador que pagó pregunta cómo va su factura
 		if (route === 'POST /pro/checkout/status') {
+			// La pregunta se repite cada pocos segundos: el pago queda en el traceo desde la factura
+			t.skip = true
 			const b = await readBody(req)
 			return json(200, (await checkoutStatus(env, String(b.id ?? ''), { print: printOf(b.print) }, now, fetcher)).body)
 		}
@@ -807,6 +863,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		// «Mi cuenta»: días, historial y compras de la cuenta de este dispositivo
 		if (route === 'POST /pro/account') {
 			const print = printOf((await readBody(req)).print)
+			t.print = print
 			return json(200, await accountView(db, await deviceAccount(req, db, print, env.PRO_KEY, now), now))
 		}
 
@@ -815,6 +872,8 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			const b = await readBody(req)
 			const print = printOf(b.print)
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			// La devolución pedida ya sale de su tabla: aquí solo los intentos fallidos
+			Object.assign(t, { print, account: license })
 			if (!license) return json(403, { error: 'Conecta tu cuenta para pedir la devolución' })
 			const reason = String(b.reason ?? '').trim()
 			if (reason.length < 3) return json(400, { error: 'Cuéntanos en pocas palabras por qué la pides' })
@@ -836,6 +895,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		if (route === 'POST /pro/telegram/link') {
 			const print = printOf((await readBody(req)).print)
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Pidió el enlace para conectar los avisos de Telegram' })
 			if (!license || !(await db.prepare('SELECT 1 FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first())) return json(403, { error: 'Conecta tu cuenta para recibir avisos' })
 			const url = await linkUrl(env, license, now, fetcher)
 			if (!url) return json(503, { error: 'Los avisos por Telegram no están disponibles ahora mismo' })
@@ -844,16 +904,21 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 		if (route === 'POST /pro/telegram/unlink') {
 			const print = printOf((await readBody(req)).print)
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Desconectó los avisos de Telegram' })
 			if (license) await unlink(db, license)
 			return json(200, await accountView(db, license, now))
 		}
-		if (route === 'POST /pro/telegram/webhook') return botWebhook(req, env, now)
+		if (route === 'POST /pro/telegram/webhook') {
+			t.skip = true
+			return botWebhook(req, env, now)
+		}
 
 		// Radar: el terminal te avisa por Telegram de una oferta que encontró o tomó. Solo con Pro activo, una vez por
 		// oferta (aunque el radar corra en varias pestañas) y con tope por hora
 		if (route === 'POST /pro/radar/alert') {
 			const b = await readBody(req)
 			const l = await licenseOfPrint(db, printOf(b.print), now)
+			Object.assign(t, { kind: 'radar', print: printOf(b.print), account: l?.username, detail: 'Aviso del radar' })
 			if (!l) {
 				// Sin Pro: si esta huella tuvo Pro y se le acabó hace más del margen, el radar sigue corriendo donde no debe
 				const was = await db
@@ -867,19 +932,59 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 			if ((await accessOf(db, { username: l.username }, now))?.level === 'blocked') return accessError('blocked')
 			const hit = cleanRadarHit(b)
 			if (!hit) return json(400, { error: 'Aviso no válido' })
+			t.detail = `${hit.kind === 'found' ? 'Encontró' : 'Tomó'} ${hit.side === 'buy' ? 'comprar' : 'vender'} ${hit.usd} USD a ${hit.price} en ${hit.coin}${hit.peer ? ` · @${hit.peer}` : ''} · oferta ${hit.offer}`
 			await db.prepare('DELETE FROM pro_radar_sent WHERE at < ?').bind(now - DAY_MS).run()
 			const recent = await db.prepare('SELECT COUNT(*) AS n FROM pro_radar_sent WHERE license = ? AND at > ?').bind(l.uuid, now - HOUR_MS).first<{ n: number }>()
 			if ((recent?.n ?? 0) >= RADAR_TG_PER_HOUR) return json(429, { error: 'Demasiados avisos del radar en la última hora' })
 			const claim = await db.prepare('INSERT OR IGNORE INTO pro_radar_sent (license, offer, kind, at) VALUES (?, ?, ?, ?)').bind(l.uuid, hit.offer, hit.kind, now).run()
-			if (!claim.meta?.changes) return json(200, { ok: true, sent: false, repeated: true })
+			if (!claim.meta?.changes) {
+				t.detail += ' · ya avisada'
+				return json(200, { ok: true, sent: false, repeated: true })
+			}
 			const sent = await tellUser(env, l.uuid, radarText(hit), radarButton(env, hit), fetcher)
 			// Si no salió (sin chat conectado, Telegram caído), no cuenta como mandado
 			if (!sent) await db.prepare('DELETE FROM pro_radar_sent WHERE license = ? AND offer = ? AND kind = ?').bind(l.uuid, hit.offer, hit.kind).run()
+			t.detail += sent ? ' · enviado por Telegram' : ' · no salió por Telegram (sin chat conectado o Telegram falló)'
 			return json(200, { ok: true, sent })
+		}
+
+		// Un diagnóstico que manda el usuario desde «Mi cuenta» al reclamar algo: lo que apuntó su navegador (operaciones
+		// que pidió, errores, avisos; nunca el token ni datos de pago). Te avisa por Telegram y sale en su ficha del panel.
+		// También con Pro apagado: el terminal es de todos
+		if (route === 'POST /pro/diag') {
+			if (Number(req.headers.get('content-length') ?? 0) > DIAG_MAX_BYTES * 1.5) return json(413, { error: 'El diagnóstico es demasiado grande' })
+			const b = await readBody(req)
+			const print = printOf(b.print)
+			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
+			const owner = who ? null : await db.prepare('SELECT l.username FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?').bind(print).first<{ username: string }>()
+			const account = who?.username ?? owner?.username ?? null
+			// Lo enviado ya sale de su tabla en la línea de tiempo: aquí solo los intentos fallidos
+			Object.assign(t, { print, account })
+			const note = String(b.note ?? '').trim().slice(0, 1000)
+			const entries = cleanDiag(b.entries)
+			if (note.length < 3) return json(400, { error: 'Cuéntanos en pocas palabras qué pasó' })
+			// Si no cabe, se quedan las líneas más recientes
+			while (entries.length && JSON.stringify(entries).length > DIAG_MAX_BYTES) entries.splice(0, Math.ceil(entries.length / 10))
+			const sent = await db.prepare('SELECT COUNT(*) AS n FROM user_diag WHERE print = ? AND at > ?').bind(print, now - DAY_MS).first<{ n: number }>()
+			if ((sent?.n ?? 0) >= DIAG_PER_DAY) return json(429, { error: 'Ya enviaste varios diagnósticos hoy. Escríbenos a @terminalp2p en Telegram.' })
+			const row = await db
+				.prepare('INSERT INTO user_diag (at, account, print, note, body, entries) VALUES (?, ?, ?, ?, ?, ?) RETURNING id')
+				.bind(now, account?.toLowerCase() ?? null, print, note, JSON.stringify(entries), entries.length)
+				.first<{ id: number }>()
+			await notify(
+				env,
+				`📋 <b>Diagnóstico</b>
+${account ? `@${tgEsc(account)}` : 'Alguien sin identificar'}: «${tgEsc(note.slice(0, 300))}»
+${entries.length} ${entries.length === 1 ? 'línea' : 'líneas'} de su navegador.`,
+				`/admin/pro?diag=${row!.id}`,
+				fetcher,
+			)
+			return json(200, { ok: true, id: row!.id })
 		}
 
 		// Aviso de QvaPay: solo dice qué factura mirar; se confirma consultándola
 		if (req.method === 'POST' && (path === '/pro/webhook' || path === '/api/pro/webhook')) {
+			t.skip = true
 			const text = await req.text()
 			let b: Record<string, unknown> = {}
 			try {
@@ -911,6 +1016,14 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 				.bind(from)
 				.first<{ uuid: string; username: string }>()
 			const same = !!who && !!owned && who.username.toLowerCase() === owned.username.toLowerCase()
+			Object.assign(t, {
+				kind: 'rotate',
+				print: to,
+				account: who?.username,
+				detail: !owned ? 'Cambió de token (el anterior no tenía Pro)' : same ? `Cambió de token: su Pro pasa al nuevo` : `Entró otra cuenta en un navegador donde estaba @${owned.username}: no se le pasa nada`,
+				// Dos cuentas en pestañas del mismo navegador se turnan en cada recarga: una vez por hora basta
+				dk: same ? undefined : hourKey('rotate', `${from}>${to}`, now),
+			})
 			if (same) await db.prepare('UPDATE sim_ids SET key = ? WHERE key = ? AND NOT EXISTS (SELECT 1 FROM sim_ids WHERE key = ?)').bind(`print:${to}`, `print:${from}`, `print:${to}`).run()
 			if (!(await proEnabled(db, now))) return json(200, { pro: false, enabled: false })
 			const l = same ? await licenseOfPrint(db, from, now) : null
@@ -930,6 +1043,7 @@ export async function proApi(req: Request, url: URL, env: ProEnv, now = Date.now
 				if (raw) await recordIncident(env, { kind: 'module_forged', detail: 'La firma de la licencia no es nuestra' }, now, fetcher)
 				return json(403, { error: 'Licencia no válida' })
 			}
+			Object.assign(t, { kind: 'module', account: lic.n, detail: 'Descargó el módulo Pro', dk: hourKey('module', lic.u, now) })
 			const l = await db.prepare('SELECT revoked, expires_at FROM pro_licenses WHERE uuid = ?').bind(lic.u).first<{ revoked: number; expires_at: number }>()
 			// Una licencia vieja (de días ya vencidos, pasado el margen) solo es incidencia si hoy tampoco tiene Pro
 			if (lic.e < now - GRACE_MS && !(l && !l.revoked && l.expires_at > now))
@@ -1001,7 +1115,111 @@ function refundHtml(r: Refund & { username?: string }, u?: string) {
 }
 
 // La ficha de un cliente: todo lo suyo en una página y lo que se puede hacer con su cuenta
-async function clientPage(env: ProEnv, username: string, notice: string, now: number) {
+// ── Actividad de una cuenta (el traceo, userlog.ts) ───────────────────
+
+const ACT_PAGE = 50
+const hWhenS = (ms: number) => new Date(ms).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const LOG_NAME: Record<string, string> = {
+	login: '🔑 Conexión',
+	status: '👁 Terminal',
+	device: '📱 Dispositivo',
+	trial: '🎁 Días gratis',
+	leave: '🚪 Salió',
+	checkout: '🧾 Factura',
+	refund: '↩️ Devolución',
+	telegram: '✈️ Telegram',
+	radar: '📡 Radar',
+	rotate: '🔁 Cambio de token',
+	module: '★ Módulo Pro',
+	denied: '⛔ Acceso',
+	sim: '📈 Simulador',
+	diag: '📋 Diagnóstico',
+	error: '⚠️ Error',
+}
+const ACT_FILTERS: [TimelineFilter, string][] = [
+	['actions', 'Lo que hizo'],
+	['errors', 'Solo lo que salió mal'],
+	['all', 'Todo (también abrir el terminal)'],
+]
+
+// Una fila de la línea de tiempo: qué fue y lo que se sabe de ello
+function activityRow(r: TimelineRow) {
+	const f = (r.detail ?? '').split('|')
+	let what = ''
+	let detail = ''
+	if (r.src === 'log') {
+		what = LOG_NAME[r.kind] ?? escHtml(r.kind)
+		detail = escHtml(r.detail ?? '')
+	} else if (r.src === 'days') {
+		const days = Number(f[0])
+		what = `📅 ${KIND_NAME[r.kind] ?? escHtml(r.kind)}`
+		detail = `<b class="${days < 0 ? 'ask' : 'bid'}">${days > 0 ? '+' : ''}${days} días</b> · Pro hasta el ${hDay(Number(f[1]))}${f[3] ? ` · «${escHtml(f.slice(3).join('|'))}»` : ''}${f[2] === 'admin' ? ' · <span class="note">lo hiciste tú</span>' : ''}`
+	} else if (r.src === 'paid') {
+		what = '💵 Pagó'
+		detail = `${escHtml(PLANS[r.kind as Plan]?.name ?? r.kind)} · <b>${hUsd(Number(f[0]))}</b>${f[1] ? ` · pagó @${escHtml(f[1])}` : ''}${f[2] ? ` · factura ${hShort(f[2])}` : ''}`
+	} else if (r.src === 'refund') {
+		what = `↩️ ${({ requested: 'Devolución pedida', approved: 'Devolución aprobada', rejected: 'Devolución rechazada', transferred: 'Devolución transferida' } as Record<string, string>)[r.kind] ?? escHtml(r.kind)}`
+		const extra = f.slice(r.kind === 'requested' ? 2 : 1).join('|')
+		detail = `<b>${hUsd(Number(f[0]))}</b>${r.kind === 'requested' ? ` · la pidió ${f[1] === 'admin' ? 'tú' : 'el usuario'}` : ''}${extra ? ` · ${r.kind === 'transferred' ? `ref. ${refLink(extra)}` : `«${escHtml(extra)}»`}` : ''}`
+	} else if (r.src === 'incident') {
+		what = '🚩 Incidencia'
+		detail = `${escHtml(INCIDENT_NAME[r.kind as keyof typeof INCIDENT_NAME] ?? r.kind)}${f.slice(1).join('|') ? ` · ${escHtml(f.slice(1).join('|'))}` : ''}${Number(f[0]) > 1 ? ` · ${f[0]} veces` : ''}`
+	} else if (r.src === 'audit') {
+		what = '🛠 Tú, en el panel'
+		detail = escHtml(r.detail ?? r.kind)
+	} else if (r.src === 'tg') {
+		what = '✈️ Aviso por Telegram'
+		detail = r.kind.startsWith('exp3') ? 'Le quedan 3 días o menos' : r.kind.startsWith('exp0') ? 'Se le acabaron los días' : escHtml(r.kind)
+	} else if (r.src === 'diag') {
+		what = '📋 Diagnóstico'
+		detail = `<a href="/admin/pro?diag=${Number(f[0])}">Ver lo que envió</a> · ${Number(f[1])} líneas${f.slice(2).join('|') ? ` · «${escHtml(f.slice(2).join('|').slice(0, 200))}»` : ''}`
+	}
+	return `<tr${r.ok ? '' : ' class="bad"'}><td class="mono" style="white-space:nowrap">${hWhenS(r.at)}</td><td style="white-space:nowrap">${what}${r.ok ? '' : ' <span class="pill rejected">no</span>'}</td><td style="white-space:normal">${detail || '<span class="note">—</span>'}</td><td>${r.print ? hShort(r.print) : ''}</td></tr>`
+}
+
+async function activityPanel(env: ProEnv, username: string, url?: URL) {
+	const page = pageOf(url, 'act')
+	const raw = url?.searchParams.get('actf') as TimelineFilter | null
+	const filter: TimelineFilter = raw && ACT_FILTERS.some(([k]) => k === raw) ? raw : 'actions'
+	const { rows, total } = await timeline(env.DB, username, ACT_PAGE, (page - 1) * ACT_PAGE, filter)
+	const tabs = ACT_FILTERS.map(([k, label]) => {
+		const u = new URL(url ?? 'https://x/admin/pro')
+		u.searchParams.set('u', username)
+		u.searchParams.set('actf', k)
+		u.searchParams.delete('act')
+		return k === filter ? `<b>${label}</b>` : `<a href="${escHtml(`${u.pathname}${u.search}`)}#actividad">${label}</a>`
+	}).join(' · ')
+	const body = `<div class="panel-b"><p class="note">${tabs}</p></div><div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Qué</th><th>Detalle</th><th>Huella</th></tr></thead><tbody>${rows.map(activityRow).join('') || '<tr><td colspan="4" class="empty">Nada todavía.</td></tr>'}</tbody></table></div>${pager(url, 'act', page, ACT_PAGE, total) ? `<div class="panel-b">${pager(url, 'act', page, ACT_PAGE, total)}</div>` : ''}`
+	return `<div id="actividad">${panel('Actividad', body, { sub: 'Todo lo que el servidor hizo con esta cuenta o le dio, y lo que hiciste tú. Lo que hace en el P2P no: eso solo está en su navegador (diagnósticos) y en QvaPay. Hora de Cuba; se guarda 180 días.', flush: true })}</div>`
+}
+
+// Un diagnóstico enviado desde «Mi cuenta»: lo que apuntó su navegador
+async function diagPage(env: ProEnv, id: number) {
+	const d = await diagOf(env.DB, id)
+	if (!d) return proPage(env, 'pro-cuentas', 'Diagnóstico', `${pageHead('Diagnóstico', 'No existe (o ya se borró: se guardan 180 días).')}`)
+	let entries: DiagEntry[] = []
+	try {
+		entries = JSON.parse(d.body)
+	} catch {}
+	const KIND: Record<string, string> = { api: 'Petición', error: 'Error', toast: 'Aviso', pro: 'Pro', account: 'Cuenta', page: 'Página' }
+	const rows = entries
+		.slice()
+		.reverse()
+		.map((e) => `<tr${e.kind === 'error' || e.data?.ok === false ? ' class="bad"' : ''}><td class="mono" style="white-space:nowrap">${hWhenS(e.t)}</td><td>${escHtml(KIND[e.kind] ?? e.kind)}</td><td style="white-space:normal">${escHtml(e.msg)}</td><td class="mono" style="white-space:normal">${e.data ? Object.entries(e.data).map(([k, v]) => `${escHtml(k)}=${escHtml(String(v))}`).join(' · ') : ''}</td></tr>`)
+		.join('')
+	const who = d.account ? userLink(d.account) : 'alguien sin identificar'
+	return proPage(
+		env,
+		'pro-cuentas',
+		'Diagnóstico',
+		`${d.account ? `<a class="crumb" href="/admin/pro?u=${encodeURIComponent(d.account)}#actividad">← @${escHtml(d.account)}</a>` : ''}
+		${pageHead(`Diagnóstico de ${who}`, `Enviado el ${hWhen(d.at)} desde el dispositivo ${d.print ? hShort(d.print) : '—'} · ${d.entries} líneas de su navegador, la más reciente arriba`)}
+		${panel('Lo que cuenta', `<div class="panel-b"><p>«${escHtml(d.note ?? '')}»</p></div>`, { flush: true })}
+		${panel('Lo que apuntó su navegador', `<div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Qué</th><th>Detalle</th><th>Datos</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="empty">Sin líneas.</td></tr>'}</tbody></table></div>`, { flush: true })}`,
+	)
+}
+
+async function clientPage(env: ProEnv, username: string, notice: string, now: number, url?: URL) {
 	const db = env.DB
 	const id = accountOf(username)
 	const l = await db
@@ -1017,7 +1235,7 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 			env,
 			'pro-cuentas',
 			`@${u}`,
-			`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>${pageHead(`@${u}${blockPill}`, 'No tiene cuenta Pro todavía. Puedes darle días: se le activan al conectar su cuenta en el terminal.')}${notice}${panel('Dar o quitar días', daysForm(name))}${panel('Acceso al terminal', accessForm(name, block, now), { sub: ACCESS_HELP })}`,
+			`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>${pageHead(`@${u}${blockPill}`, 'No tiene cuenta Pro todavía. Puedes darle días: se le activan al conectar su cuenta en el terminal.')}${notice}${panel('Dar o quitar días', daysForm(name))}${panel('Acceso al terminal', accessForm(name, block, now), { sub: ACCESS_HELP })}${await activityPanel(env, name, url)}`,
 		)
 	const all = <T>(sql: string) => db.prepare(sql).bind(id).all<T>().then((r) => r.results)
 	const tg = await db.prepare('SELECT linked_at FROM pro_telegram WHERE license = ?').bind(id).first<{ linked_at: number }>()
@@ -1078,7 +1296,8 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 		</div>
 		${panel('Pagos', table('<th>Pagado</th><th>Días</th><th class="num">Importe</th><th>Pagó</th><th>Factura</th><th>Devolución</th>', payRows, 6, 'Sin pagos.'), { flush: true })}
 		${panel('Acceso al terminal', accessForm(name, block, now), { sub: `${ACCESS_HELP} «Suspender», arriba, solo le quita Pro.` })}
-		${panel('Movimientos de días', table('<th>Cuándo</th><th>Qué</th><th class="num">Días</th><th>Pro hasta</th><th>Motivo</th>', moveRows, 5, 'Sin movimientos.'), { flush: true })}`,
+		${panel('Movimientos de días', table('<th>Cuándo</th><th>Qué</th><th class="num">Días</th><th>Pro hasta</th><th>Motivo</th>', moveRows, 5, 'Sin movimientos.'), { flush: true })}
+		${await activityPanel(env, name, url)}`,
 	)
 }
 
@@ -1639,7 +1858,9 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 	const flash = notice ? `<div class="flash">${notice}</div>` : ''
 	const view = url.searchParams.get('view')
 	const q = (url.searchParams.get('q') ?? '').replace(/^@/, '').trim().toLowerCase()
-	if (client && /^[A-Za-z0-9._-]{1,40}$/.test(client.replace(/^@/, ''))) return clientPage(env, client.replace(/^@/, ''), flash, now)
+	if (client && /^[A-Za-z0-9._-]{1,40}$/.test(client.replace(/^@/, ''))) return clientPage(env, client.replace(/^@/, ''), flash, now, url)
+	const diag = Number(url.searchParams.get('diag'))
+	if (Number.isInteger(diag) && diag > 0) return diagPage(env, diag)
 	if (view === 'informes') return reportsPage(env, flash, now)
 	if (view === 'registro') return auditPage(env, flash, now, url)
 	if (view === 'pagos') return paymentsPage(env, flash, now, url)

@@ -6,7 +6,7 @@ import { buildDailyPost, dailyPost, setDailyPost, testDailyPost } from '../worke
 import { cleanHit, loadHits, saveHit } from '../worker/hits.ts'
 
 function memD1() {
-	const db = new DatabaseSync(':memory:')
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5 } }) // como D1: no más de 5 términos por UNION
 	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
 	const stmt = (sql: string, args: unknown[] = []) => ({
 		bind: (...a: unknown[]) => stmt(sql, a),

@@ -77,6 +77,7 @@ async function proFetch(path, body, again = true) {
 	// El servidor no sabe de quién es el token: la cookie que lo dice es una por navegador y, con otra cuenta en otra
 	// pestaña, puede ser de aquella. Pedir el perfil a QvaPay la deja con esta cuenta; se reintenta una vez
 	if (r.status === 403 && d.code === 'TP_WHO' && again && bk.acct.connected) return api('/me').then(() => proFetch(path, body, false))
+	if (!r.ok) window.TPDiag?.add('api', `POST ${path} → ${r.status}: ${d.error || ''}`, { ok: false })
 	if (!r.ok) throw Object.assign(new Error(d.error || 'Algo falló. Inténtalo de nuevo.'), { status: r.status })
 	return d
 }
@@ -88,6 +89,7 @@ function applyPro(s) {
 	// Tenía el módulo Pro cargado y ya no tiene Pro (se le acabaron los días, suspendida, bloqueada o desconectó):
 	// se recarga para que la orden inteligente y el radar desaparezcan de la memoria
 	if (pro.loaded && !s.pro) return location.reload()
+	if (!pro.loaded && s.pro !== pro.active) window.TPDiag?.add('pro', s.pro ? `Pro activo: ${s.plan ?? ''}, hasta ${s.expiresAt ? new Date(s.expiresAt).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }) : '?'}` : s.blocked ? 'Sin Pro: cuenta bloqueada' : 'Sin Pro', { pro: !!s.pro, plan: s.plan ?? null })
 	// Bloqueada desde el panel: Pro ni se ofrece
 	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
 	if (Array.isArray(s.plans)) proPlans = s.plans

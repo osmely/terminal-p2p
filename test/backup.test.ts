@@ -6,7 +6,7 @@ import { BACKUP_TABLES, isSealed, open, restoreSql, seal, sendBackup, snapshot, 
 
 // D1 sobre SQLite en memoria, con las migraciones del proyecto
 function memD1() {
-	const db = new DatabaseSync(':memory:')
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5 } }) // como D1: no más de 5 términos por UNION
 	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
 	const stmt = (sql: string, args: unknown[] = []) => ({
 		bind: (...a: unknown[]) => stmt(sql, a),

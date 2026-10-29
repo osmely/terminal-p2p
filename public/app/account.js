@@ -37,9 +37,11 @@ function acctSummary() {
 			${stat('Comisión P2P', a.gold ? 'GOLD' : '0.25 %', fee)}
 		</div>
 		${TPPro.enabled ? `<button class="btn block" id="acctGoPro">${TPPro.active ? `★ Te quedan ${daysText(daysLeft())} de Pro` : TPPro.canTrial ? '★ Probar Pro 14 días gratis' : '★ Terminal P2P Pro'}</button>` : ''}
+		<button class="btn block" id="acctDiag">¿Algo salió mal? Envíanos un diagnóstico</button>
 		<p class="hint">Tu token solo está en este navegador. Desconectar lo borra de aquí; tus operaciones en QvaPay no se tocan.</p>
 		<button class="btn danger block" id="acctOut">Desconectar cuenta</button></div>`
 	$('acctGoPro')?.addEventListener('click', () => showAccount('pro'))
+	$('acctDiag').onclick = showDiag
 	$('acctOut').onclick = () => $('disconnectBtn')?.click()
 }
 
@@ -189,3 +191,27 @@ async function acctStats() {
 }
 
 document.addEventListener('click', (e) => e.target.closest('#acctOpen') && showAccount('summary'))
+
+// Enviar el diagnóstico (diag.js): lo que apuntó este navegador de esta cuenta, con lo que cuenta el usuario. Sale solo
+// al pulsar «Enviar»
+function showDiag() {
+	const entries = window.TPDiag?.forAccount(bk.acct.username) ?? []
+	openModal(`<div class="stack"><h3>Envíanos un diagnóstico</h3>
+		<p class="muted">Cuéntanos qué pasó. Con lo que tu navegador apuntó estos días entendemos qué hizo el terminal: lo que pediste (publicar, tomar, pagar, liberar…), lo que falló y los avisos que viste.</p>
+		<textarea class="input" id="diagNote" rows="4" maxlength="1000" placeholder="Por ejemplo: tomé una oferta con el radar y no me llegó el aviso…"></textarea>
+		<p class="hint">Se envían ${entries.length.toLocaleString('en-US')} ${entries.length === 1 ? 'línea' : 'líneas'} de los últimos 14 días. Nunca tu token ni tus datos de pago. Si quieres respuesta, escríbenos también a @terminalp2p en Telegram.</p>
+		<button class="btn primary block" id="diagSend">Enviar</button></div>`)
+	$('diagSend').onclick = async () => {
+		const note = $('diagNote').value.trim()
+		if (note.length < 3) return toast('Cuéntanos en pocas palabras qué pasó', true)
+		$('diagSend').disabled = true
+		try {
+			await proFetch('/pro/diag', { print: TPPro.print, note, entries })
+			openModal(`<div class="stack"><h3>Recibido</h3><p class="muted">Lo revisamos junto con lo que pasó en tu cuenta. Gracias por avisarnos.</p><button class="btn primary block" id="diagOk">Listo</button></div>`)
+			$('diagOk').onclick = closeModal
+		} catch (e) {
+			$('diagSend').disabled = false
+			toast(e.message, true)
+		}
+	}
+}

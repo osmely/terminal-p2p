@@ -17,6 +17,7 @@ import { authorized } from './metrics.ts'
 import { readSession, readWho, sessionCookie, sessionToken } from './session.ts'
 import { accessOf, BLOCKED_MSG } from './blocks.ts'
 import { proEnabled } from './flags.ts'
+import { logUser } from './userlog.ts'
 import type { D1 } from './rates.ts'
 
 export interface SimEnv extends Omit<ProEnv, 'DB'> {
@@ -338,7 +339,39 @@ export const FREE_MARKETS = new Set<Symbol>(['BTCUSDT', 'ETHUSDT'])
 // ¿Puede poner esta orden? Comprobado en el servidor: no se puede saltar desde la página
 export const canTrade = (pro: boolean, symbol: Symbol, side: string) => pro || FREE_MARKETS.has(symbol) || side === 'SELL' || side === 'COVER'
 
+// Lo que hace cada jugador (órdenes, cierres, cancelaciones, reinicios) va al traceo de su cuenta (userlog.ts), con lo
+// que respondió el simulador
 export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Response> {
+	const write = req.method !== 'GET' && url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/auth/')
+	const sent = write ? await req.clone().text().catch(() => '') : ''
+	const who: { print?: string; account?: string | null } = {}
+	const res = await simRoute(req, url, env, who)
+	if (write && who.print) {
+		who.account ??= (await licenseOfPrint(env.DB, who.print, Date.now()))?.username ?? null
+		const error = res.ok ? '' : String(((await res.clone().json().catch(() => ({}))) as { error?: unknown }).error ?? `error ${res.status}`)
+		await logUser(env.DB, { account: who.account, print: who.print, kind: 'sim', ok: res.ok, detail: `${simAction(req.method, url, sent)}${error ? ` · ${res.status}: ${error}` : ''}` }, Date.now())
+	}
+	return res
+}
+
+// «Compra límite SOLUSDT 0.5 a 150», «Cierra SOLUSDT»…: lo que pidió, en pocas palabras
+function simAction(method: string, url: URL, sent: string) {
+	let b: Record<string, unknown> = {}
+	try {
+		b = JSON.parse(sent || '{}')
+	} catch {}
+	const n = (k: string) => (typeof b[k] === 'number' || typeof b[k] === 'string' ? String(b[k]).slice(0, 20) : null)
+	const path = url.pathname
+	if (method === 'POST' && path === '/api/orders')
+		return ['Orden', n('side'), n('type') ?? 'MARKET', n('symbol'), n('quantity') && `cantidad ${n('quantity')}`, n('quoteAmount') && `${n('quoteAmount')} USDT`, n('price') && `a ${n('price')}`, n('stopPrice') && `stop ${n('stopPrice')}`].filter(Boolean).join(' ')
+	if (method === 'PATCH') return `Cambia la orden ${path.split('/').pop()}${n('price') ? ` a ${n('price')}` : ''}`
+	if (path === '/api/close') return `Cierra ${n('symbol') ?? ''}`.trim()
+	if (method === 'DELETE') return path === '/api/orders' ? `Cancela todas${url.searchParams.get('symbol') ? ` de ${url.searchParams.get('symbol')!.slice(0, 20)}` : ''}` : `Cancela la orden ${path.split('/').pop()}`
+	if (path === '/api/reset') return 'Reinicia su cuenta'
+	return `${method} ${path}`
+}
+
+async function simRoute(req: Request, url: URL, env: SimEnv, trace: { print?: string; account?: string | null }): Promise<Response> {
 	const route = `${req.method} ${url.pathname}`
 	if (!env.PRO_KEY) return json(503, { error: 'El simulador aún no está configurado' })
 	// Las escrituras solo desde nuestra propia página
@@ -370,6 +403,7 @@ export async function simApi(req: Request, url: URL, env: SimEnv): Promise<Respo
 		const now = Date.now()
 		const print = await readSession(req.headers.get('cookie'), env.PRO_KEY, now)
 		const who = print ? await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now) : null
+		if (print) Object.assign(trace, { print, account: who?.username ?? null })
 		// Una cuenta bloqueada en el panel no juega (por su cuenta confirmada o por una huella ya vista de ella)
 		if (print && (await accessOf(env.DB, { username: who?.username, print }, now))?.level === 'blocked')
 			return route === 'GET /api/me' ? json(200, { player: null, pro: null, blocked: BLOCKED_MSG }) : json(403, { error: BLOCKED_MSG })

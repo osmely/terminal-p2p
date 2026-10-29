@@ -9,7 +9,7 @@ import { simApi, type SimEnv } from '../worker/sim.ts'
 
 // D1 sobre SQLite en memoria, con las migraciones del proyecto y Pro encendido
 function memD1() {
-	const db = new DatabaseSync(':memory:')
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5 } }) // como D1: no más de 5 términos por UNION
 	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
 	db.exec("INSERT INTO app_flags (key, value, updated_at) VALUES ('pro', '1', 0)")
 	const stmt = (sql: string, args: unknown[] = []) => ({
@@ -209,4 +209,25 @@ test('panel: restringir, bloquear y levantar desde la ficha o desde Cuentas, con
 	const audit = s.db.prepare('SELECT action, target FROM pro_audit ORDER BY id').all() as { action: string; target: string }[]
 	assert.deepEqual(audit.map((a) => `${a.action} ${a.target}`), ['access-set ana', 'access-set ana', 'access-set @leo', 'access-lift ana'])
 	assert.match(await s.panel(undefined, '?view=registro'), /Restringir o bloquear[\s\S]*Levantar límite|Levantar límite[\s\S]*Restringir o bloquear/)
+})
+
+test('traceo: lo que el relé le corta queda en su cuenta (una vez por hora y por intento), y lo que hace en el simulador también', async () => {
+	const s = setup()
+	const log = () => s.db.prepare('SELECT account, kind, ok, detail FROM user_log ORDER BY id').all() as { account: string; kind: string; ok: number; detail: string }[]
+	await setBlock(s.d1 as never, 'ana', 'restricted', 'spam', null, T0)
+	for (let i = 0; i < 3; i++) await relayAccess(s.d1 as never, KEY, await relayReq('POST', '/p2p/create', TOKEN.ana, 'ana'), '/p2p/create', T0)
+	await relayAccess(s.d1 as never, KEY, await relayReq('GET', '/p2p', TOKEN.ana, 'ana'), '/p2p', T0)
+	assert.deepEqual(log().map((r) => [r.account, r.kind, r.ok, r.detail]), [['ana', 'denied', 0, 'Restringida: no se le dejó POST /p2p/create']])
+	await liftBlock(s.d1 as never, 'ana', T0)
+	// El simulador: cada orden, con lo que respondió
+	const st = await s.pro('POST', '/pro/status', { print: P1 }, 'ana')
+	const tpid = st.cookie!.match(/^tpid=([^;]*)/)![1]
+	const req = new Request('https://sim.terminalp2p.com/api/reset', { method: 'POST', headers: { Origin: 'https://sim.terminalp2p.com', Cookie: `tpid=${tpid}; tpw=${await whoToken(P1, 'u-ana', 'ana', KEY, T0)}` } })
+	assert.equal((await simApi(req, new URL(req.url), s.env as unknown as SimEnv)).status, 200)
+	const bad = new Request('https://sim.terminalp2p.com/api/orders', { method: 'POST', headers: { Origin: 'https://sim.terminalp2p.com', 'Content-Type': 'application/json', Cookie: `tpid=${tpid}` }, body: JSON.stringify({ symbol: 'SOLUSDT', side: 'BUY', type: 'MARKET', quoteAmount: 10 }) })
+	assert.equal((await simApi(bad, new URL(bad.url), s.env as unknown as SimEnv)).status, 403)
+	const sim = log().filter((r) => r.kind === 'sim')
+	assert.deepEqual(sim.map((r) => [r.account, r.ok]), [['ana', 1], [null, 0]])
+	assert.equal(sim[0].detail, 'Reinicia su cuenta')
+	assert.match(sim[1].detail, /^Orden BUY MARKET SOLUSDT 10 USDT · 403: SOL es un mercado Pro/)
 })

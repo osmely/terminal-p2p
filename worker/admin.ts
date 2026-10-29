@@ -140,7 +140,7 @@ form.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0}
 .rf{padding:16px 18px;border-bottom:1px solid var(--line)}.rf:last-child{border-bottom:0}
 .rf-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}.rf p{margin:8px 0 0}.rf form{margin-top:12px}.rf form input{flex:1 1 260px}
 .noteline{margin:0;padding:12px 18px;border-top:1px solid var(--line)}.noteline .note{display:block;margin-bottom:2px}
-.bid{color:var(--bid)}.ask{color:var(--ask)}
+.bid{color:var(--bid)}.ask{color:var(--ask)}tr.bad td{background:color-mix(in srgb,var(--ask) 5%,transparent)}
 .stack{display:flex;flex-direction:column;gap:10px}
 .grid2{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:20px;align-items:start}.grid2>.panel{margin-top:20px}
 .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 20px;align-items:start}

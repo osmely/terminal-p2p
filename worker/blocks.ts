@@ -7,6 +7,7 @@
 
 import type { D1 } from './rates.ts'
 import { readWho, tokenPrint } from './session.ts'
+import { hourKey, logUser } from './userlog.ts'
 
 export type AccessLevel = 'restricted' | 'blocked'
 export interface Block {
@@ -122,7 +123,10 @@ export async function relayAccess(db: D1, key: string | undefined, req: Request,
 	const a = await accessOf(db, { username: who?.username, print }, now)
 	if (!a) return null
 	if (who) await rememberPrint(db, a.username, print, now)
-	return a.level === 'blocked' || restrictedWrite(req.method, path) ? accessError(a.level) : null
+	if (a.level !== 'blocked' && !restrictedWrite(req.method, path)) return null
+	// Al traceo de su cuenta, una vez por hora y por lo que intentó (el terminal reintenta)
+	await logUser(db, { account: a.username, print, kind: 'denied', ok: false, detail: `${ACCESS_NAME[a.level]}: no se le dejó ${req.method} ${path}`, dk: hourKey('denied', `${print}:${req.method} ${path}`, now) }, now)
+	return accessError(a.level)
 }
 
 // Al conectar, el perfil que devuelve QvaPay dice quién es el dueño del token aunque la petición no traiga la
@@ -133,6 +137,9 @@ export async function profileAccess(db: D1, req: Request, me: unknown, now = Dat
 	if (typeof name !== 'string' || !token) return null
 	const a = await accessOf(db, { username: name }, now)
 	if (!a) return null
-	await rememberPrint(db, a.username, await tokenPrint(token), now)
-	return a.level === 'blocked' ? accessError('blocked') : null
+	const print = await tokenPrint(token)
+	await rememberPrint(db, a.username, print, now)
+	if (a.level !== 'blocked') return null
+	await logUser(db, { account: a.username, print, kind: 'denied', ok: false, detail: 'Bloqueada: no se le dejó conectar su cuenta', dk: hourKey('denied', `${print}:connect`, now) }, now)
+	return accessError('blocked')
 }

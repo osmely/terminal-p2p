@@ -11,7 +11,8 @@ import { cubaDate, informalSince, latestInformal, syncInformal } from './informa
 import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
 import { collect, isCoin, query, RANGES, withoutPro, type RatesData } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
-import { readWho, whoCookie } from './session.ts'
+import { readWho, tokenPrint, whoCookie } from './session.ts'
+import { cleanupLog, hourKey, logUser } from './userlog.ts'
 import { accessOf, profileAccess, relayAccess } from './blocks.ts'
 import { relayIncident } from './incidents.ts'
 import { sha256, verify } from './crypto.ts'
@@ -121,7 +122,17 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 			const blocked = await profileAccess(env.DB, req, me)
 			if (blocked) return secure(blocked)
 			const set = await whoCookie(url, req.headers.get('authorization'), me, env.PRO_KEY)
-			if (set) res.headers.append('Set-Cookie', set)
+			if (set) {
+				res.headers.append('Set-Cookie', set)
+				// Al traceo de su cuenta: conectó (QvaPay dijo de quién es el token), una vez por hora y dispositivo
+				const token = req.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
+				const name = (me as { username?: string }).username
+				if (token && name) {
+					const print = await tokenPrint(token)
+					const now = Date.now()
+					ctx.waitUntil(logUser(env.DB, { account: name, print, kind: 'login', detail: 'Conectó su cuenta: QvaPay confirmó de quién es el token', dk: hourKey('login', print, now) }, now))
+				}
+			}
 		}
 		return secure(res)
 	}
@@ -290,6 +301,7 @@ async function dailyPro(env: ProEnv, at: number) {
 	try {
 		await backupPro(env, at)
 		await cleanupPro(env.DB, at)
+		await cleanupLog(env.DB, at)
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
 	}
