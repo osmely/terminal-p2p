@@ -513,13 +513,14 @@ export async function recover(env: ProEnv, invoice: string, now: number, fetcher
 }
 
 // Todas las tablas de Pro (sin los códigos de respaldo por recoger, que se ven una sola vez)
-// La copia de cada día: en el KV (en claro, 120 días) y, cifrada, a tu grupo de avisos por Telegram (backup.ts)
+// La copia de cada día: en el KV (en claro, 120 días) y, cifrada, a tu grupo de avisos por Telegram (backup.ts). Los
+// domingos (hora de Cuba) la de Telegram es la completa, de toda la base
 export async function backupPro(env: ProEnv, now: number, fetcher: typeof fetch = fetch) {
 	if (!env.PRO?.put) return null
 	const key = `backup/pro/${new Date(now).toISOString().slice(0, 10)}`
 	await env.PRO.put(key, JSON.stringify(await snapshot(env.DB, now)), { expirationTtl: BACKUP_TTL_S })
 	try {
-		await sendBackup(env, now, fetcher)
+		await sendBackup(env, now, fetcher, new Date(now).toLocaleString('en-US', { timeZone: 'America/Havana', weekday: 'short' }) === 'Sun')
 	} catch (err) {
 		console.error(`pro, copia a Telegram: ${(err as Error).message}`)
 	}
@@ -1293,7 +1294,7 @@ async function reportsPage(env: ProEnv, notice: string, now: number) {
 
 const AUDIT_NAME: Record<string, string> = {
 	days: 'Días', refund: 'Devolución (directa)', 'refund-approve': 'Devolución aprobada', 'refund-reject': 'Devolución rechazada', 'refund-transfer': 'Devolución transferida', 'refund-pay': 'Devolución pagada con QvaPay', note: 'Nota',
-	'access-set': 'Restringir o bloquear', 'access-lift': 'Levantar límite', 'incident-resolve': 'Descartar incidencia', 'backup-send': 'Mandar copia a Telegram', revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
+	'access-set': 'Restringir o bloquear', 'access-lift': 'Levantar límite', 'incident-resolve': 'Descartar incidencia', 'backup-send': 'Mandar copia a Telegram', 'backup-send-full': 'Mandar copia completa a Telegram', revoke: 'Suspender', restore: 'Reactivar', recover: 'Activar pago', check: 'Comprobar factura', reconcile: 'Repasar con QvaPay', 'pro-on': 'Encender Pro', 'pro-off': 'Apagar Pro',
 	'orders-pause': 'Pausar ofertas', 'orders-resume': 'Reanudar ofertas', 'alert-test': 'Aviso de prueba', 'daily-on': 'Encender tasa del día', 'daily-off': 'Apagar tasa del día', 'daily-test': 'Probar tasa del día',
 }
 
@@ -1496,9 +1497,11 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 					notice = `<p class="ok"><b>@${escHtml(username)}</b> queda ${level === 'blocked' ? '<b>bloqueada</b>: el terminal, Pro y el simulador dejan de funcionarle' : '<b>restringida</b>: no publica, toma ni edita ofertas desde el terminal'} ${until ? `hasta el ${hWhen(until)}` : 'hasta que la levantes'} (en menos de un minuto en todas partes). Motivo: ${escHtml(reason)}.</p>`
 				}
 			}
-			if (action === 'backup-send') {
-				const r = await sendBackup(env, now, fetcher)
-				notice = r ? `<p class="ok">Copia cifrada del ${r.day} mandada a tu grupo de avisos (${Math.ceil(r.bytes / 1024)} KB).</p>` : '<p class="note">No se mandó: falta BACKUP_KEY o el bot de avisos.</p>'
+			if (action === 'backup-send' || action === 'backup-send-full') {
+				const r = await sendBackup(env, now, fetcher, action === 'backup-send-full')
+				notice = r
+					? `<p class="ok">${r.full ? `Copia completa (${r.rows.toLocaleString('en-US')} filas)` : 'Copia de Pro'} del ${r.day}, cifrada, mandada a tu grupo de avisos (${Math.ceil(r.bytes / 1024).toLocaleString('en-US')} KB).</p>`
+					: '<p class="note">No se mandó: falta BACKUP_KEY o el bot de avisos.</p>'
 			}
 			if (action === 'incident-resolve') {
 				const r = await resolveIncident(db, Math.trunc(Number(f.get('id'))), now)
@@ -1712,9 +1715,9 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 	}${dailyForm}${await liveForm(env)}</div>`
 	const upkeep = `<div class="stack">
 		<form method="post" class="row"><button class="ghost" name="action" value="reconcile" title="Activa las pagadas que se quedaron sin activar y apunta en Pendientes las que aquí no constan">Repasar pagos con QvaPay</button></form>
-		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días)${env.BACKUP_KEY ? ', que además te llega cifrada a tu grupo de avisos' : ''}. La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
+		<p class="note">Cada día a las 5:00 (hora de Cuba) se repasan los pagos con QvaPay y se guarda una copia de Pro (120 días)${env.BACKUP_KEY ? ', que además te llega cifrada a tu grupo de avisos; los domingos, la copia completa de toda la base' : ''}. La base se puede restaurar a cualquier minuto de los últimos 30 días.</p>
 		<p class="note"><a href="/admin/pro?export=pagos">Descargar pagos (CSV)</a> · <a href="/admin/pro?export=copia">Copia completa (JSON)</a>${env.BACKUP_KEY ? ' · <a href="/admin/pro?export=cifrada">Copia cifrada</a>' : ''}</p>
-		${env.BACKUP_KEY ? '<form method="post" class="row"><button class="ghost" name="action" value="backup-send">Mandar la copia cifrada a Telegram ahora</button></form>' : '<p class="note">Para tener la copia también fuera de Cloudflare, pon una clave con <code>npx wrangler secret put BACKUP_KEY</code> y guárdala en tu gestor de contraseñas.</p>'}</div>`
+		${env.BACKUP_KEY ? '<form method="post" class="row"><button class="ghost" name="action" value="backup-send">Mandar la copia de Pro a Telegram ahora</button><button class="ghost" name="action" value="backup-send-full">Mandar la copia completa</button></form>' : '<p class="note">Para tener la copia también fuera de Cloudflare, pon una clave con <code>npx wrangler secret put BACKUP_KEY</code> y guárdala en tu gestor de contraseñas.</p>'}</div>`
 	return proPage(
 		env,
 		'pro',

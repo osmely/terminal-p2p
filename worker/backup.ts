@@ -1,7 +1,9 @@
-// Copias de Pro. Tres capas, por si pasa algo raro:
+// Copias. Tres capas, por si pasa algo raro:
 //   · Time Travel de D1 (Cloudflare): cualquier momento de los últimos 30 días, de toda la base
 //   · la copia diaria en el KV (backup/pro/AAAA-MM-DD, 120 días): todas las tablas de Pro, en claro
-//   · la misma copia, cifrada, al grupo privado de avisos por Telegram: fuera de Cloudflare, por si se pierde la cuenta
+//   · la misma copia, cifrada, al grupo privado de avisos por Telegram: fuera de Cloudflare, por si se pierde la cuenta.
+//     Los domingos va la copia completa: toda la base (también el histórico de tasas, el volumen, las métricas y el
+//     simulador)
 // El cifrado es AES-GCM con una clave sacada de BACKUP_KEY (PBKDF2), que solo tiene quien lleva Terminal P2P: ni
 // Telegram ni nadie con el archivo puede leerla. Se descifra y se restaura con scripts/restaurar-copia.ts
 
@@ -43,6 +45,32 @@ export async function snapshot(db: D1, now: number): Promise<Snapshot> {
 		const rows = (await db.prepare(`SELECT * FROM ${t}`).all<Row>()).results
 		// Los códigos de respaldo de antes no hacen falta para nada
 		tables[t] = t === 'pro_checkouts' ? rows.map(({ backup_code: _, ...r }) => r) : rows
+	}
+	return { v: 2, at: new Date(now).toISOString(), tables }
+}
+
+// Lo que no se copia en la completa: tablas internas de Cloudflare y de SQLite, y el control de migraciones (para
+// restaurar en una base vacía, primero se aplican las migraciones)
+const SKIP = /^(_cf_|sqlite_|d1_migrations$)/
+// De a tantas filas por consulta, para no traer una tabla grande de golpe
+const PAGE = 5000
+
+// Toda la base: cada tabla, fila a fila
+export async function fullSnapshot(db: D1, now: number): Promise<Snapshot> {
+	const list = (await db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY name").all<{ name: string; sql: string | null }>()).results.filter((r) => !SKIP.test(r.name))
+	const tables: Record<string, Row[]> = {}
+	for (const { name: t, sql } of list) {
+		// Un orden fijo para paginar: el rowid o, en las tablas sin él (WITHOUT ROWID), su clave primaria
+		const order = /without\s+rowid/i.test(sql ?? '')
+			? (await db.prepare('SELECT name FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk').bind(t).all<{ name: string }>()).results.map((c) => c.name).join(', ')
+			: 'rowid'
+		const rows: Row[] = []
+		for (let off = 0; ; off += PAGE) {
+			const page = (await db.prepare(`SELECT * FROM ${t} ORDER BY ${order} LIMIT ? OFFSET ?`).bind(PAGE, off).all<Row>()).results
+			rows.push(...(t === 'pro_checkouts' ? page.map(({ backup_code: _, ...r }) => r) : page))
+			if (page.length < PAGE) break
+		}
+		tables[t] = rows
 	}
 	return { v: 2, at: new Date(now).toISOString(), tables }
 }
@@ -100,21 +128,26 @@ export interface BackupEnv extends AlertEnv {
 	BACKUP_KEY?: string
 }
 
-// La copia cifrada, al grupo privado de avisos como archivo. Sin BACKUP_KEY o sin el bot, no se manda
-export async function sendBackup(env: BackupEnv, now: number, fetcher: typeof fetch = fetch) {
+// La copia cifrada, al grupo privado de avisos como archivo: la de Pro o (full) toda la base. Sin BACKUP_KEY o sin el
+// bot, no se manda
+export async function sendBackup(env: BackupEnv, now: number, fetcher: typeof fetch = fetch, full = false) {
 	if (!env.BACKUP_KEY || !alertsReady(env)) return null
-	const s = await snapshot(env.DB, now)
+	const s = full ? await fullSnapshot(env.DB, now) : await snapshot(env.DB, now)
 	const sealed = await seal(JSON.stringify(s), env.BACKUP_KEY)
 	const day = s.at.slice(0, 10)
 	const n = (t: string) => (s.tables[t] ?? []).length
+	const rows = Object.values(s.tables).reduce((a, r) => a + r.length, 0)
 	const form = new FormData()
 	form.append('chat_id', env.ALERT_CHAT!)
-	form.append('caption', `${env.STAGING === '1' ? '🧪 STAGING · ' : ''}🗄 Copia de Pro del ${day}, cifrada: ${n('pro_licenses')} cuentas, ${n('pro_checkouts')} compras, ${n('pro_refunds')} devoluciones. Guárdala; se restaura con scripts/restaurar-copia.ts y tu BACKUP_KEY.`)
-	form.append('document', new Blob([sealed], { type: 'application/json' }), `terminalp2p-pro-${env.STAGING === '1' ? 'staging-' : ''}${day}.copia`)
+	form.append(
+		'caption',
+		`${env.STAGING === '1' ? '🧪 STAGING · ' : ''}🗄 ${full ? `Copia completa del ${day}, cifrada: ${Object.keys(s.tables).length} tablas, ${rows.toLocaleString('en-US')} filas (Pro, tasas, volumen, métricas y simulador)` : `Copia de Pro del ${day}, cifrada: ${n('pro_licenses')} cuentas, ${n('pro_checkouts')} compras, ${n('pro_refunds')} devoluciones`}. Guárdala; se restaura con scripts/restaurar-copia.ts y tu BACKUP_KEY.`,
+	)
+	form.append('document', new Blob([sealed], { type: 'application/json' }), `terminalp2p-${full ? 'completa' : 'pro'}-${env.STAGING === '1' ? 'staging-' : ''}${day}.copia`)
 	const res = await fetcher(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendDocument`, { method: 'POST', body: form })
 	const j = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string }
 	if (!j.ok) throw new Error(`Telegram no aceptó la copia: ${j.description ?? res.status}`)
-	return { day, bytes: sealed.length }
+	return { day, bytes: sealed.length, rows, full }
 }
 
 // ── Restaurar ─────────────────────────────────────────────────────────

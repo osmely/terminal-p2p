@@ -86,3 +86,34 @@ test('la copia cifrada va al grupo de avisos como archivo; sin clave, no se mand
 	const back = JSON.parse(await open(await file.text(), 'clave'))
 	assert.equal(back.tables.pro_licenses[0].username, 'ana')
 })
+
+test('la copia completa trae toda la base (tasas, simulador, métricas…) y se restaura igual en una base nueva', async () => {
+	const { fullSnapshot } = await import('../worker/backup.ts')
+	const a = memD1()
+	fill(a.db)
+	a.db.exec(`INSERT INTO rates (coin, t, average) VALUES ('BANK_CUP', 1, 500), ('BANK_CUP', 2, 501)`)
+	a.db.exec(`INSERT INTO hits (day, site, kind, ref, n) VALUES ('2026-10-29', 'app', 'visit', '', 3)`)
+	const s = await fullSnapshot(a.d1 as never, T0)
+	const names = Object.keys(s.tables)
+	assert.ok(names.includes('rates') && names.includes('sim_players') && names.includes('pro_refunds'))
+	assert.ok(!names.some((n) => /^(_cf_|sqlite_|d1_migrations)/.test(n)))
+	// Base nueva: las migraciones crean las tablas y la copia las llena
+	const b = memD1()
+	b.db.exec(restoreSql(tablesOf(JSON.parse(await open(await seal(JSON.stringify(s), 'k'), 'k')))))
+	for (const t of names) {
+		const rows = (d: DatabaseSync) => d.prepare(`SELECT * FROM ${t}`).all().map((r) => JSON.stringify(t === 'pro_checkouts' ? { ...r, backup_code: null } : r))
+		assert.deepEqual(rows(b.db), rows(a.db), t)
+	}
+})
+
+test('los domingos (hora de Cuba) la copia que va a Telegram es la completa', async () => {
+	const { backupPro } = await import('../worker/pro.ts')
+	const { db, d1 } = memD1()
+	fill(db)
+	const names: string[] = []
+	const fetcher = (async (_u: string, init?: RequestInit) => (names.push(((init?.body as FormData).get('document') as File).name), Response.json({ ok: true }))) as typeof fetch
+	const env = { DB: d1, TELEGRAM_BOT_TOKEN: 'bot', ALERT_CHAT: '-1', BACKUP_KEY: 'k', PRO: { get: async () => null, put: async () => {} } }
+	await backupPro(env as never, Date.parse('2026-10-29T09:00:00Z'), fetcher) // jueves
+	await backupPro(env as never, Date.parse('2026-11-01T09:00:00Z'), fetcher) // domingo
+	assert.deepEqual(names, ['terminalp2p-pro-2026-10-29.copia', 'terminalp2p-completa-2026-11-01.copia'])
+})

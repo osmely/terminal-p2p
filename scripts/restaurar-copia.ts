@@ -1,11 +1,13 @@
-// Restaura una copia de Pro en la base de staging o de producción.
+// Restaura una copia en la base de staging o de producción.
 //
 //   node scripts/restaurar-copia.ts <archivo> [--env staging|prod] [--aplicar]
 //
 // <archivo>: la copia cifrada (.copia, la del grupo de avisos o «Copia cifrada» del panel) o la copia en claro (JSON,
-// la del KV o «Copia completa» del panel). La cifrada pide BACKUP_KEY al empezar, sin enseñarla.
+// la del KV o «Copia completa (JSON)» del panel). La cifrada pide BACKUP_KEY al empezar, sin enseñarla. Puede ser la de
+// Pro (cada día) o la completa (los domingos: toda la base).
 // Sin --aplicar solo dice qué hay en la copia y deja el SQL listo: no toca nada. Con --aplicar, y tras escribir el nombre
-// de la base para confirmar, deja las tablas de Pro exactamente como en la copia (las demás no se tocan)
+// de la base para confirmar, deja las tablas que trae la copia exactamente como en ella (las demás no se tocan).
+// En una base nueva y vacía, antes: npx wrangler d1 migrations apply <base> --remote (crea las tablas)
 
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
