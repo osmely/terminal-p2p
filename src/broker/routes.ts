@@ -264,7 +264,11 @@ export class Broker {
 			trades.push(...toTrades(list.data, acc.me.uuid).trades)
 			more = list.data.length === 50 && pages * 50 < list.total
 		}
-		return json(200, { stats: tradeStats(trades), partial: more })
+		// done: cada operación completada (lo justo para las ganancias de Pro en «Mi cuenta», que se calculan aquí mismo)
+		const done = trades
+			.filter((t) => t.status === 'completed')
+			.map((t) => ({ at: t.updatedAt, coin: t.coin, side: t.side, offerType: t.offerType, role: t.role, usd: t.usd, coinAmount: t.coinAmount, price: t.price, peer: t.counterparty?.username ?? null }))
+		return json(200, { stats: tradeStats(trades), partial: more, done })
 	}
 
 	private async trades(acc: Account) {

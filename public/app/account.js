@@ -177,6 +177,7 @@ async function acctStats() {
 		.join('')
 	const peers = s.peers.map((p) => `<button type="button" class="chip-btn" data-acct-peer="${esc(p.username)}">@${esc(p.username)} <b class="mono">${p.ops}</b></button>`).join('')
 	$('acctBody').innerHTML = `<div class="stack">
+		${acctGainsSlot()}
 		<div class="peer-stats">
 			${stat('Completadas', String(s.completed), `${rate} % de las terminadas`)}
 			${stat('Compraste', `${fmtM(s.usdBought)}`, 'USD')}
@@ -188,6 +189,15 @@ async function acctStats() {
 		${peers ? `<div><p class="hint">Con quién más operas</p><div class="chips-row">${peers}</div></div>` : ''}
 		<p class="hint">${r.partial ? 'Con tus últimas 200 ofertas y tomas' : 'Con todas tus ofertas y tomas'}${s.since ? `, desde el ${acctDay(Date.parse(s.since))}` : ''}. Con tus datos de QvaPay. No se guarda.</p></div>`
 	for (const b of $('acctBody').querySelectorAll('[data-acct-peer]')) b.onclick = () => showPeer(b.dataset.acctPeer)
+	if (TPPro.active) window.TPProGains?.render($('acctGains'), r)
+	else $('acctGainsPro')?.addEventListener('click', showPro)
+}
+
+// Tus ganancias (Pro): las calcula el módulo Pro con tus operaciones de aquí arriba; sin Pro, se dice que existen
+function acctGainsSlot() {
+	if (!TPPro.enabled) return ''
+	if (TPPro.active) return '<div id="acctGains"></div>'
+	return `<p class="hint">★ Con Pro: cuánto ganaste comprando y vendiendo (con la comisión de QvaPay), cuánto pagaste de más o de menos frente a lo normal de cada día, y todas tus operaciones en CSV. <button class="link" id="acctGainsPro">Ver Pro</button></p>`
 }
 
 document.addEventListener('click', (e) => e.target.closest('#acctOpen') && showAccount('summary'))
