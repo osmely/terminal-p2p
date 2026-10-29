@@ -2225,8 +2225,8 @@ function liveChart(slots: LiveDay['slots'], from: number) {
 			return `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="var(--accent)"><title>${hHM(x.slot)}–${hHM(x.slot + SLOT_MS)} · ${count(x.accounts, 'cuenta', 'cuentas')}${x.pro ? ` (${x.pro} con Pro)` : ''} · ${count(x.tabs, 'pestaña', 'pestañas')}</title></rect>`
 		})
 		.join('')
-	const ticks = [0, 3, 6, 9, 12, 15, 18, 21].map((h) => `<text x="${(h * 6 * bw).toFixed(0)}" y="${H + 16}" font-size="13" fill="var(--muted)">${String(h).padStart(2, '0')}:00</text>`).join('')
-	return `<svg viewBox="0 -4 ${W} ${H + 24}" width="100%" style="width:100%;height:auto;display:block" role="img" aria-label="Cuentas conectadas a lo largo del día"><line x1="0" x2="${W}" y1="${H}" y2="${H}" stroke="var(--line)"/>${bars}${ticks}<text x="${W}" y="10" font-size="13" fill="var(--muted)" text-anchor="end">máx. ${max}</text></svg>`
+	const ticks = [0, 3, 6, 9, 12, 15, 18, 21].map((h) => `<text x="${(h * 6 * bw).toFixed(0)}" y="${H + 30}" font-size="24" fill="var(--muted)">${String(h).padStart(2, '0')}:00</text>`).join('')
+	return `<svg viewBox="0 -28 ${W} ${H + 64}" width="100%" style="width:100%;height:auto;display:block" role="img" aria-label="Cuentas conectadas a lo largo del día"><line x1="0" x2="${W}" y1="${H}" y2="${H}" stroke="var(--line)"/>${bars}${ticks}<text x="${W}" y="-6" font-size="24" fill="var(--muted)" text-anchor="end">máx. ${max}</text></svg>`
 }
 
 async function livePage(env: ProEnv, flash: string, now: number, url: URL) {
