@@ -37,7 +37,9 @@
 		.u { font: 13px var(--mono); text-align: right; }
 		.w { color: var(--muted); text-align: right; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 		.empty { padding: 16px 12px; color: var(--muted); text-align: center; }
-		.hint { color: var(--muted); font-size: 12px; margin: 14px 2px 0; }
+		.about { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 16px 2px 0; }
+		.about b { color: var(--text); }
+		.about ul { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 		.go { position: fixed; left: max(14px, calc(50% - 266px)); right: max(14px, calc(50% - 266px)); bottom: calc(14px + env(safe-area-inset-bottom)); height: 50px; border: 0; border-radius: 12px; background: var(--accent); color: #fff; font: 700 16px system-ui, sans-serif; cursor: pointer; }
 		.go[hidden] { display: none; }
 	</style>
@@ -53,7 +55,14 @@
 	</header>
 	<section class="ask"><h2><span>Venden USD</span><span id="askN"></span></h2><div class="rows" id="asks"><p class="empty">Cargando…</p></div></section>
 	<section class="bid"><h2><span>Compran USD</span><span id="bidN"></span></h2><div class="rows" id="bids"><p class="empty">Cargando…</p></div></section>
-	<p class="hint">Libro en vivo del P2P de QvaPay. Toca una oferta para tomarla en Terminal P2P, en tu navegador. Ocultas las de precio atípico.</p>
+	<div class="about">
+		<p><b>MiniApp de Terminal P2P</b>, la plataforma para entender y manejar el P2P de QvaPay como un trader profesional.</p>
+		<ul>
+			<li>Libro en vivo del P2P de QvaPay desde Terminal P2P.</li>
+			<li>Toca una oferta para tomarla en Terminal P2P, en tu navegador.</li>
+			<li>Para operar con más opciones, pulsa «Operar en Terminal P2P».</li>
+		</ul>
+	</div>
 	<button class="go" id="go">Operar en Terminal P2P</button>
 	<script src="mini.js"></script>
 </body>
