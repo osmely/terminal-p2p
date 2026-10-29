@@ -1234,3 +1234,33 @@ test('traceo: diagnóstico desde «Mi cuenta» (también con Pro apagado), aviso
 	for (let i = 0; i < 4; i++) await s.post('/pro/diag', { print: P1, username: 'ana', note: `otra ${i}`, entries: [] })
 	assert.equal((await s.post('/pro/diag', { print: P1, username: 'ana', note: 'una más', entries: [] })).status, 429)
 })
+
+test('en vivo: el historial del día guarda quién estuvo (primera y última vez, minutos, Pro) y el máximo de cada 10 minutos; nunca qué miraba', async () => {
+	const s = setup()
+	const { recordLive, cubaDate } = await import('../worker/livehistory.ts')
+	const admin = (query: string) =>
+		proAdmin(new Request(`https://app.terminalp2p.com/admin/pro${query}`, { headers: { Authorization: `Basic ${btoa('x:panel')}` } }), s.env, s.now()).then((r) => r.text())
+	// 12:00 UTC = 8:00 en Cuba: @ana con dos pestañas y Pro, @leo sin Pro; un minuto después solo @ana
+	const t0 = T0
+	await recordLive(s.env.DB, [
+		{ u: 'Ana', pro: true, subs: ['BANK_CUP'], at: t0, seen: t0 },
+		{ u: 'ana', pro: false, subs: [], at: t0, seen: t0 },
+		{ u: 'leo', pro: false, subs: ['ETECSA'], at: t0, seen: t0 },
+	], t0)
+	await recordLive(s.env.DB, [{ u: 'Ana', pro: true, subs: [], at: t0, seen: t0 }], t0 + 60_000)
+	assert.deepEqual(s.db.prepare('SELECT accounts, tabs, pro FROM live_slots').all().map((r) => ({ ...r })), [{ accounts: 2, tabs: 3, pro: 1 }])
+	assert.deepEqual(s.db.prepare('SELECT account, name, first_at, last_at, minutes, pro FROM live_seen ORDER BY account').all().map((r) => ({ ...r })), [
+		{ account: 'ana', name: 'Ana', first_at: t0, last_at: t0 + 60_000, minutes: 2, pro: 1 },
+		{ account: 'leo', name: 'leo', first_at: t0, last_at: t0, minutes: 1, pro: 0 },
+	])
+	// Nada de los mercados que miraban
+	assert.doesNotMatch(JSON.stringify(s.db.prepare('SELECT * FROM live_seen').all()), /BANK_CUP|ETECSA/)
+	// Ese día en el panel: cuántas, el pico y quién (aquí no hay libro en vivo: «Ahora» dice que no responde)
+	const day = cubaDate(t0)
+	const page = await admin(`?view=envivo&d=${day}`)
+	assert.match(page, /Cuentas distintas<\/span><b>2</)
+	assert.match(page, /Pico a la vez<\/span><b>2<\/b><small>a las 08:00/)
+	assert.match(page, /<a href="\/admin\/pro\?u=Ana"><b>@Ana<\/b><\/a>[\s\S]*?2 min/)
+	// Un día que no existe o del futuro: hoy
+	assert.match(await admin('?view=envivo&d=2099-01-01'), /<h2 class="sec-title">Hoy<\/h2>/)
+})

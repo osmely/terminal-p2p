@@ -23,7 +23,8 @@ import { expiryReminders } from './userbot.ts'
 import { dailyPost } from './community.ts'
 import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
-import { feedWebhook, liveSocket, type LiveEnv } from './livebook.ts'
+import { feedWebhook, liveClients, liveSocket, type LiveEnv } from './livebook.ts'
+import { cleanupLive, recordLive } from './livehistory.ts'
 import { LiveBook } from './livebook-do.ts'
 import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 
@@ -267,6 +268,13 @@ export default {
 			} catch (err) {
 				console.error(`pro, recordatorios: ${(err as Error).message}`)
 			}
+		// Quién tiene el terminal abierto (el historial del día de «En vivo», en el panel)
+		try {
+			const clients = await liveClients(env as unknown as LiveEnv)
+			if (clients) await recordLive(env.DB, clients, at)
+		} catch (err) {
+			console.error(`en vivo: ${(err as Error).message}`)
+		}
 		// A las 9:00 de Cuba, la «Tasa QvaPay del día» en el grupo de la comunidad (si está encendida en el panel)
 		try {
 			await dailyPost(env, at)
@@ -304,6 +312,7 @@ async function dailyPro(env: ProEnv, at: number) {
 		await backupPro(env, at)
 		await cleanupPro(env.DB, at)
 		await cleanupLog(env.DB, at)
+		await cleanupLive(env.DB, at)
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
 	}

@@ -9,7 +9,7 @@
 import { hex, hmac, sign, verify } from './crypto.ts'
 import { adminPage, askKey, pageHead, panel, searchIcon, type AdminTab } from './admin.ts'
 import { authorized } from './metrics.ts'
-import type { D1 } from './rates.ts'
+import { cubaOffset, type D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, panelUrl, tgEsc, type AlertEnv } from './alerts.ts'
 import { seal, sendBackup, snapshot } from './backup.ts'
@@ -19,6 +19,7 @@ import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEna
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
 import { COINS } from '../src/terminal/market.ts'
 import { liveClients, liveSimulate, liveStatus, type LiveClient, type LiveEnv } from './livebook.ts'
+import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
 import { cleanDiag, DIAG_MAX_BYTES, DIAG_PER_DAY, diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
 
@@ -1866,7 +1867,7 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 	if (view === 'registro') return auditPage(env, flash, now, url)
 	if (view === 'pagos') return paymentsPage(env, flash, now, url)
 	if (view === 'cuentas') return accountsPage(env, flash, now, url)
-	if (view === 'envivo') return livePage(env, flash, now)
+	if (view === 'envivo') return livePage(env, flash, now, url)
 	if (view === 'incidencias') return incidentsPage(env, flash, now, url)
 	if (q) return searchPage(env, flash, now, q, url)
 	return homePage(env, flash, now)
@@ -2200,10 +2201,44 @@ export function liveRows(clients: LiveClient[]) {
 	return [...by.values()].sort((a, b) => a.at - b.at)
 }
 
-async function livePage(env: ProEnv, flash: string, now: number) {
-	const clients = await liveClients(env as unknown as LiveEnv)
+// El día en Cuba (AAAA-MM-DD) en epoch ms: de su medianoche a la siguiente
+function cubaDayRange(day: string) {
+	const mid = Date.parse(`${day}T00:00:00Z`)
+	const from = mid - cubaOffset(mid + 12 * 3600_000)
+	return { from, to: from + 86_400_000 }
+}
+const hHM = (ms: number) => new Date(ms).toLocaleTimeString('es', { timeZone: 'America/Havana', hour: '2-digit', minute: '2-digit' })
+const minutesText = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`)
+
+// La gráfica del día: el máximo de cuentas conectadas a la vez en cada franja de 10 minutos
+function liveChart(slots: LiveDay['slots'], from: number) {
+	const n = 86_400_000 / SLOT_MS
+	const max = Math.max(1, ...slots.map((x) => x.accounts))
+	const W = 1440
+	const H = 140
+	const bw = W / n
+	const bars = slots
+		.map((x) => {
+			const i = Math.round((x.slot - from) / SLOT_MS)
+			if (i < 0 || i >= n || !x.accounts) return ''
+			const h = Math.max(2, (x.accounts / max) * (H - 18))
+			return `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="var(--accent)"><title>${hHM(x.slot)}–${hHM(x.slot + SLOT_MS)} · ${count(x.accounts, 'cuenta', 'cuentas')}${x.pro ? ` (${x.pro} con Pro)` : ''} · ${count(x.tabs, 'pestaña', 'pestañas')}</title></rect>`
+		})
+		.join('')
+	const ticks = [0, 3, 6, 9, 12, 15, 18, 21].map((h) => `<text x="${(h * 6 * bw).toFixed(0)}" y="${H + 16}" font-size="13" fill="var(--muted)">${String(h).padStart(2, '0')}:00</text>`).join('')
+	return `<svg viewBox="0 -4 ${W} ${H + 24}" width="100%" style="width:100%;height:auto;display:block" role="img" aria-label="Cuentas conectadas a lo largo del día"><line x1="0" x2="${W}" y1="${H}" y2="${H}" stroke="var(--line)"/>${bars}${ticks}<text x="${W}" y="10" font-size="13" fill="var(--muted)" text-anchor="end">máx. ${max}</text></svg>`
+}
+
+async function livePage(env: ProEnv, flash: string, now: number, url: URL) {
+	const today = cubaDate(now)
+	const asked = url.searchParams.get('d') ?? ''
+	const day = /^\d{4}-\d{2}-\d{2}$/.test(asked) && asked <= today ? asked : today
+	const isToday = day === today
+	const { from, to } = cubaDayRange(day)
+	const [clients, hist] = await Promise.all([isToday ? liveClients(env as unknown as LiveEnv) : Promise.resolve(null), liveDay(env.DB, day, from, to)])
 	const rows = clients ? liveRows(clients) : []
 	const known = rows.filter((r) => r.u)
+	const online = new Set(known.map((r) => r.u!.toLowerCase()))
 	const table = !clients
 		? '<p class="empty">El libro en vivo no responde ahora mismo.</p>'
 		: rows.length
@@ -2214,13 +2249,36 @@ async function livePage(env: ProEnv, flash: string, now: number) {
 					)
 					.join('')}</tbody></table></div>`
 			: '<p class="empty">Nadie tiene el terminal abierto con su cuenta conectada ahora mismo.</p>'
+
+	// El día: la gráfica y quién estuvo
+	const peak = hist.slots.reduce((m, x) => (x.accounts > (m?.accounts ?? 0) ? x : m), null as LiveDay['slots'][number] | null)
+	const dayName = new Date(from + 12 * 3600_000).toLocaleDateString('es', { timeZone: 'America/Havana', weekday: 'long', day: 'numeric', month: 'long' })
+	const shift = (d: number) => cubaDate(from + 12 * 3600_000 + d * 86_400_000)
+	const nav = `<a class="btn" href="/admin/pro?view=envivo&d=${shift(-1)}">← ${escHtml(shift(-1).slice(5).split('-').reverse().join('/'))}</a>${isToday ? '' : `<a class="btn" href="/admin/pro?view=envivo&d=${shift(1)}">${escHtml(shift(1).slice(5).split('-').reverse().join('/'))} →</a><a class="btn" href="/admin/pro?view=envivo">Hoy</a>`}`
+	const seenTable = hist.seen.length
+		? `<div class="wrap"><table class="left"><thead><tr><th>Cuenta</th><th>Pro</th><th>Primera vez</th><th>Última vez</th><th class="num">Tiempo conectada</th></tr></thead><tbody>${hist.seen
+				.map(
+					(x) =>
+						`<tr><td>${userLink(x.name)}</td><td>${x.pro ? '<span class="pill approved-ok">Pro</span>' : '<span class="note">—</span>'}</td><td>${hHM(x.first_at)}</td><td>${isToday && online.has(x.account) ? '<span class="pill approved-ok">ahora</span>' : hHM(x.last_at)}</td><td class="num">${minutesText(x.minutes)}</td></tr>`,
+				)
+				.join('')}</tbody></table></div>`
+		: '<p class="empty">Nadie se conectó este día (o aún no se guardaba).</p>'
+	const dayCards = `<div class="cards"><div class="card"><span>Cuentas distintas</span><b>${hist.seen.length.toLocaleString('en-US')}</b><small>${isToday ? 'hoy, hasta ahora' : 'ese día'}</small></div><div class="card"><span>Pico a la vez</span><b>${(peak?.accounts ?? 0).toLocaleString('en-US')}</b><small>${peak ? `a las ${hHM(peak.slot)}` : '—'}</small></div><div class="card"><span>Con Pro</span><b>${hist.seen.filter((x) => x.pro).length.toLocaleString('en-US')}</b><small>de las que se conectaron</small></div></div>`
+
 	return proPage(
 		env,
 		'live',
 		'En vivo',
-		`<meta http-equiv="refresh" content="${LIVE_REFRESH_S}">${pageHead('En vivo', `Quién tiene el terminal abierto ahora, con su cuenta de QvaPay conectada. Se actualiza cada ${LIVE_REFRESH_S} s; no se guarda nada.`, '<a class="btn" href="/admin/pro?view=envivo">Actualizar</a>')}${flash}
-		<div class="cards"><div class="card"><span>Cuentas conectadas</span><b>${known.length.toLocaleString('en-US')}</b><small>ahora mismo</small></div><div class="card"><span>Pestañas abiertas</span><b>${(clients?.length ?? 0).toLocaleString('en-US')}</b><small>con el libro en vivo</small></div><div class="card"><span>Con Pro</span><b>${known.filter((r) => r.pro).length.toLocaleString('en-US')}</b><small>de las conectadas</small></div></div>
-		${panel('Terminales abiertos', table, { flush: !!rows.length, sub: 'Solo los que tienen su cuenta conectada (reciben el libro en vivo). Quien mira sin conectar no sale aquí: eso lo cuentan las visitas de Métricas. La última señal llega cada 25 s mientras la pestaña sigue abierta.' })}`,
+		`${isToday ? `<meta http-equiv="refresh" content="${LIVE_REFRESH_S}">` : ''}${pageHead('En vivo', `Quién tiene el terminal abierto con su cuenta de QvaPay conectada${isToday ? `, ahora y a lo largo del día. Se actualiza cada ${LIVE_REFRESH_S} s` : ''}. Del día se guarda solo quién estuvo y cuánto (nunca qué miraba), 90 días.`, nav)}${flash}
+		${
+			isToday
+				? `<h2 class="sec-title">Ahora</h2><div class="cards"><div class="card"><span>Cuentas conectadas</span><b>${known.length.toLocaleString('en-US')}</b><small>ahora mismo</small></div><div class="card"><span>Pestañas abiertas</span><b>${(clients?.length ?? 0).toLocaleString('en-US')}</b><small>con el libro en vivo</small></div><div class="card"><span>Con Pro</span><b>${known.filter((r) => r.pro).length.toLocaleString('en-US')}</b><small>de las conectadas</small></div></div>
+		${panel('Terminales abiertos', table, { flush: !!rows.length, sub: 'Solo los que tienen su cuenta conectada (reciben el libro en vivo). Quien mira sin conectar no sale aquí: eso lo cuentan las visitas de Métricas. La última señal llega cada 25 s mientras la pestaña sigue abierta.' })}`
+				: ''
+		}
+		<h2 class="sec-title">${isToday ? 'Hoy' : escHtml(dayName)}</h2>${dayCards}
+		${panel('A lo largo del día', liveChart(hist.slots, from), { sub: 'Cuántas cuentas había conectadas a la vez: el máximo de cada 10 minutos, en hora de Cuba. Pasa el ratón por una barra para ver la franja.' })}
+		${panel('Quién se conectó', seenTable, { flush: !!hist.seen.length, sub: 'La primera y la última vez que se la vio con el terminal abierto, y cuánto tiempo en total (se mira cada minuto).' })}`,
 	)
 }
 
