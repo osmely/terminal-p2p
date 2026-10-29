@@ -957,9 +957,15 @@ test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto e
 		s.q.fetcher,
 	)
 	const toUser = () => s.q.telegram.filter((m) => String(m.chat_id) === '555')
-	// Datos raros (texto libre, mercado que no existe): no se manda
-	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit, peer: '<b>hola</b>' })).status, 400)
+	// Mercado que no existe: no se manda
 	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit, coin: 'NADA' })).status, 400)
+	// Sin saber de quién es (oferta recién llegada por el feed) o con un nombre raro: sale igual, sin el nombre
+	const fresh = { ...hit, offer: '0b0e1c2d-3e4f-4a5b-8c6d-bbbbbbbbbbbb' }
+	assert.deepEqual((await s.post('/pro/radar/alert', { print: P1, ...fresh, peer: '—' })).body, { ok: true, sent: true })
+	assert.match(toUser()[0].text, /Puedes comprar <b>50 USD<\/b>[\s\S]*de alguien con oferta recién publicada\./)
+	await s.post('/pro/radar/alert', { print: P1, ...fresh, offer: '0b0e1c2d-3e4f-4a5b-8c6d-cccccccccccc', peer: '<b>hola</b>' })
+	assert.doesNotMatch(toUser()[1].text, /hola/)
+	s.q.telegram.length = 0
 	const r = await s.post('/pro/radar/alert', { print: P1, ...hit })
 	assert.deepEqual(r.body, { ok: true, sent: true })
 	assert.match(toUser()[0].text, /Radar: oferta para ti[\s\S]*Puedes comprar <b>50 USD<\/b> a <b>478 CUP<\/b> por USD en CUP Transferencia, de @leo\.[\s\S]*Tu límite: 480/)
@@ -974,7 +980,8 @@ test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto e
 	assert.match(toUser()[2].text, /Puedes comprar <b>50 USD<\/b>[\s\S]*\(oferta por rango de 500 USD\)/)
 	// Tope por hora
 	for (let i = 0; i < 40; i++) await s.post('/pro/radar/alert', { print: P1, ...hit, offer: `0b0e1c2d-3e4f-4a5b-8c6d-${String(i).padStart(12, '0')}` })
-	assert.equal(toUser().length, 30)
+	// 30 por hora: estos y los dos del principio
+	assert.equal(toUser().length, 28)
 	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit, offer: '0b0e1c2d-3e4f-4a5b-8c6d-ffffffffffff' })).status, 429)
 	// Al día siguiente se limpia y vuelve a avisar
 	s.tick(25 * 3_600_000)

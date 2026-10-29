@@ -164,7 +164,8 @@ export interface RadarHit {
 	// Lo que tomarías con tu regla y, en una oferta por rango, lo que tiene la oferta
 	usd: number
 	total?: number
-	peer: string
+	// Quien publicó la oferta; null si aún no se sabe (llegó por el feed hace nada y el libro no conoce a su dueño)
+	peer: string | null
 	limit: number
 	// Tomada comprando: lo que hay que pagar y hasta cuándo
 	pay?: number
@@ -182,11 +183,12 @@ export function cleanRadarHit(b: Record<string, unknown>): RadarHit | null {
 	const side = b.side === 'buy' || b.side === 'sell' ? b.side : null
 	const offer = String(b.offer ?? '').toLowerCase()
 	const coin = String(b.coin ?? '')
-	const peer = String(b.peer ?? '')
+	const named = String(b.peer ?? '')
+	const peer = /^[\w.-]{1,40}$/.test(named) ? named : null
 	const price = amount(b.price, 1e7)
 	const usd = amount(b.usd, 1e5)
 	const limit = amount(b.limit, 1e7)
-	if (!kind || !side || !UUID.test(offer) || !RADAR_MARKETS[coin] || !/^[\w.-]{1,40}$/.test(peer) || !price || !usd || !limit) return null
+	if (!kind || !side || !UUID.test(offer) || !RADAR_MARKETS[coin] || !price || !usd || !limit) return null
 	const pay = amount(b.pay, 1e9)
 	const payBy = amount(b.payBy, 4e12)
 	const total = amount(b.total, 1e5)
@@ -198,7 +200,7 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString('es', { timeZone: 
 
 export function radarText(h: RadarHit) {
 	const m = RADAR_MARKETS[h.coin]
-	const who = `@${tgEsc(h.peer)}`
+	const who = h.peer ? `@${tgEsc(h.peer)}` : 'alguien con oferta recién publicada'
 	const at = `<b>${money(h.price)} ${m.unit}</b> por USD`
 	if (h.kind === 'found')
 		return `📡 <b>Radar: oferta para ti</b>\n\nPuedes ${h.side === 'buy' ? 'comprar' : 'vender'} <b>${money(h.usd)} USD</b> a ${at} en ${m.name}, ${h.side === 'buy' ? 'de' : 'a'} ${who}${h.total ? ` (oferta por rango de ${money(h.total)} USD)` : ''}.\nTu límite: ${money(h.limit)}.\n\nÁbrela en el terminal para tomarla.`

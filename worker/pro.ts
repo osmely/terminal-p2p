@@ -11,7 +11,7 @@ import { adminPage, askKey, pageHead, panel, searchIcon, type AdminTab } from '.
 import { authorized } from './metrics.ts'
 import type { D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
-import { alertsReady, notify, tgEsc, type AlertEnv } from './alerts.ts'
+import { alertsReady, notify, panelUrl, tgEsc, type AlertEnv } from './alerts.ts'
 import { seal, sendBackup, snapshot } from './backup.ts'
 import { GRACE_MS, INCIDENT_NAME, openIncidents, recordIncident, resolveIncident, type Incident } from './incidents.ts'
 import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tellDays, tellPaid, tellRefund, tellUser, unlink, botWebhook } from './userbot.ts'
@@ -1544,7 +1544,7 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 			// Staging: una venta inventada en el libro en vivo, para probar el radar sin esperar al mercado
 			if (action === 'live-sim') {
 				const r = await liveSimulate(env as unknown as LiveEnv)
-				notice = r?.ok ? `<p class="ok">Oferta de prueba en el libro en vivo: vende 20 USD a ${r.price} en CUP Transferencia. No se puede tomar (no existe en QvaPay) y sale sola en menos de un minuto.</p>` : `<p class="note">No se pudo: ${escHtml(r?.error ?? 'el libro en vivo no está disponible')}</p>`
+				notice = r?.ok ? `<p class="ok">Oferta de prueba en el libro en vivo: vende 20 USD a ${r.price} en CUP Transferencia. No se puede tomar (no existe en QvaPay) y sale sola en la siguiente lectura completa del libro (unos minutos); mientras, la ve cualquiera que mire el libro de staging.</p>` : `<p class="note">No se pudo: ${escHtml(r?.error ?? 'el libro en vivo no está disponible')}</p>`
 			}
 			if (action === 'orders-pause' || action === 'orders-resume') {
 				await setOrdersPaused(db, action === 'orders-pause', now)
@@ -1590,9 +1590,11 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 			// Probar el grupo de avisos de Telegram
 			// Que Telegram mande a este entorno lo que los usuarios le escriben al bot (conectar sus avisos, /stop)
 			if (action === 'bot-connect') {
-				const r = await connectBot(env, url.origin, fetcher)
+				// Las rutas de Pro (también el buzón del bot) están en el terminal (app.…), aunque el panel se abra desde la web
+				const app = new URL(panelUrl(env))
+				const r = await connectBot(env, app.origin, fetcher)
 				notice = r.ok
-					? `<p class="ok">El bot ya responde desde ${escHtml(url.host)}: los usuarios pueden conectar sus avisos en «Mi cuenta».</p>`
+					? `<p class="ok">El bot ya responde desde ${escHtml(app.host)}: los usuarios pueden conectar sus avisos en «Mi cuenta».</p>`
 					: `<p class="note">Telegram no aceptó la conexión: ${escHtml(r.description)}</p>`
 			}
 			if (action === 'alert-test')
