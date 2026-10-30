@@ -18,6 +18,7 @@
 	<link rel="stylesheet" href="/sim.css" />
 	<script src="/vendor/lightweight-charts.js" defer></script>
 	<script src="/resize.js" defer></script>
+	<script src="/numfield.js" defer></script>
 	<script src="/sim.js" defer></script>
 </head>
 <body>
@@ -97,14 +98,14 @@
 			<div class="ofield" id="fStopBox">
 				<span class="olabel">Activación</span>
 				<button type="button" class="step" data-step="-1" data-for="fStop" aria-label="Bajar">−</button>
-				<input class="oinput mono" id="fStop" type="number" step="any" inputmode="decimal" />
+				<input class="oinput mono" id="fStop" inputmode="decimal" data-num autocomplete="off" />
 				<button type="button" class="step" data-step="1" data-for="fStop" aria-label="Subir">+</button>
 				<span class="ounit">USDT</span>
 			</div>
 			<div class="ofield" id="fPriceBox">
 				<span class="olabel">Precio</span>
 				<button type="button" class="step" data-step="-1" data-for="fPrice" aria-label="Bajar">−</button>
-				<input class="oinput mono" id="fPrice" type="number" step="any" inputmode="decimal" />
+				<input class="oinput mono" id="fPrice" inputmode="decimal" data-num autocomplete="off" />
 				<button type="button" class="step" data-step="1" data-for="fPrice" aria-label="Subir">+</button>
 				<span class="ounit">USDT</span>
 			</div>
@@ -112,7 +113,7 @@
 			<div class="quick" id="fQuick"><button type="button" data-fill="best">Mejor precio</button><button type="button" data-fill="last">Último</button></div>
 			<div class="ofield">
 				<span class="olabel">Cantidad</span>
-				<input class="oinput mono" id="fAmount" type="number" step="any" min="0" inputmode="decimal" placeholder="0" />
+				<input class="oinput mono" id="fAmount" inputmode="decimal" data-num autocomplete="off" placeholder="0" />
 				<button type="button" class="unit-toggle" id="fUnit" title="Cambiar entre monedas y USDT">BTC</button>
 			</div>
 			<div class="slider">
@@ -128,12 +129,12 @@
 			<div id="exits" class="exits" hidden>
 				<p class="fine">Cuando se ejecute la compra se pone sola una orden de venta con estos precios. Si pones los dos, el primero que se toque cancela el otro.</p>
 				<div class="exit">
-					<div class="ofield"><span class="olabel up">Take profit</span><input class="oinput mono" id="fTp" type="number" step="any" inputmode="decimal" placeholder="Vender si sube a…" /><span class="ounit">USDT</span></div>
+					<div class="ofield"><span class="olabel up">Take profit</span><input class="oinput mono" id="fTp" inputmode="decimal" data-num autocomplete="off" placeholder="Vender si sube a…" /><span class="ounit">USDT</span></div>
 					<div class="chips" data-exit="fTp"><button type="button" data-pct="2">+2%</button><button type="button" data-pct="5">+5%</button><button type="button" data-pct="10">+10%</button><button type="button" data-pct="20">+20%</button></div>
 					<p class="est" id="fTpEst"></p>
 				</div>
 				<div class="exit">
-					<div class="ofield"><span class="olabel down">Stop loss</span><input class="oinput mono" id="fSl" type="number" step="any" inputmode="decimal" placeholder="Vender si baja a…" /><span class="ounit">USDT</span></div>
+					<div class="ofield"><span class="olabel down">Stop loss</span><input class="oinput mono" id="fSl" inputmode="decimal" data-num autocomplete="off" placeholder="Vender si baja a…" /><span class="ounit">USDT</span></div>
 					<div class="chips" data-exit="fSl"><button type="button" data-pct="-2">−2%</button><button type="button" data-pct="-5">−5%</button><button type="button" data-pct="-10">−10%</button><button type="button" data-pct="-20">−20%</button></div>
 					<p class="est" id="fSlEst"></p>
 				</div>

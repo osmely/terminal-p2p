@@ -743,7 +743,7 @@ function renderTab() {
 		const os = S.view.openOrders
 		const cell = (o, key) =>
 			S.editing === o.id && o[key] != null
-				? `<input class="input mono edit-price" data-edit-key="${key}" value="${o[key]}" type="number" step="any" inputmode="decimal" />`
+				? `<input class="input mono edit-price" data-edit-key="${key}" value="${o[key]}" inputmode="decimal" data-num autocomplete="off" />`
 				: fmtPrice(o[key], o.symbol)
 		body.innerHTML = os.length
 			? `<div class="cards-bar"><button class="link small" data-cancel-all>Cancelar todas</button></div><table><thead><tr><th>Mercado</th><th>Lado</th><th>Tipo</th><th>Cantidad</th><th>Precio</th><th>Stop</th><th>Puesta</th><th class="txt"><button class="link small" data-cancel-all>Cancelar todas</button></th></tr></thead><tbody>${os

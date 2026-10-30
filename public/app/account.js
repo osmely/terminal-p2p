@@ -159,7 +159,7 @@ async function acctAlerts(d) {
 				<label class="field">Mercado<select class="input" id="alCoin">${markets.map((m) => `<option value="${m.tick}" ${m.tick === coin ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
 				<label class="field">Avisarme cuando<select class="input" id="alDir"><option value="up">suba de</option><option value="down">baje de</option></select></label>
 			</div>
-			<label class="field">Tasa por USD<input class="input" id="alPrice" inputmode="decimal" /></label>
+			<label class="field">Tasa por USD<input class="input" id="alPrice" inputmode="decimal" data-num autocomplete="off" /></label>
 			<p class="hint" id="alNow"></p>
 			<button class="btn block" id="alAdd">Añadir aviso</button>`
 				: `<p class="hint">Tienes ${d.max} avisos, el máximo: quita alguno para poner otro.</p>`

@@ -823,8 +823,8 @@ async function showCreateOffer(preset = null) {
 				<p class="sec-box-t">Oferta</p>
 				<label class="field">Mercado<select class="input" id="ofCoin">${markets.map((c) => `<option value="${c.tick}">${esc(c.name)}</option>`).join('')}</select></label>
 				<div class="grid2">
-					<label class="field"><span class="field-row">Monto (USD)<button type="button" class="link small" id="ofBal" hidden></button></span><input class="input" id="ofAmount" type="number" min="0.1" max="10000" step="0.01" inputmode="decimal" placeholder="100" /></label>
-					<label class="field"><span>Precio por USD (<span id="ofUnit"></span>)</span><input class="input" id="ofPrice" type="number" min="0" step="any" inputmode="decimal" /></label>
+					<label class="field"><span class="field-row">Monto (USD)<button type="button" class="link small" id="ofBal" hidden></button></span><input class="input" id="ofAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" placeholder="100" /></label>
+					<label class="field"><span>Precio por USD (<span id="ofUnit"></span>)</span><input class="input" id="ofPrice" inputmode="decimal" data-num autocomplete="off" /></label>
 				</div>
 				<div class="ref-chips" id="ofRefs"></div>
 				<p class="hint" id="ofTotal"></p>
@@ -834,8 +834,8 @@ async function showCreateOffer(preset = null) {
 				<label class="check sec-box-h"><input type="checkbox" id="ofFlex" /> Por rango: que la tomen por partes</label>
 				<p class="hint" id="ofFlexNote" hidden>Con la orden inteligente el resto se publica entero. Desmárcala si lo quieres por partes.</p>
 				<div class="grid2" id="ofFlexBox" hidden>
-					<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" type="number" step="0.01" inputmode="decimal" /></label>
-					<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" type="number" step="0.01" inputmode="decimal" /></label>
+					<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" inputmode="decimal" data-num data-dec="2" autocomplete="off" /></label>
+					<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" inputmode="decimal" data-num data-dec="2" autocomplete="off" /></label>
 				</div>
 			</section>
 			<section class="sec-box" id="ofKeep" hidden></section>
@@ -895,7 +895,7 @@ async function showCreateOffer(preset = null) {
 						const val = esc(saved[f.name] ?? '')
 						return f.type === 'select' && f.options?.length
 							? `<label class="field">${label}<select class="input" data-detail="${esc(f.name)}">${f.options.map((o) => `<option ${o.value === saved[f.name] ? 'selected' : ''}>${esc(o.value)}</option>`).join('')}</select></label>`
-							: `<label class="field">${label}<input class="input" data-detail="${esc(f.name)}" value="${val}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
+							: `<label class="field">${label}<input class="input" data-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} value="${val}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
 					})
 					.join('')
 			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Inténtalo de nuevo.</p>'
@@ -1116,14 +1116,14 @@ function renderManage(o) {
 			editable
 				? `<div class="stack tight"><p class="hint">Cambiar precio o monto</p>
 				<div class="grid2">
-					<label class="field">${flex ? 'Disponible' : 'Monto'} (USD)<input class="input" id="edAmount" type="number" step="0.01" inputmode="decimal" value="${amount}" /></label>
-					<label class="field">Precio por USD (${unit})<input class="input" id="edPrice" type="number" step="any" inputmode="decimal" value="${Math.round(o.price * 10000) / 10000}" /></label>
+					<label class="field">${flex ? 'Disponible' : 'Monto'} (USD)<input class="input" id="edAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${amount}" /></label>
+					<label class="field">Precio por USD (${unit})<input class="input" id="edPrice" inputmode="decimal" data-num autocomplete="off" value="${Math.round(o.price * 10000) / 10000}" /></label>
 				</div>
 				<p class="hint" id="edTotal"></p><div id="edWarn"></div>
 				${flex ? '' : '<label class="check"><input type="checkbox" id="edFlex" /> Pasarla a por partes: que la tomen por partes</label>'}
 				<div class="grid2" id="edFlexBox" ${flex ? '' : 'hidden'}>
-					<label class="field">Mínimo por orden (USD)<input class="input" id="edMin" type="number" step="0.01" inputmode="decimal" value="${o.orderMin ?? ''}" /></label>
-					<label class="field">Máximo por orden (USD)<input class="input" id="edMax" type="number" step="0.01" inputmode="decimal" value="${o.orderMax ?? ''}" /></label>
+					<label class="field">Mínimo por orden (USD)<input class="input" id="edMin" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${o.orderMin ?? ''}" /></label>
+					<label class="field">Máximo por orden (USD)<input class="input" id="edMax" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${o.orderMax ?? ''}" /></label>
 				</div>
 				${flex ? '' : '<p class="notice warn" id="edFlexNote" hidden>No tiene vuelta atrás: QvaPay no deja volver a convertir una oferta por partes en una que se toma entera.</p>'}
 				<details class="opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
@@ -1438,7 +1438,7 @@ function renderTake(uuid, side, l, coin, preset) {
 			${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
 			${l.vipOnly ? '<span>Solo</span><b>cuentas VIP</b><span></span>' : ''}
 		</div>
-		${flex ? `<label class="field">¿Cuántos USD ${youBuy ? 'compras' : 'vendes'}?<input class="input" id="tkAmount" type="number" min="${min}" max="${max}" step="0.01" inputmode="decimal" value="${start}" /></label>` : ''}
+		${flex ? `<label class="field">¿Cuántos USD ${youBuy ? 'compras' : 'vendes'}?<input class="input" id="tkAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${start}" /></label>` : ''}
 		<p class="hint" id="tkTotal"></p>
 		<p class="notice">${
 			youBuy
@@ -1638,7 +1638,7 @@ async function showSwap() {
 		<div class="swap-box">
 			<div class="swap-row"><span>Vendes</span>${bk.acct.connected ? `<button type="button" class="link small" id="swMax">Saldo: <b class="mono">${fmtM(bk.acct.balance ?? 0)}</b> USD</button>` : ''}</div>
 			<div class="swap-main">
-				<input class="swap-input mono" id="swAmount" type="number" min="0" step="0.01" inputmode="decimal" value="${sw.amount}" aria-label="USD que vendes" />
+				<input class="swap-input mono" id="swAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${sw.amount}" aria-label="USD que vendes" />
 				<span class="swap-asset"><span class="swap-coin usd">$</span>USD QvaPay</span>
 			</div>
 		</div>
@@ -1698,7 +1698,7 @@ async function showSwap() {
 						const label = esc(f.label || f.name)
 						return f.type === 'select' && f.options?.length
 							? `<label class="field">${label}<select class="input" data-sw-detail="${esc(f.name)}" data-label="${label}">${f.options.map((o) => `<option ${o.value === saved[f.name] ? 'selected' : ''}>${esc(o.value)}</option>`).join('')}</select></label>`
-							: `<label class="field">${label}<input class="input" data-sw-detail="${esc(f.name)}" data-label="${label}" value="${esc(saved[f.name] ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
+							: `<label class="field">${label}<input class="input" data-sw-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} data-label="${label}" value="${esc(saved[f.name] ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
 					})
 					.join('')
 			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Cierra y vuelve a abrir.</p>'
