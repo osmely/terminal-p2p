@@ -50,7 +50,7 @@ export class BrowserAccounts implements AccountStore {
 		this.clear()
 		this.block = null
 		safe(() => (opts.remember ? this.storage.local : this.storage.session).setItem(TOKEN_KEY, token))
-		this.acc = { sid: SID, me, client, print: await tokenPrint(token), toServer: toServer(token) }
+		this.acc = { sid: SID, me, client, print: await tokenPrint(token) }
 		// Sin almacenamiento (bloqueado, modo privado) el token vive solo en memoria y no hay otra pestaña que mirar
 		this.token = this.stored() === token ? token : null
 		return this.acc
@@ -98,7 +98,7 @@ export class BrowserAccounts implements AccountStore {
 		if (!token) return null
 		const client = new QvaPayClient({ token, dryRun: false, baseUrl: this.baseUrl })
 		try {
-			this.acc = { sid: SID, me: await client.me(), client, print: await tokenPrint(token), toServer: toServer(token) }
+			this.acc = { sid: SID, me: await client.me(), client, print: await tokenPrint(token) }
 			this.token = token
 			return this.acc
 		} catch (err) {
@@ -114,11 +114,6 @@ export class BrowserAccounts implements AccountStore {
 		safe(() => this.storage.local.removeItem(TOKEN_KEY))
 	}
 }
-
-// Lo poco que nuestro servidor lee en QvaPay con tu token, de paso y sin guardarlo, como el relé (hoy: comprobar que
-// la oferta que mandas a tus clientes es tuya y privada)
-const toServer = (token: string) => (path: string, body: unknown) =>
-	fetch(path, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(body) })
 
 // Huella del token para el plan Pro: HMAC-SHA256 con una etiqueta fija. Identifica el dispositivo ante
 // nuestro servidor sin revelar el token (no se puede invertir) y nadie puede calcularla sin el token

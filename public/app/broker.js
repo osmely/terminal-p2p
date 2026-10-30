@@ -209,7 +209,6 @@ function renderAccount() {
 	const a = bk.acct
 	$('account').innerHTML = a.connected
 		? `${a.dryRun ? '<span class="badge warn" title="Modo simulación: no se envía nada a QvaPay">Simulación</span>' : ''}
-			<button class="pro-chip cl-chip" id="clientsChip" hidden></button>
 			<button class="pro-chip" id="proBtn" hidden></button>
 			<div class="acct">
 				<button type="button" class="acct-open" id="acctOpen" title="Mi cuenta">
@@ -222,7 +221,6 @@ function renderAccount() {
 			</div>`
 		: `<button class="btn primary" id="connectBtn">Conectar<span class="hide-sm">QvaPay</span></button>`
 	if (typeof renderProChip === 'function') renderProChip()
-	if (typeof renderClientsChip === 'function') renderClientsChip()
 	$('connectBtn')?.addEventListener('click', showConnect)
 	$('disconnectBtn')?.addEventListener('click', async () => {
 		if (!(await confirmDialog('Desconectar cuenta', '<p class="muted">Se borra el token de este navegador. Tus operaciones en QvaPay no se tocan.</p>', 'Desconectar', 'danger'))) return
@@ -847,7 +845,6 @@ async function showCreateOffer(preset = null) {
 				<div class="saved-methods" id="ofSaved" hidden></div><div class="stack tight" id="ofDetails"><p class="muted small">Cargando campos…</p></div>
 				<label class="check small"><input type="checkbox" id="ofRemember" /> Recordar estos datos en este navegador</label>
 			</section>
-			${clientsFormBox()}
 			<details class="sec-box opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
 				${Object.entries(REQ_OPTIONS)
 					.map(([k, [label, vals, fmt]]) => `<label class="field">${label}<select class="input" data-req="${k}"><option value="0">Sin requisito</option>${vals.map((v) => `<option value="${v}">${fmt(v)}</option>`).join('')}</select></label>`)
@@ -884,7 +881,6 @@ async function showCreateOffer(preset = null) {
 			requirements,
 			private: $('ofPrivate').checked,
 			onlyVip: $('ofVip').checked,
-			clients: !!$('ofClients')?.checked,
 			idempotencyKey: key,
 		}
 	}
@@ -995,19 +991,6 @@ async function showCreateOffer(preset = null) {
 		update()
 	}
 	for (const id of ['ofAmount', 'ofPrice', 'ofMin', 'ofMax', 'ofFlex', 'ofPrivate']) $(id).addEventListener('input', update)
-	// Solo para tus clientes: siempre privada. Si la lista aún no estaba, se pide y se pone la casilla al día
-	const bindClients = () =>
-		$('ofClients')?.addEventListener('change', () => {
-			$('ofPrivate').checked = $('ofClients').checked || $('ofPrivate').checked
-			$('ofPrivate').disabled = $('ofClients').checked
-		})
-	bindClients()
-	if (TPPro.active && !cl.data)
-		loadClients(true).then(() => {
-			if (!$('ofClientsBox')) return
-			$('ofClientsBox').outerHTML = clientsFormBox()
-			bindClients()
-		})
 	$('ofBal').onclick = () => {
 		$('ofAmount').value = String(balance())
 		update()
@@ -1056,7 +1039,7 @@ async function showCreateOffer(preset = null) {
 				${f.kind === 'flexible' ? `<span>Por partes</span><b>${fmtM(f.orderMin)}–${fmtM(f.orderMax)} USD</b><span></span>` : ''}
 				${f.keep ? `<span>★ Precio automático</span><b>${fmtP(f.keep.min)}–${fmtP(f.keep.max)} ${unit}</b><span class="muted">sin salir de esos límites</span>` : ''}
 				${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
-				<span>Visibilidad</span><b>${f.clients ? '🤝 Solo para tus clientes (privada)' : f.private ? 'Privada' : 'Pública en Telegram'}${f.onlyVip ? ' · solo VIP' : ''}</b><span></span>
+				<span>Visibilidad</span><b>${f.private ? 'Privada' : 'Pública en Telegram'}${f.onlyVip ? ' · solo VIP' : ''}</b><span></span>
 			</div>
 			<p class="notice">${
 				type === 'sell'
@@ -1076,10 +1059,8 @@ async function showCreateOffer(preset = null) {
 			btn.disabled = true
 			btn.textContent = 'Publicando…'
 			try {
-				const r = await api('/offer/create', { ...f, keep: undefined, clients: undefined })
+				const r = await api('/offer/create', { ...f, keep: undefined })
 				markOrigin(r.offer)
-				// Publicada: ahora se manda a tus clientes (si falla, la oferta sigue publicada y se puede mandar desde ella)
-				if (f.clients) await sendToClients(r.offer)
 				if (f.keep) window.TPProKeep?.save(r.offer, f.keep)
 				if ($('ofRemember').checked) store.setMine(`details.${f.coin}`, Object.fromEntries(f.details.map((d) => [d.name, d.value])))
 				else store.setMine(`details.${f.coin}`, {})
@@ -1189,17 +1170,11 @@ function renderManage(o) {
 		<div class="row-btns">
 			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? 'Volver a publicar' : 'Pausar'}</button><button class="btn danger" id="mgCancel">Cancelar oferta</button>` : ''}
 		</div>
-		${clientsManageBox(o)}
 		${o.status === 'open' ? `<div class="share"><p class="hint">Anúnciala en tus grupos: una imagen con la oferta y un enlace que la abre en el terminal${o.isPrivate ? ' (en las privadas, quien lo abra tendrá que conectar su cuenta para verla)' : ''}</p><div class="row-btns"><button class="btn primary" id="mgShare">${ICON_SHARE} Compartir</button><input class="input" id="mgLink" readonly value="${shareLink(o.offer)}" /><button class="btn icon-only" id="mgCopy" title="Copiar enlace" aria-label="Copiar enlace">${ICON_COPY}</button></div></div>` : ''}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${o.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
 	</div>`
 
 	$('mgShare')?.addEventListener('click', () => showShareOffer(o))
-	$('mgClients')?.addEventListener('click', async () => {
-		$('mgClients').disabled = true
-		if (await sendToClients(o.offer)) renderManage(o)
-		else if ($('mgClients')) $('mgClients').disabled = false
-	})
 	$('mgCopy')?.addEventListener('click', () => {
 		navigator.clipboard?.writeText($('mgLink').value)
 		$('mgCopy').innerHTML = ICON_DONE

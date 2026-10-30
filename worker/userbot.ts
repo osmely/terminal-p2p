@@ -231,12 +231,11 @@ export function welcomeText(username: string, expiresAt: number | null, now: num
 			: '📅 Ahora mismo no tienes días de Pro: cuando quieras, los compras desde «Mi cuenta» → ★ Pro en el terminal.'
 	return `👋 <b>¡Hola, @${tgEsc(username)}! Tu cuenta quedó conectada.</b>
 
-Desde ahora te escribimos por aquí, y solo cuando hay algo que debes saber:
+Desde ahora te escribimos por aquí, y solo cuando hay algo de tu Pro que debes saber:
 
 ✅ <b>Pagos</b>: la confirmación en cuanto QvaPay lo acredita y empiezan tus días
 ⏳ <b>Renovación</b>: un aviso 3 días antes de que se acaben, para que no te quedes sin la orden inteligente
 ↩️ <b>Devoluciones</b>: cada paso, si alguna vez pides una
-🤝 <b>Ofertas de tus comerciantes</b>: las privadas que te mandan por «Mis clientes»
 
 Sin publicidad ni mensajes de relleno. ¿Prefieres no recibirlos? Escribe /stop cuando quieras.
 

@@ -870,15 +870,3 @@ a.icon-btn { text-decoration: none; }
 /* Métodos de pago guardados en QvaPay, encima de los datos de pago al publicar */
 .saved-methods { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 
-/* «Mis clientes» (clients.js): el aviso de arriba, las ofertas de tus comerciantes y tu lista */
-.cl-chip { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--text); }
-.cl-chip:hover { background: var(--accent-bg); }
-.cl-link { flex-wrap: nowrap; }
-.cl-link .input { flex: 1; min-width: 0; font: 12px var(--mono); }
-.cl-link .btn { flex: none; }
-.cl-offers li { padding: 0; }
-.cl-offer { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; padding: 10px 12px; border: 0; border-radius: var(--r-sm); background: none; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
-.cl-offer:hover { background: var(--accent-bg); }
-.cl-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
-.cl-people li { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 13.5px; }
-.cl-people li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

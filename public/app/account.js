@@ -16,14 +16,14 @@ let acctTab = 'summary'
 
 function showAccount(tab = acctTab) {
 	if (!bk.acct.connected) return showConnect()
-	acctTab = (tab === 'pro' || tab === 'alerts' || tab === 'clients') && !TPPro.enabled ? 'summary' : tab
-	const tabs = [['summary', 'Resumen'], ...(TPPro.enabled ? [['pro', '★ Pro'], ['alerts', '★ Avisos'], ['clients', '🤝 Clientes']] : []), ['stats', 'Estadísticas']]
+	acctTab = (tab === 'pro' || tab === 'alerts') && !TPPro.enabled ? 'summary' : tab
+	const tabs = [['summary', 'Resumen'], ...(TPPro.enabled ? [['pro', '★ Pro'], ['alerts', '★ Avisos']] : []), ['stats', 'Estadísticas']]
 	openModal(`<div class="stack acct-modal">
 		<div class="peer-head">${avatar(bk.acct.username, bk.acct.image, 'lg')}<div><h3>@${esc(bk.acct.username)}</h3><p class="muted small">Mi cuenta</p></div></div>
 		<div class="seg-tabs" role="tablist">${tabs.map(([id, name]) => `<button class="seg-tab ${id === acctTab ? 'active' : ''}" data-acct-tab="${id}">${name}</button>`).join('')}</div>
 		<div id="acctBody"></div></div>`)
 	for (const b of $('modalBody').querySelectorAll('[data-acct-tab]')) b.onclick = () => showAccount(b.dataset.acctTab)
-	;({ summary: acctSummary, pro: acctPro, alerts: acctAlertsTab, clients: acctClients, stats: acctStats })[acctTab]()
+	;({ summary: acctSummary, pro: acctPro, alerts: acctAlertsTab, stats: acctStats })[acctTab]()
 }
 
 function acctSummary() {
@@ -204,7 +204,7 @@ async function acctTelegram() {
 		if (tab) tab.location.href = url
 		else location.href = url
 		toast('Pulsa «Iniciar» en Telegram y vuelve aquí')
-		window.addEventListener('focus', () => (acctTab === 'pro' || acctTab === 'alerts' || acctTab === 'clients') && $('acctBody') && showAccount(acctTab), { once: true })
+		window.addEventListener('focus', () => (acctTab === 'pro' || acctTab === 'alerts') && $('acctBody') && showAccount(acctTab), { once: true })
 	} catch (e) {
 		tab?.close()
 		toast(e.message, true)

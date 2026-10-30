@@ -27,7 +27,6 @@ import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveSocket, type Liv
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
 import { checkAlerts } from './ratealerts.ts'
-import { cleanupClients } from './clients.ts'
 import { LiveBook } from './livebook-do.ts'
 import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 
@@ -185,15 +184,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		const app = url.hostname.startsWith('app.') ? url.origin : `${url.protocol}//app.${url.host}`
 		return Response.redirect(`${app}/?de=oferta#p2p/${shared[1].toLowerCase()}`, 302)
 	}
-	// La invitación de un comerciante a sus clientes (terminalp2p.com/c/<usuario>): abre el terminal para unirse
-	const invite = CLIENTS_INVITE.exec(url.pathname)
-	if (invite && folderFor(url.hostname) !== 'sim') {
-		const app = url.hostname.startsWith('app.') ? url.origin : `${url.protocol}//app.${url.host}`
-		return Response.redirect(`${app}/?de=clientes#clientes/${encodeURIComponent(invite[1])}`, 302)
-	}
 	// Plan Pro, en el dominio del terminal. Pedir facturas tiene tope
 	if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
-		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund' || url.pathname === '/pro/telegram/link' || url.pathname === '/pro/trial' || url.pathname === '/pro/alerts/add' || url.pathname === '/pro/clients/send' || url.pathname === '/pro/clients/join'
+		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund' || url.pathname === '/pro/telegram/link' || url.pathname === '/pro/trial' || url.pathname === '/pro/alerts/add'
 			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 			// La consulta de estado da los días gratis y la sesión del simulador: con tope por IP (amplio)
 			if (url.pathname === '/pro/status' && !(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiadas consultas seguidas: espera un minuto'))
@@ -348,7 +341,6 @@ async function dailyPro(env: ProEnv, at: number) {
 		await cleanupPro(env.DB, at)
 		await cleanupLog(env.DB, at)
 		await cleanupLive(env.DB, at)
-		await cleanupClients(env.DB, at)
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
 	}
@@ -533,7 +525,6 @@ async function book(url: URL, env: Env, ctx: ExecutionContext) {
 // Una oferta del libro por su uuid, para quien abre el enlace que compartió su dueño sin tener la cuenta conectada:
 // lo mismo que enseña de ella el libro. Si ya salió, su mercado y lado (para enseñar otras parecidas)
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const CLIENTS_INVITE = /^\/c\/@?([A-Za-z0-9._-]{1,40})\/?$/
 const SHARED_OFFER = /^\/o\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
 async function offer(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	const id = (url.searchParams.get('id') ?? '').toLowerCase()
