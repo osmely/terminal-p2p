@@ -394,6 +394,43 @@ test('si la base falla al sumar los días, el pago no queda como pagado sin ello
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
 })
 
+test('si la base guarda los días pero se pierde su respuesta, el pago no se activa dos veces ni la devolución resta dos veces', async () => {
+	const { settlePending, approveRefund, requestRefund } = await import('../worker/pro.ts')
+	const s = setup()
+	await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
+	s.q.pay('inv-1', 'ana')
+	const batch = s.env.DB.batch
+	// Escribe y luego falla, como una respuesta que no llega
+	const lost = async (ss: Parameters<typeof batch>[0]) => {
+		await batch(ss)
+		throw new Error('D1: se perdió la respuesta')
+	}
+	s.env.DB.batch = lost
+	await settlePending(s.env, s.now(), {}, s.q.fetcher)
+	s.env.DB.batch = batch
+	await settlePending(s.env, s.now(), {}, s.q.fetcher)
+	assert.equal(s.db.prepare("SELECT status FROM pro_checkouts WHERE invoice = 'inv-1'").get()?.status, 'paid')
+	assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM pro_days WHERE kind = 'purchase'").get()?.n, 1)
+	const id = s.db.prepare("SELECT id FROM pro_checkouts WHERE invoice = 'inv-1'").get()!.id as string
+	const until = s.db.prepare("SELECT expires_at FROM pro_licenses WHERE uuid = 'qp:ana'").get()!.expires_at as number
+	assert.equal(until, s.now() + 30 * 86_400_000)
+
+	// Devolución: si la base falla sin quitar los días, sigue pedida y se puede aprobar luego
+	const rf = await requestRefund(s.env.DB, 'qp:ana', id, 'no lo uso', 'user', s.now())
+	s.env.DB.batch = async () => {
+		throw new Error('D1 caída')
+	}
+	await assert.rejects(approveRefund(s.env.DB, rf, null, s.now()))
+	assert.equal(s.db.prepare('SELECT refunded_at FROM pro_checkouts WHERE id = ?').get(id)?.refunded_at, null)
+	// Y si los quita pero se pierde la respuesta, no se le quitan otra vez
+	s.env.DB.batch = lost
+	await assert.rejects(approveRefund(s.env.DB, rf, null, s.now()))
+	s.env.DB.batch = batch
+	assert.equal((await approveRefund(s.env.DB, rf, null, s.now())).status, 'approved')
+	assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM pro_days WHERE kind = 'refund'").get()?.n, 1)
+	assert.equal(s.db.prepare("SELECT expires_at FROM pro_licenses WHERE uuid = 'qp:ana'").get()?.expires_at, s.now())
+})
+
 test('pide una factura, luego otra, y paga la primera: la pantalla que espera la segunda también se entera', async () => {
 	const s = setup()
 	const first = (await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })).body

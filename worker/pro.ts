@@ -190,9 +190,24 @@ export async function refundCheckout(db: D1, checkout: string, note: string | nu
 	if (!c) return null
 	const marked = await db.prepare('UPDATE pro_checkouts SET refunded_at = ? WHERE id = ? AND refunded_at IS NULL').bind(now, c.id).run()
 	if (!marked.meta?.changes) return null
-	const r = await addDays(db, c.username, { kind: 'refund', days: -(PLANS[c.plan]?.days ?? 0), checkout: c.id, note, actor: 'admin' }, now)
-	return { ...c, ...r }
+	try {
+		const r = await addDays(db, c.username, { kind: 'refund', days: -(PLANS[c.plan]?.days ?? 0), checkout: c.id, note, actor: 'admin' }, now)
+		return { ...c, ...r }
+	} catch (err) {
+		// Sin quitarle los días no puede quedar devuelta (si no, aprobarla otra vez diría «ya se devolvió»). Salvo que la
+		// base sí los quitara y solo se perdiera su respuesta
+		if (!(await daysOf(db, c.id, 'refund'))) await db.prepare('UPDATE pro_checkouts SET refunded_at = NULL WHERE id = ?').bind(c.id).run()
+		throw err
+	}
 }
+
+// ¿Ya consta en el libro el movimiento de días de esa compra? (si la base no responde, se da por no)
+const daysOf = (db: D1, checkout: string, kind: DayKind) =>
+	db
+		.prepare('SELECT 1 FROM pro_days WHERE checkout = ? AND kind = ?')
+		.bind(checkout, kind)
+		.first()
+		.catch(() => null)
 
 // Lo que el terminal necesita saber: si eres Pro, hasta cuándo y la licencia firmada para recoger el módulo
 // Y los paquetes con sus precios y los días gratis: así solo están escritos aquí (la web los recibe igual, worker/index.ts)
@@ -259,7 +274,8 @@ const refundRow = (db: D1, id: string) => db.prepare('SELECT * FROM pro_refunds 
 export async function approveRefund(db: D1, id: string, note: string | null, now: number) {
 	const r = await refundRow(db, id)
 	if (!r || r.status !== 'requested') throw new ProError(409, 'Esa devolución no está pendiente de aprobar')
-	if (!(await refundCheckout(db, r.checkout, note ?? r.reason, now))) throw new ProError(409, 'Esa compra ya se devolvió o no consta como pagada')
+	// Si ya se le quitaron los días (una aprobación anterior cuya respuesta se perdió), solo falta darla por aprobada
+	if (!(await refundCheckout(db, r.checkout, note ?? r.reason, now)) && !(await daysOf(db, r.checkout, 'refund'))) throw new ProError(409, 'Esa compra ya se devolvió o no consta como pagada')
 	await db.prepare("UPDATE pro_refunds SET status = 'approved', decided_at = ?, decision_note = ? WHERE id = ? AND status = 'requested'").bind(now, note, id).run()
 	return (await refundRow(db, id))!
 }
@@ -370,6 +386,12 @@ export async function settle(env: ProEnv, c: Checkout, now: number, fetcher: typ
 	try {
 		r = await addDays(db, owner, { kind: 'purchase', days: PLANS[c.plan].days, plan: c.plan, checkout: c.id, note: `${PLANS[c.plan].name} · ${c.amount} USD · pagó @${payer.username}`, actor: 'system' }, now)
 	} catch (err) {
+		// Si la base guardó los días y solo se perdió su respuesta, la compra ya está hecha: volver a pendiente los
+		// sumaría otra vez en el próximo repaso
+		if (await daysOf(db, c.id, 'purchase')) {
+			console.error(`pro: factura ${c.id}: los días ya constaban tras un fallo (${(err as Error).message})`)
+			return true
+		}
 		// Sin sus días no puede quedar como pagada: vuelve a pendiente y el próximo repaso la activa
 		await db.prepare("UPDATE pro_checkouts SET status = 'pending', license = NULL, paid_at = NULL WHERE id = ?").bind(c.id).run()
 		throw err
