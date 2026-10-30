@@ -6,7 +6,7 @@
 
 import type { D1 } from './rates.ts'
 
-export type LogKind = 'login' | 'status' | 'device' | 'trial' | 'leave' | 'checkout' | 'refund' | 'telegram' | 'radar' | 'rotate' | 'module' | 'denied' | 'sim' | 'diag' | 'error'
+export type LogKind = 'login' | 'status' | 'device' | 'trial' | 'leave' | 'checkout' | 'refund' | 'telegram' | 'clients' | 'radar' | 'rotate' | 'module' | 'denied' | 'sim' | 'diag' | 'error'
 
 export interface LogEntry {
 	account?: string | null

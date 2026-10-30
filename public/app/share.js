@@ -86,7 +86,7 @@ function shareFacts(o) {
 		market: nameOf(o.coin),
 		unit: unitOf(o.coin),
 		price: fmtP(o.price),
-		amount: flex && o.orderMin ? `De ${fmtM(o.orderMin)} a ${fmtM(max)} USD` : `${fmtM(usd)} USD`,
+		amount: flex && o.orderMin ? `De ${fmtM(o.orderMin)} a ${fmtM(max)} QUSD` : `${fmtM(usd)} QUSD`,
 		extra: [o.onlyVip && 'Solo cuentas VIP', reqText(o.requirements) && `Requisitos: ${reqText(o.requirements)}`].filter(Boolean).join(' · '),
 		user: owner.username ?? bk.acct.username ?? '',
 		// En tu propia oferta QvaPay no siempre trae tu reputación: la de tu perfil del P2P
@@ -96,7 +96,7 @@ function shareFacts(o) {
 	}
 }
 
-const shareText = (f) => `${f.sell ? 'Vendo' : 'Compro'} USD a ${f.price} ${f.unit} · ${f.market} · ${f.amount}\nTómala en Terminal P2P: ${f.link}`
+const shareText = (f) => `${f.sell ? 'Vendo' : 'Compro'} QUSD a ${f.price} ${f.unit} · ${f.market} · ${f.amount}\nTómala en Terminal P2P: ${f.link}`
 
 async function showShareOffer(o) {
 	const f = shareFacts(o)
@@ -104,6 +104,7 @@ async function showShareOffer(o) {
 	openModal(`<div class="stack">
 		<h3>Compartir la oferta</h3>
 		<img class="share-img" id="shImg" alt="Imagen de la oferta" />
+		<label class="share-switch">Oscura<input type="checkbox" role="switch" id="shLight" aria-label="Imagen clara" />Clara</label>
 		<label class="field">Mensaje<textarea class="input" id="shText" rows="3" readonly>${esc(text)}</textarea></label>
 		<div class="row-btns share-btns">
 			${navigator.share ? `<button class="btn primary" id="shNative">${ICON_SHARE} Compartir</button>` : ''}
@@ -119,14 +120,32 @@ async function showShareOffer(o) {
 		navigator.clipboard?.writeText(text)
 		toast('Mensaje copiado')
 	}
-	const canvas = await drawShareCard(f)
-	const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'))
-	if (!$('shImg') || !blob) return
-	const url = canvas.toDataURL('image/png')
-	$('shImg').src = url
-	$('shSave').href = url
-	const file = new File([blob], 'oferta-terminal-p2p.png', { type: 'image/png' })
+	// La imagen del tema elegido; al cambiarlo se vuelve a pintar (lo que se copia o comparte es siempre la que se ve)
+	let blob = null
+	let file = null
+	let theme = shareTheme()
+	const paint = async () => {
+		$('shLight').checked = theme === 'light'
+		const want = theme
+		const canvas = await drawShareCard(f, want)
+		const b = await new Promise((r) => canvas.toBlob(r, 'image/png'))
+		if (!$('shImg') || !b || want !== theme) return
+		blob = b
+		file = new File([b], 'oferta-terminal-p2p.png', { type: 'image/png' })
+		const url = canvas.toDataURL('image/png')
+		$('shImg').src = url
+		$('shSave').href = url
+	}
+	$('shLight').onchange = (e) => {
+		theme = e.target.checked ? 'light' : 'dark'
+		try {
+			localStorage.setItem('tp.shareTheme', theme)
+		} catch {}
+		paint()
+	}
+	await paint()
 	$('shNative')?.addEventListener('click', async () => {
+		if (!file) return
 		const data = navigator.canShare?.({ files: [file] }) ? { files: [file], text } : { text }
 		try {
 			await navigator.share(data)
@@ -135,6 +154,7 @@ async function showShareOffer(o) {
 		}
 	})
 	$('shCopyImg')?.addEventListener('click', async () => {
+		if (!blob) return
 		try {
 			await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
 			toast('Imagen copiada: pégala en el chat y luego el mensaje')
@@ -163,28 +183,45 @@ function roundRect(ctx, x, y, w, h, r) {
 	ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h)
 }
 
-async function drawShareCard(f) {
+// Los colores de la imagen en cada tema. El claro oscurece el rojo y el verde para que se lean sobre blanco
+const SHARE_THEMES = {
+	dark: { bg: '#070a0f', glow: 0.16, blue: 'rgba(91,140,255,0.16)', grid: 'rgba(255,255,255,0.025)', ask: [246, 70, 93], bid: [31, 194, 139], text: '#e9eef6', price: '#ffffff', unit: '#b4c0d0', label: '#7d8a9c', extra: '#f0b93a', line: 'rgba(255,255,255,0.1)', face: 'rgba(91,140,255,0.18)', accent: '#9db8ff', rep: '#9aa7b8' },
+	light: { bg: '#f5f7fb', glow: 0.1, blue: 'rgba(91,140,255,0.12)', grid: 'rgba(15,23,42,0.045)', ask: [214, 40, 66], bid: [10, 148, 100], text: '#0f1726', price: '#0b1220', unit: '#475569', label: '#64748b', extra: '#a86a06', line: 'rgba(15,23,42,0.12)', face: 'rgba(91,140,255,0.16)', accent: '#3159d6', rep: '#475569' },
+}
+// El tema de la imagen: el que elegiste la última vez o, si no, el del terminal
+const shareTheme = () => {
+	try {
+		const t = localStorage.getItem('tp.shareTheme')
+		if (t === 'light' || t === 'dark') return t
+	} catch {}
+	const t = document.documentElement.dataset.theme
+	return t === 'light' || t === 'dark' ? t : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+}
+
+async function drawShareCard(f, theme = 'dark') {
+	const P = SHARE_THEMES[theme] ?? SHARE_THEMES.dark
 	await Promise.all(['700 40px Inter', '600 40px Inter', '500 40px Inter', '600 40px "JetBrains Mono"'].map((x) => document.fonts?.load(x).catch(() => {})))
 	const c = document.createElement('canvas')
 	c.width = c.height = CARD
 	const ctx = c.getContext('2d')
-	const side = f.sell ? '#f6465d' : '#1fc28b'
-	const sideBg = f.sell ? 'rgba(246,70,93,' : 'rgba(31,194,139,'
+	const rgb = (f.sell ? P.ask : P.bid).join(',')
+	const side = `rgb(${rgb})`
+	const sideBg = `rgba(${rgb},`
 
-	// Fondo: oscuro, con un brillo del color del lado y otro azul, y una rejilla tenue
-	ctx.fillStyle = '#070a0f'
+	// Fondo: del tema, con un brillo del color del lado y otro azul, y una rejilla tenue
+	ctx.fillStyle = P.bg
 	ctx.fillRect(0, 0, CARD, CARD)
 	for (const [x, y, r, col] of [
-		[180, 260, 620, `${sideBg}0.16)`],
-		[960, 900, 640, 'rgba(91,140,255,0.16)'],
+		[180, 260, 620, `${sideBg}${P.glow})`],
+		[960, 900, 640, P.blue],
 	]) {
 		const g = ctx.createRadialGradient(x, y, 0, x, y, r)
 		g.addColorStop(0, col)
-		g.addColorStop(1, 'rgba(0,0,0,0)')
+		g.addColorStop(1, `${col.slice(0, col.lastIndexOf(','))},0)`)
 		ctx.fillStyle = g
 		ctx.fillRect(0, 0, CARD, CARD)
 	}
-	ctx.strokeStyle = 'rgba(255,255,255,0.025)'
+	ctx.strokeStyle = P.grid
 	ctx.lineWidth = 1
 	for (let p = 0; p <= CARD; p += 54) {
 		ctx.beginPath()
@@ -212,13 +249,13 @@ async function drawShareCard(f) {
 	ctx.lineTo(19, 6)
 	ctx.stroke()
 	ctx.restore()
-	ctx.fillStyle = '#e9eef6'
+	ctx.fillStyle = P.text
 	ctx.font = `700 34px ${SANS}`
 	ctx.textBaseline = 'middle'
 	ctx.fillText('Terminal P2P', PAD + 80, PAD + 31)
 
 	// Vendo o compro
-	const tag = f.sell ? 'VENDO USD' : 'COMPRO USD'
+	const tag = f.sell ? 'VENDO QUSD' : 'COMPRO QUSD'
 	ctx.font = `700 30px ${SANS}`
 	const tw = ctx.measureText(tag).width + 48
 	ctx.fillStyle = `${sideBg}0.16)`
@@ -233,50 +270,50 @@ async function drawShareCard(f) {
 	const W = CARD - PAD * 2
 	ctx.textBaseline = 'alphabetic'
 	const label = (text, y) => {
-		ctx.fillStyle = '#7d8a9c'
+		ctx.fillStyle = P.label
 		ctx.font = `500 28px ${SANS}`
 		ctx.fillText(text, PAD, y)
 	}
 
 	label('Mercado', 268)
-	ctx.fillStyle = '#e9eef6'
+	ctx.fillStyle = P.text
 	fitFont(ctx, f.market, W, 60, 700, SANS)
 	ctx.fillText(f.market, PAD, 336)
 
-	label('Precio por USD', 446)
+	label('Precio por QUSD', 446)
 	ctx.font = `600 52px ${MONO}`
 	const unitW = ctx.measureText(` ${f.unit}`).width
-	ctx.fillStyle = '#ffffff'
+	ctx.fillStyle = P.price
 	const ps = fitFont(ctx, f.price, W - unitW, 168, 600, MONO)
 	ctx.fillText(f.price, PAD - ps * 0.04, 610)
 	const pw = ctx.measureText(f.price).width
-	ctx.fillStyle = '#b4c0d0'
+	ctx.fillStyle = P.unit
 	ctx.font = `600 52px ${MONO}`
 	ctx.fillText(` ${f.unit}`, PAD + pw, 610)
 
 	label('Monto', 712)
-	ctx.fillStyle = '#e9eef6'
+	ctx.fillStyle = P.text
 	fitFont(ctx, f.amount, W, 58, 700, SANS)
 	ctx.fillText(f.amount, PAD, 778)
 	if (f.extra) {
-		ctx.fillStyle = '#f0b93a'
+		ctx.fillStyle = P.extra
 		fitFont(ctx, f.extra, W, 28, 500, SANS)
 		ctx.fillText(f.extra, PAD, 830)
 	}
 
 	// Abajo: quién la publica y dónde tomarla
-	ctx.strokeStyle = 'rgba(255,255,255,0.1)'
+	ctx.strokeStyle = P.line
 	ctx.lineWidth = 2
 	ctx.beginPath()
 	ctx.moveTo(PAD, 880)
 	ctx.lineTo(CARD - PAD, 880)
 	ctx.stroke()
 	const cy = 952
-	ctx.fillStyle = 'rgba(91,140,255,0.18)'
+	ctx.fillStyle = P.face
 	ctx.beginPath()
 	ctx.arc(PAD + 36, cy, 36, 0, Math.PI * 2)
 	ctx.fill()
-	ctx.fillStyle = '#9db8ff'
+	ctx.fillStyle = P.accent
 	ctx.font = `700 28px ${SANS}`
 	ctx.textAlign = 'center'
 	ctx.textBaseline = 'middle'
@@ -284,19 +321,19 @@ async function drawShareCard(f) {
 	ctx.textAlign = 'left'
 	const rep = [f.rating ? `★ ${f.rating.toFixed(2)}` : null, f.ops != null ? `${f.ops.toLocaleString('en-US')} operaciones` : null].filter(Boolean).join(' · ')
 	// Sin reputación que enseñar, el usuario va centrado con el círculo
-	ctx.fillStyle = '#e9eef6'
+	ctx.fillStyle = P.text
 	fitFont(ctx, `@${f.user}`, 470, 34, 700, SANS)
 	ctx.fillText(`@${f.user}`, PAD + 92, rep ? cy - 18 : cy)
 	if (rep) {
-		ctx.fillStyle = '#9aa7b8'
+		ctx.fillStyle = P.rep
 		ctx.font = `500 26px ${SANS}`
 		ctx.fillText(rep, PAD + 92, cy + 22)
 	}
 	ctx.textAlign = 'right'
-	ctx.fillStyle = '#7d8a9c'
+	ctx.fillStyle = P.label
 	ctx.font = `500 26px ${SANS}`
 	ctx.fillText('Tómala en', CARD - PAD, cy - 18)
-	ctx.fillStyle = '#9db8ff'
+	ctx.fillStyle = P.accent
 	ctx.font = `700 34px ${SANS}`
 	ctx.fillText(new URL(f.link).host, CARD - PAD, cy + 22)
 	ctx.textAlign = 'left'

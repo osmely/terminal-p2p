@@ -24,6 +24,8 @@ export interface Account {
 	print?: string
 	// Tus operaciones completadas y tu valoración en P2P (para saber qué ofertas con requisitos puedes tomar)
 	stats?: { completed: number; rating: number | null; at: number }
+	// Una petición a nuestro servidor con el token (en el navegador, para «Mis clientes»; ver web/accounts.ts)
+	toServer?: (path: string, body: unknown) => Promise<Response>
 }
 
 // Dónde vive la cuenta conectada (en el navegador: su almacenamiento local)
@@ -155,6 +157,8 @@ export class Broker {
 					return await this.swapQuote(ctx, acc)
 				case 'POST /swap':
 					return await this.swap(ctx, acc)
+				case 'POST /clients/send':
+					return await this.clientsSend(ctx, acc)
 			}
 			return json(404, { error: 'Ruta desconocida' })
 		} catch (err) {
@@ -373,6 +377,14 @@ export class Broker {
 	private async offer({ url }: Ctx, acc: Account) {
 		const o = await acc.client.getOffer(url.searchParams.get('offer') ?? '')
 		return json(200, offerView(o, acc.me.uuid))
+	}
+
+	// «Mis clientes»: el servidor lee la oferta con tu token (tiene que ser tuya y privada) y avisa a tus clientes
+	private async clientsSend({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		if (!acc.toServer || !acc.print) return json(503, { error: 'No disponible aquí' })
+		const res = await acc.toServer('/pro/clients/send', { print: acc.print, offer: String(b.offer ?? '') })
+		return json(res.status, await res.json().catch(() => ({ error: 'Algo falló. Inténtalo de nuevo.' })))
 	}
 
 	private async createOffer({ req }: Ctx, acc: Account) {

@@ -10,7 +10,8 @@ import { hex, hmac, sign, verify } from './crypto.ts'
 import { adminPage, askKey, pageHead, panel, searchIcon, type AdminTab } from './admin.ts'
 import { authorized } from './metrics.ts'
 import { cubaOffset, type D1 } from './rates.ts'
-import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
+import { clearWho, readWho, sessionCookie, sessionToken, tokenPrint } from './session.ts'
+import { checkOffer, cleanUsername, clientsView, closeOffers, join as joinClients, leave as leaveClients, notifyClients, offerOf, readOffer, saveOffer } from './clients.ts'
 import { alertsReady, notify, panelUrl, tgEsc, type AlertEnv } from './alerts.ts'
 import { seal, sendBackup, snapshot } from './backup.ts'
 import { GRACE_MS, INCIDENT_NAME, openIncidents, recordIncident, resolveIncident, type Incident } from './incidents.ts'
@@ -899,7 +900,8 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			const print = printOf((await readBody(req)).print)
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
 			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Pidió el enlace para conectar los avisos de Telegram' })
-			if (!license || !(await db.prepare('SELECT 1 FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first())) return json(403, { error: 'Conecta tu cuenta para recibir avisos' })
+			// Cualquier cuenta conectada (también la de quien recibe ofertas de «Mis clientes» sin tener Pro)
+			if (!license) return json(403, { error: 'Conecta tu cuenta para recibir avisos', code: 'TP_WHO' })
 			const url = await linkUrl(env, license, now, fetcher)
 			if (!url) return json(503, { error: 'Los avisos por Telegram no están disponibles ahora mismo' })
 			return json(200, { url })
@@ -928,6 +930,67 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 				t.detail = 'Quitó un aviso de tasa'
 			} else t.skip = true
 			return json(200, { alerts: await listAlerts(db, license), telegram: await linked(db, license), rates: await latestRates(db, COINS.map((c) => c.tick), now), max: MAX_ALERTS })
+		}
+		// «Mis clientes» (clients.ts): la lista de un comerciante con Pro y las ofertas privadas que les manda
+		if (path.startsWith('/pro/clients') && req.method === 'POST') {
+			const b = await readBody(req)
+			const print = printOf(b.print)
+			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
+			Object.assign(t, { kind: 'clients', print, account: who?.username, detail: 'Mis clientes' })
+			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay', code: 'TP_WHO' })
+			if ((await accessOf(db, { username: who.username, print }, now))?.level === 'blocked') return accessError('blocked')
+			const me = { uuid: who.uuid, username: who.username }
+			const merchantPro = async () => !!(await activeLicense(db, accountOf(who.username), now))
+			const view = async () => ({ ...(await clientsView(db, me, now)), pro: await merchantPro(), telegram: await linked(db, accountOf(who.username)) })
+			if (route === 'POST /pro/clients') {
+				t.skip = true
+				return json(200, await view())
+			}
+			if (route === 'POST /pro/clients/join') {
+				const name = cleanUsername(b.merchant)
+				const m = name ? await activeLicense(db, accountOf(name), now) : null
+				if (!name || !m) return json(404, { error: name ? `@${name} no tiene «Mis clientes» activo ahora mismo` : 'Enlace no válido' })
+				const err = await joinClients(db, m.username, me, now)
+				if (err) return json(409, { error: err })
+				t.detail = `Se unió a los clientes de @${m.username}`
+				return json(200, { ...(await view()), joined: m.username })
+			}
+			if (route === 'POST /pro/clients/leave') {
+				const name = cleanUsername(b.merchant)
+				if (name) await leaveClients(db, name, who.username)
+				t.detail = `Dejó de recibir ofertas de @${name}`
+				return json(200, await view())
+			}
+			if (route === 'POST /pro/clients/remove') {
+				const name = cleanUsername(b.client)
+				if (name) await leaveClients(db, who.username, name)
+				t.detail = `Sacó a @${name} de sus clientes`
+				return json(200, await view())
+			}
+			if (route === 'POST /pro/clients/close') {
+				const list = Array.isArray(b.offers) ? b.offers.map(String) : []
+				await closeOffers(db, who.username, list, now)
+				t.skip = true
+				return json(200, { ok: true })
+			}
+			// Mandar una oferta privada a los clientes: se lee en QvaPay con el token de quien la manda, que llega solo
+			// para esta lectura (como en el relé) y tiene que ser el mismo de la huella
+			if (route === 'POST /pro/clients/send') {
+				const uuid = String(b.offer ?? '').toLowerCase()
+				t.detail = `Mandar a sus clientes la oferta ${uuid}`
+				if (!(await merchantPro())) return json(403, { error: '«Mis clientes» es parte de Pro' })
+				const token = req.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
+				if (!token || (await tokenPrint(token)) !== print) return json(403, { error: 'Conecta tu cuenta de QvaPay', code: 'TP_WHO' })
+				const o = await readOffer(token, uuid, fetcher)
+				const err = checkOffer(o, me, uuid)
+				if (err) return json(409, { error: err })
+				const fresh = await saveOffer(db, o!, me, now)
+				const saved = (await offerOf(db, uuid))!
+				const sent = fresh ? await notifyClients(env, saved, fetcher) : saved.sent
+				t.detail = `Mandó a sus clientes la oferta ${uuid}${fresh ? ` · ${sent} avisos por Telegram` : ' (ya mandada)'}`
+				return json(200, { ...(await view()), sent, fresh })
+			}
+			return json(404, { error: 'Ruta desconocida' })
 		}
 		if (route === 'POST /pro/telegram/webhook') {
 			t.skip = true
@@ -1149,6 +1212,7 @@ const LOG_NAME: Record<string, string> = {
 	checkout: '🧾 Factura',
 	refund: '↩️ Devolución',
 	telegram: '✈️ Telegram',
+	clients: '🤝 Clientes',
 	radar: '📡 Radar',
 	rotate: '🔁 Cambio de token',
 	module: '★ Módulo Pro',

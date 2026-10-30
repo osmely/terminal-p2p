@@ -568,6 +568,13 @@ details.sec-box { display: block; }
 .share .row-btns .btn svg, .share-btns .btn svg { margin-right: 6px; vertical-align: -3px; }
 .share-img { display: block; width: 100%; max-width: 420px; aspect-ratio: 1; margin: 0 auto; border-radius: 12px; border: 1px solid var(--line); background: var(--line); }
 .share-btns { flex-wrap: wrap; }
+/* Tema de la imagen: un interruptor pequeño debajo */
+.share-switch { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: -4px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+.share-switch input { appearance: none; position: relative; width: 28px; height: 16px; margin: 0; border-radius: 8px; background: var(--line); cursor: pointer; transition: background 0.15s; }
+.share-switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s; }
+.share-switch input:checked { background: var(--accent); }
+.share-switch input:checked::after { transform: translateX(12px); }
+.share-switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .share-btns .btn { flex: 1 1 auto; justify-content: center; text-align: center; text-decoration: none; }
 .similar { display: grid; gap: 6px; margin-bottom: 12px; }
 .similar-row { display: grid; grid-template-columns: auto auto 1fr; gap: 12px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
@@ -862,3 +869,16 @@ a.icon-btn { text-decoration: none; }
 
 /* Métodos de pago guardados en QvaPay, encima de los datos de pago al publicar */
 .saved-methods { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+/* «Mis clientes» (clients.js): el aviso de arriba, las ofertas de tus comerciantes y tu lista */
+.cl-chip { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--text); }
+.cl-chip:hover { background: var(--accent-bg); }
+.cl-link { flex-wrap: nowrap; }
+.cl-link .input { flex: 1; min-width: 0; font: 12px var(--mono); }
+.cl-link .btn { flex: none; }
+.cl-offers li { padding: 0; }
+.cl-offer { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; padding: 10px 12px; border: 0; border-radius: var(--r-sm); background: none; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.cl-offer:hover { background: var(--accent-bg); }
+.cl-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.cl-people li { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 13.5px; }
+.cl-people li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
