@@ -18,7 +18,7 @@ import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tel
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
 import { COINS } from '../src/terminal/market.ts'
-import { liveClients, liveSimulate, liveStatus, type LiveClient, type LiveEnv } from './livebook.ts'
+import { liveClients, liveSimulate, liveStatus, type LagStats, type LiveClient, type LiveEnv, type LiveState } from './livebook.ts'
 import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
 import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS } from './ratealerts.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
@@ -2007,6 +2007,14 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 	)
 }
 
+// Cuánto tardan en llegar los eventos del feed (la mediana y el 90 %)
+const secs = (ms: number) => `${(ms / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 })} s`
+function lagNote(lag: LiveState['lag']) {
+	if (!lag?.sent && !lag?.upd) return ''
+	const part = (l: LagStats | null, what: string) => (l ? `${what}: ${secs(l.p50)} la mitad, ${secs(l.p90)} el 90 % (el peor ${secs(l.max)})` : '')
+	return `Retraso de los últimos ${(lag.sent ?? lag.upd)!.n} eventos — ${[part(lag.sent, 'desde que QvaPay los manda'), part(lag.upd, 'desde que cambió la oferta')].filter(Boolean).join('; ')}.`
+}
+
 // El libro en tiempo real (feed del mercado de QvaPay): si llega, qué tiene y cuántos terminales lo reciben
 async function liveForm(env: ProEnv) {
 	const live = env as unknown as LiveEnv
@@ -2019,6 +2027,7 @@ async function liveForm(env: ProEnv) {
 		`${s.events.toLocaleString('en-US')} eventos del feed (el último: ${when(s.lastEvent)}).`,
 		live.STAGING || !s.stream ? '' : s.stream.on ? `Stream de QvaPay conectado desde ${when(s.stream.since)} (${(s.stream.events ?? 0).toLocaleString('en-US')} eventos por el stream; ${s.stream.connects ?? 0} conexiones desde que arrancó${s.stream.gap != null ? `, el último corte duró ${Math.round(s.stream.gap / 1000)} s` : ''}).` : `Stream de QvaPay desconectado${s.stream.error ? `: ${escHtml(s.stream.error)}` : ''}.`,
 		`${s.offers.toLocaleString('en-US')} ofertas en el libro, ${s.owners.toLocaleString('en-US')} anunciantes conocidos y ${(s.acts ?? 0).toLocaleString('en-US')} movimientos de actividad guardados; ${s.clients === 1 ? '1 terminal conectado' : `${s.clients} terminales conectados`} (${s.proClients} con Pro, al instante; el resto, cada 10 s).`,
+		lagNote(s.lag),
 		s.creds ? `Lectura del listado con la app: ${s.readError ? `falla (${escHtml(s.readError)})` : `bien (la última: ${when(s.lastRead)})`}.` : 'Faltan las credenciales de la app (QVAPAY_APP_ID y QVAPAY_APP_SECRET): sin ellas no se saben los nombres ni la reputación.',
 		s.lastRejected ? `Último evento rechazado: ${escHtml(s.lastRejected.reason)} (${when(s.lastRejected.at)}).` : '',
 		!live.QVAPAY_FEED_SECRET ? 'Falta el secreto del feed (QVAPAY_FEED_SECRET): los eventos se rechazan.' : '',

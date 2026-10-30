@@ -26,9 +26,16 @@ export type BucketName = keyof typeof QVAPAY_BUCKETS
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+interface Job {
+	urgent: boolean
+	go: () => Promise<unknown>
+}
+
 class Bucket {
 	private stamps: number[] = []
-	private tail: Promise<unknown> = Promise.resolve()
+	// En serie, por orden de llegada; las urgentes (una toma del radar y lo que la sigue) pasan delante de las de fondo
+	private queue: Job[] = []
+	private busy = false
 	private readonly spec: BucketSpec
 	private readonly now: () => number
 
@@ -37,21 +44,45 @@ class Bucket {
 		this.now = now
 	}
 
-	run<T>(fn: () => Promise<T>): Promise<T> {
-		const next = this.tail.then(async () => {
-			await this.waitTurn()
-			this.stamps.push(this.now())
-			return fn()
+	run<T>(fn: () => Promise<T>, urgent = false): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			const job: Job = { urgent, go: () => Promise.resolve().then(fn).then(resolve, reject) }
+			const at = urgent ? this.queue.findIndex((j) => !j.urgent) : -1
+			if (at < 0) this.queue.push(job)
+			else this.queue.splice(at, 0, job)
+			void this.pump()
 		})
-		// Un fallo no debe bloquear la cola
-		this.tail = next.catch(() => {})
-		return next
+	}
+
+	// Lo que esperaría ahora una llamada (una ventana entera si ya hay otras delante)
+	waitMs() {
+		if (this.queue.length || this.busy) return this.spec.windowMs
+		const t = this.now()
+		const live = this.stamps.filter((s) => t - s < this.spec.windowMs)
+		return live.length < this.spec.max ? 0 : this.spec.windowMs - (t - live[0])
 	}
 
 	// Tras un 429 nadie más entra hasta que pase `ms`
 	penalize(ms: number) {
 		const until = this.now() + ms
 		this.stamps = Array.from({ length: this.spec.max }, () => until - this.spec.windowMs)
+	}
+
+	private async pump() {
+		if (this.busy) return
+		this.busy = true
+		try {
+			while (this.queue.length) {
+				await this.waitTurn()
+				// La que toca se decide después de esperar: una urgente que llegó mientras tanto se lleva el turno
+				const job = this.queue.shift()!
+				this.stamps.push(this.now())
+				// Un fallo no bloquea la cola (lo recibe quien la pidió)
+				await job.go()
+			}
+		} finally {
+			this.busy = false
+		}
 	}
 
 	private async waitTurn() {
@@ -74,8 +105,12 @@ export class RateLimiter<K extends string> {
 		this.now = now
 	}
 
-	run<T>(key: K, fn: () => Promise<T>): Promise<T> {
-		return this.bucket(key).run(fn)
+	run<T>(key: K, fn: () => Promise<T>, urgent = false): Promise<T> {
+		return this.bucket(key).run(fn, urgent)
+	}
+
+	waitMs(key: K) {
+		return this.bucket(key).waitMs()
 	}
 
 	penalize(key: K, ms: number) {

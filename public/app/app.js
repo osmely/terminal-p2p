@@ -746,7 +746,9 @@ function renderActivity(b) {
 			items
 				.map((a) => {
 					const [icon, text, tip] = ACT[a.kind] ?? ACT.gone
-					const t = new Date(a.t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })
+					// Con milisegundos: lo que pasa en el libro va a ritmo de bots
+					const d = new Date(a.t)
+					const t = `${d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')}`
 					const what = text.replace('{s}', a.side === 'ask' ? 'una venta' : 'una compra')
 					const who = a.user && a.user !== '—' ? ` · <button type="button" class="link peer-link" data-peer="${esc(a.user)}" title="Ver su ficha">@${esc(a.user)}</button>` : ''
 					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} USD${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`

@@ -46,10 +46,14 @@ test('clave del panel: comparación en tiempo constante y HTTP Basic', async () 
 })
 
 test('X-TP-Meta: solo valores válidos', () => {
-	assert.deepEqual(parseMeta('coin=BANK_CUP&side=sell&usd=50.555'), { coin: 'BANK_CUP', side: 'sell', usd: 50.56, via: '' })
-	assert.deepEqual(parseMeta('coin=BANK_CUP&side=buy&usd=20&via=swap'), { coin: 'BANK_CUP', side: 'buy', usd: 20, via: 'swap' })
-	assert.deepEqual(parseMeta('coin=<script>&side=x&usd=9999999&via=<b>'), { coin: '', side: '', usd: 0, via: '' })
-	assert.deepEqual(parseMeta(null), { coin: '', side: '', usd: 0, via: '' })
+	assert.deepEqual(parseMeta('coin=BANK_CUP&side=sell&usd=50.555'), { coin: 'BANK_CUP', side: 'sell', usd: 50.56, via: '', ms: null })
+	assert.deepEqual(parseMeta('coin=BANK_CUP&side=buy&usd=20&via=swap'), { coin: 'BANK_CUP', side: 'buy', usd: 20, via: 'swap', ms: null })
+	assert.deepEqual(parseMeta('coin=<script>&side=x&usd=9999999&via=<b>'), { coin: '', side: '', usd: 0, via: '', ms: null })
+	assert.deepEqual(parseMeta(null), { coin: '', side: '', usd: 0, via: '', ms: null })
+	// Las tomas del radar: cuánto tardó desde que vio la oferta (un número raro no se guarda)
+	assert.equal(parseMeta('via=radar&ms=840').ms, 840)
+	assert.equal(parseMeta('via=radar&ms=-3').ms, null)
+	assert.equal(parseMeta('via=radar&ms=9999999').ms, null)
 })
 
 test('evento de publicar y de liberar, sin datos de usuario', async () => {

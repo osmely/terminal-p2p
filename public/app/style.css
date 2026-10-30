@@ -424,9 +424,9 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .insight-list b { color: var(--text); font-family: var(--mono); font-weight: 600; }
 #activityPane { padding: 0; }
 .feed { list-style: none; margin: 0; padding: 0; }
-.feed li { display: grid; grid-template-columns: 48px 1fr auto; gap: 10px; align-items: center; padding: 7px 14px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+.feed li { display: grid; grid-template-columns: 84px 1fr auto; gap: 10px; align-items: center; padding: 7px 14px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
 .feed li:last-child { border-bottom: 0; }
-.feed time { color: var(--muted); font: 11px var(--mono); }
+.feed time { color: var(--muted); font: 11px var(--mono); white-space: nowrap; }
 .feed .px { font: 600 12px var(--mono); }
 .feed .act { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .feed .act > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -745,7 +745,7 @@ a.icon-btn { text-decoration: none; }
 	.ops-legend { position: static; max-width: none; padding: 0 2px; min-height: 16px; background: none; }
 	.chart-wrap:has(#history:not([hidden])) .ops-legend[hidden] { display: block !important; visibility: hidden; }
 	.pane { max-height: none; }
-	.feed li { grid-template-columns: 42px 1fr auto; padding: 9px 12px; }
+	.feed li { grid-template-columns: 80px 1fr auto; padding: 9px 12px; }
 	/* En el móvil la línea baja de renglón: recortada, se perdía el nombre (que abre la ficha) */
 	.feed .act > span { white-space: normal; }
 

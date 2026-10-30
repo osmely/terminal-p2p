@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { test } from 'node:test'
 import type { P2POffer } from '../src/qvapay/types.ts'
-import { Book, feedSign, feedSigned, feedWebhook, liveSocket, sseEvents, tradeOf, type FeedEvent, type LiveEnv } from '../worker/livebook.ts'
+import { Book, feedSign, lagStats, feedSigned, feedWebhook, liveSocket, sseEvents, tradeOf, type FeedEvent, type LiveEnv } from '../worker/livebook.ts'
 import { liveRows } from '../worker/pro.ts'
 
 const T = Date.parse('2026-10-27T15:00:00Z')
@@ -206,4 +206,9 @@ test('en vivo (panel): cada conexión lleva su cuenta; se juntan por cuenta con 
 			['Ana', 2, true, ['BANK_CUP', 'ETECSA'], T + 2000, T + 9000],
 		],
 	)
+})
+
+test('retraso del feed: mediana, 90 % y el peor', () => {
+	assert.equal(lagStats([]), null)
+	assert.deepEqual(lagStats([300, 100, 200, 5000, 400, 250, 150, 350, 450, 120]), { n: 10, p50: 300, p90: 5000, max: 5000 })
 })

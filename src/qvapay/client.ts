@@ -46,6 +46,8 @@ interface RequestOpts {
 	// Mercado, lado y monto de la operación para las métricas anónimas del relé de Terminal P2P
 	// (cabecera X-TP-Meta: el relé no la reenvía a QvaPay)
 	meta?: OpMeta
+	// Pasa delante de las lecturas de fondo en su bucket (una toma del radar y lo que la sigue)
+	urgent?: boolean
 }
 
 export interface OpMeta {
@@ -54,6 +56,8 @@ export interface OpMeta {
 	usd?: number
 	// Desde qué parte del terminal se hizo (p. ej. 'swap' para «Vender ya»)
 	via?: string
+	// Tomas del radar: ms desde que el terminal vio la oferta
+	ms?: number
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -75,8 +79,8 @@ export class QvaPayClient {
 
 	// ── Lectura ────────────────────────────────────────────────────────────
 
-	me() {
-		return this.request<Me>('GET', '/user', { bucket: 'general' })
+	me(urgent = false) {
+		return this.request<Me>('GET', '/user', { bucket: 'general', urgent })
 	}
 
 	extended() {
@@ -101,8 +105,8 @@ export class QvaPayClient {
 		return this.request<SavedMethod[]>('GET', '/user/payment-methods', { bucket: 'general' })
 	}
 
-	async getOffer(uuid: string) {
-		const res = await this.request<{ p2p: P2POffer }>('GET', `/p2p/${uuid}`, { bucket: 'general' })
+	async getOffer(uuid: string, urgent = false) {
+		const res = await this.request<{ p2p: P2POffer }>('GET', `/p2p/${uuid}`, { bucket: 'general', urgent })
 		return res.p2p
 	}
 
@@ -214,9 +218,14 @@ export class QvaPayClient {
 		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, form, write: true })
 	}
 
-	async sendChat(uuid: string, message: string, order?: string) {
+	async sendChat(uuid: string, message: string, order?: string, urgent = false) {
 		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/chat${order ? `?order=${order}` : ''}`)
-		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, body: { message }, write: true })
+		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, body: { message }, write: true, urgent })
+	}
+
+	// Lo que esperaría ahora una llamada del bucket (0 si hay cupo)
+	waitMs(bucket: BucketName) {
+		return this.limiter.waitMs(bucket)
 	}
 
 	// ── Transporte ─────────────────────────────────────────────────────────
@@ -245,6 +254,7 @@ export class QvaPayClient {
 						body: opts.form ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
 						signal: AbortSignal.timeout(20_000),
 					}),
+					opts.urgent,
 				)
 			} catch (err) {
 				// Error de red: no sabemos si la escritura llegó, así que solo reintentamos si es idempotente

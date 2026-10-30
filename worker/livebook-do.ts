@@ -7,7 +7,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
-import { ACT_KEEP, ALARM_MS, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, tradeOf, type Act, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, tradeOf, type Act, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
 
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
 const DONE_EVERY_MS = 5 * 60_000
@@ -64,6 +64,8 @@ export class LiveBook {
 	private streamGap: number | null = null
 	// Operaciones ya sumadas al volumen en la última hora: el mismo evento puede llegar por el webhook y por el stream
 	private volSeen = new Map<string, number>()
+	// Cuánto tardan en llegar los eventos (desde que QvaPay los manda y desde que cambió la oferta), los últimos LAG_KEEP
+	private lags = { sent: [] as number[], upd: [] as number[] }
 
 	private ctx: DurableObjectState
 	private env: LiveEnv
@@ -134,7 +136,7 @@ export class LiveBook {
 	private state(): LiveState {
 		const now = Date.now()
 		return {
-			version: 8,
+			version: 9,
 			recent: this.recent,
 			mode: this.feedOn(now) ? 'feed' : this.creds() ? 'poll' : 'off',
 			events: this.events,
@@ -146,6 +148,7 @@ export class LiveBook {
 			clients: this.ctx.getWebSockets().length,
 			proClients: this.ctx.getWebSockets().filter((ws) => (ws.deserializeAttachment() as Sock | null)?.pro).length,
 			creds: this.creds(),
+			lag: { sent: lagStats(this.lags.sent), upd: lagStats(this.lags.upd) },
 			stream: { on: this.streaming, since: this.streamSince, events: this.streamEvents, error: this.streamError, connects: this.streamConnects, gap: this.streamGap },
 			lastRead: this.lastRead,
 			readError: this.readError,
@@ -179,19 +182,38 @@ export class LiveBook {
 		}
 		this.events++
 		this.lastEvent = Date.now()
+		this.addLag(e)
 		const ch = this.book.apply(e)
+		let unknown = false
 		if (ch?.changed) {
 			this.broadcast(ch.coin, ch.side)
-			// De un dueño que no conocemos aún no sabemos nombre ni reputación: se lee ese lado pronto
-			if (ch.unknownOwner) this.want.add(sideKey(ch.coin, ch.side))
+			// De un dueño que no conocemos aún no sabemos nombre ni reputación (el radar no la toma sin ellos): ese lado se
+			// lee ya, sin esperar a la próxima pasada
+			if (ch.unknownOwner) {
+				unknown = true
+				this.want.add(sideKey(ch.coin, ch.side))
+			}
 		}
 		if (ch?.act) {
 			this.addAct(ch.coin, ch.act)
 			await this.addVolume(e.event, ch.coin, ch.act)
 		}
 		await this.save()
-		if (this.want.size && !this.streaming) await this.soon(1500)
+		if (unknown && this.streaming) void this.periodic().catch(() => {})
+		else if (this.want.size && !this.streaming) await this.soon(unknown ? 100 : 1500)
 		return true
+	}
+
+	private addLag(e: FeedEvent) {
+		const now = Date.now()
+		const push = (list: number[], at: string | undefined) => {
+			const t = Date.parse(at ?? '')
+			if (!Number.isFinite(t)) return
+			list.push(now - t)
+			if (list.length > LAG_KEEP) list.shift()
+		}
+		push(this.lags.sent, e.sent_at)
+		push(this.lags.upd, e.data?.updated_at)
 	}
 
 	private async save() {

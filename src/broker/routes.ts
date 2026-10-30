@@ -6,7 +6,7 @@ import { P2P_FEE } from '../qvapay/fees.ts'
 import type { SavedMethod } from '../qvapay/types.ts'
 import { logger } from '../log.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
-import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
+import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2POrder, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
 import { COINS, type Market } from '../terminal/market.ts'
 import { reputationScore } from '../terminal/ranking.ts'
 import { pendingCount, tradeAlerts } from './alerts.ts'
@@ -446,61 +446,86 @@ export class Broker {
 
 	// Una toma de la orden inteligente o del radar: 1) comprueba que la oferta sigue sirviendo tal como se planeó,
 	// 2) la toma y lo confirma con una lectura nueva (un corte de red puede esconder una toma hecha) y 3) vendiendo,
-	// le manda tus datos de pago al comprador por el chat. Nunca cancela nada
-	private async takeStep(acc: Account, t: { offer: string; amount: number }, side: 'buy' | 'sell', coin: string, limit: number, details: { label: string; value: string }[], via: string) {
+	// le manda tus datos de pago al comprador por el chat. Nunca cancela nada.
+	// El radar comprando con el libro recién leído (`fast`) se salta la comprobación previa: llegar medio segundo antes
+	// es lo que decide quién se la lleva. Lo que esa lectura habría parado se ve igual en la confirmación y se avisa
+	// (comprando, la puedes cancelar sin disputa mientras no la pagues). `pre` es esa lectura previa ya pedida
+	private async takeStep(
+		acc: Account,
+		t: { offer: string; amount: number },
+		side: 'buy' | 'sell',
+		coin: string,
+		limit: number,
+		details: { label: string; value: string }[],
+		via: string,
+		opts: { fast?: { kind: 'fixed' | 'flexible'; user: string }; pre?: Promise<P2POffer | null>; urgent?: boolean; seen?: number } = {},
+	) {
 		const step: TakeStep = { offer: t.offer, user: '—', status: 'pending', order: null }
 		const notes: string[] = []
-		const o = await acc.client.getOffer(t.offer).catch(() => null)
-		step.user = o?.User?.username ?? '—'
+		const urgent = !!opts.urgent
+		const fast = side === 'buy' ? opts.fast : undefined
+		const o = fast ? null : await (opts.pre ?? acc.client.getOffer(t.offer, urgent)).catch(() => null)
+		step.user = fast ? fast.user : (o?.User?.username ?? '—')
 		const user = step.user
-		const problem = takeProblem(o, t.amount, side, coin, limit, acc.me.uuid)
-		if (problem) return { step: { ...step, status: 'skipped' as const, error: problem }, notes }
-		const flexible = o!.offer_kind === 'flexible'
-		const before = new Set((o!.Orders ?? []).map((x) => x.uuid))
+		if (!fast) {
+			const problem = takeProblem(o, t.amount, side, coin, limit, acc.me.uuid)
+			if (problem) return { step: { ...step, status: 'skipped' as const, error: problem }, notes }
+		}
+		const flexible = fast ? fast.kind === 'flexible' : o!.offer_kind === 'flexible'
+		// Sin lectura previa no se saben las órdenes que ya tenía: vale la tuya más nueva de los últimos minutos
+		const before: Set<string> | number = o ? new Set((o.Orders ?? []).map((x) => x.uuid)) : Date.now() - FAST_SINCE_MS
 		let error: string | undefined
 		let code: string | undefined
 		let order: string | null = null
+		const t0 = Date.now()
 		try {
-			order = (await acc.client.applyOffer(o!.uuid, flexible ? t.amount : undefined, { coin, side: o!.type, usd: t.amount, via })).order ?? null
+			order = (await acc.client.applyOffer(t.offer, flexible ? t.amount : undefined, { coin, side: side === 'buy' ? 'sell' : 'buy', usd: t.amount, via, ms: opts.seen ? Math.max(0, Date.now() - opts.seen) : undefined })).order ?? null
 		} catch (e) {
 			error = friendly(e)
 			code = e instanceof QvaPayError ? e.code : undefined
 		}
-		const now = await acc.client.getOffer(o!.uuid).catch(() => null)
+		const applyMs = Date.now() - t0
+		const now = await acc.client.getOffer(t.offer, urgent).catch(() => null)
+		if (now) step.user = now.User?.username ?? step.user
 		const held = now ? heldTake(now, flexible, before, order, acc.me.uuid) : error ? 'unknown' : { order, price: null }
 		if (held === 'unknown') {
 			// No se sabe si quedó tomada: no se cuenta como tomada ni como libre (podrías comprar de más) y se avisa
 			notes.push(`No se pudo confirmar si la oferta de @${user} quedó tomada: revísala en «Mis operaciones». Sus ${t.amount.toLocaleString('en-US')} USD no se sumaron a tu oferta.`)
 			return { step: { ...step, status: 'stuck' as const, error: `no se pudo confirmar si quedó tomada (${error})` }, notes }
 		}
-		if (!held) return { step: { ...step, status: 'failed' as const, error: error ?? 'no quedó tomada', ...(code ? { code } : {}) }, notes }
+		if (!held) return { step: { ...step, status: 'failed' as const, error: error ?? 'no quedó tomada', ...(code ? { code } : {}) }, notes, applyMs }
 		step.status = 'taken'
 		step.order = held.order
+		// Una de monto fijo que su dueño cambió justo antes: te llevaste otro monto
+		if (fast && !flexible && now && Math.abs(num(now.amount) - t.amount) > 0.005)
+			notes.push(
+				`@${step.user} cambió el monto justo antes: tomaste ${num(now.amount).toLocaleString('en-US')} USD en vez de ${t.amount.toLocaleString('en-US')}. Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.`,
+			)
 		if (side === 'buy' && now) {
 			const ord = held.order ? now.Orders?.find((x) => x.uuid === held.order) : undefined
 			step.pay = {
 				details: paymentDetails(now.details),
 				expiresAt: ord?.payment_window_expires_at ?? now.payment_window_expires_at ?? null,
-				coinAmount: round2(t.amount * (held.price ?? limit)),
+				coinAmount: round2((fast && !flexible && now ? num(now.amount) : t.amount) * (held.price ?? limit)),
 			}
 		}
 		// Su dueño cambió el precio justo antes de tomarla: no se cancela, se avisa (comprando, la puedes
 		// cancelar tú sin disputa mientras no la hayas pagado)
 		if (held.price != null && (side === 'buy' ? held.price > limit * (1 + 1e-9) : held.price < limit * (1 - 1e-9)))
 			notes.push(
-				`@${user} cambió el precio justo antes: ${side === 'buy' ? 'compraste' : 'vendiste'} a ${held.price.toLocaleString('en-US')}, ${side === 'buy' ? 'por encima' : 'por debajo'} de tu ${limit.toLocaleString('en-US')}.${side === 'buy' ? ' Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.' : ''}`,
+				`@${step.user} cambió el precio justo antes: ${side === 'buy' ? 'compraste' : 'vendiste'} a ${held.price.toLocaleString('en-US')}, ${side === 'buy' ? 'por encima' : 'por debajo'} de tu ${limit.toLocaleString('en-US')}.${side === 'buy' ? ' Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.' : ''}`,
 			)
 		// Vendiendo, el comprador recibe tus datos por el chat
 		let chatSent: boolean | undefined
 		if (side === 'sell') {
 			const text = `Hola. Vendo ${t.amount} USD desde Terminal P2P. Págame aquí:\n${details.map((d) => `${d.label}: ${d.value}`).join('\n')}`
 			chatSent = await acc.client
-				.sendChat(o!.uuid, text.slice(0, 599), held.order ?? undefined)
+				.sendChat(t.offer, text.slice(0, 599), held.order ?? undefined, urgent)
 				.then(() => true)
 				.catch(() => false)
 			if (!chatSent) notes.push(`No se pudo mandar tus datos a @${user}: escríbeselos por el chat de la operación.`)
 		}
-		return { step, notes, chatSent }
+		return { step, notes, chatSent, applyMs }
 	}
 
 	// Radar de Pro: toma una oferta que cumplió tus reglas, con las mismas comprobaciones que la orden
@@ -514,13 +539,24 @@ export class Broker {
 		if (!side || !TICKS.has(coin) || !(limit > 0) || !t.offer || !(t.amount >= 0.1)) return json(400, { error: 'Toma no válida' })
 		const details = side === 'sell' ? payDetails(b.details) : []
 		if (side === 'sell' && !details.length) return json(400, { error: 'Pon tus datos para recibir el pago' })
+		// El radar puede probar con otra oferta si pierde esta, pero solo si QvaPay deja tomar ya: si hubiera que esperar
+		// al cupo de tomas (2 por minuto), cuando llegue ya no estaría
+		if (b.noWait && acc.client.waitMs('apply') > 1500) return json(200, { ok: false, busy: true, error: 'Sin cupo para otra toma ahora mismo' })
+		const t0 = Date.now()
+		// Comprando con el libro recién leído (como mucho FAST_MS), sin la lectura previa
+		const seen = Number(b.seen) > 0 && Number(b.seen) <= Date.now() + 1000 ? Number(b.seen) : undefined
+		const fresh = seen != null && Date.now() - seen <= FAST_MS
+		const fast = side === 'buy' && fresh && (b.kind === 'fixed' || b.kind === 'flexible') ? { kind: b.kind as 'fixed' | 'flexible', user: String(b.user ?? '—').slice(0, 40) } : undefined
+		// Vendiendo, el saldo y la oferta se leen a la vez
+		let pre: Promise<P2POffer | null> | undefined
 		if (side === 'sell') {
-			const me = await acc.client.me()
+			pre = acc.client.getOffer(t.offer, true).catch(() => null)
+			const me = await acc.client.me(true)
 			acc.me = me
 			if (t.amount > num(me.balance) + 1e-9) return json(200, { ok: false, error: `No tienes saldo suficiente: necesitas ${t.amount.toLocaleString('en-US')} USD y tienes ${num(me.balance).toLocaleString('en-US')}.` })
 		}
-		const r = await this.takeStep(acc, t, side, coin, limit, details, 'radar')
-		return json(200, { ok: r.step.status === 'taken', ...r })
+		const r = await this.takeStep(acc, t, side, coin, limit, details, 'radar', { fast, pre, urgent: true, seen })
+		return json(200, { ok: r.step.status === 'taken', ...r, fast: !!fast, ms: { apply: r.applyMs ?? null, total: Date.now() - t0 } })
 	}
 
 	private async editOffer({ req }: Ctx, acc: Account) {
@@ -860,6 +896,11 @@ function payDetails(v: unknown) {
 // Páginas de 50 que lee «Mi cuenta» para las estadísticas
 const STATS_PAGES = 4
 
+// El radar compra sin la lectura previa si vio la oferta hace como mucho FAST_MS
+export const FAST_MS = 3000
+// Sin la lectura previa, en una por rango sin número de orden vale la tuya más nueva desde FAST_SINCE_MS antes
+const FAST_SINCE_MS = 5 * 60_000
+
 // Orden inteligente: hasta 2 tomas (QvaPay deja tomar 2 por minuto)
 export const SMART_TAKES = 2
 // Solo contrapartes con historial: el plan no elige por ti una cuenta nueva solo porque es la más barata
@@ -867,11 +908,15 @@ export const SMART_MIN_OPS = 10
 export const SMART_MIN_RATING = 4.5
 
 // Si la oferta, leída justo después de tomarla, quedó de verdad en tus manos: con qué orden (en las por
-// rango, la tuya nueva) y a qué precio. null si no la tienes
-export function heldTake(o: P2POffer, flexible: boolean, before: Set<string>, order: string | null, me: string): { order: string | null; price: number | null } | null {
+// rango, la tuya nueva) y a qué precio. null si no la tienes. `before`: las órdenes que ya tenía antes de tomarla o,
+// sin esa lectura, desde cuándo cuenta una tuya como nueva (la más nueva)
+export function heldTake(o: P2POffer, flexible: boolean, before: Set<string> | number, order: string | null, me: string): { order: string | null; price: number | null } | null {
 	const offerPrice = num(o.amount) > 0 ? num(o.receive) / num(o.amount) : null
 	if (flexible) {
-		const mine = (o.Orders ?? []).find((x) => (order ? x.uuid === order : !before.has(x.uuid) && x.Taker?.uuid === me) && x.status !== 'cancelled')
+		const isNew = (x: P2POrder) => (typeof before === 'number' ? Date.parse(x.created_at ?? '') >= before : !before.has(x.uuid))
+		const mine = (o.Orders ?? [])
+			.filter((x) => (order ? x.uuid === order : isNew(x) && x.Taker?.uuid === me) && x.status !== 'cancelled')
+			.sort((a, b) => Date.parse(b.created_at ?? '') - Date.parse(a.created_at ?? ''))[0]
 		if (!mine) return null
 		return { order: mine.uuid, price: num(mine.amount) > 0 && num(mine.receive) > 0 ? num(mine.receive) / num(mine.amount) : offerPrice }
 	}

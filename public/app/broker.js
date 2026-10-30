@@ -1356,11 +1356,14 @@ function reqOk(key, need) {
 }
 
 async function pumpReq() {
-	// Las que ya no están en el libro no se preguntan
-	for (const u of req.queue) if (!findLevel(u, 'ask') && !findLevel(u, 'bid')) req.queue.delete(u)
-	if (req.busy || !req.queue.size || document.hidden) return
+	// Las que ya no están en el libro (el que miras o un lado que vigila el radar) no se preguntan
+	const radar = window.TPProRadar
+	for (const u of req.queue) if (!findLevel(u, 'ask') && !findLevel(u, 'bid') && !radar?.has?.(u)) req.queue.delete(u)
+	// Con la pestaña oculta solo sigue si el radar está vigilando
+	if (req.busy || !req.queue.size || (document.hidden && !radar?.active?.())) return
 	req.busy = true
-	const uuid = req.queue.values().next().value
+	// Primero las del radar: de esa respuesta depende que la avise o la tome
+	const uuid = [...req.queue].find((u) => radar?.has?.(u)) ?? req.queue.values().next().value
 	req.queue.delete(uuid)
 	try {
 		learnReq(await api(`/offer?offer=${encodeURIComponent(uuid)}`))
@@ -1368,6 +1371,8 @@ async function pumpReq() {
 	} catch {
 		req.seen.set(uuid, false)
 	}
+	// El radar vuelve a pasar por sus reglas el lado que la tiene
+	document.dispatchEvent(new CustomEvent('tp:req', { detail: uuid }))
 	setTimeout(() => {
 		req.busy = false
 		pumpReq()

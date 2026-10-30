@@ -34,6 +34,8 @@ export interface Level {
 	orderMin: number | null
 	orderMax: number | null
 	user: string
+	// La foto de perfil del dueño (ruta en media.qvapay.com), si tiene
+	image?: string | null
 	ops: number
 	rating: number | null
 	kyc: boolean
@@ -518,6 +520,7 @@ export function toLevel(o: P2POffer, promoted: boolean, ref: number | null): Lev
 		orderMin: flexible && o.order_min != null ? num(o.order_min) : null,
 		orderMax: flexible && o.order_max != null ? num(o.order_max) : null,
 		user: u?.username ?? '—',
+		image: u?.image ?? null,
 		ops: (u?._count?.P2P ?? 0) + (u?._count?.P2P_Peer ?? 0),
 		rating: u?.rating_count ? (u.rating_avg ?? null) : null,
 		kyc: !!u?.kyc,

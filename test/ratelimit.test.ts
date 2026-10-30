@@ -28,3 +28,18 @@ test('penalize bloquea el bucket tras un 429', async () => {
 	await limiter.run('k', async () => {})
 	assert.ok(Date.now() - t0 >= 140)
 })
+
+test('las urgentes pasan delante de las que esperan, sin pasar del cupo', async () => {
+	const limiter = new RateLimiter({ k: { max: 1, windowMs: 120 } })
+	const done: string[] = []
+	const job = (name: string, urgent = false) => limiter.run('k', async () => void done.push(name), urgent)
+	const all = [job('a'), job('b'), job('c')]
+	// Llega mientras b y c esperan su turno
+	await new Promise((r) => setTimeout(r, 20))
+	all.push(job('radar', true))
+	assert.ok(limiter.waitMs('k') > 0, 'con cola, hay que esperar')
+	await Promise.all(all)
+	assert.deepEqual(done, ['a', 'radar', 'b', 'c'])
+	await new Promise((r) => setTimeout(r, 130))
+	assert.equal(limiter.waitMs('k'), 0)
+})

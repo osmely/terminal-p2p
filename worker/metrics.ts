@@ -29,6 +29,8 @@ export interface MetricEvent {
 	via: string
 	// Si QvaPay la rechazó, por qué: su código o el estado HTTP con su mensaje (errorOf). '' si salió bien
 	err?: string
+	// Tomas del radar: ms desde que el terminal vio la oferta hasta que pidió tomarla
+	ms?: number | null
 }
 
 // El motivo de un rechazo de QvaPay, sin nada que identifique a nadie: su código si lo da (OFFER_PAUSED) o el estado
@@ -85,7 +87,14 @@ const cleanUsd = (v: unknown) => {
 // Datos que el navegador añade a sus escrituras para el relé (X-TP-Meta). No se reenvían a QvaPay
 export function parseMeta(header: string | null) {
 	const p = new URLSearchParams(header ?? '')
-	return { coin: cleanCoin(p.get('coin')), side: cleanSide(p.get('side')), usd: cleanUsd(p.get('usd')), via: ['swap', 'smart', 'radar'].includes(p.get('via') ?? '') ? (p.get('via') as string) : '' }
+	const ms = Number(p.get('ms'))
+	return {
+		coin: cleanCoin(p.get('coin')),
+		side: cleanSide(p.get('side')),
+		usd: cleanUsd(p.get('usd')),
+		via: ['swap', 'smart', 'radar'].includes(p.get('via') ?? '') ? (p.get('via') as string) : '',
+		ms: p.has('ms') && Number.isInteger(ms) && ms >= 0 && ms <= 600_000 ? ms : null,
+	}
 }
 
 const tryJson = (s: string | undefined) => {
@@ -146,6 +155,7 @@ export async function relayEvent(
 		source: 'relay',
 		via: meta.via,
 		err: ok ? '' : errorOf(a.response.status, res),
+		...(action.event === 'take' ? { ms: meta.ms } : {}),
 	}
 }
 
@@ -169,8 +179,8 @@ export async function clientEvent(body: unknown, salt: string, now = Date.now())
 
 export async function saveEvent(db: D1, e: MetricEvent) {
 	await db
-		.prepare('INSERT INTO events (t, event, status, offer, ord, coin, side, usd, source, via, err) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-		.bind(e.t, e.event, e.status, e.offer, e.ord, e.coin, e.side, e.usd, e.source, e.via, e.err ?? '')
+		.prepare('INSERT INTO events (t, event, status, offer, ord, coin, side, usd, source, via, err, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+		.bind(e.t, e.event, e.status, e.offer, e.ord, e.coin, e.side, e.usd, e.source, e.via, e.err ?? '', e.ms ?? null)
 		.all()
 }
 
@@ -194,6 +204,8 @@ export interface Summary {
 	errors: Record<string, { tries: number; failed: number; why: Record<string, number> }>
 	byCoin: { coin: string; created: number; taken: number; completed: number; volume: number }[]
 	byDay: { day: string; created: number; taken: number; paid: number; completed: number; volume: number }[]
+	// Tomas automáticas del radar: intentadas, logradas y ms desde que vio la oferta hasta pedirla (mediana y 90 %)
+	radar: { tries: number; ok: number; p50: number | null; p90: number | null }
 }
 
 // Se calcula en memoria: son pocas filas (una por acción) y así no hay consultas costosas en D1
@@ -263,6 +275,10 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 		}
 	}
 
+	const radarTries = rows.filter((e) => e.source === 'relay' && e.event === 'take' && e.via === 'radar')
+	const radarMs = radarTries.map((e) => e.ms).filter((v): v is number => v != null).sort((a, b) => a - b)
+	const q = (f: number) => (radarMs.length ? radarMs[Math.min(radarMs.length - 1, Math.floor(f * radarMs.length))] : null)
+
 	return {
 		days,
 		created: created.size,
@@ -279,12 +295,13 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 		errors,
 		byCoin: [...coins.values()].sort((a, b) => b.completed - a.completed || b.created - a.created),
 		byDay: [...byDayMap.values()].sort((a, b) => (a.day < b.day ? 1 : -1)),
+		radar: { tries: radarTries.length, ok: radarTries.filter((e) => e.status === 'ok').length, p50: q(0.5), p90: q(0.9) },
 	}
 }
 
 // Como mucho tantas acciones en memoria. Si alguna vez se llega, cuentan las más recientes (y el panel lo dice)
 const MAX_EVENTS = 100_000
-const EVENT_COLS = 't, event, status, offer, ord, coin, side, usd, source, via, err'
+const EVENT_COLS = 't, event, status, offer, ord, coin, side, usd, source, via, err, ms'
 
 export async function loadSummary(db: D1, days: number, now = Date.now()) {
 	const { results } = await db.prepare(`SELECT ${EVENT_COLS} FROM events WHERE t >= ? ORDER BY t DESC LIMIT ${MAX_EVENTS}`).bind(now - days * 86_400_000).all<MetricEvent>()
@@ -425,6 +442,7 @@ ${card('Operaciones tomadas aquí', n(s.taken))}
 ${card('Operaciones completadas', n(s.completed), 'liberadas aquí o vistas completadas por quien las empezó aquí')}
 ${card('Volumen completado', `${n(s.volume)} USD`)}
 ${card('Vender ya', n(s.swaps), `${n(s.swapsCompleted)} completadas · ${n(s.swapVolume)} USD`)}
+${s.radar.tries ? card('Tomas del radar', `${n(s.radar.ok)} de ${n(s.radar.tries)}`, s.radar.p50 != null ? `de ver la oferta a pedirla: ${n(s.radar.p50)} ms la mitad, ${n(s.radar.p90 ?? 0)} ms el 90 %` : '') : ''}
 </div>
 <div class="funnels">
 <div class="funnel"><h3>Ofertas publicadas desde el terminal</h3><p>De las ofertas creadas aquí, cuántas tuvieron contraparte y cuántas llegaron a completar al menos una operación.</p><ol>

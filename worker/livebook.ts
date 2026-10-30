@@ -134,6 +134,7 @@ export interface Applied {
 
 export interface Owner {
 	username: string
+	image?: string | null
 	ops: number
 	rating: number | null
 	kyc: boolean
@@ -231,6 +232,7 @@ export class Book {
 			if (u?.uuid) {
 				const w: Owner = {
 					username: u.username ?? '—',
+					image: u.image ?? null,
 					ops: (u._count?.P2P ?? 0) + (u._count?.P2P_Peer ?? 0),
 					rating: u.rating_count ? (u.rating_avg ?? null) : null,
 					kyc: !!u.kyc,
@@ -315,7 +317,7 @@ export class Book {
 				null,
 			)
 			// El precio exacto (sin pasar por receive/amount redondeados) y quién es su dueño, si se sabe
-			return { ...level, price: o.price, user: w?.username ?? '—', ops: w?.ops ?? 0, rating: w?.rating ?? null, kyc: w?.kyc ?? false, vip: w?.vip ?? o.ownerVip, gold: w?.gold ?? false }
+			return { ...level, price: o.price, user: w?.username ?? '—', image: w?.image ?? null, ops: w?.ops ?? 0, rating: w?.rating ?? null, kyc: w?.kyc ?? false, vip: w?.vip ?? o.ownerVip, gold: w?.gold ?? false }
 		})
 	}
 
@@ -469,6 +471,21 @@ export async function liveSimulate(env: LiveEnv, coin = 'BANK_CUP') {
 		.then((r: Response) => r.json() as Promise<{ ok: boolean; offer?: string; price?: number; error?: string }>)
 }
 
+// Retraso de los eventos del feed: cuántos se midieron y en ms la mediana, el 90 % y el peor
+export const LAG_KEEP = 200
+export interface LagStats {
+	n: number
+	p50: number
+	p90: number
+	max: number
+}
+export function lagStats(list: number[]): LagStats | null {
+	if (!list.length) return null
+	const s = [...list].sort((a, b) => a - b)
+	const at = (q: number) => s[Math.min(s.length - 1, Math.floor(q * s.length))]
+	return { n: s.length, p50: at(0.5), p90: at(0.9), max: s[s.length - 1] }
+}
+
 // Uno de los últimos eventos tal como llegó (para verlo en el panel)
 export interface FeedSample {
 	at: number
@@ -492,6 +509,8 @@ export interface LiveState {
 	proClients: number
 	creds: boolean
 	// El stream de QvaPay (solo producción se conecta; staging lo recibe reenviado)
+	// Desde que QvaPay manda el evento (sent_at) y desde que cambió la oferta (updated_at) hasta que llega aquí
+	lag?: { sent: LagStats | null; upd: LagStats | null }
 	stream?: { on: boolean; since: number | null; events: number; error: string | null; connects?: number; gap?: number | null }
 	lastRead: number | null
 	readError: string | null

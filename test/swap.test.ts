@@ -122,6 +122,9 @@ test('Vender ya: no vende si el precio bajó, si no cabe el monto o si no es VIP
 function smartQvaPay(failApply?: string, failCreate = false) {
 	const calls: string[] = []
 	const created: unknown[] = []
+	// Las lecturas del detalle, aparte (los tests de antes solo miran las escrituras)
+	const gets: string[] = []
+	let applyWait = 0
 	// Como el detalle real de QvaPay: el dueño viene sin su historial (operaciones y ★ solo salen en el listado)
 	const seller = (u: string) => ({ uuid: `u-${u}`, username: u, kyc: true, vip: false })
 	const offers: Record<string, P2POffer> = {
@@ -133,6 +136,7 @@ function smartQvaPay(failApply?: string, failCreate = false) {
 	const client = {
 		me: async () => ({ uuid: 'me', username: 'yo', balance: 300, kyc: true, golden_check: false, p2p_enabled: true }),
 		getOffer: async (uuid: string) => {
+			gets.push(uuid)
 			if (!offers[uuid]) throw new Error('404')
 			return structuredClone(offers[uuid])
 		},
@@ -141,7 +145,7 @@ function smartQvaPay(failApply?: string, failCreate = false) {
 			if (uuid === failApply) throw new Error('Esta oferta ya fue tomada')
 			// Como en QvaPay: la fija pasa a en proceso contigo de contraparte; en la por rango nace tu orden
 			const o = offers[uuid]
-			if (o.offer_kind === 'flexible') o.Orders = [...(o.Orders ?? []), { uuid: `ord-${uuid}`, amount: String(amount), receive: '0', status: 'processing', Taker: { uuid: 'me', username: 'yo' } }]
+			if (o.offer_kind === 'flexible') o.Orders = [...(o.Orders ?? []), { uuid: `ord-${uuid}`, amount: String(amount), receive: '0', status: 'processing', created_at: new Date().toISOString(), Taker: { uuid: 'me', username: 'yo' } }]
 			else Object.assign(o, { status: 'processing', Peer: { uuid: 'me', username: 'yo' } })
 			return { order: o.offer_kind === 'flexible' ? `ord-${uuid}` : null }
 		},
@@ -154,8 +158,9 @@ function smartQvaPay(failApply?: string, failCreate = false) {
 		},
 		sendChat: async (uuid: string, message: string) => void calls.push(`chat:${uuid}:${message}`),
 		editOffer: async (uuid: string, body: unknown) => void calls.push(`edit:${uuid}:${JSON.stringify(body)}`),
+		waitMs: () => applyWait,
 	}
-	return { client: client as unknown as QvaPayClient, calls, offers, created }
+	return { client: client as unknown as QvaPayClient, calls, offers, created, gets, setApplyWait: (ms: number) => void (applyWait = ms) }
 }
 
 async function smartSetup(failApply?: string, failCreate = false) {
@@ -334,4 +339,45 @@ test('radar: con la cuenta restringida en el terminal, la toma falla con su cód
 	const r = (await post({ offer: 's2', amount: 50, side: 'buy', coin: 'BANK_CUP', price: 1050 })).body
 	assert.equal(r.ok, false)
 	assert.deepEqual([r.step.status, r.step.code, r.step.error], ['failed', 'TP_ACCOUNT_RESTRICTED', msg])
+})
+
+test('radar comprando con el libro recién leído: toma sin la lectura previa y lo que esa lectura habría parado se avisa', async () => {
+	const { fake, post } = await radarSetup()
+	// Su dueño la subió a 1070 justo antes: sin la lectura previa se toma igual y se avisa (se puede cancelar sin disputa)
+	fake.offers.s1.receive = '21400'
+	const r = (await post({ offer: 's1', amount: 20, side: 'buy', coin: 'BANK_CUP', price: 1050, seen: Date.now() - 500, kind: 'fixed', user: 'ana' })).body
+	assert.deepEqual([r.ok, r.fast, r.step.status], [true, true, 'taken'])
+	assert.deepEqual(fake.gets, ['s1'], 'solo la lectura que confirma, después de tomarla')
+	assert.deepEqual(fake.calls, ['apply:s1:undefined'])
+	assert.ok(r.notes.some((n: string) => /cambió el precio justo antes/.test(n)))
+	assert.equal(r.step.pay.coinAmount, 21400)
+	// Con una lectura de hace más de 3 s, se comprueba antes como siempre
+	const { fake: f2, post: p2 } = await radarSetup()
+	f2.offers.s1.receive = '21400'
+	const r2 = (await p2({ offer: 's1', amount: 20, side: 'buy', coin: 'BANK_CUP', price: 1050, seen: Date.now() - 5000, kind: 'fixed', user: 'ana' })).body
+	assert.deepEqual([r2.fast, r2.step.status], [false, 'skipped'])
+	assert.deepEqual(f2.calls, [])
+})
+
+test('radar rápido en una por rango: si QvaPay no da el número de orden, vale la tuya nueva', async () => {
+	const { fake, post } = await radarSetup()
+	const apply = fake.client.applyOffer.bind(fake.client)
+	;(fake.client as unknown as { applyOffer: typeof apply }).applyOffer = async (u, a) => (await apply(u, a), { message: 'ok', order: null })
+	const r = (await post({ offer: 's2', amount: 50, side: 'buy', coin: 'BANK_CUP', price: 1050, seen: Date.now(), kind: 'flexible', user: 'leo' })).body
+	assert.deepEqual([r.ok, r.step.order], [true, 'ord-s2'])
+	assert.deepEqual(fake.calls, ['apply:s2:50'])
+})
+
+test('radar: otra toma seguida solo si QvaPay deja tomar ya; vendiendo nunca se salta la comprobación', async () => {
+	const { fake, post } = await radarSetup()
+	fake.setApplyWait(40_000)
+	const r = (await post({ offer: 's2', amount: 50, side: 'buy', coin: 'BANK_CUP', price: 1050, seen: Date.now(), kind: 'flexible', user: 'leo', noWait: true })).body
+	assert.deepEqual([r.ok, r.busy], [false, true])
+	assert.deepEqual(fake.calls, [])
+	// Vendiendo con el libro recién leído también se lee antes (saldo y oferta a la vez)
+	fake.setApplyWait(0)
+	fake.offers.b1.receive = '51000' // 1020: ya no llega a tu 1040
+	const sell = (await post({ offer: 'b1', amount: 50, side: 'sell', coin: 'BANK_CUP', price: 1040, details: [{ label: 'Tarjeta', value: '9200' }], seen: Date.now(), kind: 'fixed', user: 'eva' })).body
+	assert.deepEqual([sell.fast, sell.step.status], [false, 'skipped'])
+	assert.deepEqual(fake.calls, [])
 })
