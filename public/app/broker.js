@@ -790,6 +790,14 @@ function smartTeaser(f) {
 		<button type="button" class="btn small" id="smartPro">★ Comprar días de Pro</button>`
 }
 
+// Sin Pro, en su sección de «Publicar oferta»: lo que haría mantenerla la primera
+function keepTeaser() {
+	if (!window.TPPro?.enabled) return ''
+	return `<p class="smart-head"><b>★ Precio automático</b> <span class="pro-tag">PRO</span></p>
+		<p class="hint">Con Pro, si alguien publica mejor precio, la tuya se pone un paso por delante sola, sin salir de tus límites, y vuelve a tu precio cuando se va.</p>
+		<button type="button" class="btn small" id="keepPro">★ Comprar días de Pro</button>`
+}
+
 function priceWarning(type, price, mid) {
 	if (!mid || !(price > 0)) return ''
 	const dev = price / mid - 1
@@ -811,23 +819,32 @@ async function showCreateOffer(preset = null) {
 				<button type="button" class="seg-tab" data-type="sell" role="radio">Vendo USD</button>
 				<button type="button" class="seg-tab" data-type="buy" role="radio">Compro USD</button>
 			</div>
-			<label class="field">Mercado<select class="input" id="ofCoin">${markets.map((c) => `<option value="${c.tick}">${esc(c.name)}</option>`).join('')}</select></label>
-			<div class="grid2">
-				<label class="field"><span class="field-row">Monto (USD)<button type="button" class="link small" id="ofBal" hidden></button></span><input class="input" id="ofAmount" type="number" min="0.1" max="10000" step="0.01" inputmode="decimal" placeholder="100" /></label>
-				<label class="field"><span>Precio por USD (<span id="ofUnit"></span>)</span><input class="input" id="ofPrice" type="number" min="0" step="any" inputmode="decimal" /></label>
-			</div>
-			<div class="ref-chips" id="ofRefs"></div>
-			<p class="hint" id="ofTotal"></p>
-			<div class="smart" id="ofSmart" hidden></div>
-			<label class="check"><input type="checkbox" id="ofFlex" /> Por rango: que la tomen por partes</label>
-			<p class="hint" id="ofFlexNote" hidden>Con la orden inteligente el resto se publica entero. Desmárcala si lo quieres por partes.</p>
-			<div class="grid2" id="ofFlexBox" hidden>
-				<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" type="number" step="0.01" inputmode="decimal" /></label>
-				<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" type="number" step="0.01" inputmode="decimal" /></label>
-			</div>
-			<div class="stack tight"><p class="hint" id="ofDetailsTitle"></p><div class="saved-methods" id="ofSaved" hidden></div><div class="stack tight" id="ofDetails"><p class="muted small">Cargando campos…</p></div>
-				<label class="check small"><input type="checkbox" id="ofRemember" /> Recordar estos datos en este navegador</label></div>
-			<details class="opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
+			<section class="of-sec">
+				<p class="of-sec-t">Oferta</p>
+				<label class="field">Mercado<select class="input" id="ofCoin">${markets.map((c) => `<option value="${c.tick}">${esc(c.name)}</option>`).join('')}</select></label>
+				<div class="grid2">
+					<label class="field"><span class="field-row">Monto (USD)<button type="button" class="link small" id="ofBal" hidden></button></span><input class="input" id="ofAmount" type="number" min="0.1" max="10000" step="0.01" inputmode="decimal" placeholder="100" /></label>
+					<label class="field"><span>Precio por USD (<span id="ofUnit"></span>)</span><input class="input" id="ofPrice" type="number" min="0" step="any" inputmode="decimal" /></label>
+				</div>
+				<div class="ref-chips" id="ofRefs"></div>
+				<p class="hint" id="ofTotal"></p>
+				<div class="smart" id="ofSmart" hidden></div>
+			</section>
+			<section class="of-sec">
+				<label class="check of-sec-h"><input type="checkbox" id="ofFlex" /> Por rango: que la tomen por partes</label>
+				<p class="hint" id="ofFlexNote" hidden>Con la orden inteligente el resto se publica entero. Desmárcala si lo quieres por partes.</p>
+				<div class="grid2" id="ofFlexBox" hidden>
+					<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" type="number" step="0.01" inputmode="decimal" /></label>
+					<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" type="number" step="0.01" inputmode="decimal" /></label>
+				</div>
+			</section>
+			<section class="of-sec" id="ofKeep" hidden></section>
+			<section class="of-sec">
+				<p class="of-sec-t" id="ofDetailsTitle"></p>
+				<div class="saved-methods" id="ofSaved" hidden></div><div class="stack tight" id="ofDetails"><p class="muted small">Cargando campos…</p></div>
+				<label class="check small"><input type="checkbox" id="ofRemember" /> Recordar estos datos en este navegador</label>
+			</section>
+			<details class="of-sec opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
 				${Object.entries(REQ_OPTIONS)
 					.map(([k, [label, vals, fmt]]) => `<label class="field">${label}<select class="input" data-req="${k}"><option value="0">Sin requisito</option>${vals.map((v) => `<option value="${v}">${fmt(v)}</option>`).join('')}</select></label>`)
 					.join('')}
@@ -937,19 +954,27 @@ async function showCreateOffer(preset = null) {
 		// Con la orden inteligente el total es lo que tomas más lo que publicas
 		if (smartActive && total && sm.total) $('ofTotal').innerHTML = `${type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtM(sm.total)} ${unit}</b> en total`
 		$('ofReview').textContent = smartActive ? 'Revisar orden inteligente' : 'Revisar'
+		// Mantenerla la primera (módulo Pro) tiene su sección; sin Pro, lo que haría
+		if (keep) keep.update()
+		else $('ofKeep').innerHTML = keepTeaser()
+		$('ofKeep').hidden = !keep && !window.TPPro?.enabled
 	}
 	// El módulo Pro (si estás en Pro) maneja la orden inteligente de este formulario; si llega después
 	// (por ejemplo, al volver de pagar), se engancha al momento. Si Pro se apagó o venció, aunque el módulo
 	// siga cargado, no se usa
 	let smart = null
 	let smartActive = false
+	let keep = null
 	const ctx = { update: () => update(), read, fields, getType: () => type }
+	const keepCtx = { box: $('ofKeep'), getType: () => type, getCoin: () => $('ofCoin').value, getPrice: () => Number($('ofPrice').value), isPrivate: () => $('ofPrivate').checked }
 	smart = window.TPPro?.active ? (window.TPProSmart?.open(ctx) ?? null) : null
+	keep = window.TPPro?.active ? (window.TPProKeep?.form?.(keepCtx) ?? null) : null
 	renderDetails()
 	update()
 	const onSmartReady = () => {
 		if (!$('ofForm')) return document.removeEventListener('tp:smart-ready', onSmartReady)
 		if (window.TPPro?.active) smart ??= window.TPProSmart.open(ctx)
+		if (window.TPPro?.active) keep ??= window.TPProKeep?.form?.(keepCtx) ?? null
 		if (!$('ofForm').hidden) update()
 	}
 	document.addEventListener('tp:smart-ready', onSmartReady)
@@ -964,12 +989,13 @@ async function showCreateOffer(preset = null) {
 		renderDetails()
 		update()
 	}
-	for (const id of ['ofAmount', 'ofPrice', 'ofMin', 'ofMax', 'ofFlex']) $(id).addEventListener('input', update)
+	for (const id of ['ofAmount', 'ofPrice', 'ofMin', 'ofMax', 'ofFlex', 'ofPrivate']) $(id).addEventListener('input', update)
 	$('ofBal').onclick = () => {
 		$('ofAmount').value = String(balance())
 		update()
 	}
 	$('ofSmart').addEventListener('click', (e) => e.target.closest('#smartPro') && typeof showPro === 'function' && showPro())
+	$('ofKeep').addEventListener('click', (e) => e.target.closest('#keepPro') && typeof showPro === 'function' && showPro())
 	$('ofRefs').onclick = (e) => {
 		const b = e.target.closest('[data-ref]')
 		if (!b) return
@@ -993,6 +1019,10 @@ async function showCreateOffer(preset = null) {
 							? 'Completa todos tus datos de pago'
 							: ''
 		if (err) return toast(err, true)
+		// Los límites de «mantenerla la primera»: se guardan para la oferta al publicarla
+		const kp = keep?.read() ?? null
+		if (kp?.error) return toast(kp.error, true)
+		f.keep = kp
 		if (smartActive) return smart.review(f)
 		const total = f.amount * f.price
 		const req = reqText(f.requirements)
@@ -1006,6 +1036,7 @@ async function showCreateOffer(preset = null) {
 				${type === 'buy' && feeOf(f.amount) ? `<span>Te llegan</span><b>${fmtM(f.amount - feeOf(f.amount))} USD</b><span class="muted">tras la comisión de QvaPay</span>` : ''}
 				<span>Mercado</span><b>${esc(nameOf(f.coin))}</b><span></span>
 				${f.kind === 'flexible' ? `<span>Por partes</span><b>${fmtM(f.orderMin)}–${fmtM(f.orderMax)} USD</b><span></span>` : ''}
+				${f.keep ? `<span>★ Precio automático</span><b>${fmtP(f.keep.min)}–${fmtP(f.keep.max)} ${unit}</b><span class="muted">sin salir de esos límites</span>` : ''}
 				${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
 				<span>Visibilidad</span><b>${f.private ? 'Privada' : 'Pública en Telegram'}${f.onlyVip ? ' · solo VIP' : ''}</b><span></span>
 			</div>
@@ -1027,8 +1058,9 @@ async function showCreateOffer(preset = null) {
 			btn.disabled = true
 			btn.textContent = 'Publicando…'
 			try {
-				const r = await api('/offer/create', f)
+				const r = await api('/offer/create', { ...f, keep: undefined })
 				markOrigin(r.offer)
+				if (f.keep) window.TPProKeep?.save(r.offer, f.keep)
 				if ($('ofRemember').checked) store.setMine(`details.${f.coin}`, Object.fromEntries(f.details.map((d) => [d.name, d.value])))
 				else store.setMine(`details.${f.coin}`, {})
 				toast(r.message || 'Oferta publicada')
@@ -1240,7 +1272,7 @@ function renderManage(o) {
 function keepSlot(o, editable) {
 	if (!editable || o.isPrivate || !window.TPPro?.enabled) return ''
 	if (window.TPPro.active) return '<div id="mgKeep"></div>'
-	return `<p class="hint" id="mgKeep">★ Con Pro, el terminal la mantiene la primera del libro: si alguien publica mejor precio, ajusta el tuyo sin salirse de tus límites. <button class="link" id="mgKeepPro">Ver Pro</button></p>`
+	return `<p class="hint" id="mgKeep">★ Con Pro, precio automático: si alguien publica mejor precio, el terminal ajusta el tuyo sin salirse de tus límites. <button class="link" id="mgKeepPro">Ver Pro</button></p>`
 }
 
 // ── Tomar una oferta del libro ────────────────────────────────────────
