@@ -23,8 +23,11 @@ const usdText = (n) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, 
 const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'toma y publica a la vez, como en un exchange'],
 	['⏱️', 'Libro al instante', 'cada oferta te llega al momento'],
-	['📡', 'Radar', 'vigila el libro, te avisa y, si quieres, toma'],
+	['📡', 'Radar', 'vigila el libro, te avisa y, si quieres, toma al instante'],
+	['🎯', 'Precio automático', 'tu oferta la primera del libro, dentro de tus límites'],
 	['🔀', 'Libro cruzado', 'si lo puedes aprovechar y cuánto te queda'],
+	['💰', 'Ganancias', 'cuánto ganaste en cada mercado, con la comisión'],
+	['🔔', 'Avisos de tasa', 'por Telegram, cuando la tasa pasa tu precio'],
 	['📊', 'Compras, ventas y USD en el gráfico', 'hacia dónde se mueve el mercado'],
 	['📈', 'Todo el simulador', '7 mercados más en sim.terminalp2p.com'],
 ]
