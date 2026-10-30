@@ -223,8 +223,6 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .stat .unit { font: inherit; }
 .stat b.ask { color: var(--ask); }
 .stat b.bid { color: var(--bid); }
-.tg-icon { color: #229ed9; }
-:root:not([data-theme='light']) .tg-icon { color: #2aabee; }
 .intent { display: flex; flex-direction: column; gap: 3px; margin-left: -4px; cursor: help; }
 .intent label { font-size: 11px; color: var(--muted); font-weight: 500; }
 .intent-body { display: flex; align-items: center; gap: 8px; }
