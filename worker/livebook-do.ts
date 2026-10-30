@@ -96,6 +96,7 @@ export class LiveBook {
 		if (url.pathname === '/ws') return this.connect(url.searchParams.get('pro') === '1', url.searchParams.get('u') || null)
 		if (url.pathname === '/clients') return Response.json(this.clients())
 		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
+		if (url.pathname === '/offer') return Response.json(this.book.find(url.searchParams.get('id') ?? ''))
 		if (url.pathname === '/status') return Response.json(this.state())
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
 		return new Response('no encontrado', { status: 404 })

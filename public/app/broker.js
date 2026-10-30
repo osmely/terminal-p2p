@@ -243,7 +243,8 @@ function showBlocked(msg) {
 }
 
 // title: por qué se pide (p. ej. al venir de la web a probar Pro)
-function showConnect(title = 'Conectar tu cuenta de QvaPay') {
+// after: lo que se hace al conectar (p. ej. volver a la oferta que se iba a tomar)
+function showConnect(title = 'Conectar tu cuenta de QvaPay', after = null) {
 	openModal(`<div class="stack">
 		<h3>${esc(title)}</h3>
 		<p class="muted">Operas con tu propia cuenta: el dinero sigue en el escrow de QvaPay, nunca pasa por aquí.</p>
@@ -268,7 +269,7 @@ function showConnect(title = 'Conectar tu cuenta de QvaPay') {
 			const r = await api('/connect', { token: $('tokenInput').value, remember: $('rememberToken').checked })
 			closeModal()
 			toast(`Conectado como @${r.username}`)
-			loadAccount()
+			loadAccount().then(() => after?.())
 			setTimeout(loadBook, 4500)
 		} catch (e) {
 			btn.disabled = false
@@ -1169,10 +1170,11 @@ function renderManage(o) {
 		<div class="row-btns">
 			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? 'Volver a publicar' : 'Pausar'}</button><button class="btn danger" id="mgCancel">Cancelar oferta</button>` : ''}
 		</div>
-		${o.status === 'open' ? `<div class="share"><p class="hint">Enlace para que alguien la tome desde el terminal${o.isPrivate ? ' (útil en ofertas privadas)' : ''}</p><div class="row-btns"><input class="input" id="mgLink" readonly value="${location.origin}/#p2p/${o.offer}" /><button class="btn icon-only" id="mgCopy" title="Copiar enlace" aria-label="Copiar enlace">${ICON_COPY}</button></div></div>` : ''}
+		${o.status === 'open' ? `<div class="share"><p class="hint">Anúnciala en tus grupos: una imagen con la oferta y un enlace que la abre en el terminal${o.isPrivate ? ' (en las privadas, quien lo abra tendrá que conectar su cuenta para verla)' : ''}</p><div class="row-btns"><button class="btn primary" id="mgShare">${ICON_SHARE} Compartir</button><input class="input" id="mgLink" readonly value="${shareLink(o.offer)}" /><button class="btn icon-only" id="mgCopy" title="Copiar enlace" aria-label="Copiar enlace">${ICON_COPY}</button></div></div>` : ''}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${o.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
 	</div>`
 
+	$('mgShare')?.addEventListener('click', () => showShareOffer(o))
 	$('mgCopy')?.addEventListener('click', () => {
 		navigator.clipboard?.writeText($('mgLink').value)
 		$('mgCopy').innerHTML = ICON_DONE
@@ -1286,7 +1288,8 @@ function showTakeOffer(uuid, side) {
 // Una oferta por su enlace (#p2p/<uuid>): la carga aunque no esté entre las que muestra el libro. amount: el monto
 // con el que abrir una por rango (el que calculó el radar); sin él, el máximo que deja tomar
 async function showTakeOfferById(uuid, amount) {
-	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para abrir la oferta', true)
+	// Sin cuenta conectada, lo que el libro en vivo sabe de ella (el enlace que comparte su dueño)
+	if (!bk.acct.connected) return showPublicOffer(uuid, amount)
 	openModal('<p class="muted">Cargando oferta…</p>')
 	let o
 	try {
@@ -1296,10 +1299,7 @@ async function showTakeOfferById(uuid, amount) {
 		return
 	}
 	if (o.isOwner) return renderManage(o)
-	if (o.status !== 'open' || o.pause) {
-		$('modalBody').innerHTML = `<div class="stack"><h3>Esta oferta ya no está disponible</h3><p class="muted">Está ${esc((STATUS[o.status] ?? o.status).toLowerCase())}${o.pause ? ' y pausada' : ''}.</p></div>`
-		return
-	}
+	if (o.status !== 'open' || o.pause) return showGone(o.coin, o.type === 'sell' ? 'ask' : 'bid', o.offer, `Está ${(STATUS[o.status] ?? o.status).toLowerCase()}${o.pause ? ' y pausada' : ''}.`)
 	const flex = o.kind === 'flexible'
 	const level = {
 		price: o.price,
@@ -1448,7 +1448,7 @@ function renderTake(uuid, side, l, coin, preset) {
 		${
 			bk.acct.connected
 				? '<button class="btn primary block" id="tkGo"></button>'
-				: '<p class="notice warn">Conecta tu cuenta de QvaPay (arriba a la derecha) para tomarla.</p>'
+				: `<button class="btn primary block" id="tkConnect">Conectar mi cuenta para ${youBuy ? 'comprar' : 'vender'}</button>`
 		}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${uuid}" target="_blank" rel="noopener">Ver en QvaPay</a></p>
 	</div>`)
@@ -1460,6 +1460,10 @@ function renderTake(uuid, side, l, coin, preset) {
 		if ($('tkGo')) $('tkGo').textContent = `Tomar: ${youBuy ? 'comprar' : 'vender'} ${fmtM(a)} USD`
 	}
 	$('tkAmount')?.addEventListener('input', upd)
+	$('tkConnect')?.addEventListener('click', () => {
+		const a = amount()
+		showConnect('Conecta tu cuenta para tomar la oferta', () => showTakeOfferById(uuid, a))
+	})
 	$('modalBody').querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer))
 	upd()
 	// Con requisitos, QvaPay dice si los cumples: si no, se avisa antes de gastar un intento de los 2 por minuto

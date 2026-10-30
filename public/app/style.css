@@ -565,6 +565,16 @@ details.sec-box { display: block; }
 .lvl.mine { box-shadow: inset 2px 0 0 var(--accent); }
 .share .row-btns .input { flex: 1; min-width: 0; font: 12px var(--mono); }
 .share .row-btns .btn { flex: none; }
+.share .row-btns .btn svg, .share-btns .btn svg { margin-right: 6px; vertical-align: -3px; }
+.share-img { display: block; width: 100%; max-width: 420px; aspect-ratio: 1; margin: 0 auto; border-radius: 12px; border: 1px solid var(--line); background: var(--line); }
+.share-btns { flex-wrap: wrap; }
+.share-btns .btn { flex: 1 1 auto; justify-content: center; text-align: center; text-decoration: none; }
+.similar { display: grid; gap: 6px; margin-bottom: 12px; }
+.similar-row { display: grid; grid-template-columns: auto auto 1fr; gap: 12px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.similar-row:hover { border-color: var(--line-strong); }
+.similar-row .muted { justify-self: end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.similar-row .ask { color: var(--ask); }
+.similar-row .bid { color: var(--bid); }
 .lvl .who .you { font: 700 10px var(--sans); color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 0 4px; margin-right: 4px; }
 
 .toast { position: fixed; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 50; background: var(--surface); border: 1px solid var(--line-strong); padding: 10px 16px; border-radius: var(--r-sm); font-size: 13px; box-shadow: var(--shadow); }

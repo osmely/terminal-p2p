@@ -151,6 +151,8 @@ export class Book {
 	offers = new Map<string, LiveOffer>()
 	owners = new Map<string, Owner>()
 	gone = new Map<string, number>()
+	// De qué mercado y lado era cada oferta que salió (para el enlace compartido de una oferta que ya no está)
+	left = new Map<string, { coin: string; side: Side }>()
 	// Lo que cambió desde la última vez que se guardó
 	changed = new Set<string>()
 	changedOwners = new Set<string>()
@@ -202,6 +204,7 @@ export class Book {
 			this.offers.set(o.uuid, o)
 			this.changed.add(o.uuid)
 			this.gone.delete(o.uuid)
+			this.left.delete(o.uuid)
 			// Qué pasó: nueva, reabierta, o en una de rango, una parte tomada, una parte que volvió o editada
 			let a: Act | null
 			if (!had) a = act(e.event === 'p2p.reopened' ? 'reopened' : 'new', usd)
@@ -213,6 +216,7 @@ export class Book {
 		}
 		// Sale del libro: tomada entera, cancelada por su dueño o cerrada. Pasar de fija a por rango no es salir
 		this.gone.set(d.uuid, at)
+		this.left.set(d.uuid, { coin: d.coin, side })
 		if (had) {
 			this.offers.delete(d.uuid)
 			this.changed.add(d.uuid)
@@ -284,6 +288,7 @@ export class Book {
 				this.offers.delete(o.uuid)
 				this.changed.add(o.uuid)
 				this.gone.set(o.uuid, now)
+				this.left.set(o.uuid, { coin: o.coin, side: o.side })
 				removed++
 			}
 		}
@@ -294,31 +299,44 @@ export class Book {
 	levels(coin: string, side: Side, top = SEND_TOP): Level[] {
 		const list = [...this.offers.values()].filter((o) => o.coin === coin && o.side === side)
 		list.sort((a, b) => (side === 'ask' ? a.price - b.price : b.price - a.price) || a.createdAt - b.createdAt)
-		return list.slice(0, top).map((o) => {
-			const w = this.owners.get(o.owner)
-			const level = toLevel(
-				{
-					uuid: o.uuid,
-					type: side === 'ask' ? 'sell' : 'buy',
-					coin,
-					amount: String(o.usd),
-					receive: String(o.price * o.usd),
-					available_amount: o.kind === 'flexible' ? String(o.usd) : undefined,
-					offer_kind: o.kind,
-					order_min: o.orderMin == null ? undefined : String(o.orderMin),
-					order_max: o.orderMax == null ? undefined : String(o.orderMax),
-					only_vip: o.onlyVip,
-					requirements: o.requirements ?? undefined,
-					created_at: new Date(o.createdAt).toISOString(),
-					updated_at: new Date(o.updatedAt).toISOString(),
-					status: 'open',
-				} as P2POffer,
-				false,
-				null,
-			)
-			// El precio exacto (sin pasar por receive/amount redondeados) y quién es su dueño, si se sabe
-			return { ...level, price: o.price, user: w?.username ?? '—', image: w?.image ?? null, ops: w?.ops ?? 0, rating: w?.rating ?? null, kyc: w?.kyc ?? false, vip: w?.vip ?? o.ownerVip, gold: w?.gold ?? false }
-		})
+		return list.slice(0, top).map((o) => this.levelOf(o))
+	}
+
+	// Una oferta por su uuid (el enlace que comparte su dueño): abierta, ya fuera del libro (con su mercado y lado) o
+	// desconocida (las privadas no salen en el feed)
+	find(uuid: string): { state: 'open'; coin: string; side: Side; level: Level } | { state: 'gone'; coin: string; side: Side } | { state: 'unknown' } {
+		const o = this.offers.get(uuid)
+		if (o) return { state: 'open', coin: o.coin, side: o.side, level: this.levelOf(o) }
+		const l = this.left.get(uuid)
+		return l ? { state: 'gone', ...l } : { state: 'unknown' }
+	}
+
+	private levelOf(o: LiveOffer): Level {
+		const coin = o.coin
+		const side = o.side
+		const w = this.owners.get(o.owner)
+		const level = toLevel(
+			{
+				uuid: o.uuid,
+				type: side === 'ask' ? 'sell' : 'buy',
+				coin,
+				amount: String(o.usd),
+				receive: String(o.price * o.usd),
+				available_amount: o.kind === 'flexible' ? String(o.usd) : undefined,
+				offer_kind: o.kind,
+				order_min: o.orderMin == null ? undefined : String(o.orderMin),
+				order_max: o.orderMax == null ? undefined : String(o.orderMax),
+				only_vip: o.onlyVip,
+				requirements: o.requirements ?? undefined,
+				created_at: new Date(o.createdAt).toISOString(),
+				updated_at: new Date(o.updatedAt).toISOString(),
+				status: 'open',
+			} as P2POffer,
+			false,
+			null,
+		)
+		// El precio exacto (sin pasar por receive/amount redondeados) y quién es su dueño, si se sabe
+		return { ...level, price: o.price, user: w?.username ?? '—', image: w?.image ?? null, ops: w?.ops ?? 0, rating: w?.rating ?? null, kyc: w?.kyc ?? false, vip: w?.vip ?? o.ownerVip, gold: w?.gold ?? false }
 	}
 
 	// La actividad con el usuario de cada anunciante tal como se sabe ahora
@@ -333,7 +351,11 @@ export class Book {
 	}
 
 	prune(now = Date.now()) {
-		for (const [k, t] of this.gone) if (now - t > GONE_KEEP_MS) this.gone.delete(k)
+		for (const [k, t] of this.gone)
+			if (now - t > GONE_KEEP_MS) {
+				this.gone.delete(k)
+				this.left.delete(k)
+			}
 	}
 }
 
@@ -444,6 +466,13 @@ export interface LiveBookSide {
 export async function liveBookOf(env: LiveEnv, coin: string): Promise<{ coin: string; at: number; feed: boolean; ask: LiveBookSide; bid: LiveBookSide } | null> {
 	if (!env.LIVE) return null
 	const r = await liveStub(env).fetch(`https://live/book?coin=${encodeURIComponent(coin)}`)
+	return r.ok ? r.json() : null
+}
+
+// Una oferta por su uuid (ver Book.find), para el enlace que comparte su dueño
+export async function liveOfferOf(env: LiveEnv, uuid: string): Promise<ReturnType<Book['find']> | null> {
+	if (!env.LIVE) return null
+	const r = await liveStub(env).fetch(`https://live/offer?id=${encodeURIComponent(uuid)}`)
 	return r.ok ? r.json() : null
 }
 

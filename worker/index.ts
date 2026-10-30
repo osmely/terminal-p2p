@@ -23,7 +23,7 @@ import { expiryReminders } from './userbot.ts'
 import { dailyPost } from './community.ts'
 import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
-import { feedWebhook, liveBookOf, liveClients, liveSocket, type LiveEnv } from './livebook.ts'
+import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveSocket, type LiveEnv } from './livebook.ts'
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
 import { checkAlerts } from './ratealerts.ts'
@@ -177,6 +177,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/book' && req.method === 'GET') return secure(await book(url, env, ctx))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
+	if (url.pathname === '/data/offer' && req.method === 'GET') return secure(await offer(req, url, env, ctx))
+	// El enlace corto de una oferta compartida (terminalp2p.com/o/<uuid>): abre el terminal con ella delante
+	const shared = SHARED_OFFER.exec(url.pathname)
+	if (shared && folderFor(url.hostname) !== 'sim') {
+		const app = url.hostname.startsWith('app.') ? url.origin : `${url.protocol}//app.${url.host}`
+		return Response.redirect(`${app}/?de=oferta#p2p/${shared[1].toLowerCase()}`, 302)
+	}
 	// Plan Pro, en el dominio del terminal. Pedir facturas tiene tope
 	if (folderFor(url.hostname) === 'app' && (url.pathname.startsWith('/pro/') || url.pathname === '/api/pro/webhook')) {
 		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund' || url.pathname === '/pro/telegram/link' || url.pathname === '/pro/trial' || url.pathname === '/pro/alerts/add'
@@ -512,6 +519,29 @@ async function book(url: URL, env: Env, ctx: ExecutionContext) {
 	const ready = live.ask.ready && live.bid.ready
 	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': ready ? `public, max-age=${BOOK_TTL_S}` : 'no-store' } })
 	if (ready) ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
+}
+
+// Una oferta del libro por su uuid, para quien abre el enlace que compartió su dueño sin tener la cuenta conectada:
+// lo mismo que enseña de ella el libro. Si ya salió, su mercado y lado (para enseñar otras parecidas)
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SHARED_OFFER = /^\/o\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
+async function offer(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
+	const id = (url.searchParams.get('id') ?? '').toLowerCase()
+	if (!UUID.test(id)) return jsonError(400, 'Oferta desconocida')
+	const key = new Request(`${url.origin}/data/offer?id=${id}`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, `public, max-age=${BOOK_TTL_S}`)
+	if (!(await underLimit(env.STATUS_LIMIT, req))) return jsonError(429, 'Demasiadas consultas seguidas: espera un minuto')
+	const found = await liveOfferOf(env as unknown as LiveEnv, id).catch(() => null)
+	if (!found) return jsonError(503, 'La oferta no se puede ver ahora mismo')
+	let data: Record<string, unknown> = found
+	if (found.state === 'open') {
+		const l = found.level
+		data = { state: 'open', coin: found.coin, side: found.side, uuid: id, price: l.price, usd: l.usd, kind: l.kind, orderMin: l.orderMin, orderMax: l.orderMax, vipOnly: l.vipOnly, requirements: l.requirements, user: l.user, image: l.image ?? null, ops: l.ops, rating: l.rating, createdAt: l.createdAt, updatedAt: l.updatedAt }
+	}
+	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${BOOK_TTL_S}` } })
+	ctx.waitUntil(caches.default.put(key, res.clone()))
 	return res
 }
 

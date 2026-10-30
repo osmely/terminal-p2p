@@ -31,6 +31,23 @@ test('feed: una venta nueva entra al libro y sale al tomarla; un evento viejo o 
 	assert.equal(b.apply({ event: 'p2p.created' } as FeedEvent, T), null)
 })
 
+test('oferta compartida: abierta con su mercado y lado, ya fuera del libro o desconocida', () => {
+	const b = new Book()
+	b.apply(ev('p2p.created', {}), T)
+	const open = b.find('o1')
+	assert.equal(open.state, 'open')
+	if (open.state === 'open') assert.deepEqual([open.coin, open.side, open.level.price, open.level.usd], ['BANK_CUP', 'ask', 1050, 20])
+	b.apply(ev('p2p.applied', {}, 5), T)
+	assert.deepEqual(b.find('o1'), { state: 'gone', coin: 'BANK_CUP', side: 'ask' })
+	assert.deepEqual(b.find('otra'), { state: 'unknown' })
+	// Reabierta, vuelve a estar abierta; y lo que salió se olvida con el resto de lo que salió
+	b.apply(ev('p2p.reopened', {}, 9), T)
+	assert.equal(b.find('o1').state, 'open')
+	b.apply(ev('p2p.cancelled', { status: 'cancelled' }, 12), T)
+	b.prune(T + 25 * 3600_000)
+	assert.deepEqual(b.find('o1'), { state: 'unknown' })
+})
+
 test('feed: ofertas por rango con lo que queda; al cerrarse salen; pasar de fija a rango la mantiene', () => {
 	const b = new Book()
 	b.apply(ev('p2p.created', { uuid: 'r1' }), T)
