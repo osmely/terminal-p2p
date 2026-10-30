@@ -876,7 +876,7 @@ async function showCreateOffer(preset = null) {
 			kind: flex ? 'flexible' : 'fixed',
 			orderMin: flex ? num2($('ofMin').value) : undefined,
 			orderMax: flex ? num2($('ofMax').value) : undefined,
-			details: [...document.querySelectorAll('[data-detail]')].map((i) => ({ name: i.dataset.detail, value: i.value.trim() })),
+			details: [...document.querySelectorAll('[data-detail]')].map((i) => ({ name: i.dataset.detail, value: window.TPNum?.val(i) ?? i.value.trim() })),
 			requirements,
 			private: $('ofPrivate').checked,
 			onlyVip: $('ofVip').checked,
@@ -892,7 +892,7 @@ async function showCreateOffer(preset = null) {
 			? list
 					.map((f) => {
 						const label = esc(f.label || f.name)
-						const val = esc(saved[f.name] ?? '')
+						const val = esc(window.TPNum?.show(f.name, saved[f.name]) ?? saved[f.name] ?? '')
 						return f.type === 'select' && f.options?.length
 							? `<label class="field">${label}<select class="input" data-detail="${esc(f.name)}">${f.options.map((o) => `<option ${o.value === saved[f.name] ? 'selected' : ''}>${esc(o.value)}</option>`).join('')}</select></label>`
 							: `<label class="field">${label}<input class="input" data-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} value="${val}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
@@ -1698,7 +1698,7 @@ async function showSwap() {
 						const label = esc(f.label || f.name)
 						return f.type === 'select' && f.options?.length
 							? `<label class="field">${label}<select class="input" data-sw-detail="${esc(f.name)}" data-label="${label}">${f.options.map((o) => `<option ${o.value === saved[f.name] ? 'selected' : ''}>${esc(o.value)}</option>`).join('')}</select></label>`
-							: `<label class="field">${label}<input class="input" data-sw-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} data-label="${label}" value="${esc(saved[f.name] ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
+							: `<label class="field">${label}<input class="input" data-sw-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} data-label="${label}" value="${esc(window.TPNum?.show(f.name, saved[f.name]) ?? saved[f.name] ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
 					})
 					.join('')
 			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Cierra y vuelve a abrir.</p>'
@@ -1718,7 +1718,7 @@ async function showSwap() {
 			}
 		}
 	}
-	const details = () => [...document.querySelectorAll('[data-sw-detail]')].map((i) => ({ name: i.dataset.swDetail, label: i.dataset.label, value: i.value.trim() }))
+	const details = () => [...document.querySelectorAll('[data-sw-detail]')].map((i) => ({ name: i.dataset.swDetail, label: i.dataset.label, value: window.TPNum?.val(i) ?? i.value.trim() }))
 
 	// Montos que sí caben, para cuando ninguna oferta acepta el que pusiste
 	// Solo las que tu saldo alcanza

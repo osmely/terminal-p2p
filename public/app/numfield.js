@@ -1,6 +1,7 @@
 // Campos de números (data-num): solo cifras y, si llevan decimales, un punto. Cada campo dice su teclado del móvil:
 // inputmode="decimal" (con punto) o, los enteros (data-num="int"), inputmode="numeric". data-dec="2": como mucho 2 decimales.
-// data-num="digits": tarjetas, teléfonos y carnés (cifras, espacios y un + delante)
+// data-num="digits": teléfonos y carnés (cifras, espacios y un + delante). data-num="card": tarjetas, de 4 en 4
+// (9200 1234 5678 9012); lo que se manda va sin los espacios (TPNum.val), que es lo que se pega bien en el banco
 // La coma decimal de los teclados en español pasa a punto; al pegar 1,050.25 se quitan las comas de los miles.
 // Lo usan el terminal, el módulo Pro y el simulador (los campos que se pintan después también: escucha en document)
 'use strict'
@@ -26,6 +27,7 @@
 		(e) => {
 			const el = e.target
 			if (!(el instanceof HTMLInputElement) || !el.hasAttribute('data-num')) return
+			if (el.dataset.num === 'card') return card(el)
 			const int = el.dataset.num === 'int'
 			const digits = el.dataset.num === 'digits'
 			const dec = el.dataset.dec == null ? -1 : Number(el.dataset.dec)
@@ -43,13 +45,38 @@
 		true,
 	)
 
+	// Las cifras de 4 en 4; el cursor sigue detrás de la misma cifra
+	const CARD_MAX = 19
+	function card(el) {
+		const v = el.value
+		const digits = v.replace(/\D/g, '').slice(0, CARD_MAX)
+		const next = digits.replace(/(\d{4})(?=\d)/g, '$1 ')
+		if (next === v) return
+		const d = Math.min(v.slice(0, el.selectionStart ?? v.length).replace(/\D/g, '').length, digits.length)
+		const at = d ? d + Math.floor((d - 1) / 4) : 0
+		el.value = next
+		try {
+			el.setSelectionRange(at, at)
+		} catch {}
+	}
+
 	// Los datos de cobro de QvaPay son todos texto: los que son números (tarjeta, celular, carné) se marcan por su nombre.
 	// «Correo o Celular» (Zelle) y el correo de TropiPay siguen siendo texto
 	window.TPNum = {
 		detail(name) {
 			const n = String(name ?? '')
 			if (/correo|mail/i.test(n) || !/tarjeta|celular|tel[eé]fono|m[oó]vil|carn[eé]t|^number$/i.test(n)) return ''
+			if (/tarjeta/i.test(n)) return ' data-num="card" inputmode="numeric"'
 			return ` data-num="digits" inputmode="${/celular|tel[eé]fono|m[oó]vil/i.test(n) ? 'tel' : 'numeric'}"`
+		},
+		// Lo guardado, como se ve al escribir (la tarjeta de 4 en 4)
+		show(name, v) {
+			const s = String(v ?? '')
+			return /tarjeta/i.test(String(name ?? '')) && !/correo|mail/i.test(String(name)) && /^[\d\s-]+$/.test(s) ? s.replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1 ') : s
+		},
+		// El valor que se manda: la tarjeta sin espacios, lo demás tal cual (sin espacios a los lados)
+		val(el) {
+			return el.dataset.num === 'card' ? el.value.replace(/\D/g, '') : el.value.trim()
 		},
 	}
 })()
