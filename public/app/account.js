@@ -259,15 +259,18 @@ async function acctStats() {
 	const peers = s.peers.map((p) => `<button type="button" class="chip-btn" data-acct-peer="${esc(p.username)}">@${esc(p.username)} <b class="mono">${p.ops}</b></button>`).join('')
 	$('acctBody').innerHTML = `<div class="stack">
 		${acctGainsSlot()}
-		<div class="peer-stats">
-			${stat('Completadas', String(s.completed), `${rate} % de las terminadas`)}
-			${stat('Compraste', `${fmtM(s.usdBought)}`, 'USD')}
-			${stat('Vendiste', `${fmtM(s.usdSold)}`, 'USD')}
-		</div>
-		<p class="small muted">${s.asOwner} en tus ofertas · ${s.asTaker} tomando ofertas de otros · ${s.cancelled} canceladas</p>
-		<div><p class="hint">Por mes (USD)</p><table class="acct-table"><tr><th>Mes</th><th class="r">Ops</th><th class="r">Compras</th><th class="r">Ventas</th></tr>${months}</table></div>
-		<div><p class="hint">Precio medio por mercado</p><table class="acct-table"><tr><th>Mercado</th><th class="r">Ops</th><th class="r">Compraste a</th><th class="r">Vendiste a</th></tr>${markets}</table></div>
-		${peers ? `<div><p class="hint">Con quién más operas</p><div class="chips-row">${peers}</div></div>` : ''}
+		<section class="sec-box">
+			<p class="sec-box-t">Tus operaciones</p>
+			<div class="peer-stats">
+				${stat('Completadas', String(s.completed), `${rate} % de las terminadas`)}
+				${stat('Compraste', `${fmtM(s.usdBought)}`, 'USD')}
+				${stat('Vendiste', `${fmtM(s.usdSold)}`, 'USD')}
+			</div>
+			<p class="small muted">${s.asOwner} en tus ofertas · ${s.asTaker} tomando ofertas de otros · ${s.cancelled} canceladas</p>
+		</section>
+		<section class="sec-box"><p class="sec-box-t">Por mes (USD)</p><table class="acct-table"><tr><th>Mes</th><th class="r">Ops</th><th class="r">Compras</th><th class="r">Ventas</th></tr>${months}</table></section>
+		<section class="sec-box"><p class="sec-box-t">Precio medio por mercado</p><table class="acct-table"><tr><th>Mercado</th><th class="r">Ops</th><th class="r">Compraste a</th><th class="r">Vendiste a</th></tr>${markets}</table></section>
+		${peers ? `<section class="sec-box"><p class="sec-box-t">Con quién más operas</p><div class="chips-row">${peers}</div></section>` : ''}
 		<p class="hint">${r.partial ? 'Con tus últimas 200 ofertas y tomas' : 'Con todas tus ofertas y tomas'}${s.since ? `, desde el ${acctDay(Date.parse(s.since))}` : ''}. Con tus datos de QvaPay. No se guarda.</p></div>`
 	for (const b of $('acctBody').querySelectorAll('[data-acct-peer]')) b.onclick = () => showPeer(b.dataset.acctPeer)
 	if (TPPro.active) window.TPProGains?.render($('acctGains'), r)
@@ -277,8 +280,8 @@ async function acctStats() {
 // Tus ganancias (Pro): las calcula el módulo Pro con tus operaciones de aquí arriba; sin Pro, se dice que existen
 function acctGainsSlot() {
 	if (!TPPro.enabled) return ''
-	if (TPPro.active) return '<div id="acctGains"></div>'
-	return `<p class="hint">★ Con Pro: cuánto ganaste comprando y vendiendo (con la comisión de QvaPay), cuánto pagaste de más o de menos frente a lo normal de cada día, y todas tus operaciones en CSV. <button class="link" id="acctGainsPro">Ver Pro</button></p>`
+	if (TPPro.active) return '<section class="sec-box" id="acctGains"></section>'
+	return `<section class="sec-box"><p class="sec-box-t">★ Ganancias</p><p class="hint">Con Pro: cuánto ganaste comprando y vendiendo (con la comisión de QvaPay), cuánto pagaste de más o de menos frente a lo normal de cada día, y todas tus operaciones en CSV. <button class="link" id="acctGainsPro">Ver Pro</button></p></section>`
 }
 
 document.addEventListener('click', (e) => e.target.closest('#acctOpen') && showAccount('summary'))

@@ -819,8 +819,8 @@ async function showCreateOffer(preset = null) {
 				<button type="button" class="seg-tab" data-type="sell" role="radio">Vendo USD</button>
 				<button type="button" class="seg-tab" data-type="buy" role="radio">Compro USD</button>
 			</div>
-			<section class="of-sec">
-				<p class="of-sec-t">Oferta</p>
+			<section class="sec-box">
+				<p class="sec-box-t">Oferta</p>
 				<label class="field">Mercado<select class="input" id="ofCoin">${markets.map((c) => `<option value="${c.tick}">${esc(c.name)}</option>`).join('')}</select></label>
 				<div class="grid2">
 					<label class="field"><span class="field-row">Monto (USD)<button type="button" class="link small" id="ofBal" hidden></button></span><input class="input" id="ofAmount" type="number" min="0.1" max="10000" step="0.01" inputmode="decimal" placeholder="100" /></label>
@@ -830,21 +830,21 @@ async function showCreateOffer(preset = null) {
 				<p class="hint" id="ofTotal"></p>
 				<div class="smart" id="ofSmart" hidden></div>
 			</section>
-			<section class="of-sec">
-				<label class="check of-sec-h"><input type="checkbox" id="ofFlex" /> Por rango: que la tomen por partes</label>
+			<section class="sec-box">
+				<label class="check sec-box-h"><input type="checkbox" id="ofFlex" /> Por rango: que la tomen por partes</label>
 				<p class="hint" id="ofFlexNote" hidden>Con la orden inteligente el resto se publica entero. Desmárcala si lo quieres por partes.</p>
 				<div class="grid2" id="ofFlexBox" hidden>
 					<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" type="number" step="0.01" inputmode="decimal" /></label>
 					<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" type="number" step="0.01" inputmode="decimal" /></label>
 				</div>
 			</section>
-			<section class="of-sec" id="ofKeep" hidden></section>
-			<section class="of-sec">
-				<p class="of-sec-t" id="ofDetailsTitle"></p>
+			<section class="sec-box" id="ofKeep" hidden></section>
+			<section class="sec-box">
+				<p class="sec-box-t" id="ofDetailsTitle"></p>
 				<div class="saved-methods" id="ofSaved" hidden></div><div class="stack tight" id="ofDetails"><p class="muted small">Cargando campos…</p></div>
 				<label class="check small"><input type="checkbox" id="ofRemember" /> Recordar estos datos en este navegador</label>
 			</section>
-			<details class="of-sec opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
+			<details class="sec-box opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
 				${Object.entries(REQ_OPTIONS)
 					.map(([k, [label, vals, fmt]]) => `<label class="field">${label}<select class="input" data-req="${k}"><option value="0">Sin requisito</option>${vals.map((v) => `<option value="${v}">${fmt(v)}</option>`).join('')}</select></label>`)
 					.join('')}
