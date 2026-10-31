@@ -84,14 +84,20 @@ test('volumen: por hora tal cual y cada 6 h desde las 0, 6, 12 y 18 de Cuba; nun
 		{ hour: h('2026-10-27T10:00:00Z'), side: 'sell', ops: 3, usd: 60 },
 		{ hour: h('2026-10-27T11:00:00Z'), side: 'buy', ops: -1, usd: -10 },
 	]
-	assert.deepEqual(volumeBars(rows, H), [
+	assert.deepEqual(volumeBars(rows, H, 0), [
 		{ t: h('2026-10-27T09:00:00Z'), ops: 2, usd: 40, buy: 0, sell: 2, buyUsd: 0, sellUsd: 40 },
 		{ t: h('2026-10-27T10:00:00Z'), ops: 4, usd: 75.5, buy: 1, sell: 3, buyUsd: 15.5, sellUsd: 60 },
 		{ t: h('2026-10-27T11:00:00Z'), ops: 0, usd: 0, buy: 0, sell: 0, buyUsd: 0, sellUsd: 0 },
 	])
 	// Cada 6 h: las 5:00 de Cuba van con la barra de las 0:00, las 6:00 y 7:00 con la de las 6:00
-	assert.deepEqual(volumeBars(rows, 6 * H), [
+	assert.deepEqual(volumeBars(rows, 6 * H, 0), [
 		{ t: h('2026-10-27T04:00:00Z'), ops: 2, usd: 40, buy: 0, sell: 2, buyUsd: 0, sellUsd: 40 },
 		{ t: h('2026-10-27T10:00:00Z'), ops: 3, usd: 65.5, buy: 0, sell: 3, buyUsd: 5.5, sellUsd: 60 },
+	])
+	// Antes de la hora desde la que los USD son de fiar: las operaciones sí, los USD no (y en una barra a caballo, solo
+	// los de después)
+	assert.deepEqual(volumeBars(rows, 6 * H, h('2026-10-27T11:00:00Z')), [
+		{ t: h('2026-10-27T04:00:00Z'), ops: 2, usd: null, buy: 0, sell: 2, buyUsd: null, sellUsd: null },
+		{ t: h('2026-10-27T10:00:00Z'), ops: 3, usd: 0, buy: 0, sell: 3, buyUsd: 0, sellUsd: 0 },
 	])
 })

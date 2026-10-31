@@ -132,20 +132,28 @@ export async function volumeFor(db: D1, coin: string, days: number, now = Date.n
 	return { bucketMs, since: first.hour, bars: volumeBars(results, bucketMs) }
 }
 
-export function volumeBars(rows: { hour: number; side: string; ops: number; usd: number }[], bucketMs: number) {
-	const bars = new Map<number, { t: number; ops: number; usd: number; buy: number; sell: number; buyUsd: number; sellUsd: number }>()
+// Desde cuándo los USD del volumen son de fiar. Antes, el conteo viejo del feed contaba de más: las operaciones de esas
+// horas se corrigieron (scripts/corregir-volumen.ts), pero sus USD no se enseñan
+export const VOLUME_USD_SINCE = Date.parse('2026-10-31T05:00:00Z')
+
+export function volumeBars(rows: { hour: number; side: string; ops: number; usd: number }[], bucketMs: number, usdSince = VOLUME_USD_SINCE) {
+	const bars = new Map<number, { t: number; ops: number; usd: number; buy: number; sell: number; buyUsd: number; sellUsd: number; hasUsd: boolean }>()
 	for (const r of rows) {
 		const off = cubaOffset(r.hour)
 		const t = Math.floor((r.hour + off) / bucketMs) * bucketMs - off
-		const b = bars.get(t) ?? bars.set(t, { t, ops: 0, usd: 0, buy: 0, sell: 0, buyUsd: 0, sellUsd: 0 }).get(t)!
+		const b = bars.get(t) ?? bars.set(t, { t, ops: 0, usd: 0, buy: 0, sell: 0, buyUsd: 0, sellUsd: 0, hasUsd: false }).get(t)!
 		b.ops += r.ops
+		if (r.side === 'buy') b.buy += r.ops
+		else b.sell += r.ops
+		if (r.hour < usdSince) continue
+		b.hasUsd = true
 		b.usd += r.usd
-		if (r.side === 'buy') (b.buy += r.ops), (b.buyUsd += r.usd)
-		else (b.sell += r.ops), (b.sellUsd += r.usd)
+		if (r.side === 'buy') b.buyUsd += r.usd
+		else b.sellUsd += r.usd
 	}
-	// Una parte que volvió resta en su hora: nunca menos de cero
-	const money = (n: number) => Math.max(0, Math.round(n * 100) / 100)
-	return [...bars.values()].map((b) => ({ t: b.t, ops: Math.max(0, b.ops), usd: money(b.usd), buy: Math.max(0, b.buy), sell: Math.max(0, b.sell), buyUsd: money(b.buyUsd), sellUsd: money(b.sellUsd) }))
+	// Una parte que volvió resta en su hora: nunca menos de cero. Sin USD de fiar, null
+	const money = (b: { hasUsd: boolean }, n: number) => (b.hasUsd ? Math.max(0, Math.round(n * 100) / 100) : null)
+	return [...bars.values()].map((b) => ({ t: b.t, ops: Math.max(0, b.ops), usd: money(b, b.usd), buy: Math.max(0, b.buy), sell: Math.max(0, b.sell), buyUsd: money(b, b.buyUsd), sellUsd: money(b, b.sellUsd) }))
 }
 
 // Cuba: UTC-5, y UTC-4 en verano. El verano va del segundo domingo de marzo al primer domingo
@@ -196,7 +204,7 @@ export function dailyFrom(rows: DayRow[], now = Date.now()) {
 
 // Lo de cada barra que es de Pro: el reparto en compras y ventas y los USD operados. Sin licencia no se manda (el
 // terminal es público: lo que solo escondiera el navegador se vería sin Pro)
-export type RatesData = { daily: { buy?: number | null; sell?: number | null }[]; volume: { bars: { buy?: number; sell?: number; buyUsd?: number; sellUsd?: number; usd?: number }[] } | null }
+export type RatesData = { daily: { buy?: number | null; sell?: number | null }[]; volume: { bars: { buy?: number; sell?: number; buyUsd?: number | null; sellUsd?: number | null; usd?: number | null }[] } | null }
 export function withoutPro<T extends RatesData>(d: T): T {
 	return {
 		...d,

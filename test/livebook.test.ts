@@ -210,9 +210,10 @@ test('volumen: cuentan las fijas al completarse y lo tomado de las de rango; lo 
 	// Editarla (puede cambiar el monto) no cuenta; lo tomado después se mide desde ahí
 	assert.equal(trade(ev('p2p.range_updated', { ...r, amount: '120', receive: '126000', available_amount: '120', change: 'edited', status: 'open' }, 16)), null)
 	assert.deepEqual(trade(ev('p2p.range_updated', { ...r, amount: '120', receive: '126000', available_amount: '100', change: 'taken', status: 'open' }, 17)), [1, 20])
-	// De una que no conocíamos, lo tomado de antes es lo que faltaba en el libro
+	// De una que no conocíamos (ni en el libro), la primera noticia no cuenta: monto − disponible es toda su vida
 	const r2 = { uuid: 'r2', amount: '50', receive: '52500', offer_kind: 'flexible' as const }
-	assert.deepEqual(trade(ev('p2p.range_closed', { ...r2, available_amount: '0', change: 'taken', status: 'completed' }, 18)), [1, 50])
+	assert.equal(trade(ev('p2p.range_updated', { ...r2, available_amount: '20', change: 'taken', status: 'open' }, 18)), null)
+	assert.deepEqual(trade(ev('p2p.range_closed', { ...r2, available_amount: '0', change: 'taken', status: 'completed' }, 18.5)), [1, 20])
 	// Cancelar no es una operación
 	trade(ev('p2p.created', { uuid: 'o2' }, 19))
 	assert.equal(trade(ev('p2p.cancelled', { uuid: 'o2', status: 'cancelled' }, 20)), null)

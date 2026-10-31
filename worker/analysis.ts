@@ -9,7 +9,7 @@
 
 import { COINS } from '../src/terminal/market.ts'
 import { cubaDate } from './informal.ts'
-import { cubaOffset, summer, type D1 } from './rates.ts'
+import { cubaOffset, summer, VOLUME_USD_SINCE, type D1 } from './rates.ts'
 
 const DAY_MS = 86_400_000
 // El mes pasado entero, el anterior para comparar y unos días más para las medias móviles
@@ -81,7 +81,7 @@ export async function refreshAnalysis(env: { DB: D1; PRO?: { put?(key: string, v
 	await env.PRO.put(ANALYSIS_KEY, JSON.stringify(await analysis(env.DB, now)))
 }
 
-export async function analysis(db: D1, now = Date.now()) {
+export async function analysis(db: D1, now = Date.now(), usdSince = VOLUME_USD_SINCE) {
 	const since = now - HISTORY_DAYS * DAY_MS
 	const heatSince = now - HEAT_DAYS * DAY_MS
 	const today = cubaDate(now)
@@ -106,7 +106,7 @@ export async function analysis(db: D1, now = Date.now()) {
 					.bind(c.tick, heatSince)
 					.all<BookRow>(),
 			])
-			return { tick: c.tick, ...coinAnalysis(rates.results, volume.results, book.results, today, now) }
+			return { tick: c.tick, ...coinAnalysis(rates.results, volume.results, book.results, today, now, usdSince) }
 		}),
 	)
 	const { results: inf } = await db.prepare('SELECT day, cur, rate FROM informal WHERE day >= ?').bind(cubaDate(since)).all<{ day: string; cur: string; rate: number }>()
@@ -146,20 +146,24 @@ export function coinAnalysis(
 	book: BookRow[],
 	today: string,
 	now: number,
+	usdSince = VOLUME_USD_SINCE,
 ) {
-	// El volumen de cada día (una parte que volvió resta en su hora: nunca menos de cero)
-	const vol = new Map<string, { buy: number; sell: number; buyOps: number; sellOps: number }>()
+	// El volumen de cada día (una parte que volvió resta en su hora: nunca menos de cero). Los USD, solo de las horas
+	// desde usdSince (antes, el conteo viejo contaba de más): un día sin ninguna queda sin USD
+	const vol = new Map<string, { buy: number; sell: number; buyOps: number; sellOps: number; hasUsd: boolean }>()
 	for (const v of volume) {
-		const d = vol.get(cubaDate(v.hour)) ?? vol.set(cubaDate(v.hour), { buy: 0, sell: 0, buyOps: 0, sellOps: 0 }).get(cubaDate(v.hour))!
-		d[v.side === 'buy' ? 'buy' : 'sell'] += v.usd
+		const d = vol.get(cubaDate(v.hour)) ?? vol.set(cubaDate(v.hour), { buy: 0, sell: 0, buyOps: 0, sellOps: 0, hasUsd: false }).get(cubaDate(v.hour))!
 		d[v.side === 'buy' ? 'buyOps' : 'sellOps'] += v.ops
+		if (v.hour < usdSince) continue
+		d.hasUsd = true
+		d[v.side === 'buy' ? 'buy' : 'sell'] += v.usd
 	}
 	const money = (n: number) => Math.max(0, Math.round(n * 100) / 100)
 	const days: AnalysisDay[] = rates.map((r) => {
 		const day = cubaDate(r.t)
 		// En los mercados de poco movimiento la ventana de QvaPay es de 3 o 7 días: se reparte por día
 		const per = (n: number | null) => (n == null ? null : Math.round(n / ((r.window_h ?? 24) / 24)))
-		const v = vol.get(day)
+		const v = vol.get(day)?.hasUsd ? vol.get(day) : undefined
 		return {
 			day,
 			rate: r.median,
@@ -180,7 +184,7 @@ export function coinAnalysis(
 		if (rated.has(day)) continue
 		const buyOps = Math.max(0, v.buyOps)
 		const sellOps = Math.max(0, v.sellOps)
-		days.push({ day, rate: null, buy: null, sell: null, ops: buyOps + sellOps, buyOps, sellOps, usd: money(v.buy + v.sell), buyUsd: money(v.buy), sellUsd: money(v.sell), partial: day === today })
+		days.push({ day, rate: null, buy: null, sell: null, ops: buyOps + sellOps, buyOps, sellOps, usd: v.hasUsd ? money(v.buy + v.sell) : null, buyUsd: v.hasUsd ? money(v.buy) : null, sellUsd: v.hasUsd ? money(v.sell) : null, partial: day === today })
 	}
 	days.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))
 
@@ -189,7 +193,7 @@ export function coinAnalysis(
 	const seen = new Set<string>()
 	const usdHeat = emptyHeat()
 	for (const v of volume) {
-		if (v.hour < heatFrom) continue
+		if (v.hour < heatFrom || v.hour < usdSince) continue
 		seen.add(cubaDate(v.hour))
 		const [d, h] = cubaClock(v.hour)
 		usdHeat[d][h] += v.usd

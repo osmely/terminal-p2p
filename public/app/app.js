@@ -1001,7 +1001,7 @@ function drawHistory() {
 		askSeries.setData(series('sell'))
 		opsSeries.setData(opsBars(points, tz))
 		const vol = state.history?.volume
-		volSeries.setData(volLine() ? vol.bars.map((b) => ({ time: Math.floor((b.t + vol.bucketMs / 2) / 1000) + tz, value: b.usd })) : [])
+		volSeries.setData(volLine() ? vol.bars.filter((b) => b.usd != null).map((b) => ({ time: Math.floor((b.t + vol.bucketMs / 2) / 1000) + tz, value: b.usd })) : [])
 		const ref = (key) => informal.filter((d) => d[key] != null).map((d) => ({ time: Math.floor(d.t / 1000) + tz, value: d[key] }))
 		usdSeries.setData(ref('usd'))
 		usdtSeries.setData(ref('usdt'))
@@ -1076,7 +1076,7 @@ function volTags(ms) {
 				{ v: bar.buy + bar.sell, s: opsSeries, text: plural(bar.sell, 'venta', 'ventas'), cls: 'ask' },
 			]
 		: [{ v: bar.ops, s: opsSeries, text: `${bar.ops.toLocaleString('en-US')} op.`, cls: 'ops' }]
-	if (volLine()) tags.push({ v: bar.usd, s: volSeries, text: `${fmtU(bar.usd)} USD`, cls: 'usd' })
+	if (volLine() && bar.usd != null) tags.push({ v: bar.usd, s: volSeries, text: `${fmtU(bar.usd)} USD`, cls: 'usd' })
 	const el = $('history')
 	const axis = historyChart.priceScale('right').width()
 	const pane = el.clientHeight - historyChart.timeScale().height()
@@ -1149,7 +1149,8 @@ class DayBars {
 // Las barras partidas en compras y ventas son de Pro: el servidor solo manda el reparto con la licencia
 const proSplit = () => !!(window.TPPro?.enabled && window.TPPro?.active && (state.history?.volume?.bars?.[0]?.buy != null || state.history?.daily?.some((d) => d.buy != null)))
 // La línea del volumen en USD también es de Pro, y solo donde hay datos del feed (7 y 30 días)
-const volLine = () => proSplit() && state.history.volume?.bars?.[0]?.usd != null
+// Los USD solo de las barras que los traen (las horas del conteo viejo del feed vienen sin ellos)
+const volLine = () => proSplit() && !!state.history.volume?.bars?.some((b) => b.usd != null)
 
 // Al cambiar Pro (al conectar, comprar o apagarse), se vuelve a dibujar con o sin el reparto
 document.addEventListener('tp:pro', () => {

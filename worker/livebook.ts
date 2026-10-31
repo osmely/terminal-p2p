@@ -129,7 +129,7 @@ export const TRADES_KEEP_MS = 3 * 86_400_000
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 10
+export const LIVE_VERSION = 11
 
 export interface Applied {
 	coin: string
@@ -261,7 +261,7 @@ export class Book {
 
 	// Lo que el evento suma o resta al volumen. Una fija, al completarse y una sola vez. Una de rango, lo que cambió lo
 	// tomado desde el último aviso: un aviso repetido no suma nada y una parte que vuelve resta. De una oferta que no se
-	// conocía, lo tomado de antes es lo que faltaba en el libro; si tampoco estaba ahí, solo cuenta una toma
+	// conocía, lo tomado de antes es lo que faltaba en el libro; si tampoco estaba ahí, la primera noticia no cuenta
 	private tradeOf(e: FeedEvent, side: Side, at: number, flexible: boolean, amount: number, had: LiveOffer | undefined): Trade | null {
 		const d = e.data
 		if (e.event === 'p2p.completed') {
@@ -277,11 +277,11 @@ export class Book {
 		this.filled.set(d.uuid, { usd: now, at })
 		// Solo se guarda si cambió (las ediciones de las de rango llegan a miles al día)
 		if (prev?.usd !== now) this.changedTrades.add(`f:${d.uuid}`)
-		const taken = d.change === 'taken'
 		const delta = round(now - before, 2)
-		// Sin nada sabido de antes, solo cuenta una toma: una pausa o una vuelta no dice qué se tomó antes de verla
-		const known = !!prev || !!had
-		if (!delta || !TRADE_CHANGES.has(d.change ?? '') || (!known && (!taken || delta < 0))) return null
+		// Sin nada sabido de antes no cuenta nada, solo se apunta lo tomado: en una oferta que ya corría, monto − disponible
+		// es todo lo que se tomó en su vida (se vio una venta con 1,935 USD tomados antes de su primer aviso)
+		if (!prev && !had) return null
+		if (!delta || !TRADE_CHANGES.has(d.change ?? '')) return null
 		return { t: at, side, ops: delta > 0 ? 1 : -1, usd: Math.abs(delta) }
 	}
 

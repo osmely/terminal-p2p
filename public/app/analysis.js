@@ -393,7 +393,8 @@
 			if (k === 'idx') return x.rate
 			if (k === 'prem') return vsInformal(m.tick, x.rate, informalOn(d))
 			if (k === 'vol') return x.usd
-			return x.usd > 0 ? x.buyUsd / x.usd : null
+			// Sin USD (los días del conteo viejo), con las operaciones
+			return x.usd > 0 ? x.buyUsd / x.usd : x.ops > 0 && x.buyOps != null ? x.buyOps / x.ops : null
 		}
 		const has = (m) => (k !== 'prem' || hasInformal(m.tick)) && ((k !== 'idx' && k !== 'prem') || !noRate(m.tick))
 		// La serie del periodo, ya suavizada (la media usa también los días de antes del periodo)

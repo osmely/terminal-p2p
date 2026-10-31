@@ -33,7 +33,7 @@ test('análisis: el cierre de cada día de Cuba, su volumen (null sin registro) 
 		('BANK_CUP', ${Date.parse('2026-10-30T15:00:00Z')}, 'sell', 2, 500),
 		('BANK_CUP', ${Date.parse('2026-10-30T16:00:00Z')}, 'sell', -1, -100)`)
 	db.exec(`INSERT INTO informal (day, cur, rate, final, t) VALUES ('2026-10-30', 'USD', 865, 1, 0), ('2026-10-30', 'USDT_TRC20', 1105, 1, 0), ('2026-10-30', 'BTC', 0, 1, 0)`)
-	const a = await analysis(d1, NOW)
+	const a = await analysis(d1, NOW, 0)
 	assert.equal(a.today, '2026-10-31')
 	assert.deepEqual(a.informal, { '2026-10-30': { usd: 865, usdt: 1105 } })
 	const days = a.coins.BANK_CUP.days
@@ -63,7 +63,7 @@ test('análisis: un mercado sin tasa de QvaPay (USDCASH) tiene sus días por el 
 		('USDCASH', ${Date.parse('2026-10-30T15:00:00Z')}, 'sell', 1, 200),
 		('USDCASH', ${Date.parse('2026-10-30T16:00:00Z')}, 'buy', 1, 50),
 		('ZELLE', ${Date.parse('2026-10-29T15:00:00Z')}, 'buy', 3, 90)`)
-	const a = await analysis(d1, NOW)
+	const a = await analysis(d1, NOW, 0)
 	assert.deepEqual(
 		a.coins.USDCASH.days.map((d) => [d.day, d.rate, d.ops, d.buyOps, d.sellOps, d.usd, d.buyUsd, d.sellUsd]),
 		[
@@ -77,6 +77,15 @@ test('análisis: un mercado sin tasa de QvaPay (USDCASH) tiene sus días por el 
 		[
 			['2026-10-29', null, 90],
 			['2026-10-30', 1.1, null],
+		],
+	)
+	// Con los USD de fiar solo desde el 30 a las 15:30 UTC: el 29 conserva sus operaciones, sin USD; el 30, solo lo de después
+	const b = await analysis(d1, NOW, Date.parse('2026-10-30T15:30:00Z'))
+	assert.deepEqual(
+		b.coins.USDCASH.days.map((d) => [d.day, d.ops, d.usd, d.buyUsd, d.sellUsd]),
+		[
+			['2026-10-29', 2, null, null, null],
+			['2026-10-30', 2, 50, 50, 0],
 		],
 	)
 })
