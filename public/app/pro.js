@@ -24,6 +24,7 @@ const PRO_FEATURES = [
 	['⚡', 'Orden inteligente', 'toma y publica a la vez, como en un exchange'],
 	['⏱️', 'Libro al instante', 'cada oferta te llega al momento'],
 	['📡', 'Radar', 'vigila el libro, te avisa y, si quieres, toma al instante'],
+	['📈', 'Análisis de mercado', 'la semana y el mes de cada mercado, comparados y en PDF'],
 	['🎯', 'Precio automático', 'tu oferta la primera del libro, dentro de tus límites'],
 	['🔀', 'Libro cruzado', 'si lo puedes aprovechar y cuánto te queda'],
 	['💰', 'Ganancias', 'cuánto ganaste en cada mercado, con la comisión'],
@@ -173,9 +174,11 @@ function renderProChip() {
 	b.hidden = !bk.acct.connected || !pro.enabled
 	b.classList.toggle('on', pro.active)
 	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? daysText(daysLeft()) : pro.canTrial ? 'Probar Pro' : 'Pro'}</span>`
-	// El radar es del módulo Pro (TPProRadar); sin Pro, su botón abre la ventana de Pro
+	// El radar es del módulo Pro (TPProRadar) y el análisis, de analysis.js; sin Pro, sus botones abren la ventana de Pro
 	const r = $('radarBtn')
 	if (r) r.hidden = b.hidden
+	const an = document.querySelector('.an-open')
+	if (an) an.hidden = b.hidden
 	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? `Prueba el modo Pro ${proTrialDays} días gratis` : 'Modo Pro'
 }
 

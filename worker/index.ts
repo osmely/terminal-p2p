@@ -27,6 +27,7 @@ import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveSocket, type Liv
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
 import { recordBook } from './bookstats.ts'
+import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './analysis.ts'
 import { checkAlerts } from './ratealerts.ts'
 import { LiveBook } from './livebook-do.ts'
 import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
@@ -188,6 +189,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		return secure(jsonError(404, 'no encontrado'))
 	}
 	if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
+	if (url.pathname === '/data/analysis' && req.method === 'GET') return secure(await marketAnalysis(url, env))
 	if (url.pathname === '/data/book' && req.method === 'GET') return secure(await book(url, env, ctx))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
@@ -328,6 +330,14 @@ export default {
 		} catch (err) {
 			console.error(`histórico del libro: ${(err as Error).message}`)
 		}
+		// El análisis de mercado de Pro: entero una vez al día a la hora de menos tráfico (y en seguida si aún no hay
+		// ninguno); cada hora, solo su foto del libro. Las visitas solo leen el último, no tocan la base
+		try {
+			if (isAnalysisTime(at) || !(await env.PRO?.get(ANALYSIS_KEY))) await refreshAnalysis(env, at)
+			else if (at % 3600_000 === 0) await refreshBook(env, at)
+		} catch (err) {
+			console.error(`análisis de mercado: ${(err as Error).message}`)
+		}
 		// Con la tasa nueva guardada, los avisos de tasa de Pro por Telegram
 		if (env.TELEGRAM_BOT_TOKEN)
 			try {
@@ -411,6 +421,16 @@ async function rates(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	// Una respuesta vacía no se guarda: el primer punto debe verse en cuanto exista
 	if (!empty) ctx.waitUntil(caches.default.put(key, res.clone()))
 	return out(res)
+}
+
+// El análisis de mercado, solo con Pro (?l=licencia): el último que dejó hecho el cron (refreshAnalysis), tal cual.
+// Ninguna visita lo calcula ni consulta la base
+async function marketAnalysis(url: URL, env: Env) {
+	if (!(await hasPro(env, url.searchParams.get('l')))) return jsonError(403, 'El análisis de mercado es del modo Pro')
+	// Un minuto en la caché del KV en cada sitio: el cron lo rehace cada 10
+	const body = await (env.PRO as KVNamespace | undefined)?.get(ANALYSIS_KEY, { cacheTtl: 60 })
+	if (!body) return jsonError(503, 'En espera de datos')
+	return new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' } })
 }
 
 // Aviso anónimo del navegador: una operación que empezó aquí se completó

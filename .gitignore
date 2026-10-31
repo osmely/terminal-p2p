@@ -3,3 +3,4 @@ node_modules/
 public/app/data.js
 public/app/data.js.map
 wrangler.jsonc
+.dev.vars
