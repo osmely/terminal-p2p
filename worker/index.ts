@@ -31,6 +31,7 @@ import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './an
 import { checkAlerts } from './ratealerts.ts'
 import { LiveBook } from './livebook-do.ts'
 import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
+import { TASA_KEY, TASA_PATH, tasaData, tasaPage, type TasaData } from './tasa.ts'
 
 // El libro en tiempo real de Pro (un Durable Object)
 export { LiveBook }
@@ -214,7 +215,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		return secure(await simApi(req, url, env as unknown as SimEnv))
 	}
 	// Las páginas enseñan u ocultan lo de Pro según el interruptor del panel
-	const res = miniApp(url, await assets(req, url, env))
+	const res = folderFor(url.hostname) === 'site' && url.pathname === TASA_PATH && req.method === 'GET' ? await tasa(req, url, env, ctx) : miniApp(url, await assets(req, url, env))
 	return res.headers.get('Content-Type')?.includes('text/html') ? proMarkup(res, await proEnabled(env.DB)) : res
 }
 
@@ -323,6 +324,13 @@ export default {
 			await collect(env.DB, at)
 		} catch (err) {
 			console.error(`histórico: ${(err as Error).message}`)
+		}
+		// Los números de la página de la tasa de hoy, ya calculados para que sus visitas no lean la base
+		try {
+			const t = await tasaData(env.DB, at)
+			if (t) await (env.PRO as KVNamespace | undefined)?.put(TASA_KEY, JSON.stringify(t))
+		} catch (err) {
+			console.error(`tasa de hoy: ${(err as Error).message}`)
 		}
 		// Con la tasa nueva como referencia de lo atípico, la foto del libro para el análisis de mercado
 		try {
@@ -509,6 +517,30 @@ async function informal(url: URL, env: Env, ctx: ExecutionContext) {
 		headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': data.last ? `public, max-age=${INFORMAL_TTL_S}` : 'no-store' },
 	})
 	if (data.last) ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
+}
+
+// La página de la tasa de hoy, con los números del KV ya puestos (worker/tasa.ts). 5 min en la caché del borde, como el histórico
+async function tasa(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
+	const key = new Request(`${url.origin}${TASA_PATH}`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, 'public, max-age=60')
+	const page = await assets(req, url, env)
+	if (!page.ok) return page
+	// Lo deja el cron; solo si aún no hay nada (recién desplegado) se calcula aquí una vez
+	let data: TasaData | null = null
+	try {
+		const kv = env.PRO as KVNamespace | undefined
+		const saved = await kv?.get(TASA_KEY, { cacheTtl: 60 })
+		data = saved ? (JSON.parse(saved) as TasaData) : await tasaData(env.DB)
+		if (!saved && data) ctx.waitUntil(kv?.put(TASA_KEY, JSON.stringify(data)) ?? Promise.resolve())
+	} catch (err) {
+		console.error(`${TASA_PATH}: ${(err as Error).message}`)
+	}
+	const html = await tasaPage(page, data).text()
+	const res = new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=60' } })
+	// Sin datos se sirve la página con sus textos de reserva, pero no se guarda
+	if (data) ctx.waitUntil(caches.default.put(key, new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': `public, max-age=${RATES_TTL_S}` } })))
 	return res
 }
 

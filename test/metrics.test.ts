@@ -82,6 +82,10 @@ test('evento de publicar y de liberar, sin datos de usuario', async () => {
 	const failed = await relayEvent({ method: 'POST', path: `/p2p/${OFFER}/apply`, query: new URLSearchParams(), body: '{}', meta: null, response: new Response('{}', { status: 400 }) }, SALT, NOW)
 	assert.deepEqual([failed!.status, failed!.err], ['error', '400'])
 	// Con código, el código; sin él, el estado y el mensaje sin números, @usuarios, correos ni identificadores
+	// El POST que falla al cambiar una calificación no es un error: el PATCH que va detrás es el que cuenta
+	const rerate = { path: `/p2p/${OFFER}/rate`, query: new URLSearchParams(), meta: null }
+	assert.equal(await relayEvent({ ...rerate, method: 'POST', response: Response.json({ code: 'ALREADY_RATED' }, { status: 409 }) }, SALT, NOW), null)
+	assert.equal((await relayEvent({ ...rerate, method: 'PATCH', response: Response.json({}) }, SALT, NOW))?.status, 'ok')
 	const coded = await relayEvent({ method: 'POST', path: `/p2p/${OFFER}/apply`, query: new URLSearchParams(), meta: null, response: Response.json({ error: 'La oferta está pausada', code: 'OFFER_PAUSED' }, { status: 409 }) }, SALT, NOW)
 	assert.equal(coded!.err, 'OFFER_PAUSED')
 	const msg = await relayEvent({ method: 'POST', path: `/p2p/${OFFER}/rate`, query: new URLSearchParams(), meta: null, response: Response.json({ error: `P2P: ya calificaste a @pepe por 25.5 USD (pepe@mail.com, ${OFFER})` }, { status: 422 }) }, SALT, NOW)

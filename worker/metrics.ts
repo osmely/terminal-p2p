@@ -128,6 +128,8 @@ export async function relayEvent(
 	const req = tryJson(a.body)
 	const ok = a.response.ok
 	const res = !ok || action.event === 'create' || action.event === 'release' ? tryJson(await a.response.text().catch(() => '')) : {}
+	// Cambiar una calificación: el terminal prueba POST, QvaPay dice ALREADY_RATED y sigue con PATCH, que es el que cuenta
+	if (!ok && action.event === 'rate' && a.method === 'POST' && res.code === 'ALREADY_RATED') return null
 	let offer = action.offer
 	let { coin, side, usd } = meta
 	if (action.event === 'create') {

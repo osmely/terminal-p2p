@@ -125,6 +125,104 @@ async function loadStats() {
 	io.observe(sec)
 }
 
+// La tasa de hoy: 30 días de QvaPay (venta y compra, hora a hora) con el USDT y el USD de elTOQUE (uno por día).
+// Los números de arriba ya vienen puestos del servidor; aquí solo la gráfica, con su cruz al pasar el dedo o el ratón
+const SERIES = [
+	['sell', 'QvaPay venta'],
+	['buy', 'QvaPay compra'],
+	['usdt', 'USDT (elTOQUE)'],
+	['usd', 'USD efectivo (elTOQUE)'],
+]
+const SVG_NS = 'http://www.w3.org/2000/svg'
+const whenOf = (t) => new Date(t).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+async function loadTasaChart() {
+	const box = $('tasaChart')
+	let d
+	try {
+		const r = await fetch('/data/rates?coin=BANK_CUP&days=30', { headers: { Accept: 'application/json' } })
+		if (!r.ok) throw new Error(String(r.status))
+		d = await r.json()
+	} catch {
+		box.innerHTML = '<p class="muted-sm">No se pudo cargar la gráfica ahora mismo.</p>'
+		return
+	}
+	const qp = d.points.filter((p) => p.sell > 0 || p.buy > 0)
+	const inf = (d.informal ?? []).filter((x) => x.usd > 0 || x.usdt > 0)
+	if (qp.length < 2) {
+		box.innerHTML = '<p class="muted-sm">Aún no hay suficientes datos para la gráfica.</p>'
+		return
+	}
+	const lines = {
+		sell: qp.filter((p) => p.sell > 0).map((p) => [p.t, p.sell]),
+		buy: qp.filter((p) => p.buy > 0).map((p) => [p.t, p.buy]),
+		usdt: inf.filter((x) => x.usdt > 0 && x.t >= qp[0].t - 86_400_000).map((x) => [x.t, x.usdt]),
+		usd: inf.filter((x) => x.usd > 0 && x.t >= qp[0].t - 86_400_000).map((x) => [x.t, x.usd]),
+	}
+	const all = Object.values(lines).flat()
+	const t0 = Math.min(...all.map(([t]) => t))
+	const t1 = Math.max(...all.map(([t]) => t))
+	const step = (() => {
+		const span = Math.max(...all.map(([, v]) => v)) - Math.min(...all.map(([, v]) => v)) || 10
+		const raw = span / 4
+		const pow = 10 ** Math.floor(Math.log10(raw))
+		return [1, 2, 2.5, 5, 10].map((m) => m * pow).find((x) => x >= raw)
+	})()
+	const lo = Math.floor(Math.min(...all.map(([, v]) => v)) / step) * step
+	const hi = Math.ceil(Math.max(...all.map(([, v]) => v)) / step) * step
+	const W = Math.max(300, box.clientWidth)
+	const H = W < 500 ? 220 : 260
+	const pad = { l: 8, r: 52, t: 10, b: 24 }
+	const x = (t) => pad.l + ((t - t0) / (t1 - t0 || 1)) * (W - pad.l - pad.r)
+	const y = (v) => pad.t + (1 - (v - lo) / (hi - lo || 1)) * (H - pad.t - pad.b)
+	let svg = `<svg class="tchart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Tasa del USD en QvaPay y en elTOQUE en los últimos 30 días">`
+	for (let v = lo; v <= hi + 1e-9; v += step)
+		svg += `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${y(v)}" y2="${y(v)}"/><text class="ax" x="${W - pad.r + 6}" y="${y(v) + 4}">${v.toLocaleString('en-US')}</text>`
+	// Una fecha cada pocos días, a mediodía de Cuba
+	const days = Math.round((t1 - t0) / 86_400_000)
+	const every = Math.max(1, Math.ceil(days / Math.floor((W - pad.l - pad.r) / 70)))
+	for (let i = 0; i <= days; i += every) {
+		const t = t0 + i * 86_400_000
+		if (x(t) > W - pad.r - 20) break
+		svg += `<text class="ax" x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : 'middle'}">${new Date(t).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short' })}</text>`
+	}
+	for (const [k] of SERIES) if (lines[k].length > 1) svg += `<path class="ln ${k}" d="${lines[k].map(([t, v], i) => `${i ? 'L' : 'M'}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join('')}"/>`
+	svg += `<line class="cross" id="tasaCross" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden"/><g id="tasaDots"></g><rect class="hit" x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}"/></svg>`
+	box.innerHTML = `${svg}<div class="tasa-tip" id="tasaTip" hidden></div>`
+	const color = { sell: 'var(--ask)', buy: 'var(--bid)', usdt: 'var(--s-usdt)', usd: 'var(--s-usd)' }
+	// El valor de cada serie en ese momento: el último punto que no pasa de ahí
+	const at = (k, t) => {
+		let v = null
+		for (const [pt, pv] of lines[k]) if (pt <= t + 1) v = [pt, pv]
+		return v
+	}
+	const show = (e) => {
+		const r = box.querySelector('svg').getBoundingClientRect()
+		const px = ((e.clientX - r.left) / r.width) * W
+		const t = t0 + ((px - pad.l) / (W - pad.l - pad.r)) * (t1 - t0)
+		const near = qp.reduce((a, p) => (Math.abs(p.t - t) < Math.abs(a.t - t) ? p : a))
+		const vals = SERIES.map(([k, name]) => [k, name, at(k, near.t)]).filter(([, , v]) => v)
+		const cross = $('tasaCross')
+		cross.setAttribute('x1', x(near.t))
+		cross.setAttribute('x2', x(near.t))
+		cross.setAttribute('visibility', 'visible')
+		$('tasaDots').innerHTML = vals.map(([k, , [pt, v]]) => `<circle class="dot" cx="${x(k === 'sell' || k === 'buy' ? near.t : pt)}" cy="${y(v)}" r="4" fill="${color[k]}"/>`).join('')
+		const tip = $('tasaTip')
+		tip.innerHTML = `<div>${whenOf(near.t)}</div>${vals.map(([k, name, [, v]]) => `<div><i style="background:${color[k]}"></i>${name}: <b>${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b></div>`).join('')}`
+		tip.hidden = false
+		const left = (x(near.t) / W) * r.width
+		tip.style.left = `${Math.min(Math.max(0, left + 12), r.width - tip.offsetWidth)}px`
+		if (left + 12 + tip.offsetWidth > r.width) tip.style.left = `${Math.max(0, left - tip.offsetWidth - 12)}px`
+	}
+	const hit = box.querySelector('.hit')
+	hit.addEventListener('pointermove', show)
+	hit.addEventListener('pointerdown', show)
+	hit.addEventListener('pointerleave', () => {
+		$('tasaTip').hidden = true
+		$('tasaCross').setAttribute('visibility', 'hidden')
+		$('tasaDots').innerHTML = ''
+	})
+}
+
 $('themeBtn').addEventListener('click', () => {
 	const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
 	document.documentElement.dataset.theme = next
@@ -156,6 +254,17 @@ if ($('rates')) {
 }
 if ($('informal')) loadInformal()
 if ($('numeros')) loadStats()
+if ($('tasaChart')) {
+	loadTasaChart()
+	// Se dibuja al ancho que tiene: al girar el móvil o cambiar la ventana, otra vez
+	let w = $('tasaChart').clientWidth
+	new ResizeObserver(() => {
+		const now = $('tasaChart').clientWidth
+		if (Math.abs(now - w) < 24) return
+		w = now
+		loadTasaChart()
+	}).observe($('tasaChart'))
+}
 
 // El menú de ayuda se cierra al tocar fuera o con Escape
 document.addEventListener('click', (e) => {
