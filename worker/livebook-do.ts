@@ -208,23 +208,10 @@ export class LiveBook {
 		}
 		if (ch?.act) this.addAct(ch.coin, ch.act)
 		if (ch?.trade) await this.addVolume(ch.coin, ch.trade)
-		if (this.env.STAGING) await this.trace(e, ch?.act ?? null, ch?.trade ?? null)
 		await this.save()
 		if (unknown && this.streaming) void this.periodic().catch(() => {})
 		else if (this.want.size && !this.streaming) await this.soon(unknown ? 100 : 1500)
 		return true
-	}
-
-	// TEMPORAL (solo staging): cada evento del feed, sin su dueño, para cuadrar el volumen con el conteo de QvaPay.
-	// La tabla feed_trace se creó a mano en la base de staging; si no existe, no pasa nada
-	private async trace(e: FeedEvent, a: Act | null, tr: Trade | null) {
-		const d = e.data ?? ({} as FeedEvent['data'])
-		const { owner_uuid: _o, ...rest } = d
-		try {
-			await this.env.DB.prepare('INSERT INTO feed_trace (at, event, sent_at, uuid, coin, type, offer_kind, change, status, amount, available, receive, act_kind, act_usd, counted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-				.bind(Date.now(), e.event, e.sent_at ?? null, d.uuid ?? null, d.coin ?? null, d.type ?? null, d.offer_kind ?? null, d.change ?? null, d.status ?? null, d.amount ?? null, d.available_amount ?? null, d.receive ?? null, a?.kind ?? null, tr ? tr.ops * tr.usd : null, tr?.ops ?? 0, JSON.stringify(rest))
-				.run()
-		} catch {}
 	}
 
 	private addLag(e: FeedEvent) {
