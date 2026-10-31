@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { test } from 'node:test'
 import type { P2POffer } from '../src/qvapay/types.ts'
-import { Book, feedSign, lagStats, feedSigned, feedWebhook, liveSocket, sseEvents, tradeOf, type FeedEvent, type LiveEnv } from '../worker/livebook.ts'
+import { Book, feedSign, lagStats, feedSigned, feedWebhook, liveSocket, sseEvents, type FeedEvent, type LiveEnv } from '../worker/livebook.ts'
 import { liveRows } from '../worker/pro.ts'
 
 const T = Date.parse('2026-10-27T15:00:00Z')
@@ -183,25 +183,42 @@ test('actividad del feed: tomada entera o en parte, retirada, editada y completa
 	assert.equal(b.named([n])[0].user, 'leo')
 })
 
-test('volumen: cuentan las fijas al completarse y las partes tomadas de las de rango; la parte que vuelve resta', () => {
+test('volumen: cuentan las fijas al completarse y lo tomado de las de rango; lo que vuelve resta y un aviso repetido no suma', () => {
 	const b = new Book()
 	const trade = (e: FeedEvent) => {
-		const c = b.apply(e, T)
-		return c?.act ? [tradeOf(e.event, c.act), c.act.usd] : [0, 0]
+		const t = b.apply(e, T)?.trade
+		return t ? [t.ops, t.usd] : null
 	}
-	// Fija: tomarla no cuenta (puede volver); completarla sí, con su monto
-	assert.deepEqual(trade(ev('p2p.created', {})), [0, 20])
-	assert.deepEqual(trade(ev('p2p.applied', {}, 2)), [0, 20])
+	// Fija: tomarla no cuenta (puede volver); completarla sí, con su monto, y una sola vez (llega por el webhook y el stream)
+	assert.equal(trade(ev('p2p.created', {})), null)
+	assert.equal(trade(ev('p2p.applied', {}, 2)), null)
 	assert.deepEqual(trade(ev('p2p.completed', { status: 'completed' }, 9)), [1, 20])
-	// De rango: cada parte tomada suma, la que vuelve resta y lo que quedaba tomado de una vez también suma
+	assert.equal(trade(ev('p2p.completed', { status: 'completed' }, 9)), null)
+	// De rango: cada parte tomada suma lo que bajó lo disponible; la que vuelve resta
 	const r = { uuid: 'r1', amount: '100', receive: '105000', offer_kind: 'flexible' as const }
-	trade(ev('p2p.range_created', { ...r, available_amount: '100' }, 10))
+	assert.equal(trade(ev('p2p.range_created', { ...r, available_amount: '100' }, 10)), null)
 	assert.deepEqual(trade(ev('p2p.range_updated', { ...r, available_amount: '70', change: 'taken' }, 11)), [1, 30])
 	assert.deepEqual(trade(ev('p2p.range_updated', { ...r, available_amount: '80', change: 'returned' }, 12)), [-1, 10])
-	assert.deepEqual(trade(ev('p2p.range_closed', { ...r, available_amount: '0', change: 'taken', status: 'open' }, 13)), [1, 80])
+	// Se cierra tomada con un resto por debajo del mínimo: cuenta lo tomado (75), no lo que quedaba antes (80)
+	const closed = ev('p2p.range_closed', { ...r, available_amount: '5', change: 'taken', status: 'completed' }, 13)
+	assert.deepEqual(trade(closed), [1, 75])
+	// El mismo cierre otra vez (por el stream), con la oferta ya fuera del libro: no suma
+	assert.equal(trade(closed), null)
+	// QvaPay la pausa con lo tomado de vuelta y la reanuda: esa parte no se operó
+	assert.deepEqual(trade(ev('p2p.range_closed', { ...r, available_amount: '100', change: 'paused', status: 'open' }, 14)), [-1, 95])
+	assert.equal(trade(ev('p2p.range_updated', { ...r, available_amount: '100', change: 'resumed', status: 'open' }, 15)), null)
+	// Editarla (puede cambiar el monto) no cuenta; lo tomado después se mide desde ahí
+	assert.equal(trade(ev('p2p.range_updated', { ...r, amount: '120', receive: '126000', available_amount: '120', change: 'edited', status: 'open' }, 16)), null)
+	assert.deepEqual(trade(ev('p2p.range_updated', { ...r, amount: '120', receive: '126000', available_amount: '100', change: 'taken', status: 'open' }, 17)), [1, 20])
+	// De una que no conocíamos, lo tomado de antes es lo que faltaba en el libro
+	const r2 = { uuid: 'r2', amount: '50', receive: '52500', offer_kind: 'flexible' as const }
+	assert.deepEqual(trade(ev('p2p.range_closed', { ...r2, available_amount: '0', change: 'taken', status: 'completed' }, 18)), [1, 50])
 	// Cancelar no es una operación
-	trade(ev('p2p.created', { uuid: 'o2' }, 14))
-	assert.deepEqual(trade(ev('p2p.cancelled', { uuid: 'o2', status: 'cancelled' }, 15)), [0, 20])
+	trade(ev('p2p.created', { uuid: 'o2' }, 19))
+	assert.equal(trade(ev('p2p.cancelled', { uuid: 'o2', status: 'cancelled' }, 20)), null)
+	// Se olvida a los tres días (como mucho, una vez por hora)
+	assert.deepEqual(b.pruneTrades(T + 4 * 86_400_000).sort(), ['d:o1', 'f:r1', 'f:r2'])
+	assert.deepEqual(b.pruneTrades(T + 4 * 86_400_000 + 60_000), [])
 })
 
 test('en vivo (panel): cada conexión lleva su cuenta; se juntan por cuenta con sus pestañas, mercados, desde cuándo y última señal', async () => {

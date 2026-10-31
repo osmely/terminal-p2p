@@ -7,7 +7,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
-import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, tradeOf, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
 
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
 const DONE_EVERY_MS = 5 * 60_000
@@ -62,8 +62,6 @@ export class LiveBook {
 	private streamConnects = 0
 	private streamEndedAt: number | null = null
 	private streamGap: number | null = null
-	// Operaciones ya sumadas al volumen en la última hora: el mismo evento puede llegar por el webhook y por el stream
-	private volSeen = new Map<string, number>()
 	// Cuánto tardan en llegar los eventos (desde que QvaPay los manda y desde que cambió la oferta), los últimos LAG_KEEP
 	private lags = { sent: [] as number[], upd: [] as number[] }
 
@@ -78,6 +76,8 @@ export class LiveBook {
 		this.ctx.blockConcurrencyWhile(async () => {
 			for (const o of (await this.ctx.storage.list<LiveOffer>({ prefix: 'o:' })).values()) this.book.offers.set(o.uuid, o)
 			for (const [k, w] of await this.ctx.storage.list<Owner>({ prefix: 'u:' })) this.book.owners.set(k.slice(2), w)
+			for (const [k, f] of await this.ctx.storage.list<{ usd: number; at: number }>({ prefix: 'f:' })) this.book.filled.set(k.slice(2), f)
+			for (const [k, t] of await this.ctx.storage.list<number>({ prefix: 'd:' })) this.book.completed.set(k.slice(2), t)
 			for (const [k, a] of await this.ctx.storage.list<Act[]>({ prefix: 'a:' })) {
 				this.acts.set(k.slice(2), a)
 				this.takes.set(k.slice(2), a.filter((x) => x.kind === 'taken' || x.kind === 'partial').map((x) => x.t))
@@ -131,7 +131,7 @@ export class LiveBook {
 			if (!ready || (!this.feedOn() && Date.now() - (this.readAt.get(k) ?? 0) > POLL_MS)) this.want.add(k)
 			return { ready, levels: ready ? this.book.levels(coin, s, BOOK_TOP) : [], total: this.book.count(coin, s) }
 		}
-		const out = { coin, at: Date.now(), feed: this.feedOn(), ask: side('ask'), bid: side('bid') }
+		const out = { coin, at: Date.now(), feed: this.feedOn(), version: LIVE_VERSION, ask: side('ask'), bid: side('bid') }
 		if (this.want.size && !this.streaming) await this.soon(200)
 		return Response.json(out)
 	}
@@ -148,7 +148,7 @@ export class LiveBook {
 	private state(): LiveState {
 		const now = Date.now()
 		return {
-			version: 9,
+			version: LIVE_VERSION,
 			recent: this.recent,
 			mode: this.feedOn(now) ? 'feed' : this.creds() ? 'poll' : 'off',
 			events: this.events,
@@ -206,14 +206,25 @@ export class LiveBook {
 				this.want.add(sideKey(ch.coin, ch.side))
 			}
 		}
-		if (ch?.act) {
-			this.addAct(ch.coin, ch.act)
-			await this.addVolume(e.event, ch.coin, ch.act)
-		}
+		if (ch?.act) this.addAct(ch.coin, ch.act)
+		if (ch?.trade) await this.addVolume(ch.coin, ch.trade)
+		if (this.env.STAGING) await this.trace(e, ch?.act ?? null, ch?.trade ?? null)
 		await this.save()
 		if (unknown && this.streaming) void this.periodic().catch(() => {})
 		else if (this.want.size && !this.streaming) await this.soon(unknown ? 100 : 1500)
 		return true
+	}
+
+	// TEMPORAL (solo staging): cada evento del feed, sin su dueño, para cuadrar el volumen con el conteo de QvaPay.
+	// La tabla feed_trace se creó a mano en la base de staging; si no existe, no pasa nada
+	private async trace(e: FeedEvent, a: Act | null, tr: Trade | null) {
+		const d = e.data ?? ({} as FeedEvent['data'])
+		const { owner_uuid: _o, ...rest } = d
+		try {
+			await this.env.DB.prepare('INSERT INTO feed_trace (at, event, sent_at, uuid, coin, type, offer_kind, change, status, amount, available, receive, act_kind, act_usd, counted, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+				.bind(Date.now(), e.event, e.sent_at ?? null, d.uuid ?? null, d.coin ?? null, d.type ?? null, d.offer_kind ?? null, d.change ?? null, d.status ?? null, d.amount ?? null, d.available_amount ?? null, d.receive ?? null, a?.kind ?? null, tr ? tr.ops * tr.usd : null, tr?.ops ?? 0, JSON.stringify(rest))
+				.run()
+		} catch {}
 	}
 
 	private addLag(e: FeedEvent) {
@@ -237,10 +248,13 @@ export class LiveBook {
 			else dels.push(`o:${id}`)
 		}
 		for (const id of this.book.changedOwners) puts[`u:${id}`] = this.book.owners.get(id)
+		for (const k of this.book.changedTrades) puts[k] = k.startsWith('f:') ? this.book.filled.get(k.slice(2)) : this.book.completed.get(k.slice(2))
+		dels.push(...this.book.pruneTrades())
 		for (const coin of this.actsChanged) puts[`a:${coin}`] = this.acts.get(coin)
 		this.actsChanged.clear()
 		this.book.changed.clear()
 		this.book.changedOwners.clear()
+		this.book.changedTrades.clear()
 		// De 128 en 128, lo más que deja guardar o borrar de una vez
 		const keys = Object.keys(puts)
 		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.put(Object.fromEntries(keys.slice(i, i + 128).map((k) => [k, puts[k]])))
@@ -347,17 +361,10 @@ export class LiveBook {
 	}
 
 	// Suma la operación a su hora en D1 (una fila por mercado, hora y lado). Si falla, se pierde esa y nada más
-	private async addVolume(event: string, coin: string, a: Act) {
-		const n = tradeOf(event, a)
-		if (!n) return
-		const now = Date.now()
-		const key = `${event}:${a.uuid}:${a.kind}:${a.t}:${a.usd}`
-		if (this.volSeen.has(key)) return
-		for (const [k, t] of this.volSeen) if (now - t > HOUR_MS) this.volSeen.delete(k)
-		this.volSeen.set(key, now)
+	private async addVolume(coin: string, tr: Trade) {
 		try {
 			await this.env.DB.prepare('INSERT INTO volume (coin, hour, side, ops, usd) VALUES (?, ?, ?, ?, ?) ON CONFLICT (coin, hour, side) DO UPDATE SET ops = ops + excluded.ops, usd = usd + excluded.usd')
-				.bind(coin, Math.floor(a.t / HOUR_MS) * HOUR_MS, a.side === 'ask' ? 'sell' : 'buy', n, n * a.usd)
+				.bind(coin, Math.floor(tr.t / HOUR_MS) * HOUR_MS, tr.side === 'ask' ? 'sell' : 'buy', tr.ops, tr.ops * tr.usd)
 				.run()
 		} catch (err) {
 			console.error(`volumen: ${(err as Error).message}`)

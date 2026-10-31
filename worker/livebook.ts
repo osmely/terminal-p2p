@@ -112,17 +112,24 @@ export interface Act {
 	uuid: string
 }
 
-// Si lo que pasó es una operación para el volumen: +1 una fija completada, una parte tomada de una de rango o lo que
-// quedaba de ella tomado de una vez; −1 una parte que volvió (se canceló o venció su ventana de pago). La toma de una
-// fija no cuenta: cuenta al completarse (si el que la tomó se va, vuelve al libro y no hubo operación)
-export function tradeOf(event: string, a: Act): 1 | -1 | 0 {
-	if (a.kind === 'done') return event === 'p2p.completed' ? 1 : 0
-	if (a.kind === 'partial') return 1
-	if (a.kind === 'taken') return event === 'p2p.range_closed' ? 1 : 0
-	if (a.kind === 'returned') return -1
-	return 0
+// Una operación para el volumen: +1 una fija completada o una parte tomada de una de rango; −1 una parte que volvió
+// (el que la tomó no pagó: QvaPay la devuelve como «returned», o pausa y reanuda la oferta con lo disponible de vuelta).
+// La toma de una fija no cuenta: cuenta al completarse (si el que la tomó se va, vuelve al libro y no hubo operación)
+export interface Trade {
+	t: number
+	side: Side
+	ops: 1 | -1
+	usd: number
 }
+// Cambios de una oferta de rango en los que lo tomado sube o baja por una operación (al editarla, su dueño puede
+// cambiar el monto: ahí solo se apunta lo tomado, sin contar nada)
+const TRADE_CHANGES = new Set(['taken', 'returned', 'paused', 'resumed'])
+// Cuánto se recuerda lo tomado de cada oferta y las fijas ya contadas: más que cualquier ventana de pago
+export const TRADES_KEEP_MS = 3 * 86_400_000
 export const HOUR_MS = 3_600_000
+// La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
+// con el código anterior)
+export const LIVE_VERSION = 10
 
 export interface Applied {
 	coin: string
@@ -130,6 +137,7 @@ export interface Applied {
 	changed: boolean
 	unknownOwner: boolean
 	act: Act | null
+	trade: Trade | null
 }
 
 export interface Owner {
@@ -172,6 +180,12 @@ export class Book {
 	// Lo que cambió desde la última vez que se guardó
 	changed = new Set<string>()
 	changedOwners = new Set<string>()
+	// Lo tomado de cada oferta de rango (su monto menos lo disponible), también después de salir del libro: el mismo aviso
+	// llega por el webhook y por el stream, y una parte puede volver después de cerrada. Y las fijas ya contadas
+	filled = new Map<string, { usd: number; at: number }>()
+	completed = new Map<string, number>()
+	changedTrades = new Set<string>()
+	private prunedAt = 0
 
 	// Un evento del feed. Devuelve el mercado y el lado, si cambió el libro, si su dueño es desconocido y lo que pasó
 	// (para la actividad: el feed sí dice si una oferta se tomó o la retiró su dueño). null si no hay nada que contar
@@ -192,7 +206,9 @@ export class Book {
 		const user = this.owners.get(d.owner_uuid ?? '')?.username ?? ''
 		const act = (kind: ActKind, actUsd: number, actPrice = price): Act | null =>
 			actUsd > 0 && actPrice > 0 ? { t: at, kind, side, price: actPrice, usd: Math.round(actUsd * 100) / 100, owner: d.owner_uuid ?? '', user, uuid: d.uuid } : null
-		const out = (changed: boolean, a: Act | null, unknownOwner = false): Applied | null => (changed || a ? { coin: d.coin, side, changed, unknownOwner, act: a } : null)
+		const trade = this.tradeOf(e, side, at, flexible, amount, had)
+		const out = (changed: boolean, a: Act | null, unknownOwner = false): Applied | null =>
+			changed || a || trade ? { coin: d.coin, side, changed, unknownOwner, act: a, trade } : null
 
 		// Una operación que se completó: no cambia el libro (la oferta ya había salido al tomarla), pero es un precio real
 		if (e.event === 'p2p.completed') return out(false, act('done', amount))
@@ -241,6 +257,43 @@ export class Book {
 		const taken = e.event === 'p2p.applied' || (e.event === 'p2p.range_closed' && d.change === 'taken')
 		const rest = had?.usd ?? (flexible ? num(d.available_amount ?? 0) || amount : amount)
 		return out(!!had, converted ? null : act(taken ? 'taken' : 'cancelled', rest, had?.price ?? price))
+	}
+
+	// Lo que el evento suma o resta al volumen. Una fija, al completarse y una sola vez. Una de rango, lo que cambió lo
+	// tomado desde el último aviso: un aviso repetido no suma nada y una parte que vuelve resta. De una oferta que no se
+	// conocía, lo tomado de antes es lo que faltaba en el libro; si tampoco estaba ahí, solo cuenta una toma
+	private tradeOf(e: FeedEvent, side: Side, at: number, flexible: boolean, amount: number, had: LiveOffer | undefined): Trade | null {
+		const d = e.data
+		if (e.event === 'p2p.completed') {
+			if (d.status !== 'completed' || !(amount > 0) || this.completed.has(d.uuid)) return null
+			this.completed.set(d.uuid, at)
+			this.changedTrades.add(`d:${d.uuid}`)
+			return { t: at, side, ops: 1, usd: round(amount, 2) }
+		}
+		if (!flexible || d.available_amount == null || !(amount > 0)) return null
+		const now = Math.max(0, amount - num(d.available_amount))
+		const prev = this.filled.get(d.uuid)
+		const before = prev?.usd ?? (had ? Math.max(0, amount - had.usd) : 0)
+		this.filled.set(d.uuid, { usd: now, at })
+		// Solo se guarda si cambió (las ediciones de las de rango llegan a miles al día)
+		if (prev?.usd !== now) this.changedTrades.add(`f:${d.uuid}`)
+		const taken = d.change === 'taken'
+		const delta = round(now - before, 2)
+		// Sin nada sabido de antes, solo cuenta una toma: una pausa o una vuelta no dice qué se tomó antes de verla
+		const known = !!prev || !!had
+		if (!delta || !TRADE_CHANGES.has(d.change ?? '') || (!known && (!taken || delta < 0))) return null
+		return { t: at, side, ops: delta > 0 ? 1 : -1, usd: Math.abs(delta) }
+	}
+
+	// Olvida lo tomado y las fijas contadas de hace más de TRADES_KEEP_MS (como mucho, una vez por hora). Devuelve las
+	// claves que ya no hay que guardar
+	pruneTrades(now = Date.now()): string[] {
+		if (now - this.prunedAt < HOUR_MS) return []
+		this.prunedAt = now
+		const out: string[] = []
+		for (const [id, f] of this.filled) if (now - f.at > TRADES_KEEP_MS) this.filled.delete(id), out.push(`f:${id}`)
+		for (const [id, t] of this.completed) if (now - t > TRADES_KEEP_MS) this.completed.delete(id), out.push(`d:${id}`)
+		return out
 	}
 
 	// Una lectura del libro (las mejores TAKE de un lado) con nuestro token: mete o actualiza lo leído, aprende quién
@@ -521,7 +574,7 @@ export interface LiveBookSide {
 	levels: Level[]
 	total: number
 }
-export async function liveBookOf(env: LiveEnv, coin: string): Promise<{ coin: string; at: number; feed: boolean; ask: LiveBookSide; bid: LiveBookSide } | null> {
+export async function liveBookOf(env: LiveEnv, coin: string): Promise<{ coin: string; at: number; feed: boolean; version?: number; ask: LiveBookSide; bid: LiveBookSide } | null> {
 	if (!env.LIVE) return null
 	const r = await liveStub(env).fetch(`https://live/book?coin=${encodeURIComponent(coin)}`)
 	return r.ok ? r.json() : null

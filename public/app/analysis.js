@@ -75,6 +75,11 @@
 	}
 	// El primer día con algún dato de tasa en cualquier mercado
 	const firstDay = () => Object.values(an.data.coins).flatMap((c) => (c.days.length ? [c.days[0].day] : [])).sort()[0] ?? an.data.today
+	// Desde cuándo hay volumen en algún mercado (el registro volvió a empezar al corregir su conteo)
+	const volSince = () => {
+		const day = Object.values(an.data.coins).flatMap((c) => c.days.filter((d) => d.usd != null).slice(0, 1).map((d) => d.day)).sort()[0]
+		return day ? `El volumen se registra desde el ${dShort(day)}` : 'El volumen acaba de empezar a registrarse'
+	}
 
 	// Los días del periodo que se dibujan: desde el primero con datos (no se pintan días de antes de que existieran)
 	function axisOf(period) {
@@ -361,7 +366,7 @@
 	const MEASURES = [
 		['idx', 'Tasa', 'la tasa de cada uno con 100 al empezar'],
 		['prem', 'Frente a elTOQUE', 'cuánto paga QvaPay sobre la calle, cada día'],
-		['vol', 'Volumen', 'USD operados al día'],
+		['vol', 'Volumen', 'USD operados al día (calculado)'],
 		['buy', 'Presión', 'qué parte del volumen fue compra de USD'],
 	]
 	const SMOOTH = [
@@ -430,7 +435,7 @@
 		}
 		const chart = series.length
 			? lineChart('anIdx', axis, series, { fmt, base: k === 'idx' ? 100 : k === 'prem' ? 0 : k === 'buy' ? 50 : undefined, zero: k === 'vol', labels: true })
-			: { html: waiting(k === 'vol' || k === 'buy' ? 'El volumen se registra desde el 28 oct' : ''), bind() {} }
+			: { html: waiting(k === 'vol' || k === 'buy' ? volSince() : ''), bind() {} }
 		const chips = markets
 			.map((m) => {
 				const on = an.cmp.has(m.tick)
@@ -528,8 +533,8 @@
 			s.hi ? kpi('Rango', `${fmtP(s.lo.rate)}–${fmtP(s.hi.rate)}`, `Más alta el ${dShort(s.hi.day)}`, '', 'sm') : kpi('Rango', '—', rateWait),
 			s.move == null ? kpi('Movimiento diario', '—', rateWait) : kpi('Movimiento diario', `${(s.move * 100).toFixed(2)}%`, 'de media entre un día y el siguiente'),
 			s.vol == null
-				? kpi('Volumen', '—', wait)
-				: kpi('Volumen', usdK(s.vol), volChange === null ? `${plural(s.volDays, 'día', 'días')} con registro` : `${signPct(volChange)} vs. periodo anterior`, volChange === null ? '' : tone(volChange)),
+				? kpi('Volumen (calculado)', '—', wait)
+				: kpi('Volumen (calculado)', usdK(s.vol), volChange === null ? `${plural(s.volDays, 'día', 'días')} con registro` : `${signPct(volChange)} vs. periodo anterior`, volChange === null ? '' : tone(volChange)),
 			s.ops == null ? kpi('Operaciones', '—', wait) : kpi('Operaciones', fmtU(s.ops), `${fmtU(Math.round(s.ops / s.opsDays))} al día`),
 			s.buyShare == null ? kpi('Presión', '—', wait) : kpi('Presión', `${Math.round(s.buyShare * 100)}% compras`, `${Math.round((1 - s.buyShare) * 100)}% ventas`, s.buyShare > 0.5 ? 'up' : 'down'),
 		].join('')
@@ -541,7 +546,7 @@
 				: `La tasa ${change >= 0 ? 'subió' : 'bajó'} <b>${signPct(change)}</b> ${s.prevClose ? 'frente al periodo anterior' : 'en el periodo'} y cerró en <b>${fmtP(s.close)}</b> ${unit}.${s.hi && s.hi !== s.lo ? ` La más alta, <b>${fmtP(s.hi.rate)}</b> el ${dShort(s.hi.day)}; la más baja, <b>${fmtP(s.lo.rate)}</b> el ${dShort(s.lo.day)}.` : ''}`,
 			s.vol == null
 				? ''
-				: `Se operaron <b>${usdK(s.vol)}</b>${volChange === null ? '' : `, un ${signPct(volChange)} frente al periodo anterior`}.${s.buyShare == null ? '' : ` ${s.buyShare > 0.5 ? 'Dominaron las compras de USD' : 'Dominaron las ventas de USD'} (${Math.round(Math.max(s.buyShare, 1 - s.buyShare) * 100)}%)${s.prevBuyShare == null ? '' : `, ${Math.abs(s.buyShare - s.prevBuyShare) < 0.03 ? 'como antes' : s.buyShare > s.prevBuyShare ? 'más que antes' : 'menos que antes'}`}.`}`,
+				: `Se calcula que se operaron <b>${usdK(s.vol)}</b>${volChange === null ? '' : `, un ${signPct(volChange)} frente al periodo anterior`}.${s.buyShare == null ? '' : ` ${s.buyShare > 0.5 ? 'Dominaron las compras de USD' : 'Dominaron las ventas de USD'} (${Math.round(Math.max(s.buyShare, 1 - s.buyShare) * 100)}%)${s.prevBuyShare == null ? '' : `, ${Math.abs(s.buyShare - s.prevBuyShare) < 0.03 ? 'como antes' : s.buyShare > s.prevBuyShare ? 'más que antes' : 'menos que antes'}`}.`}`,
 			s.premium == null
 				? ''
 				: `Frente a elTOQUE, QvaPay pagó de media un <b>${signPct(s.premium)}</b> ${cup ? 'sobre el USD informal' : `sobre ${REF_NAME[tick]}`}${s.prevPremium == null ? '' : `: la distancia ${s.premium > s.prevPremium ? 'se abrió' : 'se cerró'} ${Math.abs((s.premium - s.prevPremium) * 100).toFixed(1)} puntos`}.`,
@@ -555,7 +560,7 @@
 					...(cup ? [{ name: 'elTOQUE USDT', cls: 'tq', values: axis.map((d) => informalOn(d)?.usdt ?? null) }] : []),
 				])
 			: { html: noRate(tick) ? noRateBox() : waiting(), bind() {} }
-		const vols = rows.some((x) => x?.usd != null) ? volumeChart('anVol', axis, rows) : { html: waiting('El volumen se registra desde el 28 oct'), bind() {} }
+		const vols = rows.some((x) => x?.usd != null) ? volumeChart('anVol', axis, rows) : { html: waiting(volSince()), bind() {} }
 		const heatData = an.heat === 'vol' ? c.heatVol : c.heatBid
 		const heat = heatData && heatData.flat().some((v) => v !== null) ? heatmap('anHeat', heatData, an.heat) : { html: waiting(an.heat === 'vol' ? 'Hacen falta al menos 3 días de volumen' : 'Sale de la foto del libro cada 10 minutos: hacen falta al menos 3 días'), bind() {} }
 		// Comparar mercados en el mismo periodo: la gráfica (con sus opciones), el reparto del volumen y elTOQUE
@@ -565,7 +570,7 @@
 			an.cmp = new Set([tick, ...top3])
 		}
 		const cmp = axis.length ? compareChart(markets, axis) : { html: waiting(), controls: '', sub: '', bind() {} }
-		const shares = markets.some((m) => m.ms.vol) ? shareBars('anShare', markets.map((m) => ({ tick: m.tick, name: m.name, vol: m.ms.vol, prevVol: m.ms.prevVol })), tick) : { html: waiting('El volumen se registra desde el 28 oct'), bind() {} }
+		const shares = markets.some((m) => m.ms.vol) ? shareBars('anShare', markets.map((m) => ({ tick: m.tick, name: m.name, vol: m.ms.vol, prevVol: m.ms.prevVol })), tick) : { html: waiting(volSince()), bind() {} }
 		const premRows = markets.filter((m) => m.ms.premium != null).map((m) => ({ tick: m.tick, name: m.name, cur: m.ms.premium, prev: m.ms.prevPremium, ref: REF_NAME[m.tick] ?? 'el USD informal de elTOQUE' }))
 		const prems = premRows.length ? premiumBars('anPrem', premRows, tick) : { html: waiting(), bind() {} }
 		// Entre mercados: los últimos 7 días de cada uno
@@ -596,7 +601,7 @@
 			${s.rated || s.vol != null ? `<div class="an-kpis">${kpis}</div>` : waiting(`Aún no hay datos de este periodo: el histórico empieza el ${dShort(firstDay())}`)}
 			<section class="an-box"><h4>En pocas palabras</h4>${words.length ? `<ul class="an-words">${words.map((w) => `<li>${w}</li>`).join('')}</ul>` : waiting()}</section>
 			<section class="an-box"><h4>Tasa${cup ? ' frente al USDT de elTOQUE' : ''} <small>${esc(unit)} por USD, cierre de cada día</small></h4>${lines.html}</section>
-			<section class="an-box"><h4>Volumen por día</h4>${vols.html}</section>
+			<section class="an-box"><h4>Volumen por día <small>calculado</small></h4>${vols.html}</section>
 			<section class="an-box"><div class="an-boxhead"><h4>Las horas del mercado <small>últimas 4 semanas, hora de Cuba</small></h4>${heatTabs}</div>${heat.html}</section>
 			<section class="an-box"><h4>El libro ahora${book.when ? ` <small>${book.when}</small>` : ''}</h4>${book.html}</section>
 			<section class="an-box an-cmp"><h4>Comparar mercados${cmp.sub ? ` <small>${cmp.sub}</small>` : ''}</h4>
@@ -608,7 +613,7 @@
 				<section class="an-box"><h4>Frente a elTOQUE <small>media del periodo</small></h4>${prems.html}<p class="muted small an-note">CUP frente al USD informal; MLC frente a USD/MLC; TropiPay frente a USD/EUR.</p></section>
 			</div>
 			<section class="an-box"><h4>Entre mercados <small>últimos 7 días</small></h4>
-				<div class="an-table"><table><thead><tr><th>Mercado</th><th class="num">Tasa</th><th class="num">7 días</th><th class="num">Volumen</th><th class="num">Vol. vs. antes</th><th class="num">vs. elTOQUE</th></tr></thead><tbody>${table}</tbody></table></div>
+				<div class="an-table"><table><thead><tr><th>Mercado</th><th class="num">Tasa</th><th class="num">7 días</th><th class="num">Volumen (calculado)</th><th class="num">Vol. vs. antes</th><th class="num">vs. elTOQUE</th></tr></thead><tbody>${table}</tbody></table></div>
 			</section>
 			<p class="muted small">Con datos de QvaPay (operaciones completadas y su libro) y de elTOQUE. No es una recomendación de inversión: es una lectura del mercado con datos públicos.</p>`,
 			bind() {

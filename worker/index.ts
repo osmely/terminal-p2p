@@ -555,7 +555,7 @@ async function book(url: URL, env: Env, ctx: ExecutionContext) {
 		total: live[s].total,
 		levels: live[s].levels.map((l) => ({ uuid: l.uuid, price: l.price, usd: l.usd, user: l.user, kind: l.kind, orderMin: l.orderMin, orderMax: l.orderMax, vipOnly: l.vipOnly, outlier: isOutlier(l.price, ref[s], s) })),
 	})
-	const data = { coin, at: live.at, rate: r?.median ?? null, rateAt: r?.t ?? null, ask: side('ask'), bid: side('bid'), markets: COINS.map((c) => ({ tick: c.tick, name: c.name, unit: c.unit })) }
+	const data = { coin, at: live.at, version: live.version ?? null, rate: r?.median ?? null, rateAt: r?.t ?? null, ask: side('ask'), bid: side('bid'), markets: COINS.map((c) => ({ tick: c.tick, name: c.name, unit: c.unit })) }
 	const ready = live.ask.ready && live.bid.ready
 	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': ready ? `public, max-age=${BOOK_TTL_S}` : 'no-store' } })
 	if (ready) ctx.waitUntil(caches.default.put(key, res.clone()))
