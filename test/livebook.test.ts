@@ -229,3 +229,30 @@ test('retraso del feed: mediana, 90 % y el peor', () => {
 	assert.equal(lagStats([]), null)
 	assert.deepEqual(lagStats([300, 100, 200, 5000, 400, 250, 150, 350, 450, 120]), { n: 10, p50: 300, p90: 5000, max: 5000 })
 })
+
+test('foto del libro: mejor precio sin lo atípico ni lo solo-VIP, USD cerca del mejor, concentración, frescura y precio de tomar 100 y 500', () => {
+	const b = new Book()
+	const sell = (uuid: string, usd: number, price: number, s: number, extra: Partial<FeedEvent['data']> = {}) =>
+		b.apply(ev('p2p.created', { uuid, amount: String(usd), receive: String(usd * price), owner_uuid: `u-${uuid}`, ...extra }, s), T)
+	sell('vip', 50, 1040, 0, { only_vip: true })
+	sell('a', 60, 1050, -600)
+	sell('b', 40, 1055, -1200, { owner_uuid: 'u-a' })
+	sell('c', 300, 1080, -60)
+	sell('d', 500, 1200, -30)
+	sell('typo', 10, 105, 0)
+	const s = b.stats('BANK_CUP', 'ask', 1060, T)
+	assert.deepEqual([s.offers, s.outliers, s.best, s.usd], [5, 1, 1050, 950])
+	// Hasta un 1 % del mejor (1,060.50): la solo-VIP y las dos de @a; hasta un 3 %, también la de 1,080
+	assert.deepEqual([s.usd1, s.usd3], [150, 450])
+	// El que más tiene es @d (500 de 950); los tres primeros, d + c + a(100)
+	assert.deepEqual([s.top1, s.top3], [0.526, 0.947])
+	// Las cinco con su último cambio hace 0, 10, 20, 1 y 0.5 min: la mediana, 1
+	assert.equal(s.age, 1)
+	// 100 USD: 60 a 1,050 y 40 a 1,055 (la solo-VIP no la toma cualquiera); 500: además 300 a 1,080 y 100 a 1,200
+	assert.equal(s.fill100, 1052)
+	assert.equal(s.fill500, (60 * 1050 + 40 * 1055 + 300 * 1080 + 100 * 1200) / 500)
+	// Sin referencia nada es atípico; un lado vacío no tiene mejor precio ni concentración
+	assert.equal(b.stats('BANK_CUP', 'ask', null, T).outliers, 0)
+	const empty = b.stats('BANK_CUP', 'bid', 1060, T)
+	assert.deepEqual([empty.offers, empty.best, empty.usd, empty.top1, empty.age, empty.fill100], [0, null, 0, null, null, null])
+})

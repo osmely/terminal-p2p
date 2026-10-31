@@ -5,7 +5,7 @@
 // las mismas de los cobros de Pro). Sin feed (o si se corta), esas credenciales leen el libro cada pocos segundos.
 // Solo ofertas públicas del mercado: nada de ningún usuario del terminal pasa por aquí
 
-import { COINS, toLevel, type Level } from '../src/terminal/market.ts'
+import { COINS, isOutlier, toLevel, type Level } from '../src/terminal/market.ts'
 import { num, type P2POffer } from '../src/qvapay/types.ts'
 import { hex, hmac } from './crypto.ts'
 import type { D1 } from './rates.ts'
@@ -144,6 +144,22 @@ export interface Owner {
 
 const ts = (v?: string | null) => (v ? Date.parse(v) || 0 : 0)
 export const sideKey = (coin: string, side: Side) => `${coin}:${side}`
+const round = (n: number, d: number) => Math.round(n * 10 ** d) / 10 ** d
+
+// La foto de un lado del libro (Book.stats, tabla book_stats)
+export interface BookStat {
+	offers: number
+	outliers: number
+	best: number | null
+	usd: number
+	usd1: number
+	usd3: number
+	top1: number | null
+	top3: number | null
+	age: number | null
+	fill100: number | null
+	fill500: number | null
+}
 
 // ── El libro (sin nada de Cloudflare: se prueba en Node) ─────────────
 
@@ -350,6 +366,48 @@ export class Book {
 		return n
 	}
 
+	// La foto de un lado para el histórico del libro (bookstats.ts): solo números del mercado, sin ofertas ni usuarios.
+	// Lo atípico respecto a la referencia (la mediana de lo completado) no cuenta
+	stats(coin: string, side: Side, ref: number | null, now = Date.now()): BookStat {
+		const all = [...this.offers.values()].filter((o) => o.coin === coin && o.side === side)
+		const list = all.filter((o) => !isOutlier(o.price, ref, side)).sort((a, b) => (side === 'ask' ? a.price - b.price : b.price - a.price) || a.createdAt - b.createdAt)
+		const open = list.filter((o) => !o.onlyVip)
+		const best = open[0]?.price ?? null
+		const sum = (xs: LiveOffer[]) => xs.reduce((t, o) => t + o.usd, 0)
+		const near = (pct: number) => (best === null ? 0 : sum(list.filter((o) => (side === 'ask' ? o.price <= best * (1 + pct) : o.price >= best * (1 - pct)))))
+		const usd = sum(list)
+		const byOwner = new Map<string, number>()
+		for (const o of list) byOwner.set(o.owner || o.uuid, (byOwner.get(o.owner || o.uuid) ?? 0) + o.usd)
+		const shares = [...byOwner.values()].sort((a, b) => b - a)
+		const ages = list.slice(0, 10).map((o) => now - o.updatedAt).sort((a, b) => a - b)
+		const age = ages.length ? Math.round((ages.length % 2 ? ages[(ages.length - 1) / 2] : (ages[ages.length / 2 - 1] + ages[ages.length / 2]) / 2) / 60_000) : null
+		// Precio medio de tomar tantos USD, de la mejor hacia atrás (las que puede tomar cualquiera)
+		const fill = (want: number) => {
+			let got = 0
+			let paid = 0
+			for (const o of open) {
+				const take = Math.min(o.usd, want - got)
+				got += take
+				paid += take * o.price
+				if (got >= want) return round(paid / want, 4)
+			}
+			return null
+		}
+		return {
+			offers: list.length,
+			outliers: all.length - list.length,
+			best,
+			usd: round(usd, 2),
+			usd1: round(near(0.01), 2),
+			usd3: round(near(0.03), 2),
+			top1: usd > 0 ? round(shares[0] / usd, 3) : null,
+			top3: usd > 0 ? round(shares.slice(0, 3).reduce((t, x) => t + x, 0) / usd, 3) : null,
+			age,
+			fill100: fill(100),
+			fill500: fill(500),
+		}
+	}
+
 	prune(now = Date.now()) {
 		for (const [k, t] of this.gone)
 			if (now - t > GONE_KEEP_MS) {
@@ -482,6 +540,19 @@ export async function liveClients(env: LiveEnv): Promise<LiveClient[] | null> {
 		.fetch('https://live/clients')
 		.then((r: Response) => r.json() as Promise<LiveClient[]>)
 		.catch(() => null)
+}
+
+// La foto de todos los mercados para el histórico del libro, con la referencia de lo atípico de cada uno. Solo los lados
+// completos; stale: el feed estaba parado
+export type BookRefs = Record<string, { ask: number | null; bid: number | null }>
+export interface BookSnapshot {
+	stale: boolean
+	sides: { coin: string; side: Side; stat: BookStat }[]
+}
+export async function liveSnapshot(env: LiveEnv, refs: BookRefs): Promise<BookSnapshot | null> {
+	if (!env.LIVE) return null
+	const r = await liveStub(env).fetch('https://live/snapshot', { method: 'POST', body: JSON.stringify({ refs }) })
+	return r.ok ? ((await r.json()) as BookSnapshot) : null
 }
 
 export async function liveStatus(env: LiveEnv): Promise<LiveState | null> {

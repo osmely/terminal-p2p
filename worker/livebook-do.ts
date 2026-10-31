@@ -7,7 +7,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
-import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, tradeOf, type Act, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, tradeOf, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side } from './livebook.ts'
 
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
 const DONE_EVERY_MS = 5 * 60_000
@@ -98,6 +98,7 @@ export class LiveBook {
 		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
 		if (url.pathname === '/offer') return Response.json(this.book.find(url.searchParams.get('id') ?? ''))
 		if (url.pathname === '/status') return Response.json(this.state())
+		if (url.pathname === '/snapshot' && req.method === 'POST') return Response.json(this.snapshot(((await req.json().catch(() => ({}))) as { refs?: BookRefs }).refs ?? {}))
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
 		return new Response('no encontrado', { status: 404 })
 	}
@@ -108,6 +109,16 @@ export class LiveBook {
 
 	private feedOn(now = Date.now()) {
 		return this.lastEvent !== null && now - this.lastEvent < FEED_IDLE_MS
+	}
+
+	// La foto del libro para el histórico (bookstats.ts): cada lado completo de cada mercado
+	private snapshot(refs: BookRefs): BookSnapshot {
+		const now = Date.now()
+		const sides: BookSnapshot['sides'] = []
+		for (const c of COINS)
+			for (const side of ['ask', 'bid'] as const)
+				if (this.synced.has(sideKey(c.tick, side))) sides.push({ coin: c.tick, side, stat: this.book.stats(c.tick, side, refs[c.tick]?.[side] ?? null, now) })
+		return { stale: !this.feedOn(now), sides }
 	}
 
 	// Un mercado entero para la mini app de QvaPay (solo mirar, sin cuenta): lo mismo que un terminal sin Pro. Un lado

@@ -26,6 +26,7 @@ import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveSocket, type LiveEnv } from './livebook.ts'
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
+import { recordBook } from './bookstats.ts'
 import { checkAlerts } from './ratealerts.ts'
 import { LiveBook } from './livebook-do.ts'
 import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
@@ -320,6 +321,12 @@ export default {
 			await collect(env.DB, at)
 		} catch (err) {
 			console.error(`histórico: ${(err as Error).message}`)
+		}
+		// Con la tasa nueva como referencia de lo atípico, la foto del libro para el análisis de mercado
+		try {
+			await recordBook(env as unknown as LiveEnv, at)
+		} catch (err) {
+			console.error(`histórico del libro: ${(err as Error).message}`)
 		}
 		// Con la tasa nueva guardada, los avisos de tasa de Pro por Telegram
 		if (env.TELEGRAM_BOT_TOKEN)
