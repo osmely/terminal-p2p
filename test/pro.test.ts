@@ -372,9 +372,9 @@ test('factura pagada sin que nadie la mire: la confirma la consulta de estado de
 	s.q.pay('inv-2', 'leo')
 	await settlePending(s.env, s.now(), {}, s.q.fetcher)
 	assert.equal(s.db.prepare("SELECT status FROM pro_checkouts WHERE invoice = 'inv-2'").get()?.status, 'paid')
-	// Las facturas de hace más de una hora ya no se consultan
+	// Las facturas de hace más de una hora (y su margen de 15 min) ya no se consultan
 	await s.post('/pro/checkout', { print: P3, plan: 'month', username: 'eva' })
-	s.tick(61 * 60_000)
+	s.tick(76 * 60_000)
 	const before = s.q.calls.length
 	await settlePending(s.env, s.now(), {}, s.q.fetcher)
 	assert.equal(s.q.calls.length, before)
@@ -396,6 +396,40 @@ test('si la base falla al sumar los días, el pago no queda como pagado sin ello
 	await settlePending(s.env, s.now(), {}, s.q.fetcher)
 	assert.equal(s.db.prepare("SELECT status FROM pro_checkouts WHERE invoice = 'inv-1'").get()?.status, 'paid')
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, true)
+})
+
+test('dos cambios de días a la vez en la misma cuenta se suman los dos (ninguno pisa al otro)', async () => {
+	const { addDays } = await import('../worker/pro.ts')
+	const s = setup()
+	const day = 86_400_000
+	await addDays(s.env.DB, 'ana', { kind: 'gift', days: 3, note: 'antes', actor: 'admin' }, s.now())
+	// Otro cambio se cuela entre la lectura de la cuenta y la escritura de este
+	const batch = s.env.DB.batch
+	let first = true
+	s.env.DB.batch = async (ss: Parameters<typeof batch>[0]) => {
+		if (first) {
+			first = false
+			await addDays(s.env.DB, 'ana', { kind: 'gift', days: 5, note: 'a la vez', actor: 'admin' }, s.now())
+		}
+		return batch(ss)
+	}
+	const r = await addDays(s.env.DB, 'ana', { kind: 'gift', days: 7, note: 'este', actor: 'admin' }, s.now())
+	s.env.DB.batch = batch
+	assert.equal(s.db.prepare("SELECT expires_at FROM pro_licenses WHERE uuid = 'qp:ana'").get()?.expires_at, s.now() + 15 * day)
+	assert.equal(r.before, s.now() + 8 * day)
+	assert.equal(r.after, s.now() + 15 * day)
+	// Cada movimiento con su saldo de antes y después, encadenados
+	const moves = s.db.prepare("SELECT days, expires_before AS b, expires_after AS a FROM pro_days WHERE license = 'qp:ana' ORDER BY id").all() as { days: number; b: number | null; a: number }[]
+	assert.deepEqual(moves.map((m) => [m.days, m.b === null ? null : (m.b - s.now()) / day, (m.a - s.now()) / day]), [[3, null, 3], [5, 3, 8], [7, 8, 15]])
+})
+
+test('una factura pagada en su último minuto se activa aunque no llegue el aviso de QvaPay', async () => {
+	const { settlePending } = await import('../worker/pro.ts')
+	const s = setup()
+	await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
+	s.q.pay('inv-1', 'ana')
+	await settlePending(s.env, s.now() + 65 * 60_000, {}, s.q.fetcher)
+	assert.equal(s.db.prepare("SELECT status FROM pro_checkouts WHERE invoice = 'inv-1'").get()?.status, 'paid')
 })
 
 test('si la base guarda los días pero se pierde su respuesta, el pago no se activa dos veces ni la devolución resta dos veces', async () => {

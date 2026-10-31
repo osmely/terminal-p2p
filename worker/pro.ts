@@ -149,11 +149,7 @@ export async function addDays(
 ) {
 	const id = accountOf(username)
 	const old = await db.prepare('SELECT expires_at, plan, revoked FROM pro_licenses WHERE uuid = ?').bind(id).first<{ expires_at: number; plan: string; revoked: number }>()
-	const before = old?.expires_at ?? null
 	const days = Math.trunc(m.days)
-	// Sumar cuenta desde hoy si ya había vencido; restar nunca deja la cuenta antes de hoy (ni toca una ya vencida)
-	const after =
-		days >= 0 ? Math.max(now, before ?? 0) + days * DAY_MS : before !== null && before > now ? Math.max(now, before + days * DAY_MS) : (before ?? now)
 	// El tipo de días que tiene ahora: el de lo último que sumó (los gratis permiten comprar más cuando quiera). Al
 	// devolver una compra, el de lo último que sumó y sigue en pie (si compró sobre los gratis, vuelven a ser gratis)
 	const kept =
@@ -167,17 +163,32 @@ export async function addDays(
 			: null
 	const keptPlan = kept?.kind === 'purchase' ? kept.plan : kept?.kind === 'trial' || kept?.kind === 'gift' ? kept.kind : null
 	const plan = days > 0 && m.kind !== 'adjust' ? (m.plan ?? m.kind) : (keptPlan ?? old?.plan ?? m.plan ?? m.kind)
-	// La cuenta y su movimiento van juntos (batch es una transacción): o quedan los dos o ninguno. Pagar no levanta
-	// una suspensión: los días se suman y sigue suspendida hasta que la reactives (o le devuelvas el dinero)
+	// La cuenta y su movimiento van juntos (batch es una transacción): o quedan los dos o ninguno. Los días se cuentan
+	// dentro de la base desde lo que tenga la cuenta en ese momento: si dos cambios llegan a la vez (dos facturas
+	// pagadas, un regalo mientras paga), ninguno pisa al otro. Sumar cuenta desde hoy si ya había vencido; restar nunca
+	// deja la cuenta antes de hoy (ni toca una ya vencida). Pagar no levanta una suspensión: los días se suman y sigue
+	// suspendida hasta que la reactives (o le devuelvas el dinero)
 	await db.batch([
-		old
-			? db.prepare('UPDATE pro_licenses SET username = ?, plan = ?, expires_at = ?, updated_at = ? WHERE uuid = ?').bind(username, plan, after, now, id)
-			: db.prepare('INSERT INTO pro_licenses (uuid, username, plan, expires_at, backup_hash, revoked, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 0, ?, ?)').bind(id, username, plan, after, now, now),
 		db
-			.prepare('INSERT INTO pro_days (license, kind, days, expires_before, expires_after, checkout, note, actor, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-			.bind(id, m.kind, days, before, after, m.checkout ?? null, m.note ?? null, m.actor, now),
+			.prepare(
+				`INSERT INTO pro_days (license, kind, days, expires_before, expires_after, checkout, note, actor, created_at)
+				SELECT ?1, ?2, ?3, b.e, CASE WHEN ?3 >= 0 THEN MAX(?4, COALESCE(b.e, 0)) + ?3 * ${DAY_MS} WHEN b.e > ?4 THEN MAX(?4, b.e + ?3 * ${DAY_MS}) ELSE COALESCE(b.e, ?4) END, ?5, ?6, ?7, ?4
+				FROM (SELECT (SELECT expires_at FROM pro_licenses WHERE uuid = ?1) AS e) b`,
+			)
+			.bind(id, m.kind, days, now, m.checkout ?? null, m.note ?? null, m.actor),
+		db
+			.prepare(
+				`INSERT INTO pro_licenses (uuid, username, plan, expires_at, backup_hash, revoked, created_at, updated_at)
+				VALUES (?1, ?2, ?3, (SELECT expires_after FROM pro_days WHERE license = ?1 ORDER BY id DESC LIMIT 1), NULL, 0, ?4, ?4)
+				ON CONFLICT(uuid) DO UPDATE SET username = excluded.username, plan = excluded.plan, expires_at = excluded.expires_at, updated_at = excluded.updated_at`,
+			)
+			.bind(id, username, plan, now),
 	])
-	return { license: id, before, after, suspended: !!old?.revoked }
+	const r = await db
+		.prepare('SELECT expires_before, expires_after FROM pro_days WHERE license = ? AND kind = ? AND created_at = ? AND checkout IS ? ORDER BY id DESC LIMIT 1')
+		.bind(id, m.kind, now, m.checkout ?? null)
+		.first<{ expires_before: number | null; expires_after: number }>()
+	return { license: id, before: r?.expires_before ?? null, after: r?.expires_after ?? now, suspended: !!old?.revoked }
 }
 
 // Devolver una compra: se restan sus días (los que queden, si ya gastó parte) y se apunta. Los dispositivos y el
@@ -412,12 +423,16 @@ const AMOUNT_SLACK = 0.03
 
 // Facturas pendientes de la última hora, confirmadas con QvaPay aunque nadie las esté mirando: si se
 // pidió otra después, se cerró la pestaña o el aviso de QvaPay no llegó. Lo lanza el cron cada minuto
-// (todas) y la consulta de estado de cada dispositivo (solo las suyas)
+// (todas) y la consulta de estado de cada dispositivo (solo las suyas). Con margen tras la hora de la factura, por si
+// se pagó en su último minuto y el aviso de QvaPay no llegó; y si hay más de un lote, cada minuto otras al azar, así
+// ninguna se queda sin mirar aunque haya muchas abandonadas
 const PENDING_BATCH = 25
+const SETTLE_GRACE_MS = 15 * 60_000
 export async function settlePending(env: ProEnv, now: number, who: { print?: string } = {}, fetcher: typeof fetch = fetch) {
 	const [filter, arg] = who.print ? [' AND print = ?', who.print] : ['', null]
-	const { results } = await env.DB.prepare(`SELECT * FROM pro_checkouts WHERE status = 'pending' AND created_at > ? AND invoice IS NOT NULL${filter} ORDER BY created_at DESC LIMIT ?`)
-		.bind(...(arg === null ? [now - CHECKOUT_MS, PENDING_BATCH] : [now - CHECKOUT_MS, arg, PENDING_BATCH]))
+	const since = now - CHECKOUT_MS - SETTLE_GRACE_MS
+	const { results } = await env.DB.prepare(`SELECT * FROM pro_checkouts WHERE status = 'pending' AND created_at > ? AND invoice IS NOT NULL${filter} ORDER BY RANDOM() LIMIT ?`)
+		.bind(...(arg === null ? [since, PENDING_BATCH] : [since, arg, PENDING_BATCH]))
 		.all<Checkout>()
 	for (const c of results)
 		try {
