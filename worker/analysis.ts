@@ -148,10 +148,11 @@ export function coinAnalysis(
 	now: number,
 ) {
 	// El volumen de cada día (una parte que volvió resta en su hora: nunca menos de cero)
-	const vol = new Map<string, { buy: number; sell: number }>()
+	const vol = new Map<string, { buy: number; sell: number; buyOps: number; sellOps: number }>()
 	for (const v of volume) {
-		const d = vol.get(cubaDate(v.hour)) ?? vol.set(cubaDate(v.hour), { buy: 0, sell: 0 }).get(cubaDate(v.hour))!
+		const d = vol.get(cubaDate(v.hour)) ?? vol.set(cubaDate(v.hour), { buy: 0, sell: 0, buyOps: 0, sellOps: 0 }).get(cubaDate(v.hour))!
 		d[v.side === 'buy' ? 'buy' : 'sell'] += v.usd
+		d[v.side === 'buy' ? 'buyOps' : 'sellOps'] += v.ops
 	}
 	const money = (n: number) => Math.max(0, Math.round(n * 100) / 100)
 	const days: AnalysisDay[] = rates.map((r) => {
@@ -173,6 +174,15 @@ export function coinAnalysis(
 			partial: day === today,
 		}
 	})
+	// Los días con volumen y sin tasa (QvaPay no publica la de USDCASH): las operaciones salen del feed
+	const rated = new Set(days.map((d) => d.day))
+	for (const [day, v] of vol) {
+		if (rated.has(day)) continue
+		const buyOps = Math.max(0, v.buyOps)
+		const sellOps = Math.max(0, v.sellOps)
+		days.push({ day, rate: null, buy: null, sell: null, ops: buyOps + sellOps, buyOps, sellOps, usd: money(v.buy + v.sell), buyUsd: money(v.buy), sellUsd: money(v.sell), partial: day === today })
+	}
+	days.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))
 
 	// Cuándo se opera: USD de media en cada día de la semana y hora, contando solo los días con registro de volumen
 	const heatFrom = now - HEAT_DAYS * DAY_MS

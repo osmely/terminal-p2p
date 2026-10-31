@@ -54,6 +54,33 @@ test('análisis: el cierre de cada día de Cuba, su volumen (null sin registro) 
 	assert.deepEqual(a.coins.ZELLE.days, [])
 })
 
+test('análisis: un mercado sin tasa de QvaPay (USDCASH) tiene sus días por el volumen, con las operaciones del feed', async () => {
+	const { db, d1 } = memD1()
+	db.exec(`INSERT INTO rates (coin, t, median, median_buy, median_sell, count, count_buy, count_sell, window_h) VALUES
+		('ZELLE', ${Date.parse('2026-10-30T20:00:00Z')}, 1.1, 1.09, 1.11, 10, 4, 6, 24)`)
+	db.exec(`INSERT INTO volume (coin, hour, side, ops, usd) VALUES
+		('USDCASH', ${Date.parse('2026-10-29T14:00:00Z')}, 'sell', 2, 244),
+		('USDCASH', ${Date.parse('2026-10-30T15:00:00Z')}, 'sell', 1, 200),
+		('USDCASH', ${Date.parse('2026-10-30T16:00:00Z')}, 'buy', 1, 50),
+		('ZELLE', ${Date.parse('2026-10-29T15:00:00Z')}, 'buy', 3, 90)`)
+	const a = await analysis(d1, NOW)
+	assert.deepEqual(
+		a.coins.USDCASH.days.map((d) => [d.day, d.rate, d.ops, d.buyOps, d.sellOps, d.usd, d.buyUsd, d.sellUsd]),
+		[
+			['2026-10-29', null, 2, 0, 2, 244, 0, 244],
+			['2026-10-30', null, 2, 1, 1, 250, 50, 200],
+		],
+	)
+	// Un mercado con tasa también gana los días que solo tienen volumen, en orden
+	assert.deepEqual(
+		a.coins.ZELLE.days.map((d) => [d.day, d.rate, d.usd]),
+		[
+			['2026-10-29', null, 90],
+			['2026-10-30', 1.1, null],
+		],
+	)
+})
+
 test('análisis: el libro ahora, lo normal (también cruzado) y las horas solo con 3 días o más', async () => {
 	const { db, d1 } = memD1()
 	const rows: string[] = []

@@ -142,6 +142,13 @@
 	const nameOf = (tick) => state.overview.find((c) => c.tick === tick)?.name ?? tick
 	const hhmm = (t) => new Date(t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })
 	const waiting = (what = '') => `<div class="an-wait"><b>En espera de datos</b>${what ? `<span>${what}</span>` : ''}</div>`
+	// Un mercado con días registrados y ninguna tasa: QvaPay no la publica (USDCASH sale siempre en cero)
+	const NO_RATE = 'QvaPay no publica la tasa de este mercado'
+	const noRate = (tick) => {
+		const days = coin(tick).days
+		return days.length > 0 && !days.some((d) => d.rate != null)
+	}
+	const noRateBox = () => `<div class="an-wait"><b>${NO_RATE}</b><span>Su volumen y su libro sí se registran</span></div>`
 
 	// ── Gráficos (SVG, con su tooltip) ─────────────────────────────────
 	let tipEl = null
@@ -383,7 +390,7 @@
 			if (k === 'vol') return x.usd
 			return x.usd > 0 ? x.buyUsd / x.usd : null
 		}
-		const has = (m) => k !== 'prem' || hasInformal(m.tick)
+		const has = (m) => (k !== 'prem' || hasInformal(m.tick)) && ((k !== 'idx' && k !== 'prem') || !noRate(m.tick))
 		// La serie del periodo, ya suavizada (la media usa también los días de antes del periodo)
 		const smoothed = (m) => {
 			const pre = dates(addDays(axis[0], -(an.smooth - 1)), axis[0])
@@ -428,7 +435,7 @@
 			.map((m) => {
 				const on = an.cmp.has(m.tick)
 				const off = !has(m)
-				return `<button class="an-chip ${on ? 'on' : ''}" data-an-cmp="${esc(m.tick)}" aria-pressed="${on}" ${off || (!on && an.cmp.size >= CMP_MAX) ? 'disabled' : ''} ${off ? 'title="Sin referencia en elTOQUE"' : ''}>${on && !off ? swatch(cmpStyle(m.tick)) : ''}${esc(m.name)}</button>`
+				return `<button class="an-chip ${on ? 'on' : ''}" data-an-cmp="${esc(m.tick)}" aria-pressed="${on}" ${off || (!on && an.cmp.size >= CMP_MAX) ? 'disabled' : ''} ${off ? `title="${noRate(m.tick) ? NO_RATE : 'Sin referencia en elTOQUE'}"` : ''}>${on && !off ? swatch(cmpStyle(m.tick)) : ''}${esc(m.name)}</button>`
 			})
 			.join('')
 		const groups = GROUPS.map((g) => {
@@ -514,11 +521,12 @@
 		const book = bookNow(tick, lastRate)
 		const since = s.partialStart && axis.length ? ` · datos desde el ${dShort(axis[0])}` : ''
 		const wait = '<small>En espera de datos</small>'
+		const rateWait = noRate(tick) ? `<small>${NO_RATE}</small>` : wait
 		const kpi = (k, v, sub, t = '', cls = '') => `<div class="an-kpi ${cls}"><span>${k}</span><b>${v}</b><small class="${t}">${sub}</small></div>`
 		const kpis = [
-			s.close == null ? kpi('Tasa al cierre', '—', wait) : kpi('Tasa al cierre', fmtP(s.close), `${signPct(change)} ${changeVs}`, tone(change)),
-			s.hi ? kpi('Rango', `${fmtP(s.lo.rate)}–${fmtP(s.hi.rate)}`, `Más alta el ${dShort(s.hi.day)}`, '', 'sm') : kpi('Rango', '—', wait),
-			s.move == null ? kpi('Movimiento diario', '—', wait) : kpi('Movimiento diario', `${(s.move * 100).toFixed(2)}%`, 'de media entre un día y el siguiente'),
+			s.close == null ? kpi('Tasa al cierre', '—', rateWait) : kpi('Tasa al cierre', fmtP(s.close), `${signPct(change)} ${changeVs}`, tone(change)),
+			s.hi ? kpi('Rango', `${fmtP(s.lo.rate)}–${fmtP(s.hi.rate)}`, `Más alta el ${dShort(s.hi.day)}`, '', 'sm') : kpi('Rango', '—', rateWait),
+			s.move == null ? kpi('Movimiento diario', '—', rateWait) : kpi('Movimiento diario', `${(s.move * 100).toFixed(2)}%`, 'de media entre un día y el siguiente'),
 			s.vol == null
 				? kpi('Volumen', '—', wait)
 				: kpi('Volumen', usdK(s.vol), volChange === null ? `${plural(s.volDays, 'día', 'días')} con registro` : `${signPct(volChange)} vs. periodo anterior`, volChange === null ? '' : tone(volChange)),
@@ -546,7 +554,7 @@
 					{ name: 'QvaPay (cierre del día)', cls: 'qp', values: rateVals },
 					...(cup ? [{ name: 'elTOQUE USDT', cls: 'tq', values: axis.map((d) => informalOn(d)?.usdt ?? null) }] : []),
 				])
-			: { html: waiting(), bind() {} }
+			: { html: noRate(tick) ? noRateBox() : waiting(), bind() {} }
 		const vols = rows.some((x) => x?.usd != null) ? volumeChart('anVol', axis, rows) : { html: waiting('El volumen se registra desde el 28 oct'), bind() {} }
 		const heatData = an.heat === 'vol' ? c.heatVol : c.heatBid
 		const heat = heatData && heatData.flat().some((v) => v !== null) ? heatmap('anHeat', heatData, an.heat) : { html: waiting(an.heat === 'vol' ? 'Hacen falta al menos 3 días de volumen' : 'Sale de la foto del libro cada 10 minutos: hacen falta al menos 3 días'), bind() {} }
