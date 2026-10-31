@@ -57,7 +57,7 @@ export const REFUND_DAYS = 7
 export const TRIAL_DAYS = 7
 // Topes de días gratis nuevos: por IP y día (amplio: muchos comparten IP en Cuba) y en total por día. No hacen
 // imposible inventar cuentas (el servidor no ve el token), pero lo vuelven lento y caro
-export const TRIAL_PER_IP_DAY = 10
+export const TRIAL_PER_IP_DAY = 30
 export const TRIAL_PER_DAY = 1000
 // Facturas sin pagar que puede tener abiertas una cuenta en la última hora: más es un error o un abuso, y solo
 // frena a esa cuenta. Pedir una exige la cuenta de QvaPay confirmada, así que no se pueden inventar
@@ -1091,7 +1091,8 @@ ${entries.length} ${entries.length === 1 ? 'línea' : 'líneas'} de su navegador
 			// Una licencia vieja (de días ya vencidos, pasado el margen) solo es incidencia si hoy tampoco tiene Pro
 			if (lic.e < now - GRACE_MS && !(l && !l.revoked && l.expires_at > now))
 				await recordIncident(env, { kind: 'module_expired', username: lic.n, license: lic.u, detail: `Su Pro venció el ${hDay(l?.expires_at ?? lic.e)}` }, now, fetcher)
-			if (lic.x < now || lic.e < now) return json(403, { error: 'Licencia no válida' })
+			// Sin las dos fechas no es una licencia (las otras firmas con la misma clave, como la de la cuenta, no las llevan)
+			if (!(lic.x > now) || !(lic.e > now)) return json(403, { error: 'Licencia no válida' })
 			if (!l || l.revoked) {
 				if (l?.revoked) await recordIncident(env, { kind: 'module_revoked', username: lic.n, license: lic.u }, now, fetcher)
 				return json(403, { error: 'Licencia revocada' })

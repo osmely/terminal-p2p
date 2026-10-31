@@ -238,6 +238,10 @@ test('el módulo Pro sale firmado con el usuario, y nunca sin licencia válida o
 	assert.match(mod.body, /window\.TPProUser="ana"/)
 	assert.match(mod.body, /console\.log\("pro"\)$/)
 	assert.equal((await s.get('/pro/module.js?l=falsa')).status, 403)
+	// Otra firma nuestra sin las dos fechas de la licencia (como la de la cuenta) no sirve de licencia
+	const { sign } = await import('../worker/crypto.ts')
+	const noX = await sign({ u: 'qp:ana', n: 'ana', e: s.now() + 86_400_000 }, 'clave')
+	assert.equal((await s.get(`/pro/module.js?l=${encodeURIComponent(noX)}`)).status, 403)
 	// La licencia firmada caduca en un día
 	s.tick(86_400_000 + 1)
 	assert.equal((await s.get(`/pro/module.js?l=${encodeURIComponent(result.license)}`)).status, 403)

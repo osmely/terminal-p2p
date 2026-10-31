@@ -71,7 +71,7 @@ const wantsPro = () => {
 	}
 }
 let proConnectShown = false
-const CHECKOUT_POLL_MS = 4000
+const CHECKOUT_POLL_MS = 6000
 const CHECKOUT_MAX_MS = 60 * 60_000
 const RENEW_SOON_MS = 5 * 86_400_000
 let proPolling = null
