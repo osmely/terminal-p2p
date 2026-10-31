@@ -29,7 +29,6 @@ const PRO_FEATURES = [
 	['💰', 'Ganancias', 'cuánto ganaste en cada mercado, con la comisión'],
 	['🔔', 'Avisos de tasa', 'por Telegram, cuando la tasa pasa tu precio'],
 	['📊', 'Compras, ventas y USD en el gráfico', 'hacia dónde se mueve el mercado'],
-	['📈', 'Todo el simulador', '7 mercados más en sim.terminalp2p.com'],
 ]
 // La web del mismo entorno (staging.… desde app.staging.…)
 const PRO_INFO_URL = `${/\.terminalp2p\.com$/.test(location.hostname) ? location.origin.replace('://app.', '://') : 'https://terminalp2p.com'}/blog/modo-pro/`
@@ -230,7 +229,7 @@ async function startTrial() {
 // Recién activados los días gratis
 function showFreeDays() {
 	openModal(`<div class="stack pro-box"><h3>★ Activaste tus ${proTrialDays} días de Pro gratis</h3>
-		<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente ya está activa, y en el <a class="link" href="${SIM_URL}" target="_blank" rel="noopener">simulador</a> operas todos los mercados. Cuando se acaben, puedes comprar más días desde el botón ★.</p>
+		<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente y el resto del modo Pro ya están activos. Cuando se acaben, puedes comprar más días desde el botón ★.</p>
 		<button class="btn primary block" id="proOk">Listo</button></div>`)
 	$('proOk').onclick = closeModal
 }

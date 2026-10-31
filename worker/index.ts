@@ -101,6 +101,18 @@ function miniApp(url: URL, res: Response) {
 	out.headers.delete('X-Frame-Options')
 	return out
 }
+// El simulador está desconectado: sim.* solo enseña el aviso de mantenimiento (public/sim/mantenimiento.html), su API
+// no responde y su cron no corre. Su código y sus datos siguen ahí: para volver a abrirlo, false
+const SIM_OFF = true
+async function simPaused(req: Request, url: URL, env: Env) {
+	if (url.pathname.startsWith('/api/')) return jsonError(503, 'El simulador está en mantenimiento')
+	// Los archivos compartidos (fuentes, icono) para la propia página del aviso
+	if (SHARED.some((p) => (p.endsWith('/') ? url.pathname.startsWith(p) : url.pathname === p))) return assets(req, url, env)
+	const page = await env.ASSETS.fetch(new Request(new URL('/sim/mantenimiento', url), { headers: req.headers }))
+	const out = new Response(req.method === 'HEAD' ? null : page.body, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': '86400' } })
+	out.headers.set('Content-Security-Policy', SIM_CSP)
+	return out
+}
 // El simulador usa el botón de Telegram; los precios los pide a este mismo dominio
 const SIM_CSP =
 	"default-src 'self'; script-src 'self' https://telegram.org; frame-src https://oauth.telegram.org; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://t.me https://*.telegram.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
@@ -113,6 +125,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		url.hostname = url.hostname.slice(4)
 		return Response.redirect(url.toString(), 301)
 	}
+	if (SIM_OFF && folderFor(url.hostname) === 'sim') return secure(await simPaused(req, url, env))
 
 	if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(`${RELAY_PREFIX}/`)) {
 		if (!(await underLimit(env.RELAY_LIMIT, req, await relayKey(req)))) return secure(jsonError(429, 'Demasiadas peticiones seguidas: espera unos segundos'))
@@ -268,7 +281,7 @@ export default {
 		// (si no, a las 19:49:56 se tomaría por el minuto 49 y se guardaría en la franja de las 19:40)
 		const at = Math.round(event.scheduledTime / 60_000) * 60_000
 		const tenth = (at / 60_000) % 10 === 0
-		if (env.PRO_KEY)
+		if (env.PRO_KEY && !SIM_OFF)
 			try {
 				await simCron(env.DB, Date.now())
 			} catch (err) {
