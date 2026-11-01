@@ -556,6 +556,31 @@ test('paga otra cuenta (otra sesión abierta en qvapay.com): Pro queda a nombre 
 	assert.match(await form({ action: 'refund', checkout: c2.id }), /págale <b>3.99 USD<\/b> a <b>@ana<\/b>/)
 })
 
+test('panel: comprobar una factura por su uuid (la que trae quien dice que pagó) y activarla si está pagada y sin activar', async () => {
+	const s = setup()
+	const U = (n: number) => `${n}`.repeat(8) + '-aaaa-4aaa-8aaa-' + 'a'.repeat(12)
+	// Pagada en QvaPay y aquí no consta; una sin pagar; una pagada que no es de Pro
+	s.q.invoices.set(U(1), { remote_id: 'pro-perdida', amount: 3.99, status: 'paid', PaidBy: { uuid: 'u-leo', username: 'leo' } })
+	s.q.invoices.set(U(2), { remote_id: 'pro-otra', amount: 1.99, status: 'pending', PaidBy: null })
+	s.q.invoices.set(U(3), { remote_id: 'otra-cosa', amount: 5, status: 'paid', PaidBy: { uuid: 'u-eva', username: 'eva' } })
+	const admin = (fields?: Record<string, string>) =>
+		proAdmin(new Request('https://app.terminalp2p.com/admin/pro?view=pagos', { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }), s.env, s.now(), s.q.fetcher).then((r) => r.text())
+	const check = (invoice: string) => admin({ action: 'invoice-check', invoice })
+	assert.match(await admin(), /Comprobar una factura/)
+	// Vale el enlace de la factura, en mayúsculas o no
+	let html = await check(`https://www.qvapay.com/pay/${U(1).toUpperCase()}`)
+	assert.match(html, /3.99 USD[\s\S]*pagada por <b>@leo<\/b> y <b>sin activar<\/b> \(no consta aquí\)/)
+	assert.match(html, /Activar para @leo/)
+	assert.match(await check(U(2)), /<b>no está pagada<\/b> \(estado «pending»\)/)
+	assert.match(await check(U(3)), /pagada por <b>@eva<\/b>, pero <b>no es una factura de Pro<\/b>/)
+	assert.match(await check(U(4)), /QvaPay no la encuentra/)
+	assert.match(await check('no sé'), /Pega el uuid/)
+	// Solo mirar no queda en el registro; activarla sí
+	assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM pro_audit WHERE action = 'invoice-check'").get()?.n, 0)
+	assert.match(await admin({ action: 'recover', invoice: U(1) }), /Recuperada: 30 días para @leo/)
+	assert.match(await check(U(1)), /<b>ya está activada<\/b>: 30 días para <a href="\/admin\/pro\?u=leo"><b>@leo<\/b><\/a> desde el/)
+})
+
 test('repaso diario con QvaPay: activa un pago que se quedó sin activar y recupera uno que aquí no consta', async () => {
 	const { reconcile, recover } = await import('../worker/pro.ts')
 	const s = setup()

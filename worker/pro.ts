@@ -661,6 +661,29 @@ export async function recover(env: ProEnv, invoice: string, now: number, fetcher
 	return { username: t.PaidBy.username, plan }
 }
 
+// Una factura que alguien dice haber pagado, por su uuid o el enlace que lo lleva: lo que dice QvaPay de ella y lo
+// que consta aquí. No cambia nada (activarla es «recover»)
+const INVOICE_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+export async function invoiceFacts(env: ProEnv, input: string, fetcher: typeof fetch = fetch) {
+	const invoice = input.match(INVOICE_ID)?.[0].toLowerCase()
+	if (!invoice) throw new ProError(400, 'Pega el uuid de la factura o el enlace que lo lleva.')
+	let t: Transaction | undefined
+	try {
+		t = (await qvapay<{ transaction?: Transaction }>(env, `/v2/transactions/${invoice}`, {}, fetcher)).transaction
+	} catch (err) {
+		if (err instanceof ProError && err.status === 502) throw new ProError(404, `QvaPay no la encuentra entre las facturas de la app (${err.message}).`)
+		throw err
+	}
+	if (!t) throw new ProError(404, 'QvaPay no la encuentra entre las facturas de la app.')
+	const ours = !!t.remote_id?.startsWith('pro-')
+	const known = ours
+		? await env.DB.prepare('SELECT c.*, l.username AS owner FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license WHERE c.id = ?')
+				.bind(t.remote_id)
+				.first<Checkout & { refunded_at: number | null; owner: string | null }>()
+		: null
+	return { invoice, paid: t.status === 'paid', status: t.status ?? '?', amount: Number(t.amount), payer: t.PaidBy?.username ?? null, createdAt: Date.parse(t.created_at ?? '') || null, ours, known }
+}
+
 // Todas las tablas de Pro (sin los códigos de respaldo por recoger, que se ven una sola vez)
 // La copia de cada día: en el KV (en claro, 120 días) y, cifrada, a tu grupo de avisos por Telegram (backup.ts). Los
 // domingos (hora de Cuba) la de Telegram es la completa, de toda la base
@@ -1932,6 +1955,8 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 				} catch (err) {
 					notice = `<p class="note">No se pudo recuperar: ${escHtml((err as Error).message)}</p>`
 				}
+			// Una factura por su uuid (la que trae quien dice que pagó): solo se mira, no se apunta en el registro
+			if (action === 'invoice-check') notice = invoiceHtml(await invoiceFacts(env, String(f.get('invoice') ?? ''), fetcher))
 			// Comprobar a mano una factura sin pagar (también las de hace más de una hora, que el cron ya no mira)
 			if (action === 'check') {
 				const c = await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(String(f.get('checkout') ?? '')).first<Checkout>()
@@ -2279,8 +2304,28 @@ async function movesPanel(env: ProEnv, q = '', url?: URL) {
 	)
 }
 
+// Lo que se sabe de una factura, para quien dice que pagó: si no es un problema de la factura, se ve aquí
+function invoiceHtml(r: Awaited<ReturnType<typeof invoiceFacts>>) {
+	const head = `Factura ${proShort(r.invoice)}: ${proUsd(r.amount)}${r.createdAt ? `, creada el ${hWhen(r.createdAt)}` : ''}.`
+	if (!r.paid) return `<p class="note">${head} QvaPay dice que <b>no está pagada</b> (estado «${escHtml(r.status)}»): no hay pago que activar.</p>`
+	const by = `pagada por <b>@${escHtml(r.payer ?? '?')}</b>`
+	if (!r.ours) return `<p class="note">${head} Está ${by}, pero <b>no es una factura de Pro</b>: no da días.</p>`
+	const c = r.known
+	if (c?.status === 'paid')
+		return `<p class="note">${head} Está ${by} y <b>ya está activada</b>: ${escHtml(PLANS[c.plan]?.name ?? c.plan)} para ${c.owner ? userLink(c.owner) : '?'}${c.paid_at ? ` desde el ${hWhen(c.paid_at)}` : ''}${c.refunded_at ? `, devuelta el ${hDay(c.refunded_at)}` : ''}.</p>`
+	return `<p class="note">${head} Está ${by} y <b>sin activar</b>${c ? '' : ' (no consta aquí)'}.</p>
+		<form method="post" class="row"><input type="hidden" name="invoice" value="${escHtml(r.invoice)}"><button name="action" value="recover">Activar para @${escHtml(r.payer ?? '?')}</button></form>`
+}
+
+const invoicePanel = () =>
+	panel(
+		'Comprobar una factura',
+		`<form method="post" class="row"><input type="hidden" name="action" value="invoice-check"><input name="invoice" placeholder="uuid de la factura o su enlace" required style="flex:1 1 300px"><button>Comprobar</button></form>`,
+		{ sub: 'Para quien dice que pagó y no se le activó: lo que dice QvaPay de esa factura y si ya consta aquí. Si está pagada y sin activar, se puede activar desde aquí' },
+	)
+
 async function paymentsPage(env: ProEnv, flash: string, now: number, url: URL) {
-	return proPage(env, 'pro-pagos', 'Pagos de Pro', `${pageHead('Pagos', 'Quién pagó lo confirma QvaPay. Desde aquí se devuelve una compra: se le quitan sus días y luego haces tú la transferencia.', proSearch())}${flash}${await paymentsPanel(env, now, '', url)}${await unpaidPanel(env, now)}`)
+	return proPage(env, 'pro-pagos', 'Pagos de Pro', `${pageHead('Pagos', 'Quién pagó lo confirma QvaPay. Desde aquí se devuelve una compra: se le quitan sus días y luego haces tú la transferencia.', proSearch())}${flash}${invoicePanel()}${await paymentsPanel(env, now, '', url)}${await unpaidPanel(env, now)}`)
 }
 
 // Las cuentas con el terminal restringido o bloqueado ahora mismo, y el formulario para cualquier usuario
