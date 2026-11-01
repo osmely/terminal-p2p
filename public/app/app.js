@@ -922,12 +922,23 @@ let usdtSeries = null
 let historyDrawn = null
 let historyKey = ''
 const DAY_MS = 86_400_000
-const shortDay = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'America/Havana' })
+// Hora de Cuba: UTC-4 en verano (del segundo domingo de marzo al primer domingo de noviembre) y UTC-5 en invierno.
+// El verano de 2026 sigue hasta el 7 nov 2027 (Cuba no atrasó el reloj) y los navegadores aún dicen UTC-5 para
+// America/Havana: se calcula aquí, igual que en el servidor (worker/rates.ts)
+function cubaOffset(ms) {
+	const sunday = (y, m, nth) => Date.UTC(y, m, 1 + ((7 - new Date(Date.UTC(y, m, 1)).getUTCDay()) % 7) + (nth - 1) * 7, 5)
+	const summer = (y) => [sunday(y, 2, 2), y === 2026 ? sunday(2027, 10, 1) : sunday(y, 10, 1)]
+	const y = new Date(ms).getUTCFullYear()
+	return [summer(y), summer(y - 1)].some(([a, b]) => ms >= a && ms < b) ? -4 * 3_600_000 : -5 * 3_600_000
+}
+// Un instante pasado a la hora de Cuba, para formatearlo con timeZone: 'UTC'
+const inCuba = (ms) => new Date(ms + cubaOffset(ms))
+const shortDay =(ms) => inCuba(ms).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'UTC' })
 
 const showInformal = () => INFORMAL_MARKETS.has(state.coin) && (state.history?.informal?.length ?? 0) > 0
 
 // Leyenda: operaciones y tasa informal del día bajo el cursor o, si no, del último día
-const cubaTime = (ms) => new Date(ms).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Havana' })
+const cubaTime = (ms) => inCuba(ms).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
 function opsLegend(ms) {
 	const el = $('opsLegend')
 	const daily = state.history?.daily ?? []
@@ -983,7 +994,7 @@ function drawHistory() {
 		historyChart.priceScale('right').applyOptions({ scaleMargins: { top: 0.08, bottom: 0.19 } })
 		historyChart.timeScale().subscribeSizeChange(fitHistory)
 		historyChart.subscribeCrosshairMove((p) => {
-			const ms = p.time ? (p.time - -new Date().getTimezoneOffset() * 60) * 1000 : null
+			const ms = p.time ? p.time * 1000 - cubaOffset(Date.now()) : null
 			opsLegend(ms)
 			volTags(ms)
 		})
@@ -994,7 +1005,8 @@ function drawHistory() {
 	const informal = (showInformal() && state.history?.informal) || []
 	if (state.history !== historyDrawn) {
 		historyDrawn = state.history
-		const tz = -new Date().getTimezoneOffset() * 60
+		// El eje en hora de Cuba, la misma para todo el gráfico (con la de cada punto, un cambio de hora repetiría horas)
+		const tz = cubaOffset(Date.now()) / 1000
 		const points = state.history?.points ?? []
 		const series = (key) => points.filter((p) => p[key] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[key] }))
 		bidSeries.setData(series('buy'))
@@ -1014,12 +1026,12 @@ function drawHistory() {
 	const vol = state.history?.volume
 	const bars = vol ? `operaciones ${vol.bucketMs === 3600000 ? 'por hora' : 'cada 6 h'}` : 'operaciones por día'
 	$('chartNote').textContent = first
-		? `Tasa de lo completado · barras: ${bars}${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${volLine() ? ' · línea: USD operados' : ''}${src} · desde el ${new Date(first).toLocaleDateString('es')}`
+		? `Tasa de lo completado · barras: ${bars}${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${volLine() ? ' · línea: USD operados' : ''}${src} · hora de Cuba · desde el ${inCuba(first).toLocaleDateString('es', { timeZone: 'UTC' })}`
 		: informal.length
 			? 'Mercado informal según elTOQUE, por día · aún no hay histórico de QvaPay en este mercado'
 			: 'Aún no hay histórico de este mercado'
 	$('chartNote').title =
-		'Líneas continuas: tasa de las operaciones completadas en QvaPay en las últimas 24 h. ' +
+		'Líneas continuas: tasa de las operaciones completadas en QvaPay en las últimas 24 h. Horas y días, en hora de Cuba, se abra desde donde se abra. ' +
 		(vol
 			? `Barras: operaciones ${vol.bucketMs === 3600000 ? 'de cada hora' : 'de cada 6 horas'} desde el ${shortDay(vol.since)}; antes, el promedio de cada día, más tenue. La más clara es la que está en curso.`
 			: 'Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.') +
@@ -1093,7 +1105,7 @@ function volTags(ms) {
 }
 
 // Fecha de Cuba (AAAA-MM-DD) de un instante: así agrupa el servidor las operaciones por día
-const cubaDate = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Havana' })
+const cubaDate = (ms) => inCuba(ms).toLocaleDateString('en-CA', { timeZone: 'UTC' })
 
 // Serie propia del gráfico para las operaciones por día. Con barras de la librería, un día de 7 o 30 días eran
 // decenas de rayas finas con huecos; aquí los puntos seguidos del mismo día se pintan como un solo bloque sólido,

@@ -129,7 +129,8 @@ test('análisis: el cron lo deja hecho en el KV', async () => {
 
 test('análisis: entero a las 3:00 de Cuba (con y sin horario de verano); cada hora, solo la foto del libro', async () => {
 	assert.equal(isAnalysisTime(Date.parse('2026-10-31T07:00:00Z')), true) // UTC−4
-	assert.equal(isAnalysisTime(Date.parse('2026-11-05T08:00:00Z')), true) // UTC−5
+	assert.equal(isAnalysisTime(Date.parse('2026-11-05T07:00:00Z')), true) // UTC−4: Cuba no atrasó el reloj en 2026
+	assert.equal(isAnalysisTime(Date.parse('2027-11-10T08:00:00Z')), true) // UTC−5
 	assert.equal(isAnalysisTime(Date.parse('2026-10-31T07:10:00Z')), false)
 	assert.equal(isAnalysisTime(Date.parse('2026-10-31T08:00:00Z')), false)
 	const { db, d1 } = memD1()

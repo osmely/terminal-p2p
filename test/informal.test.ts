@@ -22,10 +22,12 @@ test('día de Cuba y mediodía, con el horario de verano', () => {
 	// 03:30 UTC del 23 de octubre son las 23:30 del 22 en Cuba (UTC-4)
 	assert.equal(cubaDate(Date.parse('2026-10-23T03:30:00Z')), '2026-10-22')
 	assert.equal(cubaDate(Date.parse('2026-10-23T04:30:00Z')), '2026-10-23')
-	// En diciembre Cuba está en UTC-5
-	assert.equal(cubaDate(Date.parse('2026-12-16T04:30:00Z')), '2026-12-15')
+	// En invierno Cuba está en UTC-5 (el de 2026-27 no: Cuba no atrasó el reloj)
+	assert.equal(cubaDate(Date.parse('2026-12-16T04:30:00Z')), '2026-12-16')
+	assert.equal(cubaDate(Date.parse('2027-12-16T04:30:00Z')), '2027-12-15')
 	assert.equal(new Date(noonCuba('2026-10-22')).toISOString(), '2026-10-22T16:00:00.000Z')
-	assert.equal(new Date(noonCuba('2026-12-15')).toISOString(), '2026-12-15T17:00:00.000Z')
+	assert.equal(new Date(noonCuba('2026-12-15')).toISOString(), '2026-12-15T16:00:00.000Z')
+	assert.equal(new Date(noonCuba('2027-12-15')).toISOString(), '2027-12-15T17:00:00.000Z')
 })
 
 // D1 de mentira: guarda las filas en un Map y responde a la consulta de días cerrados
@@ -94,7 +96,7 @@ test('el cron guarda hoy y rellena primero los días recientes que faltan', asyn
 })
 
 test('días con cambio de hora: elTOQUE no acepta intervalos de 24 h o más', () => {
-	assert.deepEqual([dayHours('2025-11-02'), dayHours('2026-03-08'), dayHours('2026-10-23'), dayHours('2026-11-01')], [25, 23, 24, 25])
+	assert.deepEqual([dayHours('2025-11-02'), dayHours('2026-03-08'), dayHours('2026-10-23'), dayHours('2026-11-01'), dayHours('2027-11-07')], [25, 23, 24, 24, 25])
 	assert.deepEqual(dayRange('2025-11-02'), { from: '2025-11-02 00:00:01', to: '2025-11-02 22:59:59' })
 	assert.deepEqual(dayRange('2026-10-23'), { from: '2026-10-23 00:00:01', to: '2026-10-23 23:59:59' })
 })

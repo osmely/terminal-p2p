@@ -2,13 +2,13 @@
 // Solo presencia (quién y cuánto, con Pro o no), nunca qué mercados mira cada uno. Se borra a los 90 días
 
 import type { LiveClient } from './livebook.ts'
-import type { D1 } from './rates.ts'
+import { inCuba, type D1 } from './rates.ts'
 
 export const SLOT_MS = 10 * 60_000
 const KEEP_MS = 90 * 86_400_000
 
 // AAAA-MM-DD en Cuba
-export const cubaDate = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Havana' })
+export const cubaDate = (ms: number) => inCuba(ms).toLocaleDateString('en-CA', { timeZone: 'UTC' })
 
 // Lo que hay conectado ahora, por cuenta (una cuenta con dos pestañas cuenta una vez)
 export function presence(clients: LiveClient[]) {

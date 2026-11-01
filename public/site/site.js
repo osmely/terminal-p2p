@@ -67,7 +67,16 @@ async function loadInformal() {
 }
 
 // En números: lo publicado, tomado y completado desde el terminal (/data/stats, anónimo y cacheado 10 min)
-const cubaDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/Havana' })
+// Hora de Cuba: UTC-4 en verano y UTC-5 en invierno. El verano de 2026 sigue hasta el 7 nov 2027 (Cuba no atrasó
+// el reloj) y los navegadores aún dicen UTC-5 para America/Havana: se calcula aquí, igual que en el servidor
+function cubaOffset(ms) {
+	const sunday = (y, m, nth) => Date.UTC(y, m, 1 + ((7 - new Date(Date.UTC(y, m, 1)).getUTCDay()) % 7) + (nth - 1) * 7, 5)
+	const summer = (y) => [sunday(y, 2, 2), y === 2026 ? sunday(2027, 10, 1) : sunday(y, 10, 1)]
+	const y = new Date(ms).getUTCFullYear()
+	return [summer(y), summer(y - 1)].some(([a, b]) => ms >= a && ms < b) ? -4 * 3_600_000 : -5 * 3_600_000
+}
+const inCuba = (ms) => new Date(ms + cubaOffset(ms))
+const cubaDay =(ms) => inCuba(ms).toLocaleDateString('en-CA', { timeZone: 'UTC' })
 const dayName = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('es', { day: 'numeric', month: 'short' })
 const whole = (n) => Math.round(n).toLocaleString('en-US')
 async function loadStats() {
@@ -134,7 +143,7 @@ const SERIES = [
 	['usd', 'USD efectivo (elTOQUE)'],
 ]
 const SVG_NS = 'http://www.w3.org/2000/svg'
-const whenOf = (t) => new Date(t).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+const whenOf = (t) => inCuba(t).toLocaleString('es', { timeZone: 'UTC', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 async function loadTasaChart() {
 	const box = $('tasaChart')
 	let d
@@ -183,7 +192,7 @@ async function loadTasaChart() {
 	for (let i = 0; i <= days; i += every) {
 		const t = t0 + i * 86_400_000
 		if (x(t) > W - pad.r - 20) break
-		svg += `<text class="ax" x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : 'middle'}">${new Date(t).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short' })}</text>`
+		svg += `<text class="ax" x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : 'middle'}">${inCuba(t).toLocaleDateString('es', { timeZone: 'UTC', day: 'numeric', month: 'short' })}</text>`
 	}
 	for (const [k] of SERIES) if (lines[k].length > 1) svg += `<path class="ln ${k}" d="${lines[k].map(([t, v], i) => `${i ? 'L' : 'M'}${x(t).toFixed(1)},${y(v).toFixed(1)}`).join('')}"/>`
 	svg += `<line class="cross" id="tasaCross" y1="${pad.t}" y2="${H - pad.b}" visibility="hidden"/><g id="tasaDots"></g><rect class="hit" x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}"/></svg>`

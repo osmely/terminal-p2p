@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { bucketFor, cubaOffset, dailyFrom, rowsFrom, slot, summer, volumeBars } from '../worker/rates.ts'
+import { bucketFor, cubaOffset, dailyFrom, inCuba, rowsFrom, slot, summer, volumeBars } from '../worker/rates.ts'
 import { cacheable } from '../worker/relay.ts'
 import type { Averages } from '../src/qvapay/types.ts'
 
@@ -63,15 +63,18 @@ test('operaciones por día: un valor por día de Cuba, repartiendo las ventanas 
 	assert.equal(new Date(days[0].t).toISOString(), '2026-10-20T16:00:00.000Z')
 })
 
-test('horario de Cuba: UTC-4 del segundo domingo de marzo al primer domingo de noviembre', () => {
+test('horario de Cuba: UTC-4 del segundo domingo de marzo al primer domingo de noviembre, salvo el invierno 2026-27', () => {
 	const at = (iso: string) => Date.parse(iso)
-	assert.deepEqual(summer(2026).map((t) => new Date(t).toISOString()), ['2026-03-08T05:00:00.000Z', '2026-11-01T05:00:00.000Z'])
+	assert.deepEqual(summer(2025).map((t) => new Date(t).toISOString()), ['2025-03-09T05:00:00.000Z', '2025-11-02T05:00:00.000Z'])
+	// 2026: Cuba no atrasó el reloj el 1 de noviembre; sigue en UTC-4 hasta el fin del verano de 2027
+	assert.deepEqual(summer(2026).map((t) => new Date(t).toISOString()), ['2026-03-08T05:00:00.000Z', '2027-11-07T05:00:00.000Z'])
 	assert.deepEqual(summer(2027).map((t) => new Date(t).toISOString()), ['2027-03-14T05:00:00.000Z', '2027-11-07T05:00:00.000Z'])
 	const h = (iso: string) => cubaOffset(at(iso)) / 3600_000
-	assert.deepEqual([h('2026-03-08T04:59:59Z'), h('2026-03-08T05:00:00Z'), h('2026-10-31T23:00:00Z'), h('2026-11-01T05:00:00Z'), h('2026-12-15T12:00:00Z')], [-5, -4, -4, -5, -5])
+	assert.deepEqual([h('2025-12-15T12:00:00Z'), h('2026-03-08T04:59:59Z'), h('2026-03-08T05:00:00Z'), h('2026-11-01T05:00:00Z'), h('2026-12-15T12:00:00Z'), h('2027-01-20T12:00:00Z'), h('2027-11-07T04:59:59Z'), h('2027-11-07T05:00:00Z'), h('2028-01-10T12:00:00Z')], [-5, -5, -4, -4, -4, -4, -4, -5, -5])
+	assert.equal(inCuba(at('2026-11-01T18:30:00Z')).toISOString().slice(11, 16), '14:30')
 	// En invierno el día de Cuba empieza a las 05:00 UTC y la barra va a las 17:00 UTC
-	const [d] = dailyFrom([{ t: at('2026-12-16T04:50:00Z'), count: 24, count_buy: null, count_sell: null, window_h: 24 }], at('2026-12-20T12:00:00Z'))
-	assert.deepEqual([d.day, new Date(d.t).toISOString()], ['2026-12-15', '2026-12-15T17:00:00.000Z'])
+	const [d] = dailyFrom([{ t: at('2027-12-16T04:50:00Z'), count: 24, count_buy: null, count_sell: null, window_h: 24 }], at('2027-12-20T12:00:00Z'))
+	assert.deepEqual([d.day, new Date(d.t).toISOString()], ['2027-12-15', '2027-12-15T17:00:00.000Z'])
 })
 
 test('volumen: por hora tal cual y cada 6 h desde las 0, 6, 12 y 18 de Cuba; nunca negativo', () => {

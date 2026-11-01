@@ -95,10 +95,11 @@ export async function analysis(db: D1, now = Date.now(), usdSince = VOLUME_USD_S
 						   FROM rates
 						  WHERE coin = ?1 AND t IN (
 						        SELECT MAX(t) FROM rates WHERE coin = ?1 AND t >= ?2
-						         GROUP BY CAST((t + CASE WHEN (t >= ?3 AND t < ?4) OR (t >= ?5 AND t < ?6) THEN ${CDT} ELSE ${CST} END) / 86400000 AS INTEGER))
+						         GROUP BY CAST((t + CASE WHEN (t >= ?3 AND t < ?4) OR (t >= ?5 AND t < ?6) OR (t >= ?7 AND t < ?8) THEN ${CDT} ELSE ${CST} END) / 86400000 AS INTEGER))
 						  ORDER BY t`,
 					)
-					.bind(c.tick, since, ...summer(new Date(since).getUTCFullYear()), ...summer(new Date(now).getUTCFullYear()))
+					// Un verano alargado viene del año anterior: los de ese año, el de `since` y el de ahora
+					.bind(c.tick, since, ...summer(new Date(since).getUTCFullYear() - 1), ...summer(new Date(since).getUTCFullYear()), ...summer(new Date(now).getUTCFullYear()))
 					.all<{ t: number; median: number | null; median_buy: number | null; median_sell: number | null; count: number | null; count_buy: number | null; count_sell: number | null; window_h: number | null }>(),
 				db.prepare('SELECT hour, side, ops, usd FROM volume WHERE coin = ? AND hour >= ?').bind(c.tick, since).all<{ hour: number; side: string; ops: number; usd: number }>(),
 				db

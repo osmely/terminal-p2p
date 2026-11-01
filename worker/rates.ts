@@ -164,12 +164,18 @@ const sunday = (year: number, month: number, nth: number) => {
 	const first = new Date(Date.UTC(year, month, 1)).getUTCDay()
 	return Date.UTC(year, month, 1 + ((7 - first) % 7) + (nth - 1) * 7, 5)
 }
-// [inicio, fin) del verano de ese año, en ms UTC
-export const summer = (year: number): [number, number] => [sunday(year, 2, 2), sunday(year, 10, 1)]
+// Veranos que Cuba alargó sin atrasar el reloj en noviembre: el de 2026 sigue hasta el fin del de 2027 (7 nov 2027),
+// por el ahorro de electricidad. Los navegadores y el ICU de Cloudflare aún dicen UTC-5 para America/Havana: por eso
+// la hora de Cuba se calcula siempre con cubaOffset y nunca con timeZone: 'America/Havana'
+const KEPT = new Set([2026])
+// [inicio, fin) del verano que empieza ese año, en ms UTC
+export const summer = (year: number): [number, number] => [sunday(year, 2, 2), KEPT.has(year) ? summer(year + 1)[1] : sunday(year, 10, 1)]
 export function cubaOffset(t: number) {
-	const [start, end] = summer(new Date(t).getUTCFullYear())
-	return t >= start && t < end ? CDT : CST
+	const y = new Date(t).getUTCFullYear()
+	return [summer(y), summer(y - 1)].some(([start, end]) => t >= start && t < end) ? CDT : CST
 }
+// Un instante pasado a la hora de Cuba, para formatearlo con timeZone: 'UTC'
+export const inCuba = (t: number) => new Date(t + cubaOffset(t))
 const cubaDay = (t: number) => Math.floor((t + cubaOffset(t)) / 86_400_000)
 
 interface DayRow {

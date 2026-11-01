@@ -5,7 +5,7 @@
 
 import { hex, hmac } from './crypto.ts'
 import { tgEsc, type AlertEnv } from './alerts.ts'
-import type { D1 } from './rates.ts'
+import { inCuba, type D1 } from './rates.ts'
 
 export interface BotEnv extends AlertEnv {
 	DB: D1
@@ -17,7 +17,7 @@ const LINK_MS = 60 * 60_000
 const API = (env: BotEnv, method: string) => `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`
 
 export const appUrl = (env: AlertEnv) => (env.STAGING === '1' ? 'https://app.staging.terminalp2p.com' : 'https://app.terminalp2p.com')
-const day = (ms: number) => new Date(ms).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric' })
+const day = (ms: number) => inCuba(ms).toLocaleDateString('es', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' })
 const daysText = (n: number) => (n === 1 ? '1 día' : `${n} días`)
 const button = (text: string, url: string) => ({ inline_keyboard: [[{ text, url }]] })
 
@@ -198,7 +198,7 @@ export function cleanRadarHit(b: Record<string, unknown>): RadarHit | null {
 }
 
 const money = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
-const clock = (ms: number) => new Date(ms).toLocaleTimeString('es', { timeZone: 'America/Havana', hour: '2-digit', minute: '2-digit' })
+const clock = (ms: number) => inCuba(ms).toLocaleTimeString('es', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' })
 
 export function radarText(h: RadarHit) {
 	const m = RADAR_MARKETS[h.coin]

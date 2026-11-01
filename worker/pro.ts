@@ -9,7 +9,7 @@
 import { hex, hmac, sign, verify } from './crypto.ts'
 import { adminPage, askKey, pageHead, panel, searchIcon, type AdminTab } from './admin.ts'
 import { authorized } from './metrics.ts'
-import { cubaOffset, type D1 } from './rates.ts'
+import { cubaOffset, inCuba, type D1 } from './rates.ts'
 import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, panelUrl, tgEsc, type AlertEnv } from './alerts.ts'
 import { seal, sendBackup, snapshot } from './backup.ts'
@@ -692,7 +692,7 @@ export async function backupPro(env: ProEnv, now: number, fetcher: typeof fetch 
 	const key = `backup/pro/${new Date(now).toISOString().slice(0, 10)}`
 	await env.PRO.put(key, JSON.stringify(await snapshot(env.DB, now)), { expirationTtl: BACKUP_TTL_S })
 	try {
-		await sendBackup(env, now, fetcher, new Date(now).toLocaleString('en-US', { timeZone: 'America/Havana', weekday: 'short' }) === 'Sun')
+		await sendBackup(env, now, fetcher, inCuba(now).toLocaleString('en-US', { timeZone: 'UTC', weekday: 'short' }) === 'Sun')
 	} catch (err) {
 		console.error(`pro, copia a Telegram: ${(err as Error).message}`)
 	}
@@ -1221,8 +1221,8 @@ const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)
 // ── Panel: piezas compartidas ────────────────────────────────────────
 // Horas de Cuba, como el resto del proyecto
 const hUsd = (n: number) => `${(Math.round(n * 100) / 100).toLocaleString('en-US')} USD`
-const hWhen = (ms: number) => new Date(ms).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-const hDay = (ms: number) => new Date(ms).toLocaleDateString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', year: 'numeric' })
+const hWhen = (ms: number) => inCuba(ms).toLocaleString('es', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+const hDay = (ms: number) => inCuba(ms).toLocaleDateString('es', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' })
 const hShort = (s: string) => `<span title="${escHtml(s)}">${escHtml(s.slice(0, 8))}…</span>`
 const userLink = (u: string) => `<a href="/admin/pro?u=${encodeURIComponent(u)}"><b>@${escHtml(u)}</b></a>`
 const copyBtn = (text: string, label = 'Copiar') =>
@@ -1266,7 +1266,7 @@ function refundHtml(r: Refund & { username?: string }, u?: string) {
 // ── Actividad de una cuenta (el traceo, userlog.ts) ───────────────────
 
 const ACT_PAGE = 50
-const hWhenS = (ms: number) => new Date(ms).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const hWhenS = (ms: number) => inCuba(ms).toLocaleString('es', { timeZone: 'UTC', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 const LOG_NAME: Record<string, string> = {
 	login: '🔑 Conexión',
 	status: '👁 Terminal',
@@ -1476,7 +1476,7 @@ const daysForm = (username?: string) =>
 
 // Pagos en CSV (uno por fila, con quién pagó y su identificador en QvaPay) o copia completa de Pro en JSON
 // Mes en hora de Cuba (AAAA-MM)
-const cubaMonth = (ms: number) => new Date(ms).toLocaleString('en-CA', { timeZone: 'America/Havana', year: 'numeric', month: '2-digit' }).slice(0, 7)
+const cubaMonth = (ms: number) => inCuba(ms).toLocaleString('en-CA', { timeZone: 'UTC', year: 'numeric', month: '2-digit' }).slice(0, 7)
 
 // Las cuentas del negocio, mes a mes: lo cobrado, lo devuelto, el neto, clientes nuevos y los que repiten
 export async function proReport(db: D1, now: number) {
@@ -2151,7 +2151,7 @@ async function liveForm(env: ProEnv) {
 	if (!live.LIVE) return ''
 	const s = await liveStatus(live)
 	if (!s || typeof s.events !== 'number') return '<form class="flag"><b>Libro en tiempo real: sin respuesta</b><span class="note">El objeto del libro no contestó.</span></form>'
-	const when = (t: number | null) => (t ? new Date(t).toLocaleString('es', { timeZone: 'America/Havana', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'nunca')
+	const when = (t: number | null) => (t ? inCuba(t).toLocaleString('es', { timeZone: 'UTC', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'nunca')
 	const title = { feed: 'Libro en tiempo real: feed de QvaPay llegando', poll: 'Libro en tiempo real: sin feed, se lee con la app', off: 'Libro en tiempo real: sin feed ni credenciales' }[s.mode]
 	const notes = [
 		`${s.events.toLocaleString('en-US')} eventos del feed (el último: ${when(s.lastEvent)}).`,
@@ -2384,7 +2384,7 @@ function cubaDayRange(day: string) {
 	const from = mid - cubaOffset(mid + 12 * 3600_000)
 	return { from, to: from + 86_400_000 }
 }
-const hHM = (ms: number) => new Date(ms).toLocaleTimeString('es', { timeZone: 'America/Havana', hour: '2-digit', minute: '2-digit' })
+const hHM = (ms: number) => inCuba(ms).toLocaleTimeString('es', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' })
 const minutesText = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`)
 
 // La gráfica del día: el máximo de cuentas conectadas a la vez en cada franja de 10 minutos
@@ -2429,7 +2429,7 @@ async function livePage(env: ProEnv, flash: string, now: number, url: URL) {
 
 	// El día: la gráfica y quién estuvo
 	const peak = hist.slots.reduce((m, x) => (x.accounts > (m?.accounts ?? 0) ? x : m), null as LiveDay['slots'][number] | null)
-	const dayName = new Date(from + 12 * 3600_000).toLocaleDateString('es', { timeZone: 'America/Havana', weekday: 'long', day: 'numeric', month: 'long' })
+	const dayName = inCuba(from + 12 * 3600_000).toLocaleDateString('es', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' })
 	const shift = (d: number) => cubaDate(from + 12 * 3600_000 + d * 86_400_000)
 	const nav = `<a class="btn" href="/admin/pro?view=envivo&d=${shift(-1)}">← ${escHtml(shift(-1).slice(5).split('-').reverse().join('/'))}</a>${isToday ? '' : `<a class="btn" href="/admin/pro?view=envivo&d=${shift(1)}">${escHtml(shift(1).slice(5).split('-').reverse().join('/'))} →</a><a class="btn" href="/admin/pro?view=envivo">Hoy</a>`}`
 	const seenTable = hist.seen.length
