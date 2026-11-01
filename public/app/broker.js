@@ -7,6 +7,7 @@ const bk = {
 	openOffers: [],
 	detail: null, // { offer, order }
 	alerts: store.get('alerts', false), // notificaciones y sonido activados
+	cancelling: new Set(), // ofertas que se están cancelando ahora (su botón dice «Cancelando…»)
 }
 const BASE_TITLE = document.title
 
@@ -318,6 +319,28 @@ const NEXT = {
 	rate: ['Califica a la contraparte', false],
 }
 
+// Cancelar una oferta publicada, desde la lista o desde su ventana. Mientras QvaPay responde, su botón dice
+// «Cancelando…» y no se puede pedir otra vez: QvaPay deja cancelar una oferta cada 20 s y la siguiente espera su turno
+// sin que se viera nada, así que se pulsaba de nuevo y la repetida fallaba («no está disponible para cancelar»).
+// null si ya se estaba cancelando
+async function cancelOffer(uuid) {
+	if (bk.cancelling.has(uuid)) return null
+	bk.cancelling.add(uuid)
+	renderTrades()
+	toast('Cancelando la oferta…')
+	const slow = setTimeout(() => toast('QvaPay deja cancelar una oferta cada 20 segundos: la tuya va en cola, no hace falta pulsar otra vez'), 4000)
+	try {
+		const r = await api('/trade/action', { offer: uuid, action: 'cancel_offer' })
+		// Fuera de la lista ya, sin esperar a la próxima lectura (que no vuelva a enseñarse «Cancelar» entretanto)
+		bk.openOffers = bk.openOffers.filter((o) => o.offerUuid !== uuid)
+		return r
+	} finally {
+		clearTimeout(slow)
+		bk.cancelling.delete(uuid)
+		renderTrades()
+	}
+}
+
 function renderTrades() {
 	const active = bk.trades.filter((t) => t.status !== 'completed')
 	const done = bk.trades.filter((t) => t.status === 'completed')
@@ -366,7 +389,7 @@ function renderTrades() {
 							<td class="r num c-usd" data-l="USD">${fmtM(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(o.price)}</td><td class="r num c-total" data-l="Total">${fmtM((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
 							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? `Pausada hasta ${new Date(o.pause.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}` : 'Pausada'}</span>` : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}${window.TPProKeep?.chip(o) ?? ''}</td>
 							<td class="muted c-date">${o.updatedAt ? new Date(o.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
-							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}">Cancelar</button></td></tr>`,
+							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}" ${bk.cancelling.has(o.offerUuid) ? 'disabled>Cancelando…' : '>Cancelar'}</button></td></tr>`,
 					)
 					.join('')}</tbody></table>`
 			: '<div class="empty">No tienes ofertas publicadas. Usa «Publicar oferta» para crear una.</div>'
@@ -1190,7 +1213,7 @@ function renderManage(o) {
 				: ''
 		}
 		<div class="row-btns">
-			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? 'Volver a publicar' : 'Pausar'}</button><button class="btn danger" id="mgCancel">Cancelar oferta</button>` : ''}
+			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? 'Volver a publicar' : 'Pausar'}</button><button class="btn danger" id="mgCancel" ${bk.cancelling.has(o.offer) ? 'disabled>Cancelando…' : '>Cancelar oferta'}</button>` : ''}
 		</div>
 		${o.status === 'open' ? `<div class="share"><p class="hint">Anúnciala en tus grupos: una imagen con la oferta y un enlace que la abre en el terminal${o.isPrivate ? ' (en las privadas, quien lo abra tendrá que conectar su cuenta para verla)' : ''}</p><div class="row-btns"><button class="btn primary" id="mgShare">${ICON_SHARE} Compartir</button><input class="input" id="mgLink" readonly value="${shareLink(o.offer)}" /><button class="btn icon-only" id="mgCopy" title="Copiar enlace" aria-label="Copiar enlace">${ICON_COPY}</button></div></div>` : ''}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${o.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
@@ -1268,10 +1291,12 @@ function renderManage(o) {
 		}
 	})
 	$('mgCancel')?.addEventListener('click', async () => {
+		if (bk.cancelling.has(o.offer)) return
 		const msg = o.type === 'sell' ? 'Se retira del mercado y los USD reservados vuelven a tu saldo.' : 'Se retira del mercado.'
 		if (!(await confirmDialog('Cancelar oferta', `<p class="muted">${msg}</p>`, 'Cancelar oferta', 'danger'))) return showManageOffer(o.offer)
 		try {
-			const r = await api('/trade/action', { offer: o.offer, action: 'cancel_offer' })
+			const r = await cancelOffer(o.offer)
+			if (!r) return
 			toast(r.message || 'Oferta cancelada')
 			loadTrades()
 			loadBook()
@@ -2050,9 +2075,11 @@ function bindBroker() {
 		const cancel = e.target.closest('[data-cancel-btn]')
 		if (cancel) {
 			e.stopPropagation()
+			if (bk.cancelling.has(cancel.dataset.cancelBtn)) return
 			if (!(await confirmDialog('Cancelar oferta', '<p class="muted">Se retira del mercado y, si es de venta, tus USD vuelven a tu saldo.</p>', 'Cancelar oferta', 'danger'))) return
 			try {
-				const r = await api('/trade/action', { offer: cancel.dataset.cancelBtn, action: 'cancel_offer' })
+				const r = await cancelOffer(cancel.dataset.cancelBtn)
+				if (!r) return
 				toast(r.message || 'Oferta cancelada')
 				loadTrades()
 				loadBook()

@@ -723,6 +723,8 @@ export class Broker {
 				// abre una disputa con quien la tomó (venta) o la devuelve al mercado (compra). Solo se cancela
 				// publicada; en una por partes QvaPay ya rechaza cancelarla entera con órdenes en curso
 				const o = await c.getOffer(offer)
+				// Ya cancelada (desde otra pestaña, la web de QvaPay o un toque repetido): no hay nada que hacer
+				if (o.status === 'cancelled') return json(200, { ok: true, message: 'La oferta ya estaba cancelada' })
 				if (o.offer_kind !== 'flexible' && o.status !== 'open')
 					return json(409, { error: 'Alguien acaba de tomar tu oferta y ya no se puede cancelar: ábrela para ver la operación.', status: o.status })
 				const r = await c.cancelOrder(offer, order)

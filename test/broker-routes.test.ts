@@ -90,6 +90,12 @@ test('cancelar tu oferta: si alguien la acaba de tomar no se manda nada a QvaPay
 	assert.match(taken.body.error, /acaba de tomar/)
 	assert.equal((await post('/trade/action', { offer: 'c2', action: 'cancel_offer' })).status, 200)
 	assert.deepEqual(fake.calls, ['cancel:c2'])
+	// Ya cancelada (un toque repetido o desde otra pestaña): sale bien y no se vuelve a pedir a QvaPay
+	fake.offers.c3 = { uuid: 'c3', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10500', status: 'cancelled', User: me }
+	const again = await post('/trade/action', { offer: 'c3', action: 'cancel_offer' })
+	assert.equal(again.status, 200)
+	assert.match(again.body.message, /ya estaba cancelada/)
+	assert.deepEqual(fake.calls, ['cancel:c2'])
 })
 
 test('sin sesión no hay operaciones y los POST ajenos se rechazan', async () => {
