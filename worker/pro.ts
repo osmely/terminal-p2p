@@ -21,8 +21,9 @@ import { COINS } from '../src/terminal/market.ts'
 import { liveClients, liveSimulate, liveStatus, type LagStats, type LiveClient, type LiveEnv, type LiveState } from './livebook.ts'
 import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
 import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS } from './ratealerts.ts'
+import { offerAlertsOn, setOfferAlerts } from './offeralerts.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
-import { cleanDiag, DIAG_MAX_BYTES, DIAG_PER_DAY, diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
+import { diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
 
 export interface ProEnv extends AlertEnv {
 	DB: D1
@@ -51,8 +52,12 @@ export type Plan = keyof typeof PLANS
 // Para las consultas de cuentas con días comprados (las demás son trial y gift)
 const PAID_PLANS_SQL = Object.keys(PLANS).map((p) => `'${p}'`).join(', ')
 
-// Devolución completa en los días siguientes al primer pago (a mano: QvaPay no tiene devoluciones por API)
-export const REFUND_DAYS = 7
+// Las compras no se devuelven, salvo error en el pago (pagada dos veces, paquete equivocado…): eso lo decides tú desde el
+// panel. Para «no me convence» están los días gratis
+export const NO_REFUNDS = 'Las compras no se reembolsan. Si tienes alguna dificultad, consúltanos en el grupo de Telegram: t.me/terminalp2p'
+// Al devolver, cada día usado se cobra a lo que vale un día comprando la semana (el día más caro): así un paquete
+// largo, usado unos días y devuelto, no sale más barato que la semana. Se guarda en cada compra al pedirla
+export const USED_DAY_USD = PLANS.week.usd / PLANS.week.days
 // Los días gratis: el terminal y la web los reciben de aquí (statusOf, data-trial en worker/index.ts)
 export const TRIAL_DAYS = 7
 // Topes de días gratis nuevos: por IP y día (amplio: muchos comparten IP en Cuba) y en total por día. No hacen
@@ -101,6 +106,7 @@ interface Checkout {
 	paid_at: number | null
 	requester: string | null // la cuenta conectada al terminal que la pidió (confirmada por QvaPay al conectar)
 	payer: string | null // quien pagó, según QvaPay
+	day_usd: number | null // lo que vale cada día usado si la devuelve (el día de la semana cuando la compró)
 }
 
 export class ProError extends Error {
@@ -191,23 +197,126 @@ export async function addDays(
 	return { license: id, before: r?.expires_before ?? null, after: r?.expires_after ?? now, suspended: !!old?.revoked }
 }
 
-// Devolver una compra: se restan sus días (los que queden, si ya gastó parte) y se apunta. Los dispositivos y el
-// resto de sus días siguen igual. El dinero lo transfieres tú desde QvaPay a quien pagó
+// Cuánto se devuelve de una compra: lo que pagó menos sus días usados, cada uno a lo que vale un día de la semana
+// (USED_DAY_USD, el guardado en la compra), y nunca más que la parte de sus días que no usó. Qué días
+// quedan de cada compra sale de rehacer su libro de días (pro_days) en orden: los días se gastan en el orden en que se
+// sumaron (los gratis, regalos o compras que ya tenía van antes), y devolver una compra quita lo que le quedaba a ella,
+// con lo que las de detrás se adelantan. Solo cuentan como usados los días completos: el día en curso todavía se
+// devuelve. Se redondea a centavos hacia abajo
+export interface DayRow {
+	license: string
+	kind: string
+	days: number
+	expires_before: number | null
+	expires_after: number
+	checkout: string | null
+	created_at: number
+}
+export interface Left {
+	days: number // los que sumó la compra
+	ms: number // lo que le queda sin gastar
+}
+export function purchasesLeft(rows: DayRow[], now: number) {
+	const q: { checkout: string | null; ms: number }[] = []
+	const left = new Map<string, Left>()
+	let at = rows[0]?.created_at ?? now
+	const total = () => q.reduce((t, s) => t + s.ms, 0)
+	// El tiempo que pasa se gasta desde el principio de la cola
+	const spend = (to: number) => {
+		let ms = Math.max(0, to - at)
+		at = Math.max(at, to)
+		while (ms > 0 && q.length) {
+			const k = Math.min(ms, q[0].ms)
+			q[0].ms -= k
+			ms -= k
+			if (q[0].ms <= 0) q.shift()
+		}
+	}
+	// Restar días quita del final (lo último que se gastaría)
+	const cut = (ms: number) => {
+		while (ms > 0 && q.length) {
+			const s = q[q.length - 1]
+			const k = Math.min(ms, s.ms)
+			s.ms -= k
+			ms -= k
+			if (s.ms <= 0) q.pop()
+		}
+	}
+	for (const r of rows) {
+		spend(r.created_at)
+		// Lo que el libro dice que tenía la cuenta: manda sobre lo calculado (días que entraron sin movimiento, como los
+		// de una licencia juntada, van delante)
+		const had = Math.max(0, (r.expires_before ?? 0) - r.created_at)
+		const t = total()
+		if (had > t + 1000) q.unshift({ checkout: null, ms: had - t })
+		else if (had < t - 1000) cut(t - had)
+		const delta = Math.max(0, r.expires_after - r.created_at) - had
+		if (r.kind === 'purchase' && r.checkout) left.set(r.checkout, { days: r.days, ms: 0 })
+		if (delta > 0) q.push({ checkout: r.kind === 'purchase' ? r.checkout : null, ms: delta })
+		else if (delta < 0) {
+			let ms = -delta
+			const s = r.kind === 'refund' && r.checkout ? q.find((x) => x.checkout === r.checkout) : undefined
+			if (s) {
+				const k = Math.min(ms, s.ms)
+				s.ms -= k
+				ms -= k
+				if (s.ms <= 0) q.splice(q.indexOf(s), 1)
+			}
+			cut(ms)
+		}
+	}
+	spend(now)
+	for (const s of q) if (s.checkout && left.has(s.checkout)) left.get(s.checkout)!.ms += s.ms
+	return left
+}
+export function quoteOf(amount: number, l: Left | undefined, dayUsd: number | null = null) {
+	if (!l || !(l.days > 0)) return { days: l?.days ?? 0, used: l?.days ?? 0, unused: 0, usd: 0 }
+	const used = Math.min(l.days, Math.max(0, Math.floor((l.days * DAY_MS - l.ms) / DAY_MS)))
+	const unused = l.ms > 0 ? l.days - used : 0
+	const back = Math.min(amount - (l.days - unused) * (dayUsd ?? USED_DAY_USD), (amount * unused) / l.days)
+	return { days: l.days, used: l.days - unused, unused, usd: unused > 0 ? Math.max(0, Math.floor(back * 100 + 1e-6) / 100) : 0 }
+}
+export type Quote = ReturnType<typeof quoteOf>
+// Lo que les queda a las compras de esas cuentas (una consulta para todas)
+export async function leftOf(db: D1, licenses: string[], now: number) {
+	const ids = [...new Set(licenses.filter(Boolean))]
+	const out = new Map<string, Left>()
+	for (let i = 0; i < ids.length; i += 50) {
+		const part = ids.slice(i, i + 50)
+		const { results } = await db
+			.prepare(`SELECT license, kind, days, expires_before, expires_after, checkout, created_at FROM pro_days WHERE license IN (${part.map(() => '?').join(',')}) ORDER BY license, id`)
+			.bind(...part)
+			.all<DayRow>()
+		for (const id of part) for (const [k, v] of purchasesLeft(results.filter((r) => r.license === id), now)) out.set(k, v)
+	}
+	return out
+}
+export async function refundQuote(db: D1, checkout: string, now: number) {
+	const c = await db.prepare("SELECT license, amount, day_usd FROM pro_checkouts WHERE id = ? AND status = 'paid'").bind(checkout).first<{ license: string; amount: number; day_usd: number | null }>()
+	return c ? quoteOf(c.amount, (await leftOf(db, [c.license], now)).get(checkout), c.day_usd) : null
+}
+
+// Devolver una compra: se restan los días que no usó de ella, se apunta lo que se le devuelve (en la compra y en su
+// devolución) y se da por devuelta. Los dispositivos y el resto de sus días siguen igual. El dinero va de la cuenta de
+// la app a quien pagó (payRefund) o lo transfieres tú
 export async function refundCheckout(db: D1, checkout: string, note: string | null, now: number) {
 	const c = await db
 		.prepare("SELECT c.id, c.plan, c.amount, c.license, COALESCE(c.payer, l.username) AS payer, l.username FROM pro_checkouts c JOIN pro_licenses l ON l.uuid = c.license WHERE c.id = ? AND c.status = 'paid' AND c.refunded_at IS NULL")
 		.bind(checkout)
 		.first<{ id: string; plan: Plan; amount: number; license: string; payer: string; username: string }>()
 	if (!c) return null
-	const marked = await db.prepare('UPDATE pro_checkouts SET refunded_at = ? WHERE id = ? AND refunded_at IS NULL').bind(now, c.id).run()
+	const q = await refundQuote(db, c.id, now)
+	if (!q || !(q.usd > 0)) throw new ProError(409, 'Ya se usaron todos los días de esa compra: no queda nada que devolver')
+	const marked = await db.prepare('UPDATE pro_checkouts SET refunded_at = ?, refund_usd = ? WHERE id = ? AND refunded_at IS NULL').bind(now, q.usd, c.id).run()
 	if (!marked.meta?.changes) return null
 	try {
-		const r = await addDays(db, c.username, { kind: 'refund', days: -(PLANS[c.plan]?.days ?? 0), checkout: c.id, note, actor: 'admin' }, now)
-		return { ...c, ...r }
+		const r = await addDays(db, c.username, { kind: 'refund', days: -q.unused, checkout: c.id, note, actor: 'admin' }, now)
+		await db.prepare('UPDATE pro_refunds SET amount = ? WHERE checkout = ?').bind(q.usd, c.id).run()
+		return { ...c, ...r, refund: q }
 	} catch (err) {
 		// Sin quitarle los días no puede quedar devuelta (si no, aprobarla otra vez diría «ya se devolvió»). Salvo que la
 		// base sí los quitara y solo se perdiera su respuesta
-		if (!(await daysOf(db, c.id, 'refund'))) await db.prepare('UPDATE pro_checkouts SET refunded_at = NULL WHERE id = ?').bind(c.id).run()
+		if (!(await daysOf(db, c.id, 'refund'))) await db.prepare('UPDATE pro_checkouts SET refunded_at = NULL, refund_usd = NULL WHERE id = ?').bind(c.id).run()
 		throw err
 	}
 }
@@ -230,8 +339,9 @@ export async function statusOf(env: ProEnv, l: License | null, now: number) {
 export const planList = () => (Object.keys(PLANS) as Plan[]).map((id) => ({ id, name: PLANS[id].name, usd: PLANS[id].usd, days: PLANS[id].days }))
 
 // ── Devoluciones en pasos ────────────────────────────────────────────
-// Pedida (por el usuario desde «Mi cuenta», o por ti) → aprobada (se le quitan los días de esa compra) →
-// transferida (la haces tú en QvaPay y apuntas la referencia). O rechazada, con un motivo que el usuario ve
+// Pedida → aprobada (se le quitan los días de esa compra que no usó) → transferida (con QvaPay o la marcas tú). O
+// rechazada, con un motivo que el usuario ve. Ahora solo las haces tú (en un paso, adminRefund); las pedidas por el
+// usuario son de cuando podía pedirlas desde «Mi cuenta», y se aprueban o rechazan igual
 
 export type RefundStatus = 'requested' | 'approved' | 'transferred' | 'rejected'
 export interface Refund {
@@ -250,30 +360,28 @@ export interface Refund {
 	transfer_ref: string | null
 }
 
-// Una compra se puede devolver si está pagada, no devuelta y dentro del plazo desde la primera compra de la cuenta
-export async function refundable(db: D1, checkout: string, now: number) {
-	const c = await db
+// La compra pagada y a quién se le devolvería (quien la pagó)
+const refundable = (db: D1, checkout: string) =>
+	db
 		.prepare(
-			`SELECT c.id, c.plan, c.amount, c.license, COALESCE(c.payer, l.username) AS payee, c.refunded_at,
-				(SELECT MIN(COALESCE(f.paid_at, f.created_at)) FROM pro_checkouts f WHERE f.license = c.license AND f.status = 'paid') AS first_paid
+			`SELECT c.id, c.plan, c.amount, c.license, COALESCE(c.payer, l.username) AS payee, c.refunded_at
 			FROM pro_checkouts c JOIN pro_licenses l ON l.uuid = c.license WHERE c.id = ? AND c.status = 'paid'`,
 		)
 		.bind(checkout)
-		.first<{ id: string; plan: Plan; amount: number; license: string; payee: string; refunded_at: number | null; first_paid: number | null }>()
-	if (!c) return null
-	return { ...c, inTime: c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS }
-}
+		.first<{ id: string; plan: Plan; amount: number; license: string; payee: string; refunded_at: number | null }>()
 
 export async function requestRefund(db: D1, license: string, checkout: string, reason: string, by: 'user' | 'admin', now: number) {
-	const c = await refundable(db, checkout, now)
+	const c = await refundable(db, checkout)
 	if (!c || c.license !== license) throw new ProError(404, 'Esa compra no es tuya o no existe')
 	if (c.refunded_at) throw new ProError(409, 'Esa compra ya se devolvió')
 	if (await db.prepare('SELECT 1 FROM pro_refunds WHERE checkout = ?').bind(checkout).first()) throw new ProError(409, 'Ya pediste la devolución de esa compra')
-	if (by === 'user' && !c.inTime) throw new ProError(409, `La devolución se pide en los ${REFUND_DAYS} días siguientes a tu primera compra. Escríbenos a @terminalp2p si es otra cosa.`)
+	// Lo que se devolvería hoy (al aprobarla se calcula otra vez, con los días que entonces queden)
+	const q = await refundQuote(db, checkout, now)
+	if (!q || !(q.usd > 0)) throw new ProError(409, 'Ya usaste todos los días de esa compra: no queda nada que devolver')
 	const id = `rf-${crypto.randomUUID()}`
 	await db
 		.prepare("INSERT INTO pro_refunds (id, checkout, license, amount, payee, status, reason, requested_by, requested_at) VALUES (?, ?, ?, ?, ?, 'requested', ?, ?, ?)")
-		.bind(id, checkout, license, c.amount, c.payee, reason.slice(0, 300) || null, by, now)
+		.bind(id, checkout, license, q.usd, c.payee, reason.slice(0, 300) || null, by, now)
 		.run()
 	return id
 }
@@ -294,7 +402,7 @@ export async function approveRefund(db: D1, id: string, note: string | null, now
 // Devolver directamente desde el panel (te lo pidió por Telegram): se apunta como pedida por ti y aprobada. Si
 // antes la rechazaste y cambias de idea, la misma devolución vuelve a pedida y se aprueba
 export async function adminRefund(db: D1, checkout: string, note: string | null, now: number) {
-	const c = await refundable(db, checkout, now)
+	const c = await refundable(db, checkout)
 	if (!c || c.refunded_at) throw new ProError(409, 'Ese pago no existe o ya se devolvió')
 	const old = await db.prepare('SELECT id, status FROM pro_refunds WHERE checkout = ?').bind(checkout).first<{ id: string; status: RefundStatus }>()
 	if (old?.status === 'rejected')
@@ -543,8 +651,8 @@ export async function recover(env: ProEnv, invoice: string, now: number, fetcher
 	const plan = known?.plan ?? (Object.keys(PLANS) as Plan[]).find((p) => Math.abs(PLANS[p].usd - Number(t.amount)) <= PLANS[p].usd * AMOUNT_SLACK + 0.005)
 	if (!plan) throw new ProError(400, `Importe sin días asociados: ${t.amount} USD. Dale los días a mano desde su ficha.`)
 	if (!known)
-		await env.DB.prepare("INSERT OR IGNORE INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at) VALUES (?, '', NULL, ?, ?, ?, 'pending', ?)")
-			.bind(t.remote_id, plan, PLANS[plan].usd, invoice, Date.parse(t.created_at ?? '') || now)
+		await env.DB.prepare("INSERT OR IGNORE INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at, day_usd) VALUES (?, '', NULL, ?, ?, ?, 'pending', ?, ?)")
+			.bind(t.remote_id, plan, PLANS[plan].usd, invoice, Date.parse(t.created_at ?? '') || now, USED_DAY_USD)
 			.run()
 	const c = (await env.DB.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(t.remote_id).first<Checkout>())!
 	// Solo se da por resuelta si de verdad quedó activada
@@ -665,8 +773,8 @@ export async function createCheckout(env: ProEnv, who: { print: string; username
 		fetcher,
 	)
 	if (!inv.transaction_uuid || !inv.url) throw new ProError(502, 'QvaPay no devolvió la factura')
-	await db.prepare("INSERT INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at, requester) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)")
-		.bind(id, who.print, null, plan, p.usd, inv.transaction_uuid, now, who.username)
+	await db.prepare("INSERT INTO pro_checkouts (id, print, tg, plan, amount, invoice, status, created_at, requester, day_usd) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)")
+		.bind(id, who.print, null, plan, p.usd, inv.transaction_uuid, now, who.username, USED_DAY_USD)
 		.run()
 	return { id, url: inv.url }
 }
@@ -697,10 +805,11 @@ async function deviceAccount(req: Request, db: D1, print: string, key: string, n
 	return (await db.prepare('SELECT license FROM pro_prints WHERE print = ?').bind(print).first<{ license: string }>())?.license ?? null
 }
 
-// Lo que el usuario ve de su cuenta: días, su historial (sin tus notas internas) y sus compras con la devolución
+// Lo que el usuario ve de su cuenta: días, su historial (sin tus notas internas) y sus compras, con la devolución si
+// le hiciste una
 export async function accountView(db: D1, license: string | null, now: number) {
 	const l = license ? await db.prepare('SELECT uuid, username, plan, expires_at, revoked FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first<License>() : null
-	if (!l) return { account: null, moves: [], purchases: [], refundDays: REFUND_DAYS }
+	if (!l) return { account: null, moves: [], purchases: [] }
 	const moves = (
 		await db.prepare('SELECT kind, days, expires_after, checkout, note, created_at FROM pro_days WHERE license = ? ORDER BY created_at DESC, id DESC LIMIT 100').bind(l.uuid).all<{ kind: string; days: number; expires_after: number; checkout: string | null; note: string | null; created_at: number }>()
 	).results.map((m) => ({
@@ -714,14 +823,12 @@ export async function accountView(db: D1, license: string | null, now: number) {
 	const paid = (
 		await db
 			.prepare(
-				`SELECT c.id, c.plan, c.amount, COALESCE(c.paid_at, c.created_at) AS at, c.refunded_at, r.status AS rstatus, r.decision_note, r.requested_at AS rat, r.transferred_at AS tat, r.transfer_ref
+				`SELECT c.id, c.plan, c.amount, COALESCE(c.paid_at, c.created_at) AS at, c.refunded_at, r.status AS rstatus, r.amount AS ramount, r.decision_note, r.requested_at AS rat, r.transferred_at AS tat, r.transfer_ref
 				FROM pro_checkouts c LEFT JOIN pro_refunds r ON r.checkout = c.id WHERE c.license = ? AND c.status = 'paid' ORDER BY at DESC`,
 			)
 			.bind(l.uuid)
-			.all<{ id: string; plan: Plan; amount: number; at: number; refunded_at: number | null; rstatus: RefundStatus | null; decision_note: string | null; rat: number | null; tat: number | null; transfer_ref: string | null }>()
+			.all<{ id: string; plan: Plan; amount: number; at: number; refunded_at: number | null; rstatus: RefundStatus | null; ramount: number | null; decision_note: string | null; rat: number | null; tat: number | null; transfer_ref: string | null }>()
 	).results
-	const first = paid.length ? Math.min(...paid.map((p) => p.at)) : null
-	const inTime = first !== null && now - first < REFUND_DAYS * DAY_MS
 	const purchases = paid.map((p) => ({
 		id: p.id,
 		at: p.at,
@@ -731,19 +838,17 @@ export async function accountView(db: D1, license: string | null, now: number) {
 		refund: p.rstatus
 			? {
 					status: p.rstatus,
+					usd: p.ramount,
 					note: p.rstatus === 'rejected' ? p.decision_note : null,
 					at: p.rat,
 					...(p.rstatus === 'transferred' ? { transferredAt: p.tat, ref: p.transfer_ref } : {}),
 				}
 			: null,
-		canRefund: inTime && !p.refunded_at && !p.rstatus,
 	}))
 	return {
 		account: { username: l.username, plan: l.plan, expiresAt: l.expires_at, suspended: !!l.revoked, active: !l.revoked && l.expires_at > now },
 		moves,
 		purchases,
-		refundDays: REFUND_DAYS,
-		refundUntil: first !== null ? first + REFUND_DAYS * DAY_MS : null,
 		telegram: await linked(db, l.uuid),
 	}
 }
@@ -907,28 +1012,9 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			return json(200, await accountView(db, await deviceAccount(req, db, print, env.PRO_KEY, now), now))
 		}
 
-		// Pedir la devolución de una compra (en plazo): queda pendiente de que la apruebes
-		if (route === 'POST /pro/refund') {
-			const b = await readBody(req)
-			const print = printOf(b.print)
-			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
-			// La devolución pedida ya sale de su tabla: aquí solo los intentos fallidos
-			Object.assign(t, { print, account: license })
-			if (!license) return json(403, { error: 'Conecta tu cuenta para pedir la devolución' })
-			const reason = String(b.reason ?? '').trim()
-			if (reason.length < 3) return json(400, { error: 'Cuéntanos en pocas palabras por qué la pides' })
-			await requestRefund(db, license, String(b.checkout ?? ''), reason, 'user', now)
-			const c = await refundable(db, String(b.checkout ?? ''), now)
-			const user = license.slice(3)
-			if (c)
-				await notify(
-					env,
-					`↩️ <b>Devolución pedida</b>\n@${tgEsc(user)} pide devolver <b>${PLANS[c.plan]?.name ?? c.plan}</b> · ${c.amount} USD\nMotivo: «${tgEsc(reason.slice(0, 300))}»\n${c.inTime ? 'En plazo' : 'Fuera de plazo'} · se transfiere a @${tgEsc(c.payee)}`,
-					`/admin/pro?u=${encodeURIComponent(user)}`,
-					fetcher,
-				)
-			return json(200, await accountView(db, license, now))
-		}
+		// Ya no se piden devoluciones desde el terminal (los terminales viejos aún tienen el botón)
+		if (route === 'POST /pro/refund') return json(410, { error: NO_REFUNDS })
+
 
 		// Avisos por Telegram: el enlace para conectar el chat desde «Mi cuenta», dejar de recibirlos, y lo que el
 		// usuario le escribe al bot (lo manda Telegram, con su clave)
@@ -948,8 +1034,9 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			if (license) await unlink(db, license)
 			return json(200, await accountView(db, license, now))
 		}
-		// Avisos de tasa por Telegram (ratealerts.ts): los suyos, poner uno y quitar uno. Solo con Pro activo
-		if (route === 'POST /pro/alerts' || route === 'POST /pro/alerts/add' || route === 'POST /pro/alerts/delete') {
+		// Avisos de tasa por Telegram (ratealerts.ts): los suyos, poner uno y quitar uno. Y los de sus ofertas
+		// (offeralerts.ts): activarlos o no. Solo con Pro activo
+		if (route === 'POST /pro/alerts' || route === 'POST /pro/alerts/add' || route === 'POST /pro/alerts/delete' || route === 'POST /pro/alerts/offers') {
 			const b = await readBody(req)
 			const print = printOf(b.print)
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
@@ -963,8 +1050,14 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			} else if (route === 'POST /pro/alerts/delete') {
 				await deleteAlert(db, license, Number(b.id))
 				t.detail = 'Quitó un aviso de tasa'
+			} else if (route === 'POST /pro/alerts/offers') {
+				// El feed dice el uuid de QvaPay del dueño de cada oferta: sale de la cookie que firma el relé con el perfil de QvaPay
+				const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY!, now)
+				if (b.on && (!who || accountOf(who.username) !== license)) return json(409, { error: 'Vuelve a conectar tu cuenta de QvaPay en este navegador y prueba otra vez' })
+				await setOfferAlerts(db, license, who?.uuid ?? '', !!b.on, now)
+				t.detail = b.on ? 'Activó los avisos de sus ofertas' : 'Quitó los avisos de sus ofertas'
 			} else t.skip = true
-			return json(200, { alerts: await listAlerts(db, license), telegram: await linked(db, license), rates: await latestRates(db, COINS.map((c) => c.tick), now), max: MAX_ALERTS })
+			return json(200, { alerts: await listAlerts(db, license), offers: await offerAlertsOn(db, license), telegram: await linked(db, license), rates: await latestRates(db, COINS.map((c) => c.tick), now), max: MAX_ALERTS })
 		}
 		if (route === 'POST /pro/telegram/webhook') {
 			t.skip = true
@@ -1006,39 +1099,9 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			return json(200, { ok: true, sent })
 		}
 
-		// Un diagnóstico que manda el usuario desde «Mi cuenta» al reclamar algo: lo que apuntó su navegador (operaciones
-		// que pidió, errores, avisos; nunca el token ni datos de pago). Te avisa por Telegram y sale en su ficha del panel.
-		// También con Pro apagado: el terminal es de todos
-		if (route === 'POST /pro/diag') {
-			if (Number(req.headers.get('content-length') ?? 0) > DIAG_MAX_BYTES * 1.5) return json(413, { error: 'El diagnóstico es demasiado grande' })
-			const b = await readBody(req)
-			const print = printOf(b.print)
-			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
-			const owner = who ? null : await db.prepare('SELECT l.username FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?').bind(print).first<{ username: string }>()
-			const account = who?.username ?? owner?.username ?? null
-			// Lo enviado ya sale de su tabla en la línea de tiempo: aquí solo los intentos fallidos
-			Object.assign(t, { print, account })
-			const note = String(b.note ?? '').trim().slice(0, 1000)
-			const entries = cleanDiag(b.entries)
-			if (note.length < 3) return json(400, { error: 'Cuéntanos en pocas palabras qué pasó' })
-			// Si no cabe, se quedan las líneas más recientes
-			while (entries.length && JSON.stringify(entries).length > DIAG_MAX_BYTES) entries.splice(0, Math.ceil(entries.length / 10))
-			const sent = await db.prepare('SELECT COUNT(*) AS n FROM user_diag WHERE print = ? AND at > ?').bind(print, now - DAY_MS).first<{ n: number }>()
-			if ((sent?.n ?? 0) >= DIAG_PER_DAY) return json(429, { error: 'Ya enviaste varios diagnósticos hoy. Escríbenos a @terminalp2p en Telegram.' })
-			const row = await db
-				.prepare('INSERT INTO user_diag (at, account, print, note, body, entries) VALUES (?, ?, ?, ?, ?, ?) RETURNING id')
-				.bind(now, account?.toLowerCase() ?? null, print, note, JSON.stringify(entries), entries.length)
-				.first<{ id: number }>()
-			await notify(
-				env,
-				`📋 <b>Diagnóstico</b>
-${account ? `@${tgEsc(account)}` : 'Alguien sin identificar'}: «${tgEsc(note.slice(0, 300))}»
-${entries.length} ${entries.length === 1 ? 'línea' : 'líneas'} de su navegador.`,
-				`/admin/pro?diag=${row!.id}`,
-				fetcher,
-			)
-			return json(200, { ok: true, id: row!.id })
-		}
+		// Ya no se mandan diagnósticos desde el terminal: las dificultades se consultan en el grupo de Telegram (los terminales
+		// viejos aún tienen el botón)
+		if (route === 'POST /pro/diag') return json(410, { error: 'Consúltanos en el grupo de Telegram: t.me/terminalp2p' })
 
 		// Aviso de QvaPay: solo dice qué factura mirar; se confirma consultándola
 		if (req.method === 'POST' && (path === '/pro/webhook' || path === '/api/pro/webhook')) {
@@ -1145,8 +1208,11 @@ const KIND_NAME: Record<string, string> = { trial: 'Días gratis', purchase: 'Co
 const REFUND_STATUS: Record<RefundStatus, string> = { requested: 'Pedida', approved: 'Aprobada: falta transferir', transferred: 'Transferida', rejected: 'Rechazada' }
 
 // Devolver una compra desde una tabla: el motivo se pide al pulsar, para que la fila no lleve un formulario entero
-const refundButton = (checkout: string, amount: number, payer: string, back = '') =>
-	`<form method="post" style="display:inline" onsubmit="var m=prompt('¿Devolver ${amount} USD a @${escHtml(payer)}? Se le quitan los días de esta compra y luego haces tú la transferencia en QvaPay.\\n\\nMotivo (puede verlo el usuario en «Mi cuenta»):','');if(m===null)return false;this.note.value=m">${back}<input type="hidden" name="checkout" value="${escHtml(checkout)}"><input type="hidden" name="note"><button class="ghost" name="action" value="refund">Devolver</button></form>`
+// Devolver una compra desde el panel: lo que se devolvería hoy (los días que no usó); sin días por usar, nada
+const refundButton = (checkout: string, q: Quote, payer: string, back = '') =>
+	q.usd > 0
+		? `<form method="post" style="display:inline" onsubmit="var m=prompt('¿Devolver ${q.usd} USD a @${escHtml(payer)} (lo pagado menos ${q.used} días usados a precio de semana; le quedan ${q.unused} de ${q.days})? Se le quitan los días que no usó y luego le pagas desde la devolución.\\n\\nMotivo (puede verlo el usuario en «Mi cuenta»):','');if(m===null)return false;this.note.value=m">${back}<input type="hidden" name="checkout" value="${escHtml(checkout)}"><input type="hidden" name="note"><button class="ghost" name="action" value="refund">Devolver ${q.usd} USD</button></form>`
+		: '<span class="note">ya usó todos sus días</span>'
 
 // La referencia de una devolución: si es el uuid de la transferencia, enlaza a su detalle en QvaPay
 const refLink = (ref: string) =>
@@ -1252,7 +1318,8 @@ async function activityPanel(env: ProEnv, username: string, url?: URL) {
 	return `<div id="actividad">${panel('Actividad', body, { sub: 'Todo lo que el servidor hizo con esta cuenta o le dio, y lo que hiciste tú. Lo que hace en el P2P no: eso solo está en su navegador (diagnósticos) y en QvaPay. Hora de Cuba; se guarda 180 días.', flush: true })}</div>`
 }
 
-// Un diagnóstico enviado desde «Mi cuenta»: lo que apuntó su navegador
+// Un diagnóstico de los que se mandaban desde «Mi cuenta» (ya no: se consulta en el grupo de Telegram). Los que hay
+// siguen en la ficha hasta que se borran (180 días)
 async function diagPage(env: ProEnv, id: number) {
 	const d = await diagOf(env.DB, id)
 	if (!d) return proPage(env, 'pro-cuentas', 'Diagnóstico', `${pageHead('Diagnóstico', 'No existe (o ya se borró: se guardan 180 días).')}`)
@@ -1300,7 +1367,7 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 	const tg = await db.prepare('SELECT linked_at FROM pro_telegram WHERE license = ?').bind(id).first<{ linked_at: number }>()
 	const [refunds, pays, moves, devices, notes, trials] = await Promise.all([
 		all<Refund>('SELECT * FROM pro_refunds WHERE license = ? ORDER BY requested_at DESC'),
-		all<Checkout & { refunded_at: number | null }>("SELECT * FROM pro_checkouts WHERE license = ? AND status = 'paid' ORDER BY COALESCE(paid_at, created_at) DESC"),
+		all<Checkout & { refunded_at: number | null; refund_usd: number | null }>("SELECT c.* FROM pro_checkouts c WHERE c.license = ? AND c.status = 'paid' ORDER BY COALESCE(c.paid_at, c.created_at) DESC"),
 		all<{ kind: string; days: number; expires_after: number; note: string | null; actor: string; created_at: number; checkout: string | null }>('SELECT * FROM pro_days WHERE license = ? ORDER BY created_at DESC, id DESC'),
 		all<{ print: string; added_at: number; seen_at: number }>('SELECT print, added_at, seen_at FROM pro_prints WHERE license = ? ORDER BY seen_at DESC'),
 		all<{ text: string; created_at: number }>('SELECT text, created_at FROM pro_notes WHERE license = ? ORDER BY created_at DESC'),
@@ -1308,19 +1375,20 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 	])
 	const left = Math.ceil((l.expires_at - now) / DAY_MS)
 	const state = l.revoked ? '<span class="pill rejected">Suspendida</span>' : left > 0 ? `<span class="pill approved-ok">Pro · ${left} días</span>` : '<span class="pill">Vencida</span>'
-	const paidTotal = pays.filter((p) => !p.refunded_at).reduce((t, p) => t + p.amount, 0)
-	const refundedTotal = pays.filter((p) => p.refunded_at).reduce((t, p) => t + p.amount, 0)
-	const first = pays.length ? Math.min(...pays.map((p) => p.paid_at ?? p.created_at)) : null
-	const inTime = first !== null && now - first < REFUND_DAYS * DAY_MS
+	// Lo devuelto de cada compra (las devueltas antes del prorrateo, todo) y lo que se queda
+	const back_ = (p: { amount: number; refunded_at: number | null; refund_usd: number | null }) => (p.refunded_at ? (p.refund_usd ?? p.amount) : 0)
+	const refundedTotal = pays.reduce((t, p) => t + back_(p), 0)
+	const paidTotal = pays.reduce((t, p) => t + p.amount, 0) - refundedTotal
 	const refundOf = new Map(refunds.map((r) => [r.checkout, r]))
+	const lefts = await leftOf(db, [id], now)
 	const back = `<input type="hidden" name="u" value="${u}">`
 	const payRows = pays
 		.map((p) => {
 			const r = refundOf.get(p.id)
 			// Una rechazada se puede devolver igual si cambias de idea
 			const act = r
-				? `<span class="pill ${r.status}">${REFUND_STATUS[r.status]}</span>${r.status === 'rejected' && !p.refunded_at ? ` ${refundButton(p.id, p.amount, p.payer ?? name, back)}` : ''}`
-				: refundButton(p.id, p.amount, p.payer ?? name, back)
+				? `<span class="pill ${r.status}">${REFUND_STATUS[r.status]}</span>${r.status === 'rejected' && !p.refunded_at ? ` ${refundButton(p.id, quoteOf(p.amount, lefts.get(p.id), p.day_usd), p.payer ?? name, back)}` : ''}`
+				: refundButton(p.id, quoteOf(p.amount, lefts.get(p.id), p.day_usd), p.payer ?? name, back)
 			return `<tr><td>${hWhen(p.paid_at ?? p.created_at)}</td><td>${escHtml(PLANS[p.plan]?.name ?? p.plan)}</td><td class="num">${hUsd(p.amount)}</td><td>@${escHtml(p.payer ?? '?')}</td><td>${p.invoice ? hShort(p.invoice) : '—'}</td><td>${act}</td></tr>`
 		})
 		.join('')
@@ -1344,7 +1412,6 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 		<div class="cards">
 			<div class="card"><span>Pro hasta</span><b>${hDay(l.expires_at)}</b><small>${left > 0 ? `${left} días` : 'vencido'} · ${escHtml((l.plan in PLANS ? 'comprados' : (({ trial: 'gratis', gift: 'regalados' } as Record<string, string>)[l.plan] ?? l.plan)))}</small></div>
 			<div class="card"><span>Pagado</span><b>${hUsd(paidTotal)}</b><small>${pays.length} pagos${refundedTotal ? ` · devuelto ${hUsd(refundedTotal)}` : ''}</small></div>
-			<div class="card"><span>Devolución</span><b>${first === null ? '—' : inTime ? 'En plazo' : 'Fuera'}</b><small>${first === null ? 'sin compras' : `hasta el ${hDay(first + REFUND_DAYS * DAY_MS)}`}</small></div>
 			<div class="card"><span>Cliente desde</span><b>${hDay(l.created_at)}</b><small>${devices.length} dispositivos${devices[0] ? ` · usado ${hDay(devices[0].seen_at)}` : ''}</small></div>
 		</div>
 		${refunds.length ? panel('Devoluciones', refunds.map((r) => refundHtml(r, name)).join(''), { flush: true }) : ''}
@@ -1968,11 +2035,11 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan = 'trial') AS trials,
 				(SELECT COUNT(*) FROM pro_licenses WHERE merged_into IS NULL AND revoked = 0 AND expires_at > ?1 AND plan = 'gift') AS gifts,
 				(SELECT COUNT(*) FROM pro_trials) AS trialKeys,
-				(SELECT COALESCE(SUM(amount), 0) FROM pro_checkouts WHERE status = 'paid' AND refunded_at IS NULL AND COALESCE(paid_at, created_at) >= ?2) AS month,
+				(SELECT COALESCE(SUM(amount - CASE WHEN refunded_at IS NULL THEN 0 ELSE COALESCE(refund_usd, amount) END), 0) FROM pro_checkouts WHERE status = 'paid' AND COALESCE(paid_at, created_at) >= ?2) AS month,
 				(SELECT COUNT(*) FROM pro_checkouts WHERE status = 'paid' AND refunded_at IS NULL AND COALESCE(paid_at, created_at) >= ?2) AS monthCount,
-				(SELECT COALESCE(SUM(amount), 0) FROM pro_checkouts WHERE status = 'paid' AND refunded_at IS NULL) AS total,
+				(SELECT COALESCE(SUM(amount - CASE WHEN refunded_at IS NULL THEN 0 ELSE COALESCE(refund_usd, amount) END), 0) FROM pro_checkouts WHERE status = 'paid') AS total,
 				(SELECT COUNT(*) FROM pro_checkouts WHERE status = 'paid') AS paidCount,
-				(SELECT COALESCE(SUM(amount), 0) FROM pro_checkouts WHERE refunded_at IS NOT NULL) AS refunded,
+				(SELECT COALESCE(SUM(COALESCE(refund_usd, amount)), 0) FROM pro_checkouts WHERE refunded_at IS NOT NULL) AS refunded,
 				(SELECT COUNT(*) FROM pro_checkouts WHERE status = 'pending' AND created_at > ?3) AS unpaid`,
 		)
 		.bind(now, monthStart, now - DAY_MS)
@@ -1999,7 +2066,7 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 		`Pendientes ${work.count ? `<span class="count">${work.count}</span>` : ''}`,
 		work.count
 			? work.refunds.map((r) => refundHtml(r)).join('') + issueRows
-			: '<div class="panel-b"><p class="allclear"><i>✓</i>Nada pendiente: ni devoluciones por decidir o transferir, ni pagos sin activar.</p></div>',
+			: '<div class="panel-b"><p class="allclear"><i>✓</i>Nada pendiente: ni devoluciones por transferir, ni pagos sin activar.</p></div>',
 		{ sub: work.count ? 'Devoluciones por decidir o transferir y pagos que QvaPay cobró sin activarse' : '', flush: true },
 	)
 	const proOn = await proEnabled(db, now)
@@ -2041,7 +2108,7 @@ async function homePage(env: ProEnv, flash: string, now: number) {
 		'Pro',
 		`${pageHead('Inicio', 'De cada usuario solo se guarda su usuario de QvaPay, hasta cuándo tiene Pro y la huella de sus dispositivos, nunca el token. Quién pagó lo confirma QvaPay.', proSearch())}
 		${flash}${cards}${pending}
-		<div class="grid2">${panel('Estado', toggles, { flush: true })}${panel('Pagos y copias', upkeep, { foot: `Política: se compran días, nada se cobra solo; devolución completa en los ${REFUND_DAYS} días siguientes a la primera compra. Si Pro falla por nuestra culpa, en vez de devolver se dan los días perdidos.` })}</div>`,
+		<div class="grid2">${panel('Estado', toggles, { flush: true })}${panel('Pagos y copias', upkeep, { foot: `Política: se compran días, nada se cobra solo y no se devuelven (para probar están los días gratis), salvo error en el pago: lo devuelves tú desde su ficha o Pagos, lo pagado menos los días usados a precio de la semana. Si Pro falla por nuestra culpa, en vez de devolver se dan los días perdidos.` })}</div>`,
 	)
 }
 
@@ -2089,7 +2156,7 @@ async function liveForm(env: ProEnv) {
 	}</form>${recent}`
 }
 
-type PayRow = Checkout & { refunded_at: number | null; owner: string | null; first_paid: number | null; rstatus: string | null }
+type PayRow = Checkout & { refunded_at: number | null; owner: string | null; rstatus: string | null }
 // De dónde se pidió: el simulador (con la cuenta de Telegram) o un dispositivo del terminal (solo su huella)
 const origin = (c: PayRow) => (c.tg ? 'Simulador' : `Terminal · ${c.requester ? `@${escHtml(c.requester)}` : proShort(c.print)}`)
 const checkoutsWhere = (where: string, q: string) =>
@@ -2100,8 +2167,7 @@ const countCheckouts = async (db: D1, where: string, q: string) =>
 const checkouts = (db: D1, where: string, order: string, limit: number, q: string, offset = 0) =>
 	db
 		.prepare(
-			`SELECT c.*, COALESCE(c.payer, l.username) AS payer, l.username AS owner, (SELECT r.status FROM pro_refunds r WHERE r.checkout = c.id) AS rstatus,
-				(SELECT MIN(COALESCE(f.paid_at, f.created_at)) FROM pro_checkouts f WHERE f.license = c.license AND f.status = 'paid') AS first_paid
+			`SELECT c.*, COALESCE(c.payer, l.username) AS payer, l.username AS owner, (SELECT r.status FROM pro_refunds r WHERE r.checkout = c.id) AS rstatus
 			FROM pro_checkouts c LEFT JOIN pro_licenses l ON l.uuid = c.license
 			${checkoutsWhere(where, q)}
 			ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`,
@@ -2115,14 +2181,14 @@ const PAYS_PAGE = 50
 async function paymentsPanel(env: ProEnv, now: number, q = '', url?: URL) {
 	const page = pageOf(url, 'pp')
 	const [paid, total] = await Promise.all([checkouts(env.DB, "c.status = 'paid'", 'COALESCE(c.paid_at, c.created_at) DESC', PAYS_PAGE, q, (page - 1) * PAYS_PAGE), countCheckouts(env.DB, "c.status = 'paid'", q)])
+	const lefts = await leftOf(env.DB, paid.filter((c) => !c.refunded_at).map((c) => c.license ?? ''), now)
 	const rows = paid
 		.map((c) => {
-			const inTime = c.first_paid !== null && now - c.first_paid < REFUND_DAYS * DAY_MS
 			const state = c.rstatus
-				? `<span class="pill ${c.rstatus}">${REFUND_STATUS[c.rstatus as RefundStatus]}</span>${c.rstatus === 'rejected' && !c.refunded_at ? ` ${refundButton(c.id, c.amount, c.payer ?? '')}` : ''}`
+				? `<span class="pill ${c.rstatus}">${REFUND_STATUS[c.rstatus as RefundStatus]}</span>${c.rstatus === 'rejected' && !c.refunded_at ? ` ${refundButton(c.id, quoteOf(c.amount, lefts.get(c.id), c.day_usd), c.payer ?? '')}` : ''}`
 				: c.refunded_at
 					? `<span class="note">devuelto el ${hDay(c.refunded_at)}</span>`
-					: `${refundButton(c.id, c.amount, c.payer ?? '')} <span class="note">${inTime ? 'en plazo' : 'fuera de plazo'}</span>`
+					: refundButton(c.id, quoteOf(c.amount, lefts.get(c.id), c.day_usd), c.payer ?? '')
 			return `<tr><td>${hWhen(c.paid_at ?? c.created_at)}</td><td>${c.owner ? userLink(c.owner) : `<b>@${escHtml(c.payer ?? '?')}</b>`}${c.owner && c.owner.toLowerCase() !== (c.payer ?? '').toLowerCase() ? ` <span class="note">pagó @${escHtml(c.payer ?? '?')}</span>` : ''}</td><td>${escHtml(PLANS[c.plan]?.name ?? c.plan)}</td><td class="num">${proUsd(c.amount)}</td><td>${origin(c)}</td><td>${c.invoice ? proShort(c.invoice) : '—'}</td><td>${state}</td></tr>`
 		})
 		.join('')
@@ -2163,7 +2229,7 @@ async function accountsPanel(env: ProEnv, now: number, q = '', url?: URL) {
 				(SELECT COUNT(*) FROM pro_prints p WHERE p.license = l.uuid) AS devices,
 				(SELECT MAX(p.seen_at) FROM pro_prints p WHERE p.license = l.uuid) AS seen,
 				(SELECT COUNT(*) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid') AS pays,
-				(SELECT COALESCE(SUM(c.amount), 0) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid' AND c.refunded_at IS NULL) AS paid
+				(SELECT COALESCE(SUM(c.amount - CASE WHEN c.refunded_at IS NULL THEN 0 ELSE COALESCE(c.refund_usd, c.amount) END), 0) FROM pro_checkouts c WHERE c.license = l.uuid AND c.status = 'paid') AS paid
 			FROM pro_licenses l WHERE ${where} ORDER BY l.revoked, l.expires_at DESC LIMIT ${ACCOUNTS_PAGE} OFFSET ${(page - 1) * ACCOUNTS_PAGE}`,
 		)
 		.bind(...args)

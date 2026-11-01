@@ -1550,6 +1550,11 @@ window.TPResize?.({
 	],
 })
 renderMarketsPanel()
+// Los avisos de tus ofertas por Telegram abren aquí con #ops: directo a «Mis operaciones» (en el móvil)
+if (location.hash === '#ops') {
+	state.view = 'orders'
+	history.replaceState(null, '', `${location.pathname}${location.search}`)
+}
 showView(state.view)
 showChart(state.chart)
 render()

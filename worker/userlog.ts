@@ -94,37 +94,14 @@ export async function timeline(db: D1, username: string, limit: number, offset: 
 }
 
 // ── Diagnósticos del navegador ───────────────────────────────────────
+// Los que se mandaban desde «Mi cuenta» (ya no: se consulta en el grupo de Telegram). Los que hay se ven en la ficha
+// hasta que se borran
 
 export interface DiagEntry {
 	t: number
 	kind: string
 	msg: string
 	data?: Record<string, string | number | boolean | null>
-}
-
-export const DIAG_MAX_ENTRIES = 500
-export const DIAG_MAX_BYTES = 200_000
-export const DIAG_PER_DAY = 5
-
-// Lo que llega del navegador, limpio: solo campos sueltos y cortos (nada de objetos anidados ni textos largos)
-export function cleanDiag(raw: unknown): DiagEntry[] {
-	if (!Array.isArray(raw)) return []
-	const out: DiagEntry[] = []
-	for (const e of raw.slice(-DIAG_MAX_ENTRIES)) {
-		if (!e || typeof e !== 'object') continue
-		const o = e as Record<string, unknown>
-		const t = Number(o.t)
-		if (!Number.isFinite(t) || typeof o.kind !== 'string' || typeof o.msg !== 'string') continue
-		const data: Record<string, string | number | boolean | null> = {}
-		if (o.data && typeof o.data === 'object')
-			for (const [k, v] of Object.entries(o.data as Record<string, unknown>).slice(0, 12)) {
-				if (!/^[A-Za-z0-9_]{1,24}$/.test(k)) continue
-				if (typeof v === 'string') data[k] = v.slice(0, 200)
-				else if (typeof v === 'number' || typeof v === 'boolean' || v === null) data[k] = v
-			}
-		out.push({ t, kind: o.kind.slice(0, 24), msg: o.msg.slice(0, 300), ...(Object.keys(data).length ? { data } : {}) })
-	}
-	return out
 }
 
 export const diagOf = (db: D1, id: number) =>

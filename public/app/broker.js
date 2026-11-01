@@ -22,11 +22,8 @@ const STATUS = {
 // ── API ───────────────────────────────────────────────────────────────
 async function api(path, body) {
 	const opts = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Broker': '1' }, body: JSON.stringify(body) }
-	const t0 = Date.now()
 	const r = await TPApi.fetch(`/api/broker${path}`, opts)
 	const data = await r.json().catch(() => ({}))
-	// Al diagnóstico (diag.js): lo que pediste que cambie algo y lo que falló, con el resultado
-	if (body !== undefined || !r.ok) window.TPDiag?.add('api', `${body === undefined ? 'GET' : 'POST'} ${path} → ${r.status}${r.ok ? '' : `: ${data.error || ''}`}`, { ...(body && typeof body === 'object' ? body : {}), ok: r.ok, ms: Date.now() - t0, code: data.code })
 	if (!r.ok) {
 		// Bloqueada en Terminal P2P con el terminal abierto: se relee la cuenta, que lo dice y la desconecta
 		if (data.code === 'TP_ACCOUNT_BLOCKED' && path !== '/me') loadAccount()
@@ -39,7 +36,6 @@ async function api(path, body) {
 async function apiForm(path, form) {
 	const r = await TPApi.fetch(`/api/broker${path}`, { method: 'POST', headers: { 'X-Broker': '1' }, body: form })
 	const data = await r.json().catch(() => ({}))
-	window.TPDiag?.add('api', `POST ${path} (archivo) → ${r.status}${r.ok ? '' : `: ${data.error || ''}`}`, { ok: r.ok })
 	if (!r.ok) throw Object.assign(new Error(data.error || `Error ${r.status}`), { status: r.status })
 	return data
 }
@@ -84,7 +80,6 @@ async function shrinkImage(file) {
 }
 
 function toast(text, bad = false) {
-	window.TPDiag?.add('toast', text, { ok: !bad })
 	const el = document.createElement('div')
 	el.className = `toast ${bad ? 'bad' : ''}`
 	el.textContent = text
@@ -167,7 +162,6 @@ async function loadAccount() {
 		bk.acct = { connected: false, dryRun: true }
 	}
 	renderAccount()
-	window.TPDiag?.add('account', bk.acct.blocked ? 'Cuenta bloqueada en Terminal P2P' : bk.acct.connected ? `Cuenta conectada: @${bk.acct.username}` : 'Sin cuenta conectada')
 	if (bk.acct.blocked) showBlocked(bk.acct.blocked)
 	if (bk.acct.connected) {
 		loadTrades()

@@ -8,6 +8,8 @@ import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
 import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
+import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
+import type { BotEnv } from './userbot.ts'
 
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
 const DONE_EVERY_MS = 5 * 60_000
@@ -28,6 +30,11 @@ export class LiveBook {
 	private events = 0
 	private lastEvent: number | null = null
 	private lastRejected: { at: number; reason: string } | null = null
+	// Avisos de las ofertas por Telegram (offeralerts.ts): los ya enviados (el mismo evento llega dos veces), quién los
+	// tiene activados (se relee cada WATCH_TTL_MS) y cuántos salieron a cada cuenta en la última hora
+	private noticed = new Map<string, number>()
+	private watch: { at: number; map: Promise<Map<string, string>> } | null = null
+	private noticeTimes = new Map<string, number[]>()
 	// Los últimos eventos tal como llegaron, para ver en el panel qué manda QvaPay
 	private recent: FeedSample[] = []
 	private readAt = new Map<string, number>()
@@ -196,6 +203,7 @@ export class LiveBook {
 		this.lastEvent = Date.now()
 		this.addLag(e)
 		const ch = this.book.apply(e)
+		this.notice(e, ch?.trade ?? null)
 		let unknown = false
 		if (ch?.changed) {
 			this.broadcast(ch.coin, ch.side)
@@ -212,6 +220,27 @@ export class LiveBook {
 		if (unknown && this.streaming) void this.periodic().catch(() => {})
 		else if (this.want.size && !this.streaming) await this.soon(unknown ? 100 : 1500)
 		return true
+	}
+
+	// Si el dueño de la oferta activó los avisos de sus ofertas, se le escribe por Telegram (sin esperar: el libro sigue)
+	private notice(e: FeedEvent, trade: Trade | null) {
+		const n = offerNotice(e, trade)
+		if (!n || this.noticed.has(n.key)) return
+		const now = Date.now()
+		this.noticed.set(n.key, now)
+		if (this.noticed.size > 2000) for (const [k, t] of this.noticed) if (now - t > 2 * NOTICE_MAX_AGE_MS) this.noticed.delete(k)
+		this.ctx.waitUntil(this.sendNotice(n, now).catch((err) => console.error(`aviso de oferta: ${(err as Error).message}`)))
+	}
+
+	private async sendNotice(n: Notice, now: number) {
+		if (!this.watch || now - this.watch.at > WATCH_TTL_MS) this.watch = { at: now, map: offerWatchers(this.env.DB, now).catch(() => new Map<string, string>()) }
+		const license = (await this.watch.map).get(n.owner.toLowerCase())
+		if (!license) return
+		const sent = (this.noticeTimes.get(license) ?? []).filter((t) => now - t < HOUR_MS)
+		if (sent.length >= NOTICES_PER_HOUR) return
+		sent.push(now)
+		this.noticeTimes.set(license, sent)
+		await sendNotice(this.env as unknown as BotEnv, license, n.text)
 	}
 
 	private addLag(e: FeedEvent) {

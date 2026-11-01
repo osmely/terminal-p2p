@@ -28,6 +28,7 @@ const PRO_FEATURES = [
 	['🎯', 'Precio automático', 'tu oferta la primera del libro, dentro de tus límites'],
 	['🔀', 'Libro cruzado', 'si lo puedes aprovechar y cuánto te queda'],
 	['💰', 'Ganancias', 'cuánto ganaste en cada mercado, con la comisión'],
+	['📲', 'Avisos de tus ofertas', 'por Telegram, aunque cierres el terminal'],
 	['🔔', 'Avisos de tasa', 'por Telegram, cuando la tasa pasa tu precio'],
 	['📊', 'Compras, ventas y USD en el gráfico', 'hacia dónde se mueve el mercado'],
 ]
@@ -82,7 +83,6 @@ async function proFetch(path, body, again = true) {
 	// El servidor no sabe de quién es el token: la cookie que lo dice es una por navegador y, con otra cuenta en otra
 	// pestaña, puede ser de aquella. Pedir el perfil a QvaPay la deja con esta cuenta; se reintenta una vez
 	if (r.status === 403 && d.code === 'TP_WHO' && again && bk.acct.connected) return api('/me').then(() => proFetch(path, body, false))
-	if (!r.ok) window.TPDiag?.add('api', `POST ${path} → ${r.status}: ${d.error || ''}`, { ok: false })
 	if (!r.ok) throw Object.assign(new Error(d.error || 'Algo falló. Inténtalo de nuevo.'), { status: r.status })
 	return d
 }
@@ -94,7 +94,6 @@ function applyPro(s) {
 	// Tenía el módulo Pro cargado y ya no tiene Pro (se le acabaron los días, suspendida, bloqueada o desconectó):
 	// se recarga para que la orden inteligente y el radar desaparezcan de la memoria
 	if (pro.loaded && !s.pro) return location.reload()
-	if (!pro.loaded && s.pro !== pro.active) window.TPDiag?.add('pro', s.pro ? `Pro activo: ${s.plan ?? ''}, hasta ${s.expiresAt ? new Date(s.expiresAt).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }) : '?'}` : s.blocked ? 'Sin Pro: cuenta bloqueada' : 'Sin Pro', { pro: !!s.pro, plan: s.plan ?? null })
 	// Bloqueada desde el panel: Pro ni se ofrece
 	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
 	if (Array.isArray(s.plans)) proPlans = s.plans
@@ -190,7 +189,7 @@ function showPro() {
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para usar Pro', true)
 	const feats = `${PRO_FEATURES.map(([i, t, d]) => `<li><span class="pro-ic">${i}</span><div><b>${t}</b><p class="muted">${d}</p></div></li>`).join('')}<li class="pro-more-link"><a class="link" href="${PRO_INFO_URL}" target="_blank" rel="noopener">Saber más sobre el modo Pro →</a></li>`
 	const plans = proPlans.map((p) => `<button class="pro-plan" data-plan="${esc(p.id)}"><b>${esc(p.name)}</b><span class="mono">${usdText(p.usd)}</span><small>${usdText(p.usd / p.days)} al día</small></button>`).join('')
-	const refund = 'Si no te convence, te devolvemos el dinero en los 7 días siguientes a tu primera compra: pídela en «Mi cuenta» → ★ Pro.'
+	const refund = NO_REFUNDS
 	openModal(
 		pro.active
 			? `<div class="stack pro-box"><h3>★ Te quedan ${daysText(daysLeft())} de Pro</h3>
@@ -254,7 +253,8 @@ function showWaiting() {
 	openModal(`<div class="stack pro-box"><h3>Esperando tu pago</h3>
 		<p class="muted">Paga la factura en QvaPay. Cuando QvaPay lo confirme, esto se actualiza solo.</p>
 		<a class="btn primary block" href="${esc(c.url)}" target="_blank" rel="noopener">Abrir el pago en QvaPay</a>
-		<p class="hint" id="proWait">Comprobando…</p></div>`)
+		<p class="hint" id="proWait">Comprobando…</p>
+		<p class="hint">¿Ya pagaste y no se activa? <a class="link" href="https://t.me/terminalp2p" target="_blank" rel="noopener">Consúltanos en el grupo de Telegram</a></p></div>`)
 	pollCheckout()
 }
 

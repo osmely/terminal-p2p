@@ -39,11 +39,10 @@ function acctSummary() {
 			${stat('Comisión P2P', a.gold ? 'GOLD' : pct, fee)}
 		</div>
 		${TPPro.enabled ? `<button class="btn block" id="acctGoPro">${TPPro.active ? `★ Te quedan ${daysText(daysLeft())} de Pro` : TPPro.canTrial ? `★ Probar Pro ${proTrialDays} días gratis` : '★ Terminal P2P Pro'}</button>` : ''}
-		<button class="btn block" id="acctDiag">¿Algo salió mal? Envíanos un diagnóstico</button>
+		<p class="hint">${HELP}</p>
 		<p class="hint">Tu token solo está en este navegador. Desconectar lo borra de aquí; tus operaciones en QvaPay no se tocan.</p>
 		<button class="btn danger block" id="acctOut">Desconectar cuenta</button></div>`
 	$('acctGoPro')?.addEventListener('click', () => showAccount('pro'))
-	$('acctDiag').onclick = showDiag
 	$('acctOut').onclick = () => $('disconnectBtn')?.click()
 }
 
@@ -77,12 +76,11 @@ async function acctPro() {
 				r?.status === 'transferred'
 					? `<small class="muted">${r.transferredAt ? `El ${acctDay(r.transferredAt)} a` : 'A'} tu cuenta de QvaPay</small>${r.ref ? `<small class="muted">Transferencia: ${acctRef(r.ref)}</small>` : ''}`
 					: ''
+			// Sin devoluciones (salvo error en el pago, que decidimos nosotros): si le hicimos una, cómo va
 			const state = r
-				? `<span class="chip ${r.status === 'rejected' ? 'cancelled' : r.status === 'transferred' ? 'completed' : 'paid'}">${ACCT_REFUND[r.status]}</span>${r.note ? `<small class="muted">${esc(r.note)}</small>` : ''}${sent}`
-				: p.canRefund
-					? `<button class="link small" data-refund="${esc(p.id)}">Pedir devolución</button>`
-					: ''
-			return `<li><div><b>${p.days} días</b> · ${fmtM(p.amount)} USD<small class="muted"> · ${acctDay(p.at)}</small></div><div class="acct-refund">${state}</div><div class="acct-ask" id="ask-${esc(p.id)}"></div></li>`
+				? `<span class="chip ${r.status === 'rejected' ? 'cancelled' : r.status === 'transferred' ? 'completed' : 'paid'}">${ACCT_REFUND[r.status]}${r.usd != null && r.status !== 'rejected' ? ` · ${fmtM(r.usd)} USD` : ''}</span>${r.note ? `<small class="muted">${esc(r.note)}</small>` : ''}${sent}`
+				: ''
+			return `<li><div><b>${p.days} días</b> · ${fmtM(p.amount)} USD<small class="muted"> · ${acctDay(p.at)}</small></div><div class="acct-refund">${state}</div></li>`
 		})
 		.join('')
 	const moves = d.moves
@@ -91,36 +89,27 @@ async function acctPro() {
 				`<li><span>${ACCT_KIND[m.kind] ?? esc(m.kind)}${m.note ? `<small class="muted"> · ${esc(m.note)}</small>` : ''}</span><b class="mono ${m.days < 0 ? 'ask' : 'bid'}">${m.days > 0 ? '+' : ''}${m.days}</b><small class="muted">${acctDay(m.at)}</small></li>`,
 		)
 		.join('')
-	const tg = d.telegram
-		? `<div class="acct-tg on"><span>✓ Recibes los avisos de tu Pro en Telegram</span><button class="link small" id="tgOff">Dejar de recibirlos</button></div>`
-		: `<div class="acct-tg"><button class="btn block" id="tgOn">Recibir avisos en Telegram</button><p class="hint">Te escribimos cuando se confirme un pago, 3 días antes de que se acaben tus días, en cada paso de una devolución y con los avisos de tasa que pongas. Nada más.</p></div>`
 	$('acctBody').innerHTML = `<div class="stack">
-		${head}
-		${tg}
-		<hr class="acct-sep">
-		${canRenew() ? '<button class="btn primary block" id="acctBuy">Comprar días</button>' : `<p class="hint">Podrás comprar más días cuando te queden 5 o menos.</p>`}
-		<div><p class="hint">Tus compras</p>${purchases ? `<ul class="acct-list">${purchases}</ul>` : '<p class="muted small">Aún no has comprado días.</p>'}
-		${d.refundUntil && d.refundUntil > Date.now() && d.purchases.some((p) => p.canRefund) ? `<p class="hint">Puedes pedir la devolución hasta el ${acctDay(d.refundUntil)} (${d.refundDays} días desde tu primera compra).</p>` : ''}</div>
-		<hr class="acct-sep">
-		<div><p class="hint">Historial de tus días</p><ul class="acct-moves">${moves || '<li class="muted">Sin movimientos.</li>'}</ul></div></div>`
+		<section class="sec-box">
+			<p class="sec-box-t">Tus días</p>
+			${head}
+			${canRenew() ? '<button class="btn primary block" id="acctBuy">Comprar días</button>' : `<p class="hint">Podrás comprar más días cuando te queden 5 o menos.</p>`}
+			${d.telegram ? '' : '<p class="hint">Para saber por Telegram cuándo se confirma un pago o se acaban tus días, conéctalo en <button class="link" id="acctGoAlerts">★ Avisos</button>.</p>'}
+		</section>
+		<section class="sec-box">
+			<p class="sec-box-t">Tus compras</p>
+			${purchases ? `<ul class="acct-list">${purchases}</ul>` : '<p class="muted small">Aún no has comprado días.</p>'}
+			<p class="hint">${NO_REFUNDS}</p>
+		</section>
+		<section class="sec-box"><p class="sec-box-t">Historial de tus días</p><ul class="acct-moves">${moves || '<li class="muted">Sin movimientos.</li>'}</ul></section></div>`
 	$('acctBuy')?.addEventListener('click', showPro)
-	$('tgOn')?.addEventListener('click', acctTelegram)
-	$('tgOff')?.addEventListener('click', async () => {
-		try {
-			await proFetch('/pro/telegram/unlink', { print: TPPro.print })
-			toast('Ya no te llegarán avisos por Telegram')
-			acctPro()
-		} catch (e) {
-			toast(e.message, true)
-		}
-	})
-	for (const b of $('acctBody').querySelectorAll('[data-refund]')) b.onclick = () => acctAskRefund(b.dataset.refund)
+	$('acctGoAlerts')?.addEventListener('click', () => showAccount('alerts'))
 }
 
 // La pestaña ★ Avisos: los avisos de tasa por Telegram (con Pro); sin Pro, qué son y cómo tenerlos
 function acctAlertsTab() {
 	if (!TPPro.active) {
-		$('acctBody').innerHTML = `<div class="stack"><p class="muted">Con Pro te escribimos por Telegram cuando la Tasa QvaPay de un mercado suba o baje del valor que pongas.</p><button class="btn primary block" id="acctBuy">${TPPro.canTrial ? `★ Probar Pro ${proTrialDays} días gratis` : 'Ver Terminal P2P Pro'}</button></div>`
+		$('acctBody').innerHTML = `<div class="stack"><p class="muted">Con Pro te escribimos por Telegram cuando tomen tus ofertas, te paguen o te liberen, aunque cierres el terminal, y cuando la Tasa QvaPay de un mercado suba o baje del valor que pongas.</p><button class="btn primary block" id="acctBuy">${TPPro.canTrial ? `★ Probar Pro ${proTrialDays} días gratis` : 'Ver Terminal P2P Pro'}</button></div>`
 		$('acctBuy').onclick = showPro
 		return
 	}
@@ -149,9 +138,23 @@ async function acctAlerts(d) {
 		)
 		.join('')
 	const coin = d.alerts.at(-1)?.coin ?? state.coin
-	$('acctAlerts').innerHTML = `<div class="stack tight">
-		<p class="hint">Avisos de tasa por Telegram</p>
-		${d.telegram ? '' : '<div class="acct-tg"><p class="notice warn">Para que te lleguen, conecta el bot de Telegram.</p><button class="btn block" id="alTg">Recibir avisos en Telegram</button></div>'}
+	$('acctAlerts').innerHTML = `<div class="stack">
+		<section class="sec-box">
+			<p class="sec-box-t">Telegram</p>
+			${
+				d.telegram
+					? '<div class="acct-tg on"><span>✓ Te llegan los avisos a Telegram</span><button class="link small" id="tgOff">Dejar de recibirlos</button></div>'
+					: '<p class="notice warn">Para que te lleguen los avisos de abajo, conecta el bot de Telegram.</p><button class="btn block" id="alTg">Recibir avisos en Telegram</button>'
+			}
+			<p class="hint">Te escribimos cuando se confirme un pago, 3 días antes de que se acaben tus días, en cada paso de una devolución y con los avisos que actives aquí. Nada más.</p>
+		</section>
+		<section class="sec-box">
+			<p class="sec-box-t">Tus ofertas</p>
+			<label class="check"><input type="checkbox" id="alOffers" ${d.offers ? 'checked' : ''} /> Avísame cuando tomen mis ofertas, me marquen pagado, me liberen o una vuelva al libro, aunque tenga el terminal cerrado</label>
+			<p class="hint">Solo tus ofertas públicas: QvaPay no avisa de las privadas. En las de rango, de lo que te toman y lo que vuelve (QvaPay no avisa del pago de cada parte).</p>
+		</section>
+		<section class="sec-box">
+			<p class="sec-box-t">Tasa QvaPay</p>
 		${list ? `<ul class="acct-list">${list}</ul>` : '<p class="muted small">Te escribimos cuando la Tasa QvaPay de un mercado suba o baje del valor que pongas.</p>'}
 		${
 			d.alerts.length < d.max
@@ -164,6 +167,7 @@ async function acctAlerts(d) {
 			<button class="btn block" id="alAdd">Añadir aviso</button>`
 				: `<p class="hint">Tienes ${d.max} avisos, el máximo: quita alguno para poner otro.</p>`
 		}
+		</section>
 	</div>`
 	const sync = () => {
 		const c = $('alCoin').value
@@ -171,6 +175,25 @@ async function acctAlerts(d) {
 		$('alPrice').placeholder = d.rates[c] ? fmtP(d.rates[c]) : ''
 	}
 	$('alTg')?.addEventListener('click', acctTelegram)
+	$('tgOff')?.addEventListener('click', async () => {
+		try {
+			await proFetch('/pro/telegram/unlink', { print: TPPro.print })
+			toast('Ya no te llegarán avisos por Telegram')
+			acctAlerts()
+		} catch (e) {
+			toast(e.message, true)
+		}
+	})
+	$('alOffers').onchange = async (e) => {
+		const on = e.target.checked
+		try {
+			acctAlerts(await proFetch('/pro/alerts/offers', { print: TPPro.print, on }))
+			toast(on ? 'Te avisaremos de tus ofertas por Telegram' : 'Ya no te avisaremos de tus ofertas')
+		} catch (err) {
+			e.target.checked = !on
+			toast(err.message, true)
+		}
+	}
 	if ($('alCoin')) {
 		$('alCoin').onchange = sync
 		sync()
@@ -208,24 +231,6 @@ async function acctTelegram() {
 	} catch (e) {
 		tab?.close()
 		toast(e.message, true)
-	}
-}
-
-function acctAskRefund(checkout) {
-	const box = $(`ask-${checkout}`)
-	box.innerHTML = `<div class="stack"><label class="field">¿Por qué la pides?<textarea class="input" id="rfReason" rows="2" maxlength="300" placeholder="Así mejoramos Pro"></textarea></label>
-		<p class="hint">Te devolvemos el dinero a la cuenta de QvaPay que pagó, y se quitan los días de esta compra.</p>
-		<button class="btn primary" id="rfGo">Pedir devolución</button></div>`
-	$('rfGo').onclick = async () => {
-		$('rfGo').disabled = true
-		try {
-			await proFetch('/pro/refund', { print: TPPro.print, checkout, reason: $('rfReason').value })
-			toast('Devolución pedida: la revisamos pronto')
-			acctPro()
-		} catch (e) {
-			$('rfGo').disabled = false
-			toast(e.message, true)
-		}
 	}
 }
 
@@ -285,27 +290,10 @@ function acctGainsSlot() {
 }
 
 document.addEventListener('click', (e) => e.target.closest('#acctOpen') && showAccount('summary'))
-
-// Enviar el diagnóstico (diag.js): lo que apuntó este navegador de esta cuenta, con lo que cuenta el usuario. Sale solo
-// al pulsar «Enviar»
-function showDiag() {
-	const entries = window.TPDiag?.forAccount(bk.acct.username) ?? []
-	openModal(`<div class="stack"><h3>Envíanos un diagnóstico</h3>
-		<p class="muted">Cuéntanos qué pasó. Con lo que tu navegador apuntó estos días entendemos qué hizo el terminal: lo que pediste (publicar, tomar, pagar, liberar…), lo que falló y los avisos que viste.</p>
-		<textarea class="input" id="diagNote" rows="4" maxlength="1000" placeholder="Por ejemplo: tomé una oferta con el radar y no me llegó el aviso…"></textarea>
-		<p class="hint">Se envían ${entries.length.toLocaleString('en-US')} ${entries.length === 1 ? 'línea' : 'líneas'} de los últimos 14 días. Nunca tu token ni tus datos de pago. Si quieres respuesta, escríbenos también a @terminalp2p en Telegram.</p>
-		<button class="btn primary block" id="diagSend">Enviar</button></div>`)
-	$('diagSend').onclick = async () => {
-		const note = $('diagNote').value.trim()
-		if (note.length < 3) return toast('Cuéntanos en pocas palabras qué pasó', true)
-		$('diagSend').disabled = true
-		try {
-			await proFetch('/pro/diag', { print: TPPro.print, note, entries })
-			openModal(`<div class="stack"><h3>Recibido</h3><p class="muted">Lo revisamos junto con lo que pasó en tu cuenta. Gracias por avisarnos.</p><button class="btn primary block" id="diagOk">Listo</button></div>`)
-			$('diagOk').onclick = closeModal
-		} catch (e) {
-			$('diagSend').disabled = false
-			toast(e.message, true)
-		}
-	}
-}
+// Para cualquier dificultad (también con un pago): el grupo de Telegram. Las compras no se devuelven
+const HELP = '¿Tienes alguna dificultad? <a class="link" href="https://t.me/terminalp2p" target="_blank" rel="noopener">Consúltanos en el grupo de Telegram</a>'
+const NO_REFUNDS = `Puedes probarlo gratis antes de pagar. Las compras no se reembolsan. ${HELP}`
+// Lo que apuntaba el diagnóstico (diag.js), que ya no existe: se borra de este navegador
+try {
+	localStorage.removeItem('tp.diag')
+} catch {}

@@ -88,9 +88,9 @@ export const tellRefund = (env: BotEnv, r: { license: string; amount: number; pa
 	const usd = `${r.amount.toLocaleString('en-US')} USD`
 	const text =
 		r.status === 'approved'
-			? `↩️ <b>Devolución aprobada</b>\n\nVamos a transferirte <b>${usd}</b> a la cuenta de QvaPay @${tgEsc(r.payee)}. Ya se quitaron los días de esa compra.\n\nTe escribimos de nuevo en cuanto esté hecha.`
+			? `↩️ <b>Devolución aprobada</b>\n\nVamos a transferirte <b>${usd}</b> a la cuenta de QvaPay @${tgEsc(r.payee)}. Los días de esa compra que no usaste ya se quitaron de tu cuenta.\n\nTe escribimos de nuevo en cuanto esté hecha.`
 			: r.status === 'transferred'
-				? `💸 <b>Devolución enviada</b>\n\nTe transferimos <b>${usd}</b> a @${tgEsc(r.payee)} en QvaPay.${r.transfer_ref ? `\nReferencia: <code>${tgEsc(r.transfer_ref)}</code>` : ''}\n\nGracias por haber probado Pro.`
+				? `💸 <b>Devolución enviada</b>\n\nTe transferimos <b>${usd}</b> a @${tgEsc(r.payee)} en QvaPay.${r.transfer_ref ? `\nReferencia: <code>${tgEsc(r.transfer_ref)}</code>` : ''}`
 				: `<b>Tu devolución no fue aprobada</b>\n\nMotivo: «${tgEsc(r.decision_note ?? '')}»\n\nSi quieres hablarlo, escríbenos en @terminalp2p.`
 	return tellUser(env, r.license, text, undefined, fetcher)
 }
@@ -235,7 +235,7 @@ Desde ahora te escribimos por aquí, y solo cuando hay algo de tu Pro que debes 
 
 ✅ <b>Pagos</b>: la confirmación en cuanto QvaPay lo acredita y empiezan tus días
 ⏳ <b>Renovación</b>: un aviso 3 días antes de que se acaben, para que no te quedes sin la orden inteligente
-↩️ <b>Devoluciones</b>: cada paso, si alguna vez pides una
+↩️ <b>Devoluciones</b>: cada paso, si alguna vez te hacemos una
 
 Sin publicidad ni mensajes de relleno. ¿Prefieres no recibirlos? Escribe /stop cuando quieras.
 
