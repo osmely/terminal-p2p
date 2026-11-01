@@ -741,7 +741,7 @@ export class Broker {
 			}
 			case 'rate': {
 				const rating = Math.min(5, Math.max(1, Math.round(Number(b.rating) || 5)))
-				await c.rate(offer, order, rating)
+				await c.rate(offer, order, rating, undefined, b.edit === true)
 				return json(200, { ok: true, message: 'Calificación guardada' })
 			}
 		}

@@ -513,7 +513,7 @@ function renderDetail(t) {
 			.join('')
 		action = `<div class="stack tight"><p>${mine ? `Calificaste a @${esc(t.counterparty)}:` : `Operación completada. Califica a @${esc(t.counterparty)}:`}</p>
 			<div class="stars ${locked ? 'locked' : ''}" role="group" aria-label="Calificación">${stars}</div>
-			${mine ? `<p class="hint">${locked ? 'Ya no se puede cambiar.' : `Puedes cambiarla hasta el ${when}.`}</p>` : ''}
+			<p class="hint" id="rateHint" ${mine ? '' : 'hidden'}>${locked ? 'Ya no se puede cambiar.' : when ? `Puedes cambiarla hasta el ${when}.` : 'Puedes cambiarla.'}</p>
 </div>`
 	}
 
@@ -619,7 +619,35 @@ function bindDetail(t) {
 			}
 			return act(a)
 		}
-	for (const b of body.querySelectorAll('[data-rate]')) b.onclick = () => !b.disabled && act('rate', { rating: Number(b.dataset.rate) })
+	// Calificar: la estrella elegida se ve al momento y no se puede tocar otra hasta que QvaPay responda (las llamadas
+	// van en fila y una nota que se cambia varias veces seguidas tardaba en asentarse). Con nota ya puesta, se cambia
+	const stars = body.querySelector('.stars')
+	for (const b of body.querySelectorAll('[data-rate]'))
+		b.onclick = async () => {
+			if (b.disabled || stars.classList.contains('busy')) return
+			const n = Number(b.dataset.rate)
+			stars.classList.add('busy')
+			for (const s of stars.querySelectorAll('[data-rate]')) {
+				s.classList.toggle('on', Number(s.dataset.rate) <= n)
+				s.disabled = true
+			}
+			const hint = $('rateHint')
+			hint.textContent = 'Guardando…'
+			hint.hidden = false
+			try {
+				await api('/trade/action', { offer: t.offer, order: t.order, action: 'rate', rating: n, edit: (t.myRating?.rating ?? 0) > 0 })
+				stars.classList.remove('busy')
+				for (const s of stars.querySelectorAll('[data-rate]')) s.disabled = false
+				hint.textContent = 'Calificación guardada.'
+			} catch (e) {
+				toast(e.message, true)
+			}
+			// Se vuelve a leer la operación aunque no haya cambiado (nota igual que antes o error): así queda la nota que
+			// de verdad guardó QvaPay y su plazo
+			bk.detailSig = null
+			refreshDetail()
+			loadTrades()
+		}
 	$('chatform').onsubmit = (e) => {
 		e.preventDefault()
 		const text = $('chatInput').value.trim()
