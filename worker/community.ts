@@ -75,6 +75,7 @@ export async function buildDailyPost(env: CommunityEnv, now: number) {
 		['ETECSA', '📱 Saldo ETECSA', (v: number) => `${fmt(v)} CUP`],
 		['CLASICA', '💳 Clásica', (v: number) => `${fmt(v, 2)} USD`],
 		['BANK_MLC', '🏦 MLC', (v: number) => `${fmt(v, 2)} MLC`],
+		['BANDECPREPAGO', '💳 Bandec Prepago (USD Tropical)', (v: number) => `${fmt(v, 2)} USD`],
 	] as const
 	const others = other.map(([tick, label, f]) => (by.get(tick)?.median ? `${label}: ${f(by.get(tick)!.median!)}` : '')).filter(Boolean)
 	if (others.length) lines.push('', 'Por cada USD de saldo:', ...others)
