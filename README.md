@@ -8,12 +8,13 @@ Libro de órdenes por moneda (CUP Transferencia, Saldo ETECSA, Tarjeta Clásica,
 
 ## Privacidad
 
-- **Todo lo que depende de tu cuenta corre en tu navegador.** Tu token de QvaPay, la lectura del libro y "Mis operaciones" viven ahí; el servidor no guarda tokens ni datos de usuarios.
-- **Nadie usa datos de otro.** El libro se lee con el token de quien mira. Sin cuenta conectada se ven los datos públicos del mercado: promedios, operaciones completadas e histórico.
+- **Lo que depende de tu cuenta corre en tu navegador.** Tu token de QvaPay y "Mis operaciones" viven ahí; las peticiones a QvaPay pasan por un relé sin estado que no guarda el token.
+- **El libro en vivo** lo arma el servidor con el feed de mercado de QvaPay, igual para todos. En el terminal se ve con una cuenta de QvaPay conectada; la mini app (`/mini/`) y `/data/book` lo dan sin cuenta. Sin cuenta, el terminal enseña los datos públicos del mercado: promedios, operaciones completadas e histórico.
 - **El token** se guarda solo en tu navegador: se borra al cerrar la pestaña, salvo que elijas recordarlo. "Desconectar" lo borra.
 - **Sin custodia:** el dinero de cada operación queda en el escrow de QvaPay.
-- Sin cookies ni rastreadores, y una política de seguridad estricta que solo admite scripts del propio dominio.
-- **Métricas anónimas:** el servidor cuenta las acciones del P2P hechas desde el terminal (publicar, tomar, pagar, liberar, completar) con su mercado, lado y monto, sin usuario, token ni IP. La oferta va como huella SHA-256, solo para unir "publicada" con "completada". También suma por día las visitas a la web, al terminal y al simulador, las cuentas conectadas y por qué enlace llegaron (`?de=…`), sin cookies ni identificadores (`public/app/hit.js`, `worker/hits.ts`). El panel es privado (`/admin/metrics`, con la clave del secreto `METRICS_KEY`).
+- **Lo que se guarda de cada cuenta:** el usuario de QvaPay y cuánto tiempo tiene el libro en vivo abierto cada día (`live_seen`, 90 días), sus conexiones con la huella del token (`user_log`, 180 días) y, si el panel la restringe o bloquea, `user_blocks` y `user_block_prints`. Con Pro, su licencia y, si conecta Telegram, su chat con el bot. Nunca el token ni lo que hace en el P2P.
+- **Cookies:** solo las de la sesión, firmadas y HttpOnly: `tpid` (huella del token) y `tpw` (huella, uuid y usuario de QvaPay). Sin rastreadores, y una política de seguridad estricta que solo admite scripts del propio dominio.
+- **Métricas anónimas:** el servidor cuenta las acciones del P2P hechas desde el terminal (publicar, tomar, pagar, liberar, completar) con su mercado, lado y monto, sin usuario, token ni IP. La oferta va como huella SHA-256, solo para unir "publicada" con "completada". También suma por día las visitas a la web y al terminal, las cuentas conectadas y por qué enlace llegaron (`?de=…`), sin cookies ni identificadores (`public/app/hit.js`, `worker/hits.ts`). El panel es privado (`/admin/metrics`, con la clave del secreto `METRICS_KEY`).
 
 ## Mis operaciones
 
@@ -62,7 +63,7 @@ test/          pruebas
 
 ## Fuentes de datos
 
-- **QvaPay:** el libro (con el token de quien mira) y los promedios públicos del P2P, guardados cada 10 minutos.
+- **QvaPay:** el libro en vivo (su feed de mercado) y los promedios públicos del P2P, guardados cada 10 minutos.
 - **[elTOQUE](https://eltoque.com/tasas-de-cambio-de-moneda-en-cuba-hoy):** la tasa representativa del mercado informal (USD, EUR, MLC y USDT en CUP), una mediana por día, tal como la publica elTOQUE. Son tasas de referencia.
 
 ## Licencia

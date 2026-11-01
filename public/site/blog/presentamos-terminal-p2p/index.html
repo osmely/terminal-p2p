@@ -133,23 +133,23 @@
 					<figcaption>Mis operaciones en el móvil.</figcaption>
 				</figure>
 
-				<h2>Tu cuenta no sale de tu navegador</h2>
-				<p>Terminal P2P no tiene cuentas de usuario ni base de datos de usuarios. Para operar usas un token de QvaPay que creas tú, con los permisos justos:</p>
+				<h2>Tu token, solo en tu navegador</h2>
+				<p>Terminal P2P no te pide registrarte: entras con un token de QvaPay que creas tú, con los permisos justos:</p>
 				<ul>
 					<li><strong>Sin custodia.</strong> El terminal nunca toca tu dinero: cada operación pasa por el escrow de QvaPay.</li>
-					<li><strong>Permisos mínimos.</strong> El token lleva <code>read</code> y <code>p2p:buy</code> o <code>p2p:sell</code>. Nunca <code>transfer</code> ni <code>withdraw</code>, así que no puede sacar dinero de tu cuenta.</li>
+					<li><strong>Permisos mínimos.</strong> El token lleva <code>read</code>, <code>p2p:read</code> y <code>p2p:buy</code> o <code>p2p:sell</code>. Nunca <code>transfer</code> ni <code>withdraw</code>, así que no puede sacar dinero de tu cuenta.</li>
 					<li><strong>Token solo en tu navegador.</strong> Se borra al cerrar la pestaña, salvo que elijas recordarlo en ese dispositivo.</li>
-					<li><strong>Nadie ve lo tuyo.</strong> Cada persona lee el libro con su propia cuenta, y tus datos no se comparten con otros usuarios.</li>
-					<li><strong>Sin rastreadores.</strong> Sin cookies de seguimiento ni identificadores. Solo se cuentan, de forma anónima, las visitas de cada día y las acciones del P2P hechas desde el terminal.</li>
+					<li><strong>Nadie ve lo tuyo.</strong> Tus operaciones, tu saldo y tus datos de pago no se comparten con otros usuarios.</li>
+					<li><strong>Sin rastreadores.</strong> Ni publicidad ni seguimiento de terceros, y las fuentes se sirven desde este dominio. Las únicas cookies son las de tu sesión: llevan, firmados, la huella de tu token y tu usuario de QvaPay, nunca el token. Las visitas y las acciones del P2P (publicar, tomar, completar) se cuentan de forma anónima, sin usuario ni IP.</li>
 					<li><strong>Código abierto.</strong> Todo el código está en <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a> con licencia Apache 2.0: puedes revisarlo o desplegar tu propia copia.</li>
 				</ul>
-				<p>En el servidor solo se guardan datos públicos del mercado (los promedios que QvaPay publica sin cuenta y la tasa del mercado informal de elTOQUE) y contadores anónimos de las visitas de cada día y de las acciones del P2P hechas desde el terminal, sin usuario, token, IP ni ningún identificador.</p>
+				<p>En el servidor se guardan datos públicos del mercado (los promedios del P2P de QvaPay y la tasa informal de elTOQUE), contadores anónimos de visitas y de acciones del P2P y, de tu cuenta, solo tu usuario de QvaPay y cuánto tiempo tienes el terminal abierto. Nunca tu token.</p>
 
 				<h2>Cómo empezar</h2>
 				<ol>
 					<li><strong>Crea tu cuenta de QvaPay</strong>, si aún no la tienes. Es gratis; para el P2P, QvaPay pide verificar tu identidad, tu teléfono y vincular Telegram. <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crear cuenta en QvaPay</a> <small>(usuario referido)</small></li>
 					<li><strong>Abre el terminal</strong> en <a href="https://app.terminalp2p.com">app.terminalp2p.com</a>. Las tasas y el histórico se ven al instante.</li>
-					<li><strong>Crea un token</strong> en qvapay.com/dev/tokens con los permisos <code>read</code> y <code>p2p:buy</code> o <code>p2p:sell</code>, y pégalo en «Conectar QvaPay».</li>
+					<li><strong>Crea un token</strong> en qvapay.com/dev/tokens con los permisos <code>read</code>, <code>p2p:read</code> y <code>p2p:buy</code> o <code>p2p:sell</code>, pégalo y pulsa «Conectar».</li>
 					<li><strong>Mira el libro y opera.</strong> Prueba primero con un monto pequeño para familiarizarte con cada paso.</li>
 				</ol>
 				<p class="note">Terminal P2P es un proyecto independiente, no afiliado a QvaPay. Las operaciones, el escrow, las comisiones y la resolución de disputas son de QvaPay.</p>
