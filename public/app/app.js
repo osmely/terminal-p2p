@@ -488,7 +488,7 @@ function levelRow(l, side, cum, maxCum) {
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em title="Ver la ficha de ${esc(l.user)}">${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em${l.user === '—' ? ' class="anon"' : ` title="Ver la ficha de ${esc(l.user)}"`}>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 // ── Libro agrupado por rangos de precio ───────────────────────────────
@@ -536,7 +536,7 @@ function groupRow(g, side, cum, maxCum) {
 	return `<div class="lvl grp ${dim ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${best.uuid}" data-side="${side}" data-group="${g.key}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(g.price)}</span><span class="u">${fmtU(g.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${n} ${n === 1 ? 'oferta' : 'ofertas'}${mine ? ' · <b class="you">tú</b>' : ''} · <em title="Ver la ficha de ${esc(best.user)}">${esc(best.user)}</em></span></div>`
+		<span class="who">${n} ${n === 1 ? 'oferta' : 'ofertas'}${mine ? ' · <b class="you">tú</b>' : ''} · <em${best.user === '—' ? ' class="anon"' : ` title="Ver la ficha de ${esc(best.user)}"`}>${esc(best.user)}</em></span></div>`
 }
 
 function groupTip(g, side) {
@@ -1527,8 +1527,9 @@ function bind() {
 			if (!row) return
 			tip.hidden = true
 			// El nombre abre su ficha; el resto de la fila, la oferta
+			// Sin dueño aún («—»: QvaPay todavía no dijo quién la publicó), abre la oferta, que sí lo dice
 			const who = e.target.closest('.who em')
-			if (who && typeof showPeer === 'function') return showPeer(who.textContent)
+			if (who && who.textContent.trim() !== '—' && typeof showPeer === 'function') return showPeer(who.textContent)
 			// broker.js abre la oferta para tomarla; sin él, se abre en QvaPay
 			if (typeof showTakeOffer === 'function') showTakeOffer(row.dataset.uuid, row.dataset.side)
 			else window.open(`https://www.qvapay.com/p2p/${row.dataset.uuid}`, '_blank', 'noopener')

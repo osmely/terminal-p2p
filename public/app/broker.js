@@ -1585,8 +1585,9 @@ function peerSignals(p, known, offers) {
 }
 
 async function showPeer(user) {
-	user = String(user ?? '').replace(/^@/, '')
-	if (!user) return
+	user = String(user ?? '').trim().replace(/^@/, '')
+	// «—» u otro hueco: aún no se sabe de quién es (no se abre una ficha vacía que solo dice «Usuario no válido»)
+	if (!/^[A-Za-z0-9._-]{1,40}$/.test(user)) return toast('Aún no se sabe quién publicó esta oferta: ábrela para verlo', true)
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para ver la ficha', true)
 	openModal(`<div class="stack"><h3>@${esc(user)}</h3><p class="muted">Cargando ficha…</p></div>`)
 	let d

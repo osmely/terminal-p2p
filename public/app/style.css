@@ -626,6 +626,9 @@ a.icon-btn { text-decoration: none; }
 .peer-link { font-size: inherit; }
 .lvl .who em { cursor: pointer; }
 .lvl .who em:hover { text-decoration: underline; }
+/* Sin dueño aún («—»): no es un enlace, toca la fila para abrir la oferta */
+.lvl .who em.anon { cursor: inherit; }
+.lvl .who em.anon:hover { text-decoration: none; }
 .rank-list li[data-user] { cursor: pointer; }
 .rank-list li[data-user]:hover { background: var(--surface-2); border-radius: 6px; }
 
