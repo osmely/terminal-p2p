@@ -6,6 +6,7 @@ import { panel, periods } from './admin.ts'
 import { cubaDate } from './informal.ts'
 import type { D1 } from './rates.ts'
 
+// Las consultas al bot del dólar también se cuentan en hits, con site 'bot' (ratebot.ts): aquí no salen
 const SITES = new Set(['site', 'app', 'sim'])
 const KINDS = new Set(['visit', 'connect', 'first'])
 const REF = /^[a-z0-9_-]{1,20}$/
@@ -37,7 +38,7 @@ const REFS_SHOWN = 20
 
 export async function loadHits(db: D1, days: number, now = Date.now()) {
 	const since = cubaDate(now - (days - 1) * 86_400_000)
-	const { results } = await db.prepare('SELECT day, site, kind, ref, n FROM hits WHERE day >= ? ORDER BY day DESC').bind(since).all<{ day: string; site: string; kind: string; ref: string; n: number }>()
+	const { results } = await db.prepare("SELECT day, site, kind, ref, n FROM hits WHERE day >= ? AND site != 'bot' ORDER BY day DESC").bind(since).all<{ day: string; site: string; kind: string; ref: string; n: number }>()
 	// En los rangos largos, por semana o por mes (admin.ts)
 	const per = periods(days)
 	const byDay = new Map<string, Record<string, number>>()

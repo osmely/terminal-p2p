@@ -25,6 +25,7 @@ import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveSocket, type LiveEnv } from './livebook.ts'
 import { COINS, isOutlier } from '../src/terminal/market.ts'
+import { botHtml, loadBot } from './ratebot.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
 import { recordBook } from './bookstats.ts'
 import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './analysis.ts'
@@ -481,7 +482,7 @@ async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
-	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days), hitsHtml(await loadHits(env.DB, days))))
+	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days), hitsHtml(await loadHits(env.DB, days)) + botHtml(await loadBot(env.DB, days))))
 }
 
 // Las cifras públicas del terminal (para la landing): lo publicado, tomado y completado desde aquí, cacheadas 10 minutos

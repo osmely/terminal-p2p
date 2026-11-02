@@ -6,6 +6,7 @@
 import { hex, hmac } from './crypto.ts'
 import { tgEsc, type AlertEnv } from './alerts.ts'
 import { inCuba, type D1 } from './rates.ts'
+import { BOT_MENU, commandOf, HELP, JOINED, leftGroup, rateCommand, seenGroup, type Chat } from './ratebot.ts'
 
 export interface BotEnv extends AlertEnv {
 	DB: D1
@@ -218,7 +219,9 @@ export const radarButton = (env: AlertEnv, h: RadarHit) => (h.kind === 'found' ?
 // ── Lo que el usuario le escribe al bot ──────────────────────────────
 
 interface Update {
-	message?: { text?: string; chat?: { id: number; type: string } }
+	message?: { message_id?: number; text?: string; chat?: Chat }
+	// El bot entró en un grupo o lo sacaron (allowed_updates incluye my_chat_member)
+	my_chat_member?: { chat?: Chat; new_chat_member?: { status?: string } }
 }
 
 const reply = (chat_id: number, text: string, reply_markup?: object) =>
@@ -242,22 +245,38 @@ Sin publicidad ni mensajes de relleno. ¿Prefieres no recibirlos? Escribe /stop 
 ${status}`
 }
 
-// Telegram manda aquí cada mensaje privado al bot (POST /pro/telegram/webhook). Se responde en la misma
-// respuesta, sin otra llamada
+// Telegram manda aquí cada mensaje privado al bot, los comandos de los grupos y cuándo lo meten o lo sacan de uno
+// (POST /pro/telegram/webhook). Se responde en la misma respuesta, sin otra llamada
 export async function botWebhook(req: Request, env: BotEnv, now: number): Promise<Response> {
 	if (!env.PRO_KEY || req.headers.get('x-telegram-bot-api-secret-token') !== (await webhookSecret(env))) return new Response('no', { status: 401 })
 	const u = (await req.json().catch(() => ({}))) as Update
+	const db = env.DB
+	const staging = env.STAGING === '1'
+	// Lo metieron en un grupo (saluda y dice qué sabe hacer) o lo sacaron
+	const member = u.my_chat_member
+	if (member?.chat && member.chat.type !== 'private') {
+		const status = member.new_chat_member?.status ?? ''
+		if (status === 'member' || status === 'administrator') {
+			await seenGroup(db, member.chat, now)
+			return Response.json({ method: 'sendMessage', chat_id: member.chat.id, text: JOINED, parse_mode: 'HTML' })
+		}
+		if (status === 'left' || status === 'kicked') await leftGroup(db, member.chat, now)
+		return Response.json({ ok: true })
+	}
 	const chat = u.message?.chat
 	const text = (u.message?.text ?? '').trim()
-	// En grupos no contesta (el bot está en tu grupo de avisos y en el de la comunidad)
-	if (!chat || chat.type !== 'private') return Response.json({ ok: true })
-	const db = env.DB
+	if (!chat) return Response.json({ ok: true })
+	// El bot del dólar (ratebot.ts), en grupos y por privado. En los grupos solo llegan los comandos; lo demás no se contesta
+	const rc = commandOf(text, null)
+	const rate = rc ? await rateCommand(db, chat, rc, now, staging, u.message?.message_id) : null
+	if (rate) return Response.json('skip' in rate ? { ok: true } : rate)
+	if (chat.type !== 'private') return Response.json({ ok: true })
 	const [cmd, arg] = text.split(/\s+/, 2)
 	if (/^\/start(@\w+)?$/i.test(cmd ?? '')) {
 		if (!arg)
 			return reply(
 				chat.id,
-				'👋 Hola. Soy el bot de <b>Terminal P2P</b>, el terminal para operar en el P2P de QvaPay.\n\nPara recibir aquí los avisos de tu Pro, abre el terminal, entra en «Mi cuenta» → ★ Pro y pulsa «Recibir avisos en Telegram».',
+				`${HELP}\n\n⭐ Si tienes Pro, aquí también te llegan sus avisos: abre el terminal, entra en «Mi cuenta» → ★ Pro y pulsa «Recibir avisos en Telegram».`,
 				openApp(env),
 			)
 		const link = await db.prepare('SELECT license, created_at FROM pro_tg_links WHERE code = ?').bind(arg).first<{ license: string; created_at: number }>()
@@ -280,7 +299,7 @@ export async function botWebhook(req: Request, env: BotEnv, now: number): Promis
 				: 'Este chat no tiene ninguna cuenta conectada, así que no te llegará nada.',
 		)
 	}
-	return reply(chat.id, 'Por aquí solo enviamos los avisos de tu Pro y no leemos los mensajes. Si necesitas ayuda, escríbenos en @terminalp2p.')
+	return reply(chat.id, 'No leo los mensajes: solo contesto comandos. Prueba /dolar o /tasas, y /ayuda para ver todos. Si necesitas ayuda con el terminal, escríbenos en @terminalp2p.')
 }
 
 // Desde el panel: que Telegram mande los mensajes del bot a este entorno (el bot es el mismo en staging y
@@ -291,10 +310,13 @@ export async function connectBot(env: BotEnv, origin: string, fetcher: typeof fe
 		const res = await fetcher(API(env, 'setWebhook'), {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ url: `${origin}/pro/telegram/webhook`, secret_token: await webhookSecret(env), allowed_updates: ['message'], drop_pending_updates: true }),
+			body: JSON.stringify({ url: `${origin}/pro/telegram/webhook`, secret_token: await webhookSecret(env), allowed_updates: ['message', 'my_chat_member'], drop_pending_updates: true }),
 			signal: AbortSignal.timeout(8000),
 		})
 		const j = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string }
+		// El menú de «/» con los comandos del bot del dólar (si falla, el bot contesta igual)
+		if (j.ok)
+			await fetcher(API(env, 'setMyCommands'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commands: BOT_MENU }), signal: AbortSignal.timeout(8000) }).catch(() => null)
 		return { ok: !!j.ok, description: j.description ?? `Telegram respondió ${res.status}` }
 	} catch (err) {
 		return { ok: false, description: (err as Error).message }

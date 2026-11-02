@@ -55,6 +55,10 @@ function fakeQvaPay() {
 				telegram.push({ chat_id: 'webhook', text: b.url, url: b.secret_token })
 				return Response.json({ ok: true, description: 'Webhook was set' })
 			}
+			if (url.endsWith('/setMyCommands')) {
+				telegram.push({ chat_id: 'menu', text: b.commands.map((c: { command: string }) => c.command).join(' '), url: '' })
+				return Response.json({ ok: true })
+			}
 			telegram.push({ chat_id: b.chat_id, text: b.text, url: b.reply_markup?.inline_keyboard?.[0]?.[0]?.url })
 			return Response.json({ ok: true })
 		}
@@ -975,7 +979,7 @@ test('avisos al usuario por Telegram: se conecta desde «Mi cuenta» y recibe su
 	// El enlace sirve una sola vez
 	assert.match((await tg(`/start ${code}`)).body!.text!, /caducó/)
 	assert.match((await tg('/start')).body!.text!, /Recibir avisos en Telegram/)
-	assert.match((await tg('hola?')).body!.text!, /no leemos los mensajes/)
+	assert.match((await tg('hola?')).body!.text!, /No leo los mensajes: solo contesto comandos/)
 
 	// Compra: el aviso al grupo y la confirmación al usuario
 	const { checkout } = await buy(s, P1, 'month', 'ana')
@@ -1007,7 +1011,9 @@ test('avisos al usuario por Telegram: se conecta desde «Mi cuenta» y recibe su
 
 	// El panel conecta el bot a este entorno, con la clave
 	assert.match(await admin({ action: 'bot-connect' }), /El bot ya responde desde app\.terminalp2p\.com/)
-	assert.deepEqual(s.q.telegram.at(-1), { chat_id: 'webhook', text: 'https://app.terminalp2p.com/pro/telegram/webhook', url: await webhookSecret(s.env) })
+	assert.deepEqual(s.q.telegram.at(-2), { chat_id: 'webhook', text: 'https://app.terminalp2p.com/pro/telegram/webhook', url: await webhookSecret(s.env) })
+	// Y le pone el menú de «/» con los comandos del bot del dólar
+	assert.deepEqual(s.q.telegram.at(-1), { chat_id: 'menu', text: 'dolar tasas mlc zelle clasica etecsa tropical ayuda', url: '' })
 })
 
 test('importe con comisión: se activa; importe que no cuadra: el repaso lo deja en «Pendientes» y se resuelve a mano', async () => {
