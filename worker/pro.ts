@@ -1084,7 +1084,7 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 		}
 		if (route === 'POST /pro/telegram/webhook') {
 			t.skip = true
-			return botWebhook(req, env, now)
+			return botWebhook(req, env, now, fetcher)
 		}
 
 		// Radar: el terminal te avisa por Telegram de una oferta que encontró o tomó. Solo con Pro activo, una vez por

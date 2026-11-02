@@ -157,6 +157,8 @@ export interface Chat {
 	id: number
 	type: string
 	title?: string
+	// El @ del grupo, solo si es público
+	username?: string
 }
 
 // «/dolar», «/dolar@terminalp2p_bot» o «/Dólar 5060» → 'dolar'; null si no es un comando para este bot
@@ -214,12 +216,21 @@ async function count(db: D1, chat: Chat, cmd: string, now: number) {
 export async function seenGroup(db: D1, chat: Chat, now: number, cmds = 0) {
 	await db
 		.prepare(
-			`INSERT INTO bot_groups (chat_id, title, kind, added_at, last_at, cmds, left_at) VALUES (?, ?, ?, ?, ?, ?, NULL)
-			ON CONFLICT (chat_id) DO UPDATE SET title = COALESCE(excluded.title, title), kind = excluded.kind, last_at = excluded.last_at, cmds = cmds + excluded.cmds, left_at = NULL`,
+			`INSERT INTO bot_groups (chat_id, title, username, kind, added_at, last_at, cmds, left_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+			ON CONFLICT (chat_id) DO UPDATE SET title = COALESCE(excluded.title, title), username = excluded.username, kind = excluded.kind, last_at = excluded.last_at, cmds = cmds + excluded.cmds, left_at = NULL`,
 		)
-		.bind(chat.id, chat.title?.slice(0, 120) ?? null, chat.type, now, now, cmds)
+		.bind(chat.id, chat.title?.slice(0, 120) ?? null, chat.username && /^\w{4,32}$/.test(chat.username) ? chat.username : null, chat.type, now, now, cmds)
 		.run()
 }
+
+// Los miembros de un grupo se le preguntan a Telegram al entrar el bot y, luego, como mucho una vez al día
+export async function membersDue(db: D1, chat: Chat, now: number) {
+	if (chat.type === 'private') return false
+	const r = await db.prepare('SELECT members_at FROM bot_groups WHERE chat_id = ?').bind(chat.id).first<{ members_at: number | null }>()
+	return !!r && (!r.members_at || now - r.members_at > DAY_MS)
+}
+export const saveMembers = (db: D1, chat: Chat, members: number, now: number) =>
+	db.prepare('UPDATE bot_groups SET members = ?, members_at = ? WHERE chat_id = ?').bind(members, now, chat.id).run()
 export const leftGroup = (db: D1, chat: Chat, now: number) => db.prepare('UPDATE bot_groups SET left_at = ? WHERE chat_id = ?').bind(now, chat.id).run()
 
 // Para el panel de métricas: en cuántos grupos está y cuántas consultas
@@ -228,7 +239,10 @@ export async function loadBot(db: D1, days: number, now = Date.now()) {
 	const [groups, byCmd, top] = await Promise.all([
 		db.prepare('SELECT COUNT(*) AS n, SUM(left_at IS NULL) AS active FROM bot_groups').first<{ n: number; active: number | null }>(),
 		db.prepare("SELECT kind, ref, SUM(n) AS n FROM hits WHERE site = 'bot' AND day >= ? GROUP BY kind, ref ORDER BY n DESC").bind(since).all<{ kind: string; ref: string; n: number }>(),
-		db.prepare('SELECT title, cmds, added_at, last_at, left_at FROM bot_groups ORDER BY cmds DESC, last_at DESC LIMIT 15').all<{ title: string | null; cmds: number; added_at: number; last_at: number; left_at: number | null }>(),
+		// Todos: primero donde sigue, por la última consulta
+		db
+			.prepare('SELECT title, username, members, cmds, added_at, last_at, left_at FROM bot_groups ORDER BY left_at IS NOT NULL, last_at DESC LIMIT 500')
+			.all<{ title: string | null; username: string | null; members: number | null; cmds: number; added_at: number; last_at: number; left_at: number | null }>(),
 	])
 	return { groups: groups?.n ?? 0, active: groups?.active ?? 0, byCmd: byCmd.results, top: top.results }
 }
@@ -241,7 +255,11 @@ export function botHtml(b: Awaited<ReturnType<typeof loadBot>>) {
 	const cmds = new Map<string, number>()
 	for (const r of b.byCmd) cmds.set(r.ref, (cmds.get(r.ref) ?? 0) + r.n)
 	const rows = b.top
-		.map((g) => `<tr><td>${g.title ? esc(g.title) : '<span class="note">sin nombre</span>'}${g.left_at ? ' <span class="note">(lo sacaron)</span>' : ''}</td><td>${g.cmds.toLocaleString('en-US')}</td><td>${when(g.added_at)}</td><td>${when(g.last_at)}</td></tr>`)
+		.map((g) => {
+			const name = g.title ? esc(g.title) : '<span class="note">sin nombre</span>'
+			const link = g.username ? `<a href="https://t.me/${esc(g.username)}" target="_blank" rel="noopener">${name}</a> <span class="note">@${esc(g.username)}</span>` : `${name} <span class="note">privado</span>`
+			return `<tr><td>${link}${g.left_at ? ' <span class="note">(lo sacaron)</span>' : ''}</td><td class="num">${g.members != null ? g.members.toLocaleString('en-US') : '—'}</td><td class="num">${g.cmds.toLocaleString('en-US')}</td><td>${when(g.added_at)}</td><td>${when(g.last_at)}</td></tr>`
+		})
 		.join('')
 	return `<div class="cards">
 <div class="card"><span>Grupos con el bot</span><b>${b.active.toLocaleString('en-US')}</b><small>${b.groups > b.active ? `${b.groups - b.active} lo sacaron` : 'donde sigue'}</small></div>
@@ -249,5 +267,5 @@ export function botHtml(b: Awaited<ReturnType<typeof loadBot>>) {
 <div class="card"><span>Consultas por privado</span><b>${total('private').toLocaleString('en-US')}</b><small>en este periodo</small></div>
 <div class="card"><span>Lo más pedido</span><b>${[...cmds].sort((a, c) => c[1] - a[1]).slice(0, 3).map(([c]) => `/${esc(c)}`).join(' ') || '—'}</b></div>
 </div>
-${panel('Bot del dólar: grupos', rows ? `<div class="wrap"><table><thead><tr><th>Grupo</th><th>Consultas</th><th>Entró</th><th>Última</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="empty">Aún no está en ningún grupo.</p>', { sub: 'Los que más preguntan · de los chats privados no se guarda nada', flush: true })}`
+${panel('Bot de Terminal P2P: grupos', rows ? `<div class="wrap"><table><thead><tr><th>Grupo</th><th>Miembros</th><th>Consultas</th><th>Entró</th><th>Última</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="empty">Aún no está en ningún grupo.</p>', { sub: 'Todos los grupos donde lo metieron, por la última consulta · los públicos se abren tocando su nombre · de los chats privados no se guarda nada', flush: true })}`
 }

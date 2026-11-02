@@ -35,6 +35,13 @@ function setup() {
 	rate('BANK_MLC', last - 5 * H, 1.4)
 	db.prepare('INSERT INTO informal (day, cur, rate, final, t) VALUES (?, ?, ?, 0, ?)').run('2026-11-02', 'USD', 1050, NOW)
 	const env = { DB: d1, PRO_KEY: 'clave', TELEGRAM_BOT_TOKEN: 'bot' }
+	// Telegram: cuántos miembros tiene cada grupo (se apunta cada pregunta)
+	const asked: string[] = []
+	const fetcher = (async (url: string) => {
+		asked.push(String(url).replace(/^.*\/getChatMemberCount\?chat_id=/, ''))
+		return Response.json({ ok: true, result: 1234 })
+	}) as typeof fetch
+	let at = NOW
 	const send = async (update: unknown) => {
 		const res = await botWebhook(
 			new Request('https://app.terminalp2p.com/pro/telegram/webhook', {
@@ -43,11 +50,12 @@ function setup() {
 				body: JSON.stringify(update),
 			}),
 			env,
-			NOW,
+			at,
+			fetcher,
 		)
 		return (await res.json()) as Record<string, unknown>
 	}
-	return { db, d1, env, send }
+	return { db, d1, env, send, asked, tick: (ms: number) => (at += ms) }
 }
 
 const group = (id: number, title = 'Cambio Habana') => ({ id, type: 'supergroup', title })
@@ -127,4 +135,28 @@ test('por privado: /dolar contesta sin citar ni apuntar el chat; /start sin cód
 	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM bot_groups').get() as { n: number }).n, 0)
 	assert.match(String((await s.send({ message: { message_id: 4, text: '/start', chat: { id: 55, type: 'private' } } })).text), /\/dolar · el USD en CUP/)
 	assert.match(String((await s.send({ message: { message_id: 5, text: 'hola', chat: { id: 55, type: 'private' } } })).text), /solo contesto comandos/)
+})
+
+test('la lista de grupos del panel: todos, los públicos con su enlace y cuántos miembros tienen (preguntado como mucho una vez al día)', async () => {
+	const s = setup()
+	// Lo meten en un grupo público: se pregunta cuántos miembros tiene
+	await s.send({ my_chat_member: { chat: { id: -3003, type: 'supergroup', title: 'Cambio <MLC>', username: 'cambiomlc' }, new_chat_member: { status: 'member' } } })
+	assert.deepEqual(s.asked, ['-3003'])
+	// Las consultas del mismo día no vuelven a preguntar; al día siguiente, sí
+	await s.send({ message: { message_id: 1, text: '/tasas', chat: { id: -3003, type: 'supergroup', title: 'Cambio <MLC>', username: 'cambiomlc' } } })
+	assert.equal(s.asked.length, 1)
+	s.tick(25 * H)
+	await s.send({ message: { message_id: 2, text: '/tasas', chat: { id: -3003, type: 'supergroup', title: 'Cambio <MLC>', username: 'cambiomlc' } } })
+	assert.equal(s.asked.length, 2)
+	// Uno privado (sin @) y otro que lo sacó: salen todos, los que siguen primero
+	await s.send({ my_chat_member: { chat: group(-4004, 'Familia'), new_chat_member: { status: 'member' } } })
+	await s.send({ my_chat_member: { chat: group(-5005, 'Viejo'), new_chat_member: { status: 'member' } } })
+	await s.send({ my_chat_member: { chat: group(-5005, 'Viejo'), new_chat_member: { status: 'left' } } })
+	const b = await loadBot(s.d1, 7, NOW + 26 * H)
+	assert.deepEqual(b.top.map((g) => [g.title, g.username, g.members]), [['Familia', null, 1234], ['Cambio <MLC>', 'cambiomlc', 1234], ['Viejo', null, 1234]])
+	const html = botHtml(b)
+	assert.match(html, /<a href="https:\/\/t\.me\/cambiomlc"[^>]*>Cambio &#60;MLC&#62;<\/a> <span class="note">@cambiomlc<\/span>/)
+	assert.match(html, /Familia <span class="note">privado<\/span>/)
+	assert.match(html, /Viejo <span class="note">privado<\/span> <span class="note">\(lo sacaron\)<\/span>/)
+	assert.match(html, /Bot de Terminal P2P: grupos/)
 })

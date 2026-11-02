@@ -6,7 +6,7 @@
 import { hex, hmac } from './crypto.ts'
 import { tgEsc, type AlertEnv } from './alerts.ts'
 import { inCuba, type D1 } from './rates.ts'
-import { BOT_MENU, commandOf, HELP, JOINED, leftGroup, rateCommand, seenGroup, type Chat } from './ratebot.ts'
+import { BOT_MENU, commandOf, HELP, JOINED, leftGroup, membersDue, rateCommand, saveMembers, seenGroup, type Chat } from './ratebot.ts'
 
 export interface BotEnv extends AlertEnv {
 	DB: D1
@@ -247,7 +247,7 @@ ${status}`
 
 // Telegram manda aquí cada mensaje privado al bot, los comandos de los grupos y cuándo lo meten o lo sacan de uno
 // (POST /pro/telegram/webhook). Se responde en la misma respuesta, sin otra llamada
-export async function botWebhook(req: Request, env: BotEnv, now: number): Promise<Response> {
+export async function botWebhook(req: Request, env: BotEnv, now: number, fetcher: typeof fetch = fetch): Promise<Response> {
 	if (!env.PRO_KEY || req.headers.get('x-telegram-bot-api-secret-token') !== (await webhookSecret(env))) return new Response('no', { status: 401 })
 	const u = (await req.json().catch(() => ({}))) as Update
 	const db = env.DB
@@ -258,6 +258,7 @@ export async function botWebhook(req: Request, env: BotEnv, now: number): Promis
 		const status = member.new_chat_member?.status ?? ''
 		if (status === 'member' || status === 'administrator') {
 			await seenGroup(db, member.chat, now)
+			await refreshMembers(env, member.chat, now, fetcher)
 			return Response.json({ method: 'sendMessage', chat_id: member.chat.id, text: JOINED, parse_mode: 'HTML' })
 		}
 		if (status === 'left' || status === 'kicked') await leftGroup(db, member.chat, now)
@@ -269,7 +270,10 @@ export async function botWebhook(req: Request, env: BotEnv, now: number): Promis
 	// El bot del dólar (ratebot.ts), en grupos y por privado. En los grupos solo llegan los comandos; lo demás no se contesta
 	const rc = commandOf(text, null)
 	const rate = rc ? await rateCommand(db, chat, rc, now, staging, u.message?.message_id) : null
-	if (rate) return Response.json('skip' in rate ? { ok: true } : rate)
+	if (rate) {
+		if (!('skip' in rate)) await refreshMembers(env, chat, now, fetcher)
+		return Response.json('skip' in rate ? { ok: true } : rate)
+	}
 	if (chat.type !== 'private') return Response.json({ ok: true })
 	const [cmd, arg] = text.split(/\s+/, 2)
 	if (/^\/start(@\w+)?$/i.test(cmd ?? '')) {
@@ -300,6 +304,17 @@ export async function botWebhook(req: Request, env: BotEnv, now: number): Promis
 		)
 	}
 	return reply(chat.id, 'No leo los mensajes: solo contesto comandos. Prueba /dolar o /tasas, y /ayuda para ver todos. Si necesitas ayuda con el terminal, escríbenos en @terminalp2p.')
+}
+
+// Cuántos miembros tiene un grupo donde está el bot, para la lista del panel (al entrar y como mucho una vez al día).
+// Si Telegram no contesta, se queda el número de antes
+async function refreshMembers(env: BotEnv, chat: Chat, now: number, fetcher: typeof fetch) {
+	if (!env.TELEGRAM_BOT_TOKEN || !(await membersDue(env.DB, chat, now))) return
+	try {
+		const res = await fetcher(`${API(env, 'getChatMemberCount')}?chat_id=${chat.id}`, { signal: AbortSignal.timeout(3000) })
+		const j = (await res.json()) as { ok?: boolean; result?: number }
+		if (j.ok && typeof j.result === 'number') await saveMembers(env.DB, chat, j.result, now)
+	} catch {}
 }
 
 // Desde el panel: que Telegram mande los mensajes del bot a este entorno (el bot es el mismo en staging y
