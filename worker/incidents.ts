@@ -45,7 +45,8 @@ export interface Incident {
 // Apunta una incidencia: si ya hay una abierta igual, suma una vez más. La primera vez avisa por Telegram
 export async function recordIncident(
 	env: IncidentEnv,
-	i: { kind: IncidentKind; username?: string | null; license?: string | null; detail?: string | null },
+	// tag separa incidencias del mismo tipo sin cuenta verificada (p. ej. el usuario que dice ser una licencia falsa)
+	i: { kind: IncidentKind; username?: string | null; license?: string | null; detail?: string | null; tag?: string | null },
 	now = Date.now(),
 	fetcher: typeof fetch = fetch,
 ) {
@@ -56,7 +57,7 @@ export async function recordIncident(
 		ON CONFLICT (key) WHERE resolved_at IS NULL DO UPDATE SET count = count + 1, last_at = excluded.last_at, detail = COALESCE(excluded.detail, detail)
 		RETURNING count`,
 	)
-		.bind(`${i.kind}:${username ?? ''}:${license ?? ''}`, i.kind, username, license, i.detail ?? null, now, now)
+		.bind(`${i.kind}:${username ?? ''}:${license ?? ''}${i.tag ? `:${i.tag}` : ''}`, i.kind, username, license, i.detail ?? null, now, now)
 		.first<{ count: number }>()
 	if (r?.count !== 1) return false
 	const who = username ? `@${tgEsc(username)}` : 'Alguien sin identificar'

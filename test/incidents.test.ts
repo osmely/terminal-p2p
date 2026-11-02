@@ -91,6 +91,18 @@ test('el módulo con una licencia vencida (pasado el margen), de una cuenta susp
 	const forged = await sign({ u: 'qp:leo', n: 'leo', e: s.now() + DAY, x: s.now() + DAY }, 'otra-clave')
 	assert.equal((await s.pro('GET', `/pro/module.js?l=${encodeURIComponent(forged)}`)).status, 403)
 	assert.equal(s.incidents()[1].kind, 'module_forged')
+	// Sin cuenta verificada, pero con lo que dice ser (sin fiarse) y sin guardar la licencia
+	const row = s.db.prepare("SELECT username, license, detail FROM pro_incidents WHERE kind = 'module_forged'").get() as { username: string | null; license: string | null; detail: string }
+	assert.equal(row.username, null)
+	assert.equal(row.license, null)
+	assert.match(row.detail, /^La firma no es nuestra\. Dice ser @leo \(sin verificar\), con Pro hasta el /)
+	// Otra que dice ser otra cuenta va en su propia fila; algo que ni se lee, con el texto de siempre
+	await s.pro('GET', `/pro/module.js?l=${encodeURIComponent(await sign({ u: 'qp:eva', n: 'Eva', e: s.now() + DAY, x: s.now() + DAY }, 'otra-clave'))}`)
+	await s.pro('GET', '/pro/module.js?l=basura.sinfirma')
+	const forgedRows = s.db.prepare("SELECT detail FROM pro_incidents WHERE kind = 'module_forged' ORDER BY id").all() as { detail: string }[]
+	assert.equal(forgedRows.length, 3)
+	assert.match(forgedRows[1].detail, /Dice ser @eva/)
+	assert.equal(forgedRows[2].detail, 'La firma de la licencia no es nuestra')
 })
 
 test('una copia del módulo en uso: de otra cuenta o con los días vencidos se apunta; si renovó, no', async () => {

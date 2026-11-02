@@ -6,7 +6,7 @@
 // dispositivo solo vemos su huella (HMAC del token). Con ella se pregunta si eres Pro y se recoge el
 // módulo Pro, firmado para ti. Pro va con la cuenta: cualquier dispositivo donde la conectes entra solo.
 
-import { hex, hmac, sign, verify } from './crypto.ts'
+import { hex, hmac, sign, unb64url, verify } from './crypto.ts'
 import { adminPage, askKey, pageHead, panel, searchIcon, type AdminTab } from './admin.ts'
 import { authorized } from './metrics.ts'
 import { cubaOffset, inCuba, type D1 } from './rates.ts'
@@ -1184,7 +1184,11 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			const raw = String(url.searchParams.get('l') ?? '')
 			const lic = raw ? await verify<{ u: string; n: string; e: number; x: number }>(raw, env.PRO_KEY) : null
 			if (!lic) {
-				if (raw) await recordIncident(env, { kind: 'module_forged', detail: 'La firma de la licencia no es nuestra' }, now, fetcher)
+				if (raw) {
+					const c = claimOf(raw)
+					const detail = c ? `La firma no es nuestra. Dice ser @${c.n} (sin verificar)${c.e ? `, con Pro hasta el ${hDay(c.e)}` : ''}` : 'La firma de la licencia no es nuestra'
+					await recordIncident(env, { kind: 'module_forged', detail, tag: c?.n }, now, fetcher)
+				}
 				return json(403, { error: 'Licencia no válida' })
 			}
 			Object.assign(t, { kind: 'module', account: lic.n, detail: 'Descargó el módulo Pro', dk: hourKey('module', lic.u, now) })
@@ -1211,6 +1215,19 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 		if (err instanceof ProError) return json(err.status, { error: err.message })
 		console.error(`pro ${route}: ${(err as Error).message}`)
 		return json(500, { error: 'Algo falló. Inténtalo de nuevo.' })
+	}
+}
+
+// Lo que dice una licencia cuya firma no es nuestra (sin fiarse de nada): el usuario y hasta cuándo, para la incidencia.
+// Nunca se guarda la licencia entera
+function claimOf(raw: string): { n: string; e: number | null } | null {
+	try {
+		const p = JSON.parse(unb64url(raw.split('.')[0])) as { n?: unknown; e?: unknown }
+		const n = typeof p.n === 'string' && /^[a-z0-9_.-]{1,40}$/i.test(p.n) ? p.n.toLowerCase() : null
+		const e = typeof p.e === 'number' && Number.isFinite(p.e) && p.e > 0 && p.e < 8.64e15 ? p.e : null
+		return n ? { n, e } : null
+	} catch {
+		return null
 	}
 }
 
