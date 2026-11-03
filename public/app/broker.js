@@ -61,9 +61,9 @@ function avatar(user, img, cls = '') {
 }
 document.addEventListener('error', (e) => e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains('avatar') && e.target.remove(), true)
 
-// Antes de enviarla, la imagen se reduce a 1280 px como mucho y a JPG (QvaPay la deja en 1000 × 1000 igualmente):
-// una foto del móvil pasa de varios MB a unos cientos de KB. Un GIF pequeño va tal cual para no perder la animación
-const CHAT_IMAGE_PX = 1280
+// Antes de enviarla, la imagen se reduce a 1000 px como mucho y a JPG, lo mismo que deja QvaPay: se ve igual en el
+// chat y sube antes con la conexión lenta. Un GIF pequeño va tal cual para no perder la animación
+const CHAT_IMAGE_PX = 1000
 async function shrinkImage(file) {
 	if (file.type === 'image/gif' && file.size <= 2 * 1024 * 1024) return file
 	const bmp = await createImageBitmap(file)
@@ -704,6 +704,8 @@ function bindDetail(t) {
 			refreshDetail()
 		} catch (e) {
 			toast(e.message || 'No se pudo enviar la imagen', true)
+			// Si se cortó sin respuesta puede que llegara: el chat se recarga para que se vea
+			if (e.status === 504) refreshDetail()
 		} finally {
 			$('chatFile')?.closest('label').classList.remove('busy')
 		}

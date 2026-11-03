@@ -624,7 +624,13 @@ export class Broker {
 		if (!(file instanceof Blob) || !CHAT_IMAGE_TYPES.has(file.type)) return json(400, { error: 'Solo se pueden enviar imágenes JPG, PNG o GIF' })
 		if (file.size > CHAT_IMAGE_MAX) return json(413, { error: 'La imagen es demasiado grande (máximo 2 MB)' })
 		const ext = file.type === 'image/png' ? 'png' : file.type === 'image/gif' ? 'gif' : 'jpg'
-		await acc.client.sendChatImage(offer, file, `imagen.${ext}`, message || undefined, order)
+		try {
+			await acc.client.sendChatImage(offer, file, `imagen.${ext}`, message || undefined, order)
+		} catch (err) {
+			// Sin respuesta (se cortó la conexión o pasó el minuto): la imagen pudo llegar igual, y mandarla otra vez la repetiría
+			if (err instanceof QvaPayError) throw err
+			return json(504, { error: 'La conexión está lenta y la imagen no terminó de subir. Mira el chat antes de reintentar: puede que sí haya llegado' })
+		}
 		return json(200, { ok: true })
 	}
 

@@ -161,6 +161,17 @@ test('imagen al chat: solo imágenes y con tope de tamaño', async () => {
 	assert.equal(await send(new Blob(['<svg/>'], { type: 'image/svg+xml' })), 400)
 	assert.equal(await send(new Blob([new Uint8Array(2 * 1024 * 1024 + 1)], { type: 'image/jpeg' })), 413)
 	assert.deepEqual(fake.calls, ['image:a1:1000:imagen.png:comprobante'])
+
+	// Se corta sin respuesta (conexión lenta): avisa de que pudo llegar en vez del error del navegador
+	fake.client.sendChatImage = async () => {
+		throw new DOMException('signal timed out', 'TimeoutError')
+	}
+	const form = new FormData()
+	form.append('offer', 'a1')
+	form.append('file', new Blob([new Uint8Array(1000)], { type: 'image/jpeg' }))
+	const res = (await broker.handle(new Request(BASE + '/trade/image', { method: 'POST', headers: { 'X-Broker': '1', Cookie: 'sid=sid1' }, body: form })))!
+	assert.equal(res.status, 504)
+	assert.match(((await res.json()) as { error: string }).error, /Mira el chat antes de reintentar/)
 })
 
 test('/me trae tus operaciones y tu valoración de P2P, pedidas como mucho cada 10 minutos', async () => {

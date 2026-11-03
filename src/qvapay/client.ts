@@ -48,7 +48,13 @@ interface RequestOpts {
 	meta?: OpMeta
 	// Pasa delante de las lecturas de fondo en su bucket (una toma del radar y lo que la sigue)
 	urgent?: boolean
+	// Cuánto se espera la respuesta (REQUEST_TIMEOUT_MS si no se dice)
+	timeoutMs?: number
 }
+
+const REQUEST_TIMEOUT_MS = 20_000
+// Subir una imagen con la conexión lenta de la noche puede pasar de 20 s: se le da un minuto
+export const CHAT_IMAGE_TIMEOUT_MS = 60_000
 
 export interface OpMeta {
 	coin?: string
@@ -227,7 +233,7 @@ export class QvaPayClient {
 		const form = new FormData()
 		form.append('file', file, name)
 		if (message) form.append('message', message)
-		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, form, write: true })
+		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, form, write: true, timeoutMs: CHAT_IMAGE_TIMEOUT_MS })
 	}
 
 	async sendChat(uuid: string, message: string, order?: string, urgent = false) {
@@ -264,7 +270,7 @@ export class QvaPayClient {
 							...(proMark() ? { 'X-TP-Pro': proMark() } : {}),
 						},
 						body: opts.form ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
-						signal: AbortSignal.timeout(20_000),
+						signal: AbortSignal.timeout(opts.timeoutMs ?? REQUEST_TIMEOUT_MS),
 					}),
 					opts.urgent,
 				)
