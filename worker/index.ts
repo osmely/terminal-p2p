@@ -31,6 +31,7 @@ import { recordBook } from './bookstats.ts'
 import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './analysis.ts'
 import { checkAlerts } from './ratealerts.ts'
 import { LiveBook } from './livebook-do.ts'
+import { cleanupPush, pushApi, type PushEnv } from './push.ts'
 import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 import { TASA_KEY, TASA_PATH, tasaData, tasaPage, type TasaData } from './tasa.ts'
 
@@ -211,6 +212,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		const r = await proApi(req, url, env as unknown as ProEnv)
 		if (r) return secure(r)
 	}
+	// Avisos push de tus operaciones (push.ts), con tope por IP como la consulta de estado de Pro
+	if (folderFor(url.hostname) === 'app' && url.pathname.startsWith('/push/')) {
+		if (req.method === 'POST' && !(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos seguidos: espera un minuto'))
+		return secure(await pushApi(req, url, env as unknown as PushEnv, ctx))
+	}
 	if (folderFor(url.hostname) === 'sim' && url.pathname.startsWith('/api/')) {
 		if (req.method !== 'GET' && !(await underLimit(env.SIM_LIMIT, req))) return secure(jsonError(429, 'Demasiadas órdenes seguidas: espera unos segundos'))
 		return secure(await simApi(req, url, env as unknown as SimEnv))
@@ -380,6 +386,7 @@ async function dailyPro(env: ProEnv, at: number) {
 		await cleanupPro(env.DB, at)
 		await cleanupLog(env.DB, at)
 		await cleanupLive(env.DB, at)
+		await cleanupPush(env.DB, at)
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
 	}

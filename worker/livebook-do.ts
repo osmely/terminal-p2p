@@ -10,6 +10,7 @@ import { intentOf } from '../src/terminal/stats.ts'
 import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
 import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
 import type { BotEnv } from './userbot.ts'
+import { deliverPush, ownerPush, pushTargets, takerPush, TARGETS_TTL_MS, type PushEnv, type PushNotice } from './push.ts'
 
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
 const DONE_EVERY_MS = 5 * 60_000
@@ -35,6 +36,11 @@ export class LiveBook {
 	private noticed = new Map<string, number>()
 	private watch: { at: number; map: Promise<Map<string, string>> } | null = null
 	private noticeTimes = new Map<string, number[]>()
+	// Avisos push (push.ts): los ya enviados, quién puede recibirlos (se relee cada TARGETS_TTL_MS o al momento cuando
+	// alguien los activa) y los envíos de la última hora de cada navegador
+	private pushed = new Map<string, number>()
+	private pushT: { at: number; t: Promise<{ owners: Set<string>; offers: Set<string> }> } | null = null
+	private pushTimes = new Map<string, number[]>()
 	// Los últimos eventos tal como llegaron, para ver en el panel qué manda QvaPay
 	private recent: FeedSample[] = []
 	private readAt = new Map<string, number>()
@@ -100,6 +106,8 @@ export class LiveBook {
 	async fetch(req: Request) {
 		const url = new URL(req.url)
 		if (url.pathname === '/event' && req.method === 'POST') return this.onEvent(await req.text())
+		if (url.pathname === '/push-refresh') return (this.pushT = null), Response.json({ ok: true })
+		if (url.pathname === '/push-sim' && req.method === 'POST') return Response.json(await this.pushSim(await req.json()))
 		if (url.pathname === '/ws') return this.connect(url.searchParams.get('pro') === '1', url.searchParams.get('u') || null)
 		if (url.pathname === '/clients') return Response.json(this.clients())
 		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
@@ -204,6 +212,7 @@ export class LiveBook {
 		this.addLag(e)
 		const ch = this.book.apply(e)
 		this.notice(e, ch?.trade ?? null)
+		this.push(e, ch?.trade ?? null)
 		let unknown = false
 		if (ch?.changed) {
 			this.broadcast(ch.coin, ch.side)
@@ -241,6 +250,43 @@ export class LiveBook {
 		sent.push(now)
 		this.noticeTimes.set(license, sent)
 		await sendNotice(this.env as unknown as BotEnv, license, n.text)
+	}
+
+	// Avisos push al dueño de la oferta y a quien la tomó desde el terminal (sin esperar: el libro sigue)
+	private push(e: FeedEvent, trade: Trade | null) {
+		const d = e?.data
+		if (!d?.uuid || !(this.env as unknown as PushEnv).VAPID_PRIVATE_JWK) return
+		this.ctx.waitUntil(this.pushNow(e, trade).catch((err) => console.error(`aviso push: ${(err as Error).message}`)))
+	}
+
+	private async pushNow(e: FeedEvent, trade: Trade | null, now = Date.now()) {
+		if (!this.pushT || now - this.pushT.at > TARGETS_TTL_MS) this.pushT = { at: now, t: pushTargets(this.env.DB, now).catch(() => ({ owners: new Set<string>(), offers: new Set<string>() })) }
+		const t = await this.pushT.t
+		const list: PushNotice[] = []
+		const owner = e.data.owner_uuid?.toLowerCase()
+		if (owner && t.owners.has(owner)) {
+			const n = ownerPush(e, trade, now)
+			if (n) list.push(n)
+		}
+		if (t.offers.has(e.data.uuid.toLowerCase())) {
+			const n = takerPush(e, now)
+			if (n) list.push({ ...n, offer: e.data.uuid.toLowerCase() })
+		}
+		let sent = 0
+		for (const n of list) {
+			if (this.pushed.has(n.key)) continue
+			this.pushed.set(n.key, now)
+			sent += await deliverPush(this.env as unknown as PushEnv, n, now, this.pushTimes)
+			if (n.end) t.offers.delete(n.offer!)
+		}
+		if (this.pushed.size > 2000) for (const [k, at] of this.pushed) if (now - at > 3_600_000) this.pushed.delete(k)
+		return { notices: list.length, sent }
+	}
+
+	// Staging y local: un evento inventado (push.ts, simEvent) pasa por el mismo camino que uno del feed, sin tocar el libro
+	private async pushSim(e: FeedEvent) {
+		this.pushT = null
+		return this.pushNow(e, null)
 	}
 
 	private addLag(e: FeedEvent) {

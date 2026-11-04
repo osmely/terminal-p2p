@@ -1,0 +1,165 @@
+import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
+import { DatabaseSync } from 'node:sqlite'
+import { test } from 'node:test'
+import type { FeedEvent } from '../worker/livebook.ts'
+import { deliverPush, ownerPush, pushApi, pushTargets, simEvent, takerPush, type PushEnv } from '../worker/push.ts'
+import { whoToken } from '../worker/session.ts'
+import { b64u, newVapidJwk } from '../worker/webpush.ts'
+
+function memD1() {
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5 } })
+	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
+	const stmt = (sql: string, args: unknown[] = []) => ({
+		bind: (...a: unknown[]) => stmt(sql, a),
+		all: async () => ({ results: db.prepare(sql).all(...(args as never[])) as never[] }),
+		first: async () => (db.prepare(sql).get(...(args as never[])) ?? null) as never,
+		run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...(args as never[])).changes) } }),
+	})
+	return { db, d1: { prepare: (sql: string) => stmt(sql), batch: async (ss: { run: () => Promise<unknown> }[]) => { for (const s of ss) await s.run() } } }
+}
+
+const T = Date.parse('2026-11-03T15:00:00Z')
+const at = (s: number) => new Date(T + s * 1000).toISOString()
+const OWNER = '0b5e4c1a-1111-4222-8333-944455556666'
+const ev = (event: string, d: Partial<FeedEvent['data']> = {}, s = 0): FeedEvent => ({
+	event,
+	data: { uuid: 'o1', type: 'sell', coin: 'BANK_CUP', amount: '20', receive: '22200', status: 'processing', updated_at: at(s), offer_kind: 'fixed', owner_uuid: OWNER.toUpperCase(), ...d },
+})
+
+test('push: lo que se le avisa al dueño de la oferta', () => {
+	const t = (e: FeedEvent, trade: unknown = null) => ownerPush(e, trade as never, T)?.msg
+	assert.deepEqual(t(ev('p2p.applied')), { title: 'Tomaron tu venta de 20.00 USD', body: 'CUP Transferencia a 1,110.00 CUP. Espera el pago y libera solo cuando veas el dinero en tu cuenta.', tag: 'tp:o1:taken', url: '/#ops', urgent: false, offer: 'o1', kind: 'taken' })
+	assert.equal(t(ev('p2p.applied', { type: 'buy' }))?.body, 'CUP Transferencia a 1,110.00 CUP. Te toca pagar dentro del plazo.')
+	assert.equal(t(ev('p2p.applied', { type: 'buy' }))?.urgent, true)
+	assert.equal(t(ev('p2p.paid'))?.title, 'Te pagaron: comprueba y libera')
+	// En tu compra quien marca pagado eres tú, y en tu venta quien libera eres tú
+	assert.equal(t(ev('p2p.paid', { type: 'buy' })), undefined)
+	assert.equal(t(ev('p2p.completed', { status: 'completed' })), undefined)
+	assert.equal(t(ev('p2p.completed', { type: 'buy', status: 'completed' }))?.title, 'Te liberaron 20.00 USD')
+	assert.equal(t(ev('p2p.reopened', { status: 'open' }))?.title, 'Tu venta volvió al libro')
+	assert.equal(t(ev('p2p.created', { status: 'open' })), undefined)
+	// De rango: lo tomado y lo que vuelve
+	const range = ev('p2p.range_updated', { offer_kind: 'flexible', amount: '100', receive: '111000', available_amount: '70', change: 'taken' })
+	assert.equal(t(range, { ops: 1, usd: 30 })?.title, 'Te tomaron 30.00 USD de tu venta')
+	assert.match(t(range, { ops: 1, usd: 30 })!.body, /Quedan 70\.00 USD publicados/)
+	assert.equal(t(range, { ops: -1, usd: 30 })?.title, 'Volvieron 30.00 USD a tu venta')
+	assert.equal(t(range), undefined)
+	// El dueño en minúsculas y la misma clave para el mismo evento (llega por el webhook y por el stream)
+	const n = ownerPush(ev('p2p.paid'), null, T)!
+	assert.equal(n.owner, OWNER)
+	assert.equal(n.key, ownerPush(ev('p2p.paid'), null, T)!.key)
+	// Uno viejo (tras un corte del feed) no avisa
+	assert.equal(ownerPush(ev('p2p.paid', {}, -20 * 60), null, T), null)
+})
+
+test('push: lo que se le avisa a quien tomó la oferta desde el terminal', () => {
+	// Tomó una venta: compra USD, le liberan
+	assert.equal(takerPush(ev('p2p.completed', { status: 'completed' }), T)?.msg?.title, 'Te liberaron 20.00 USD')
+	assert.equal(takerPush(ev('p2p.completed', { status: 'completed' }), T)?.end, true)
+	assert.equal(takerPush(ev('p2p.paid'), T), null)
+	// Tomó una compra: vende USD, le pagan; al completarse liberó él (no se avisa, pero se deja de vigilar)
+	assert.equal(takerPush(ev('p2p.paid', { type: 'buy' }), T)?.msg?.title, 'Te pagaron: comprueba y libera')
+	const done = takerPush(ev('p2p.completed', { type: 'buy', status: 'completed' }), T)!
+	assert.deepEqual([done.msg, done.end], [null, true])
+	assert.equal(takerPush(ev('p2p.reopened', { status: 'open' }), T)?.msg?.title, 'Se canceló tu compra de 20.00 USD')
+	assert.equal(takerPush(ev('p2p.range_updated', { offer_kind: 'flexible' }), T), null)
+})
+
+async function setup() {
+	const { db, d1 } = memD1()
+	const jwk = await newVapidJwk()
+	const refreshed: string[] = []
+	const env: PushEnv = {
+		DB: d1 as never,
+		PRO_KEY: 'clave',
+		VAPID_PRIVATE_JWK: JSON.stringify(jwk),
+		LIVE: { idFromName: () => 'id', get: () => ({ fetch: async (u: string) => (refreshed.push(u), Response.json({ notices: 1, sent: 1 })) }) },
+	}
+	const print = 'a'.repeat(64)
+	const cookie = `tpw=${await whoToken(print, OWNER, 'ana', 'clave', T)}`
+	const sent: { url: string; headers: Record<string, string> }[] = []
+	let status = 201
+	const fetcher = (async (url: string, init: RequestInit) => (sent.push({ url, headers: init.headers as Record<string, string> }), new Response(null, { status }))) as unknown as typeof fetch
+	const ua = (await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])) as CryptoKeyPair
+	const p256dh = b64u(new Uint8Array(await crypto.subtle.exportKey('raw', ua.publicKey)))
+	const auth = b64u(crypto.getRandomValues(new Uint8Array(16)))
+	const subOf = (n: number) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/dev${n}`, keys: { p256dh, auth } })
+	const ctx = { waitUntil: (p: Promise<unknown>) => void p }
+	const call = async (path: string, body: unknown, withCookie = true) => {
+		const req = new Request(`https://app.terminalp2p.com${path}`, { method: 'POST', body: JSON.stringify(body), headers: withCookie ? { cookie } : {} })
+		const res = await pushApi(req, new URL(req.url), env, ctx, T, fetcher)
+		return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+	}
+	return { db, env, print, call, subOf, sent, refreshed, fetcher, setStatus: (s: number) => (status = s) }
+}
+
+test('push: activar los avisos pide tu cuenta confirmada en ese navegador; luego se vigila, se prueba y se desactiva', async () => {
+	const s = await setup()
+	const get = await pushApi(new Request('https://app.terminalp2p.com/push/key'), new URL('https://app.terminalp2p.com/push/key'), s.env, { waitUntil() {} }, T)
+	assert.match(((await get.json()) as { key: string }).key, /^B[A-Za-z0-9_-]{86}$/)
+
+	assert.equal((await s.call('/push/subscribe', { print: s.print, sub: s.subOf(1) }, false)).status, 401)
+	assert.equal((await s.call('/push/subscribe', { print: 'b'.repeat(64), sub: s.subOf(1) })).status, 401)
+	assert.equal((await s.call('/push/subscribe', { print: s.print, sub: { endpoint: 'http://x' } })).status, 400)
+	assert.equal((await s.call('/push/subscribe', { print: s.print, sub: s.subOf(1) })).status, 200)
+	assert.deepEqual(s.db.prepare('SELECT owner, username FROM push_subs').all().map((r) => ({ ...r })), [{ owner: OWNER, username: 'ana' }])
+	assert.deepEqual(s.refreshed, ['https://live/push-refresh'])
+
+	// Vigilar una oferta tomada: solo desde un navegador con los avisos de esa cuenta
+	const offer = '7f1c2d3e-aaaa-4bbb-8ccc-0123456789ab'
+	assert.equal((await s.call('/push/watch', { print: s.print, endpoint: s.subOf(2).endpoint, offer })).status, 404)
+	assert.equal((await s.call('/push/watch', { print: s.print, endpoint: s.subOf(1).endpoint, offer: 'no' })).status, 400)
+	assert.equal((await s.call('/push/watch', { print: s.print, endpoint: s.subOf(1).endpoint, offer: offer.toUpperCase() })).status, 200)
+	const t = await pushTargets(s.env.DB, T)
+	assert.deepEqual([[...t.owners], [...t.offers]], [[OWNER], [offer]])
+
+	// El aviso de prueba sale al servicio de push del navegador
+	assert.deepEqual((await s.call('/push/test', { print: s.print, endpoint: s.subOf(1).endpoint })).body, { ok: true })
+	assert.equal(s.sent.at(-1)!.url, s.subOf(1).endpoint)
+	// Si el servicio dice que no existe, el de prueba no la borra (recién hecha, FCM a veces tarda unos segundos)
+	s.setStatus(410)
+	assert.equal((await s.call('/push/test', { print: s.print, endpoint: s.subOf(1).endpoint })).status, 502)
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM push_subs').get()!.n, 1)
+	s.setStatus(201)
+	// La simulación solo existe en staging y en local
+	assert.equal((await s.call('/push/sim', { print: s.print, endpoint: s.subOf(1).endpoint, kind: 'paid' })).status, 404)
+
+	assert.equal((await s.call('/push/unsubscribe', { endpoint: s.subOf(1).endpoint }, false)).status, 200)
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM push_subs').get()!.n, 0)
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM push_watch').get()!.n, 0)
+})
+
+test('push: el aviso llega a todos los navegadores de la cuenta; uno que ya no existe se borra; con tope por hora', async () => {
+	const s = await setup()
+	for (const n of [1, 2]) await s.call('/push/subscribe', { print: s.print, sub: s.subOf(n) })
+	const n = ownerPush(ev('p2p.paid'), null, T)!
+	assert.equal(await deliverPush(s.env, n, T, new Map(), s.fetcher), 2)
+	assert.equal(s.sent[0].headers.Urgency, 'high')
+	assert.equal(s.sent[0].headers.Topic, 'o1paid')
+
+	s.setStatus(410)
+	assert.equal(await deliverPush(s.env, n, T, new Map(), s.fetcher), 0)
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM push_subs').get()!.n, 0)
+
+	s.setStatus(201)
+	await s.call('/push/subscribe', { print: s.print, sub: s.subOf(3) })
+	const times = new Map<string, number[]>()
+	let ok = 0
+	for (let i = 0; i < 35; i++) ok += await deliverPush(s.env, n, T + i, times, s.fetcher)
+	assert.equal(ok, 30)
+
+	// Quien tomó la oferta: al terminar la operación se deja de vigilar
+	const offer = '7f1c2d3e-aaaa-4bbb-8ccc-0123456789ab'
+	await s.call('/push/watch', { print: s.print, endpoint: s.subOf(3).endpoint, offer })
+	const end = takerPush(ev('p2p.completed', { uuid: offer, status: 'completed' }), T)!
+	assert.equal(await deliverPush(s.env, end, T, new Map(), s.fetcher), 1)
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM push_watch').get()!.n, 0)
+})
+
+test('push: el evento inventado de las pruebas lleva tu cuenta de dueño y pasa por el mismo aviso', () => {
+	const e = simEvent(OWNER, 'paid', 'sell', T)!
+	assert.equal(ownerPush(e, null, T)?.msg?.title, 'Te pagaron: comprueba y libera')
+	assert.equal(ownerPush(simEvent(OWNER, 'released', 'buy', T)!, null, T)?.msg?.title, 'Te liberaron 10.00 USD')
+	assert.equal(simEvent(OWNER, 'otro', 'sell', T), null)
+})

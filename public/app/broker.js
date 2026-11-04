@@ -166,6 +166,8 @@ async function loadAccount() {
 	if (bk.acct.blocked) showBlocked(bk.acct.blocked)
 	if (bk.acct.connected) {
 		loadTrades()
+		// Avisos push: la suscripción de este navegador, con esta cuenta (renovada al cargar o al cambiar de cuenta)
+		if (bk.alerts && window.TPPush?.ok && Notification.permission === 'granted') TPPush.subscribe().catch(() => {})
 		// Contador anónimo de cuentas conectadas por día (hit.js): sin usuario ni nada que lo identifique
 		window.TPHit?.connected()
 	} else renderTrades()
@@ -219,6 +221,8 @@ function renderAccount() {
 	$('connectBtn')?.addEventListener('click', showConnect)
 	$('disconnectBtn')?.addEventListener('click', async () => {
 		if (!(await confirmDialog('Desconectar cuenta', '<p class="muted">Se borra el token de este navegador. Tus operaciones en QvaPay no se tocan.</p>', 'Desconectar', 'danger'))) return
+		// Sin cuenta, este navegador deja de recibir los avisos push de ella
+		await window.TPPush?.unsubscribe()
 		await api('/disconnect', {}).catch(() => {})
 		loadAccount()
 	})
@@ -1526,6 +1530,8 @@ function renderTake(uuid, side, l, coin, preset) {
 		try {
 			const r = await api('/offer/apply', { offer: uuid, amount: flex ? a : undefined })
 			markOrigin(r.offer)
+			// Una fija: el servidor te avisa de lo que haga su dueño (en las de rango QvaPay no avisa de cada parte)
+			if (!flex) window.TPPush?.watch(r.offer)
 			toast(r.message || 'Tomaste la oferta')
 			bk.tab = 'active'
 			await loadTrades()
@@ -1897,6 +1903,7 @@ async function showSwap() {
 		try {
 			const r = await api('/swap', { offer: best.offer, amount: a, minPrice: best.price, details: d })
 			markOrigin(r.offer)
+			window.TPPush?.watch(r.offer)
 			if ($('swRemember').checked) store.setMine(`details.${sw.coin}`, Object.fromEntries(d.map((x) => [x.name, x.value])))
 			else store.setMine(`details.${sw.coin}`, {})
 			toast(r.chatSent ? `Venta en marcha: @${best.user} ya tiene tus datos para pagarte` : 'Venta en marcha. No se pudo enviar el chat: manda tus datos de pago a mano', !r.chatSent)
@@ -1944,7 +1951,10 @@ async function toggleAlerts() {
 	bk.alerts = !bk.alerts
 	store.set('alerts', bk.alerts)
 	renderAlertsBtn()
-	if (!bk.alerts) return toast('Avisos desactivados')
+	if (!bk.alerts) {
+		window.TPPush?.unsubscribe()
+		return toast('Avisos desactivados')
+	}
 	// El sonido necesita un gesto del usuario para poder sonar después
 	try {
 		audio ??= new AudioContext()
@@ -1952,12 +1962,17 @@ async function toggleAlerts() {
 	} catch {}
 	let perm = 'Notification' in window ? Notification.permission : 'denied'
 	if (perm === 'default') perm = await Notification.requestPermission().catch(() => 'denied')
-	toast(
-		perm === 'granted'
-			? 'Avisos activados: te avisaremos aunque estés en otra pestaña'
-			: 'Avisos activados con sonido. Para recibirlos en otra pestaña, permite las notificaciones del navegador',
-	)
 	beep(false)
+	if (perm !== 'granted') return toast('Avisos activados con sonido. Para recibirlos en otra pestaña o con el terminal cerrado, permite las notificaciones del navegador')
+	// Con tu cuenta conectada, también con el terminal cerrado (avisos push): llega uno de prueba
+	const push = bk.acct.connected && window.TPPush ? await TPPush.subscribe({ test: true }).catch(() => 'error') : null
+	toast(
+		push === 'on'
+			? 'Avisos activados: te avisaremos aunque cierres el terminal'
+			: push === 'unsupported' && /iPhone|iPad/.test(navigator.userAgent)
+				? 'Avisos activados con el terminal abierto. En el iPhone, para recibirlos con el terminal cerrado, añádelo a la pantalla de inicio'
+				: 'Avisos activados: te avisaremos aunque estés en otra pestaña',
+	)
 }
 
 function beep(urgent) {
@@ -2022,8 +2037,15 @@ function deliver(alerts) {
 	const away = document.hidden || !document.hasFocus()
 	if (!away || !('Notification' in window) || Notification.permission !== 'granted') return
 	for (const a of alerts) {
+		// Por el service worker si lo hay (en el móvil es la única forma). El tag, el mismo que el del aviso push de ese
+		// suceso: si llegan los dos, uno reemplaza al otro
+		const tag = `tp:${a.offer}:${a.kind}`
+		if (window.TPPush?.ok) {
+			TPPush.show(a.title, { body: a.body, tag, icon: '/icon-192.png', badge: '/badge-96.png', data: { url: '/#ops', offer: a.offer, order: a.order, kind: a.kind }, requireInteraction: a.urgent }).catch(() => {})
+			continue
+		}
 		try {
-			const n = new Notification(a.title, { body: a.body, tag: a.key, icon: '/favicon.svg', requireInteraction: a.urgent })
+			const n = new Notification(a.title, { body: a.body, tag, icon: '/icon-192.png', requireInteraction: a.urgent })
 			n.onclick = () => {
 				window.focus()
 				n.close()

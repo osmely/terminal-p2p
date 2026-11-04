@@ -129,7 +129,7 @@ export const TRADES_KEEP_MS = 3 * 86_400_000
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 12
+export const LIVE_VERSION = 13
 
 export interface Applied {
 	coin: string
@@ -525,7 +525,7 @@ function timingSafe(a: string, b: string) {
 
 // ── En el Worker: el webhook de QvaPay y la conexión de los terminales ─
 
-const liveStub = (env: LiveEnv) => env.LIVE!.get(env.LIVE!.idFromName('book') as never)
+export const liveStub = (env: LiveEnv) => env.LIVE!.get(env.LIVE!.idFromName('book') as never)
 
 export async function feedWebhook(req: Request, env: LiveEnv, ctx: { waitUntil(p: Promise<unknown>): void }, now = Date.now()) {
 	if (!env.LIVE) return Response.json({ error: 'El feed aún no está configurado' }, { status: 503 })
