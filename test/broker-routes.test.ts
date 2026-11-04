@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Broker, type AccountStore } from '../src/broker/routes.ts'
-import type { QvaPayClient } from '../src/qvapay/client.ts'
+import { QvaPayError, type QvaPayClient } from '../src/qvapay/client.ts'
 import type { P2POffer } from '../src/qvapay/types.ts'
 
 // QvaPay simulado: el usuario "yo" ya tomó dos ofertas
@@ -77,6 +77,58 @@ test('mis operaciones: acciones según el lado y liberación protegida', async (
 	assert.equal(ok.status, 200)
 	assert.match(ok.body.message, /Liberado/)
 	assert.deepEqual(fake.calls, ['paid:a1:REF-9', 'received:b1'])
+})
+
+test('tu oferta por rango ya completada: el detalle trae sus partes para calificar cada una', async () => {
+	const { fake, get } = await setup()
+	const me = { uuid: 'me', username: 'yo' }
+	fake.offers.r1 = {
+		uuid: 'r1', type: 'sell', coin: 'BANK_CUP', amount: '30', receive: '31500', status: 'completed', offer_kind: 'flexible', User: me,
+		Orders: [
+			{ uuid: 'o1', amount: '20', receive: '21000', status: 'completed', Taker: { uuid: 't1', username: 'ana' }, my_rating: { rating: '5' } },
+			{ uuid: 'o2', amount: '10', receive: '10500', status: 'completed', Taker: { uuid: 't2', username: 'luis' }, my_rating: null },
+			{ uuid: 'o3', amount: '5', receive: '5250', status: 'cancelled', Taker: { uuid: 't3', username: 'pepe' } },
+		],
+	}
+	const whole = await get('/trade?offer=r1')
+	assert.deepEqual(
+		whole.body.parts.map((p: { order: string; counterparty: string; usd: number; rated: number | null }) => [p.order, p.counterparty, p.usd, p.rated]),
+		[['o1', 'ana', 20, 5], ['o2', 'luis', 10, null]],
+	)
+	// Una parte abierta por su orden ya no lista partes: allí van las estrellas
+	assert.equal((await get('/trade?offer=r1&order=o2')).body.parts, null)
+})
+
+test('liberar dos veces: la segunda no llega a QvaPay, y si ya se liberó por fuera no es un error', async () => {
+	const { fake, post } = await setup()
+	// QvaPay sigue diciendo «pagado» justo después de liberar
+	const real = fake.client.markReceived.bind(fake.client)
+	fake.client.markReceived = (async (uuid: string) => {
+		const r = await real(uuid)
+		fake.offers[uuid].status = 'paid'
+		return r
+	}) as typeof fake.client.markReceived
+	assert.match((await post('/trade/action', { offer: 'b1', action: 'release' })).body.message, /Liberado/)
+	const again = await post('/trade/action', { offer: 'b1', action: 'release' })
+	assert.deepEqual([again.status, again.body.message], [200, 'Ya estaba liberada: QvaPay tarda unos segundos en marcarla completada.'])
+	assert.deepEqual(fake.calls, ['received:b1'])
+
+	// Liberada desde la web de QvaPay mientras tenías el terminal abierto: QvaPay contesta 403 y ya está completada
+	const me = { uuid: 'me', username: 'yo' }
+	fake.offers.b2 = { uuid: 'b2', type: 'buy', coin: 'BANK_CUP', amount: '10', receive: '10100', status: 'paid', User: { uuid: 's1', username: 'otro' }, Peer: me }
+	fake.client.markReceived = (async (uuid: string) => {
+		fake.offers[uuid].status = 'completed'
+		throw new QvaPayError(403, 'No se puede recibir esta oferta')
+	}) as typeof fake.client.markReceived
+	assert.match((await post('/trade/action', { offer: 'b2', action: 'release' })).body.message, /Ya estaba liberada/)
+	// Y ya completada antes de tocar: tampoco se manda
+	assert.match((await post('/trade/action', { offer: 'b2', action: 'release' })).body.message, /Ya estaba liberada/)
+	// Un 403 con la operación todavía en «pagado» sí es un error
+	fake.offers.b3 = { ...fake.offers.b2, uuid: 'b3', status: 'paid' }
+	fake.client.markReceived = (async () => {
+		throw new QvaPayError(403, 'No se puede recibir esta oferta')
+	}) as typeof fake.client.markReceived
+	assert.notEqual((await post('/trade/action', { offer: 'b3', action: 'release' })).status, 200)
 })
 
 test('cancelar tu oferta: si alguien la acaba de tomar no se manda nada a QvaPay', async () => {

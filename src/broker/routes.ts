@@ -81,6 +81,9 @@ interface Ctx {
 	sid: string | undefined
 }
 
+// Tras liberar, cuánto rato un segundo «Liberar» de lo mismo no se manda a QvaPay
+const RELEASE_GRACE_MS = 5 * 60_000
+
 export class Broker {
 	private readonly accounts: AccountStore
 	private readonly market: Pick<Market, 'wake'>
@@ -89,6 +92,9 @@ export class Broker {
 	private seen: Seen | null = null
 	private coinFields: Record<string, PaymentField[]> | null = null
 	private swapQuotes = new Map<string, { user: string; at: number; offers: SwapOffer[] }>()
+	// Lo que liberaste desde esta pestaña y cuándo: QvaPay sigue diciendo «pagado» unos segundos después de liberar,
+	// y un segundo «Liberar» en ese rato acababa en «403: No se puede recibir esta oferta»
+	private released = new Map<string, number>()
 
 	constructor(opts: { accounts: AccountStore; market: Pick<Market, 'wake'>; dryRun: boolean }) {
 		this.accounts = opts.accounts
@@ -322,9 +328,26 @@ export class Broker {
 		// Solo tu calificación: la que te dieron no se muestra, porque las notas se pueden
 		// cambiar durante 72 h y verla invitaría a la represalia
 		const { mine } = ratingsOf(o, order)
+		// Tu oferta por rango vista entera (sin orden): QvaPay solo deja calificar cada orden, así que van sus partes,
+		// cada una con su contraparte y si ya la calificaste, para abrirla y calificarla allí
+		const parts =
+			!order && isOwner && o.offer_kind === 'flexible'
+				? (o.Orders ?? [])
+						.filter((x) => x.status !== 'cancelled')
+						.map((x) => ({
+							order: x.uuid,
+							counterparty: x.Taker?.username ?? null,
+							image: x.Taker?.image ?? null,
+							usd: num(x.amount),
+							coinAmount: num(x.receive),
+							status: x.status,
+							rated: x.my_rating ? Number(x.my_rating.rating) : null,
+						}))
+				: null
 		return json(200, {
 			offer,
 			order: order ?? null,
+			parts,
 			myRating: mine,
 			coin: o.coin,
 			type: o.type,
@@ -716,12 +739,27 @@ export class Broker {
 				return json(200, { ok: true, message: 'Marcado como pagado' })
 			}
 			case 'release': {
+				const key = `${acc.me.uuid}:${offer}:${order ?? ''}`
+				const already = json(200, { ok: true, message: 'Ya estaba liberada: QvaPay tarda unos segundos en marcarla completada.' })
+				if (Date.now() - (this.released.get(key) ?? 0) < RELEASE_GRACE_MS) return already
 				// Estado fresco: solo se libera lo que está en "pagado"
-				const o = await c.getOffer(offer)
-				const status = order ? o.Orders?.find((x) => x.uuid === order)?.status : o.status
+				const fresh = async () => {
+					const o = await c.getOffer(offer)
+					return { o, status: order ? o.Orders?.find((x) => x.uuid === order)?.status : o.status }
+				}
+				const { o, status } = await fresh()
+				if (status === 'completed') return already
 				if (status !== 'paid') return json(400, { error: `La operación está en «${status ?? 'desconocido'}», no en pagado. No se libera.` })
 				const usd = num((order ? o.Orders?.find((x) => x.uuid === order)?.amount : undefined) ?? o.amount)
-				const r = await c.markReceived(offer, order, { coin: o.coin, side: o.type, usd })
+				let r: Awaited<ReturnType<typeof c.markReceived>>
+				try {
+					r = await c.markReceived(offer, order, { coin: o.coin, side: o.type, usd })
+				} catch (e) {
+					// Liberada entretanto (otra pestaña, la web de QvaPay): QvaPay contesta 403. Si ya está completada, no es un error
+					if (e instanceof QvaPayError && e.status === 403 && (await fresh().catch(() => null))?.status === 'completed') return already
+					throw e
+				}
+				this.released.set(key, Date.now())
 				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${Number(r.amount).toLocaleString('en-US')} USD netos (comisión ${Number(r.fee ?? 0).toLocaleString('en-US')}).` : 'Liberado' })
 			}
 			case 'cancel_offer': {

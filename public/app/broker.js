@@ -8,6 +8,7 @@ const bk = {
 	detail: null, // { offer, order }
 	alerts: store.get('alerts', false), // notificaciones y sonido activados
 	cancelling: new Set(), // ofertas que se están cancelando ahora (su botón dice «Cancelando…»)
+	released: new Map(), // «oferta:orden» que liberaste y cuándo: QvaPay sigue diciendo «pagado» unos segundos
 }
 const BASE_TITLE = document.title
 
@@ -414,8 +415,8 @@ function renderTrades() {
 }
 
 // ── Detalle de una operación ──────────────────────────────────────────
-async function openTrade(offer, order) {
-	bk.detail = { offer, order }
+async function openTrade(offer, order, parent = false) {
+	bk.detail = { offer, order, parent }
 	bk.detailSig = null
 	openModal('<p class="muted">Cargando operación…</p>')
 	await refreshDetail()
@@ -523,6 +524,8 @@ function renderDetail(t) {
 	else if (status === 'processing')
 		action = `<p>Esperando que @${esc(t.counterparty)} te pague <b>${fmtM(t.coinAmount)} ${unit}</b>.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
 			${needSendDetails ? '<p class="notice">Envía tus datos de pago por el chat para que sepa a dónde transferir.</p>' : ''}`
+	else if (status === 'paid' && !payer && Date.now() - (bk.released.get(`${d.offer}:${d.order ?? ''}`) ?? 0) < 5 * 60_000)
+		action = '<p>Liberaste los USD. QvaPay tarda unos segundos en marcarla completada.</p>'
 	else if (status === 'paid' && !payer)
 		action = `<div class="stack">
 			<p>@${esc(t.counterparty)} marcó el pago${t.txId ? ` (ref. <b>${esc(t.txId)}</b>)` : ''}. <b>Comprueba en tu banco</b> que entraron <b>${fmtM(t.coinAmount)} ${unit}</b> antes de liberar.</p>
@@ -530,7 +533,20 @@ function renderDetail(t) {
 			<div class="row-btns"><button class="btn danger" data-act="dispute">No llegó: disputar</button><button class="btn buy" data-act="release" disabled>Liberar ${fmtM(t.usd)} USD</button></div></div>`
 	else if (status === 'paid') action = `<p>Marcaste el pago. Esperando que @${esc(t.counterparty)} libere los USD.</p>`
 	else if (status === 'revision') action = '<p>En disputa: un moderador revisa el chat. Sube aquí tus comprobantes.</p>'
-	else if (status === 'completed') {
+	else if (status === 'completed' && t.parts) {
+		// Una oferta por rango tuya: se califica cada parte por separado (QvaPay no deja calificar la oferta entera)
+		const rows = t.parts
+			.map(
+				(p) =>
+					`<button type="button" class="part-row" data-part="${esc(p.order)}"><span class="who-ava">${p.counterparty ? avatar(p.counterparty, p.image, 'sm') : ''}@${esc(p.counterparty ?? '—')}</span><span>${fmtM(p.usd)} USD</span>${
+						p.status !== 'completed' ? `<span class="chip ${p.status}">${STATUS[p.status] ?? p.status}</span>` : p.rated ? `<span class="muted">${'★'.repeat(p.rated)}</span>` : '<b>Calificar</b>'
+					}</button>`,
+			)
+			.join('')
+		action = t.parts.length
+			? `<div class="stack tight"><p>Se completó en ${t.parts.length === 1 ? 'una parte' : `${t.parts.length} partes`}. Toca cada una para calificar a quien la tomó:</p><div class="part-list">${rows}</div></div>`
+			: '<p class="muted">Operación completada.</p>'
+	} else if (status === 'completed') {
 		const mine = t.myRating?.rating ?? 0
 		const until = t.myRating?.editableUntil ? Date.parse(t.myRating.editableUntil) : null
 		const locked = mine > 0 && until != null && until < Date.now()
@@ -545,8 +561,9 @@ function renderDetail(t) {
 	}
 
 	$('modalBody').innerHTML = `<div class="stack">
+		${d.parent ? '<button type="button" class="link" id="backParts">← Todas las partes de la oferta</button>' : ''}
 		<div><h3>${buy ? 'Compras' : 'Vendes'} ${fmtM(t.usd)} USD por ${fmtM(t.coinAmount)} ${unit}</h3>
-			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button>` : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
+			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button>` : t.parts ? 'por partes' : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
 		${
 			payTo.length
 				? `<div><p class="hint">Datos de pago de @${esc(t.counterparty)}:</p><div class="kv">${payTo
@@ -555,8 +572,8 @@ function renderDetail(t) {
 				: ''
 		}
 		${action}
-		<div><p class="hint">Chat</p><div class="chatbox" id="chatbox">${chatHtml(t.chat)}</div>
-		<form class="chatform" id="chatform"><label class="btn icon-only chat-attach" title="Enviar una imagen (comprobante, captura)" aria-label="Enviar una imagen"><input type="file" id="chatFile" accept="image/*" hidden /><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.5 3.5 0 015 5l-8.6 8.6a2 2 0 01-2.8-2.8l7.9-7.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label><input class="input" id="chatInput" maxlength="599" placeholder="Escribe un mensaje…" /><button class="btn">Enviar</button></form></div>
+		${t.parts ? '' : `<div><p class="hint">Chat</p><div class="chatbox" id="chatbox">${chatHtml(t.chat)}</div>
+		<form class="chatform" id="chatform"><label class="btn icon-only chat-attach" title="Enviar una imagen (comprobante, captura)" aria-label="Enviar una imagen"><input type="file" id="chatFile" accept="image/*" hidden /><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.5 3.5 0 015 5l-8.6 8.6a2 2 0 01-2.8-2.8l7.9-7.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label><input class="input" id="chatInput" maxlength="599" placeholder="Escribe un mensaje…" /><button class="btn">Enviar</button></form></div>`}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${t.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
 	</div>`
 	tickClocks()
@@ -581,14 +598,24 @@ function bindCopy(body) {
 function bindDetail(t) {
 	const body = $('modalBody')
 	body.querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer))
+	// Las partes de una oferta por rango: cada una abre su detalle, desde donde se vuelve a la lista
+	for (const b of body.querySelectorAll('[data-part]')) b.onclick = () => openTrade(t.offer, b.dataset.part, true)
+	const back = $('backParts')
+	if (back) back.onclick = () => openTrade(t.offer, null)
 	const act = async (action, extra = {}) => {
+		// Mientras QvaPay responde no se puede tocar otro botón (ni el mismo dos veces)
+		for (const b of body.querySelectorAll('[data-act]')) b.disabled = true
 		try {
 			const r = await api('/trade/action', { offer: t.offer, order: t.order, action, ...extra })
+			if (action === 'release') bk.released.set(`${t.offer}:${t.order ?? ''}`, Date.now())
 			if (r.message) toast(r.message)
 			await refreshDetail()
 			loadTrades()
 		} catch (e) {
 			toast(e.message, true)
+			// Se vuelve a dibujar entera para que los botones se puedan tocar otra vez
+			bk.detailSig = null
+			refreshDetail()
 		}
 	}
 	bindCopy(body)
@@ -675,6 +702,8 @@ function bindDetail(t) {
 			refreshDetail()
 			loadTrades()
 		}
+	// La oferta por rango vista entera no tiene chat: cada parte tiene el suyo
+	if (!$('chatform')) return
 	$('chatform').onsubmit = (e) => {
 		e.preventDefault()
 		const text = $('chatInput').value.trim()

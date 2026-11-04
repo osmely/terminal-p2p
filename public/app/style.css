@@ -514,6 +514,11 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .chat-attach.busy { opacity: 0.5; pointer-events: none; }
 .msg-img { display: block; margin-bottom: 4px; }
 .msg-img img { display: block; max-width: 100%; max-height: 180px; border-radius: 6px; }
+.part-list { display: flex; flex-direction: column; gap: 6px; }
+.part-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-align: left; cursor: pointer; }
+.part-row:hover { border-color: var(--line-strong); }
+.part-row > :first-child { flex: 1; min-width: 0; }
+.part-row b { color: var(--accent); }
 .stars { display: inline-flex; gap: 2px; }
 /* Al pasar por encima se iluminan las estrellas hasta la elegida */
 .stars button { font-size: 28px; line-height: 1; padding: 2px 3px; background: none; border: 0; color: var(--line-strong); transition: color 0.1s, transform 0.1s; }
