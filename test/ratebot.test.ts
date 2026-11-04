@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { allText, botHtml, commandOf, loadBot, marketText, sparkline } from '../worker/ratebot.ts'
-import { botWebhook, webhookSecret } from '../worker/userbot.ts'
+import { botWebhook, connectBot, webhookSecret } from '../worker/userbot.ts'
 
 function memD1() {
 	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5 } })
@@ -102,6 +102,8 @@ test('en un grupo: contesta citando el mensaje, con el botón al terminal; el mi
 	assert.match(String(r.text), /1,122 CUP/)
 	assert.deepEqual(r.reply_parameters, { message_id: 7, allow_sending_without_reply: true })
 	assert.match(JSON.stringify(r.reply_markup), /app\.terminalp2p\.com\/\?de=bot-dolar/)
+	// En los grupos Telegram no deja botones de mini app
+	assert.doesNotMatch(JSON.stringify(r.reply_markup), /web_app/)
 	// Otro pide /dolar a los 10 s: no se repite. /zelle sí sale
 	assert.deepEqual(await s.send({ message: { message_id: 8, text: '/dolar', chat: group(-1001) } }), { ok: true })
 	assert.match(String((await s.send({ message: { message_id: 9, text: '/zelle', chat: group(-1001) } })).text), /1\.04 USD/)
@@ -132,8 +134,15 @@ test('por privado: /dolar contesta sin citar ni apuntar el chat; /start sin cód
 	const r = await s.send({ message: { message_id: 3, text: '/tasas', chat: { id: 55, type: 'private' } } })
 	assert.match(String(r.text), /Tasas QvaPay ahora/)
 	assert.equal(r.reply_parameters, undefined)
+	// Por privado: el libro en la mini app y, debajo, el terminal
+	const z = (await s.send({ message: { message_id: 6, text: '/zelle', chat: { id: 55, type: 'private' } } })).reply_markup as { inline_keyboard: { text: string; url?: string; web_app?: { url: string } }[][] }
+	assert.equal(z.inline_keyboard[0][0].web_app?.url, 'https://terminalp2p.com/mini/?tg&coin=ZELLE')
+	assert.equal(z.inline_keyboard[1][0].url, 'https://app.terminalp2p.com/?de=bot-zelle')
+	assert.equal((r.reply_markup as typeof z).inline_keyboard[0][0].web_app?.url, 'https://terminalp2p.com/mini/?tg')
 	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM bot_groups').get() as { n: number }).n, 0)
-	assert.match(String((await s.send({ message: { message_id: 4, text: '/start', chat: { id: 55, type: 'private' } } })).text), /\/dolar · el USD en CUP/)
+	const start = await s.send({ message: { message_id: 4, text: '/start', chat: { id: 55, type: 'private' } } })
+	assert.match(String(start.text), /\/dolar · el USD en CUP/)
+	assert.match(JSON.stringify(start.reply_markup), /"web_app":\{"url":"https:\/\/terminalp2p\.com\/mini\/\?tg"\}/)
 	assert.match(String((await s.send({ message: { message_id: 5, text: 'hola', chat: { id: 55, type: 'private' } } })).text), /solo contesto comandos/)
 })
 
@@ -159,4 +168,16 @@ test('la lista de grupos del panel: todos, los públicos con su enlace y cuánto
 	assert.match(html, /Familia <span class="note">privado<\/span>/)
 	assert.match(html, /Viejo <span class="note">privado<\/span> <span class="note">\(lo sacaron\)<\/span>/)
 	assert.match(html, /Bot de Terminal P2P: grupos/)
+})
+
+test('conectar el bot: el webhook, el menú de comandos y el botón «Libro» de la mini app (la de staging, en staging)', async () => {
+	const calls: { method: string; body: Record<string, unknown> }[] = []
+	const fetcher = (async (url: string, init: RequestInit) => {
+		calls.push({ method: String(url).split('/').pop()!, body: JSON.parse(String(init.body)) })
+		return Response.json({ ok: true })
+	}) as typeof fetch
+	const env = { DB: memD1().d1, PRO_KEY: 'clave', TELEGRAM_BOT_TOKEN: 'bot', STAGING: '1' }
+	assert.equal((await connectBot(env, 'https://app.staging.terminalp2p.com', fetcher)).ok, true)
+	assert.deepEqual(calls.map((c) => c.method).sort(), ['setChatMenuButton', 'setMyCommands', 'setWebhook'])
+	assert.deepEqual(calls.find((c) => c.method === 'setChatMenuButton')!.body, { menu_button: { type: 'web_app', text: 'Libro', web_app: { url: 'https://staging.terminalp2p.com/mini/?tg' } } })
 })

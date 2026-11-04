@@ -6,7 +6,7 @@
 import { hex, hmac } from './crypto.ts'
 import { tgEsc, type AlertEnv } from './alerts.ts'
 import { inCuba, type D1 } from './rates.ts'
-import { BOT_MENU, commandOf, HELP, JOINED, leftGroup, membersDue, rateCommand, saveMembers, seenGroup, type Chat } from './ratebot.ts'
+import { BOT_MENU, commandOf, HELP, JOINED, leftGroup, membersDue, miniUrl, rateCommand, saveMembers, seenGroup, type Chat } from './ratebot.ts'
 
 export interface BotEnv extends AlertEnv {
 	DB: D1
@@ -281,7 +281,7 @@ export async function botWebhook(req: Request, env: BotEnv, now: number, fetcher
 			return reply(
 				chat.id,
 				`${HELP}\n\n⭐ Si tienes Pro, aquí también te llegan sus avisos: abre el terminal, entra en «Mi cuenta» → ★ Pro y pulsa «Recibir avisos en Telegram».`,
-				openApp(env),
+				{ inline_keyboard: [[{ text: '📈 Ver el libro en vivo', web_app: { url: miniUrl(staging) } }], ...openApp(env).inline_keyboard] },
 			)
 		const link = await db.prepare('SELECT license, created_at FROM pro_tg_links WHERE code = ?').bind(arg).first<{ license: string; created_at: number }>()
 		await db.prepare('DELETE FROM pro_tg_links WHERE code = ?').bind(arg).run()
@@ -329,9 +329,11 @@ export async function connectBot(env: BotEnv, origin: string, fetcher: typeof fe
 			signal: AbortSignal.timeout(8000),
 		})
 		const j = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string }
-		// El menú de «/» con los comandos del bot del dólar (si falla, el bot contesta igual)
-		if (j.ok)
-			await fetcher(API(env, 'setMyCommands'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commands: BOT_MENU }), signal: AbortSignal.timeout(8000) }).catch(() => null)
+		// El menú de «/» con los comandos del bot del dólar, y el botón «Libro» junto a donde se escribe, que abre la mini
+		// app en los chats privados (si fallan, el bot contesta igual)
+		const call = (method: string, body: object) =>
+			fetcher(API(env, method), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) }).catch(() => null)
+		if (j.ok) await Promise.all([call('setMyCommands', { commands: BOT_MENU }), call('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Libro', web_app: { url: miniUrl(env.STAGING === '1') } } })])
 		return { ok: !!j.ok, description: j.description ?? `Telegram respondió ${res.status}` }
 	} catch (err) {
 		return { ok: false, description: (err as Error).message }

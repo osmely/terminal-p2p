@@ -95,10 +95,12 @@ const SHARED = ['/vendor/', '/favicon.svg', '/theme.js', '/resize.js', '/hit.js'
 
 // app.terminalp2p.com (app.localhost en desarrollo) → terminal; sim.* → simulador; el resto → landing
 const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : host.startsWith('sim.') ? 'sim' : 'site')
-// La mini app de QvaPay (terminalp2p.com/mini/): el simulador del panel de QvaPay la abre dentro de su web y le pone su
-// puente (sdk-sim.js). Va en la web, no en el terminal: ahí no hay ningún token que ese script pudiera ver
+// La mini app de QvaPay y la de Telegram (terminalp2p.com/mini/, la de Telegram con ?tg): el simulador del panel de
+// QvaPay la abre dentro de su web y le pone su puente (sdk-sim.js); Telegram, el suyo (telegram-web-app.js), y en
+// Telegram Web va dentro de un marco. Va en la web, no en el terminal: ahí no hay ningún token que esos scripts
+// pudieran ver
 const MINI_CSP =
-	"default-src 'self'; script-src 'self' https://www.qvapay.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' https://www.qvapay.com; base-uri 'none'; form-action 'self'"
+	"default-src 'self'; script-src 'self' https://www.qvapay.com https://telegram.org; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self' https://www.qvapay.com https://web.telegram.org; base-uri 'none'; form-action 'self'"
 function miniApp(url: URL, res: Response) {
 	if (folderFor(url.hostname) !== 'site' || !url.pathname.startsWith('/mini')) return res
 	const out = new Response(res.body, res)
@@ -243,10 +245,13 @@ function proMarkup(res: Response, on: boolean) {
 }
 
 const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook', '/pro/telegram/webhook', '/api/p2p/feed'])
+// La mini app de Telegram se abre en un visor del propio Telegram, que no sabe pedir la contraseña: en staging quedan
+// abiertas su página y lo público que lee (el libro, el histórico y la librería del gráfico, lo mismo que en producción)
+const MINI_OPEN = new Set(['/mini', '/mini/', '/mini/mini.js', '/data/book', '/data/rates', '/favicon.svg', '/vendor/lightweight-charts.js'])
 // El relé a QvaPay lleva el token del usuario en Authorization, la misma cabecera que la contraseña de
 // staging: pidiéndola ahí, el navegador volvía a sacar el diálogo al conectar la cuenta. No expone nada de
 // staging (solo reenvía a QvaPay con el token del usuario, como en producción)
-const stagingOpen = (path: string) => STAGING_OPEN.has(path) || path === RELAY_PREFIX || path.startsWith(`${RELAY_PREFIX}/`)
+const stagingOpen = (path: string) => STAGING_OPEN.has(path) || MINI_OPEN.has(path) || path === RELAY_PREFIX || path.startsWith(`${RELAY_PREFIX}/`)
 
 // Staging: que ningún buscador lo indexe y que se vea a simple vista que no es producción
 const STAGING_BADGE =

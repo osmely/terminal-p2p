@@ -149,7 +149,17 @@ export const JOINED = `👋 ¡Hola! Soy el bot de <b>Terminal P2P</b>.
 
 Escribid /dolar y os digo a cómo se está pagando el saldo de QvaPay ahora mismo, según las operaciones cerradas en su P2P. También /tasas, /mlc, /zelle, /clasica, /etecsa y /tropical.`
 
-const button = (staging: boolean, cmd: string) => ({ inline_keyboard: [[{ text: '📈 Ver el libro en vivo', url: `${appUrl(staging)}/?de=bot-${cmd}` }]] })
+// La mini app de Telegram (la misma página que la de QvaPay, terminalp2p.com/mini/): el libro en vivo dentro del
+// chat, sin cuenta. ?tg la hace usar el puente de Telegram; coin, el mercado con que abre
+export const miniUrl = (staging: boolean, tick?: string) => `https://${staging ? 'staging.' : ''}terminalp2p.com/mini/?tg${tick ? `&coin=${tick}` : ''}`
+
+// Por privado, el libro se abre ahí mismo en la mini app y el terminal va debajo. En los grupos Telegram no deja
+// botones de mini app: solo el del terminal
+function button(staging: boolean, cmd: string, group: boolean) {
+	const app = { text: group ? '📈 Ver el libro en vivo' : '💻 Abrir el terminal', url: `${appUrl(staging)}/?de=bot-${cmd}` }
+	if (group) return { inline_keyboard: [[app]] }
+	return { inline_keyboard: [[{ text: '📈 Ver el libro en vivo', web_app: { url: miniUrl(staging, COMMANDS[cmd]) } }], [app]] }
+}
 
 // ── Lo que llega por el webhook ──────────────────────────────────────
 
@@ -197,7 +207,7 @@ export async function rateCommand(db: D1, chat: Chat, cmd: string, now: number, 
 		text,
 		parse_mode: 'HTML',
 		link_preview_options: { is_disabled: true },
-		reply_markup: button(staging, cmd),
+		reply_markup: button(staging, cmd, group),
 		...(group && replyTo ? { reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } } : {}),
 	}
 }

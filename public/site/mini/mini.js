@@ -1,8 +1,11 @@
-// Mini app de QvaPay: el libro del P2P en vivo, para mirar. Para operar, Terminal P2P en el navegador del móvil (en la
-// app de QvaPay, con QvaPay.openLink). Sin cuenta ni token: el libro lo da nuestro servidor (/data/book)
+// Mini app de QvaPay y de Telegram (con ?tg, la abre el bot): el libro del P2P en vivo, para mirar. Para operar,
+// Terminal P2P en el navegador del móvil (con QvaPay.openLink o Telegram.WebApp.openLink). Sin cuenta ni token: el
+// libro lo da nuestro servidor (/data/book)
 'use strict'
 ;(() => {
 	const APP = location.hostname.includes('staging') ? 'https://app.staging.terminalp2p.com' : 'https://app.terminalp2p.com'
+	const q = new URLSearchParams(location.search)
+	const TG = q.has('tg')
 	// Las mejores de cada lado (sin las atípicas): el libro completo está en el terminal
 	const ROWS = 10
 	// Lo que dura el libro en la caché del servidor: leer más a menudo no traería nada nuevo
@@ -24,8 +27,12 @@
 		} catch {}
 	}
 
-	let Q = window.QvaPay ?? null
-	let coin = get('mini.coin', 'BANK_CUP')
+	let Q = TG ? null : (window.QvaPay ?? null)
+	// Telegram.WebApp, ya cargado
+	let T = null
+	// El mercado del enlace (?coin=, o el startapp de un enlace t.me/…?startapp=ETECSA), si no, el último que se miró
+	const asked = q.get('coin') ?? q.get('tgWebAppStartParam')
+	let coin = asked && /^[A-Z_]{2,20}$/.test(asked) ? asked : get('mini.coin', 'BANK_CUP')
 	let tab = get('mini.tab', 'book') === 'chart' ? 'chart' : 'book'
 	let days = Number(get('mini.days', 7)) || 7
 	let markets = []
@@ -36,9 +43,9 @@
 	// Al abrir un mercado, el libro baja solo hasta el diferencial (donde están las mejores), como en el terminal
 	let toSpread = true
 
-	// Fuera de la app de QvaPay (un navegador normal) se abre en otra pestaña
-	const open = (url) => (Q ? Q.openLink(url) : window.open(url, '_blank', 'noopener'))
-	const terminal = (hash = '') => open(`${APP}/?de=qvapay&coin=${encodeURIComponent(coin)}${hash}`)
+	// Fuera de las apps de QvaPay y de Telegram (un navegador normal) se abre en otra pestaña
+	const open = (url) => (T ? T.openLink(url) : Q ? Q.openLink(url) : window.open(url, '_blank', 'noopener'))
+	const terminal = (hash = '') => open(`${APP}/?de=${TG ? 'bot-mini' : 'qvapay'}&coin=${encodeURIComponent(coin)}${hash}`)
 
 	function rows(levels, side) {
 		const list = levels.filter((l) => !l.outlier).slice(0, ROWS)
@@ -216,7 +223,39 @@
 		} catch {}
 		Q.ready?.()
 	}
-	if (Q) withQvaPay()
+	// Dentro de Telegram: sus colores, su botón principal y a pantalla completa. Su script se carga solo aquí
+	function withTelegram() {
+		const s = document.createElement('script')
+		s.src = 'https://telegram.org/js/telegram-web-app.js'
+		s.onload = () => {
+			// Fuera de Telegram el script carga igual, pero sin datos de inicio: se queda como una página normal
+			T = window.Telegram?.WebApp?.initData ? window.Telegram.WebApp : null
+			if (!T) return
+			const theme = () => {
+				const p = T.themeParams ?? {}
+				document.documentElement.dataset.theme = T.colorScheme === 'light' ? 'light' : 'dark'
+				const css = document.documentElement.style
+				// Como las pantallas de Telegram: el fondo gris y los recuadros del color de sus secciones
+				const map = { '--bg': p.secondary_bg_color, '--surface': p.section_bg_color ?? p.bg_color, '--text': p.text_color, '--muted': p.hint_color, '--accent': p.button_color }
+				for (const [k, v] of Object.entries(map)) if (v) css.setProperty(k, v)
+				try {
+					T.setHeaderColor('secondary_bg_color')
+					T.setBackgroundColor('secondary_bg_color')
+				} catch {}
+				paintChart()
+			}
+			theme()
+			T.onEvent('themeChanged', theme)
+			T.MainButton.setParams({ text: 'Operar en Terminal P2P', is_visible: true })
+			T.MainButton.onClick(() => terminal())
+			$('go').hidden = true
+			T.ready()
+			T.expand()
+		}
+		document.head.append(s)
+	}
+	if (TG) withTelegram()
+	else if (Q) withQvaPay()
 	else window.addEventListener('qvapay:ready', withQvaPay, { once: true })
 
 	showTab(tab)
