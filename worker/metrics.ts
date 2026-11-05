@@ -161,12 +161,18 @@ export async function relayEvent(
 	}
 }
 
-// Aviso del navegador: una operación que empezó aquí se completó (la liberó la contraparte)
+// Cuánto atrás puede decir el navegador que se completó una operación (la vio después, al abrir el terminal)
+export const CLIENT_BACK_MS = 30 * 86_400_000
+
+// Aviso del navegador: una operación que empezó aquí se completó (la liberó la contraparte, o se vio completada en
+// «Mis operaciones»). Cuenta en el día en que se completó (at), si es de los últimos 30 días; sin at, ahora
 export async function clientEvent(body: unknown, salt: string, now = Date.now()): Promise<MetricEvent | null> {
 	const b = (body ?? {}) as Record<string, unknown>
 	if (b.event !== 'completed' || typeof b.offer !== 'string' || !UUID.test(b.offer)) return null
+	const at = typeof b.at === 'number' && Number.isFinite(b.at) ? Math.min(Math.round(b.at), now) : now
+	if (at < now - CLIENT_BACK_MS) return null
 	return {
-		t: now,
+		t: at,
 		event: 'completed',
 		status: 'ok',
 		offer: await fingerprint(b.offer, salt),

@@ -98,6 +98,18 @@ test('aviso del navegador: solo "completed" con un identificador válido', async
 	assert.deepEqual([e!.event, e!.source, e!.coin, e!.usd], ['completed', 'client', 'ZELLE', 30])
 	assert.equal(await clientEvent({ event: 'create', offer: OFFER }, SALT), null)
 	assert.equal(await clientEvent({ event: 'completed', offer: 'x' }, SALT), null)
+	// Vista después (al abrir el terminal): cuenta el día en que se completó, si es de los últimos 30 días; nunca en el futuro
+	const ayer = NOW - 86_400_000
+	assert.equal((await clientEvent({ event: 'completed', offer: OFFER, at: ayer }, SALT, NOW))!.t, ayer)
+	assert.equal((await clientEvent({ event: 'completed', offer: OFFER, at: NOW + 3_600_000 }, SALT, NOW))!.t, NOW)
+	assert.equal(await clientEvent({ event: 'completed', offer: OFFER, at: NOW - 31 * 86_400_000 }, SALT, NOW), null)
+	assert.equal((await clientEvent({ event: 'completed', offer: OFFER, at: 'ayer' }, SALT, NOW))!.t, NOW)
+})
+
+test('la misma operación liberada aquí y vista completada después cuenta una sola vez', () => {
+	const ev = (event: MetricEvent['event'], t: number, source: MetricEvent['source']): MetricEvent => ({ t, event, status: 'ok', offer: 'f1', ord: '', coin: 'BANK_CUP', side: 'sell', usd: 20, source, via: '' })
+	const s = summarize([ev('take', NOW - 7_200_000, 'relay'), ev('release', NOW - 3_600_000, 'relay'), ev('completed', NOW - 3_600_000, 'client')], 1)
+	assert.deepEqual([s.completed, s.volume, s.byDay.reduce((n, d) => n + d.completed, 0)], [1, 20, 1])
 })
 
 test('embudos: publicadas, con contraparte, completadas', () => {

@@ -297,6 +297,7 @@ async function loadTrades() {
 		if (moved) refreshBalance(true)
 		document.title = r.pending ? `(${r.pending}) ${BASE_TITLE}` : BASE_TITLE
 		deliver(r.alerts ?? [])
+		reportFinished(r.trades)
 		// El módulo Pro sigue tus ofertas publicadas (mantenerlas las primeras del libro)
 		document.dispatchEvent(new CustomEvent('tp:offers'))
 	} catch (e) {
@@ -2025,8 +2026,8 @@ function beep(urgent) {
 
 // ── Métricas anónimas ─────────────────────────────────────────────────
 // Se recuerdan (solo en este navegador) las ofertas publicadas o tomadas desde aquí. Cuando una
-// se completa porque la liberó la contraparte, se avisa al servidor sin usuario ni token: así se
-// cuentan también las operaciones que terminan en la web de QvaPay (ver worker/metrics.ts)
+// sale completada en «Mis operaciones» (la liberó la contraparte, o se terminó en la web de QvaPay o
+// con el terminal cerrado), se avisa al servidor una vez, sin usuario ni token (ver worker/metrics.ts)
 const ORIGIN_KEY = 'tp.origin'
 function origin() {
 	const o = store.get(ORIGIN_KEY, null)
@@ -2041,20 +2042,48 @@ function markOrigin(uuid) {
 	o.offers = Object.fromEntries(keep)
 	store.set(ORIGIN_KEY, o)
 }
-function reportCompleted(a) {
-	const o = origin()
+// Lo completado hace más de esto ya no se cuenta (el servidor tampoco lo acepta)
+const REPORT_BACK_MS = 30 * 86_400_000
+// Avisos en camino, para no mandar dos veces el mismo mientras el servidor contesta
+const reporting = new Set()
+// Devuelve si mandó el aviso. Queda como avisado solo si el servidor lo aceptó (o lo rechazó por no válido): si
+// se pasó el tope por minuto o falló la red, se vuelve a intentar en la siguiente lectura
+function reportCompleted(a, at) {
 	const key = `${a.offer}:${a.order ?? ''}`
-	if (!o.offers[a.offer] || o.reported[key]) return
-	o.reported[key] = Date.now()
-	o.reported = Object.fromEntries(Object.entries(o.reported).sort((x, y) => y[1] - x[1]).slice(0, 300))
-	store.set(ORIGIN_KEY, o)
+	const o = origin()
+	if (!o.offers[a.offer] || o.reported[key] || reporting.has(key)) return false
+	reporting.add(key)
 	const t = bk.trades.find((x) => x.offerUuid === a.offer && (x.order ?? '') === (a.order ?? ''))
 	fetch('/data/event', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ event: 'completed', offer: a.offer, order: a.order ?? undefined, coin: t?.coin, side: t?.offerType, usd: t?.usd }),
+		body: JSON.stringify({ event: 'completed', offer: a.offer, order: a.order ?? undefined, coin: t?.coin, side: t?.offerType, usd: t?.usd, at }),
 		keepalive: true,
-	}).catch(() => {})
+	})
+		.then((r) => {
+			if (!r.ok && r.status !== 400) return
+			const now = origin()
+			now.reported[key] = Date.now()
+			now.reported = Object.fromEntries(Object.entries(now.reported).sort((x, y) => y[1] - x[1]).slice(0, 300))
+			store.set(ORIGIN_KEY, now)
+		})
+		.catch(() => {})
+		.finally(() => reporting.delete(key))
+	return true
+}
+// Cada lectura de «Mis operaciones»: lo que empezó aquí y ya está completado cuenta en el día en que se completó.
+// La oferta por rango tuya vista entera no: sus partes cuentan cada una (y así no se cuenta dos veces)
+// Como mucho unos pocos por lectura: la primera vez puede haber muchas, y el servidor acepta 30 avisos por minuto
+const REPORT_PER_READ = 5
+function reportFinished(trades) {
+	let sent = 0
+	for (const t of trades) {
+		if (sent >= REPORT_PER_READ) return
+		if (t.status !== 'completed' || (t.kind === 'flexible' && t.role === 'owner' && !t.order)) continue
+		const at = Date.parse(t.updatedAt ?? '')
+		if (!(at > Date.now() - REPORT_BACK_MS)) continue
+		if (reportCompleted({ offer: t.offerUuid, order: t.order }, Math.min(at, Date.now()))) sent++
+	}
 }
 
 function deliver(alerts) {
