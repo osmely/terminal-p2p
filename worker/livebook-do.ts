@@ -451,17 +451,26 @@ export class LiveBook {
 	}
 
 	// La operación a su vela (worker/candles.ts): solo lo que se toma (una parte que vuelve no es un precio) y sin lo
-	// atípico respecto a la mediana de lo completado de su lado
-	private async addCandle(coin: string, tr: Trade) {
+	// atípico respecto a la mediana de lo completado de su lado. Apuntada, va al momento a los Pro que miran ese mercado
+	// para que la vela en curso crezca sin esperar a /data/candles (w: cuándo se apuntó, para no sumarla dos veces)
+	private async addCandle(coin: string, tr: Trade, live = true) {
 		const done = this.done.get(coin)?.data
 		// Sin la mediana aún leída, el mejor precio de ese lado del libro
 		const ref = (tr.side === 'ask' ? done?.median_sell : done?.median_buy) || done?.average || this.book.levels(coin, tr.side, 1)[0]?.price || null
 		if (tr.ops < 0 || !candlePrice(tr.price, ref, tr.side)) return
+		const w = Date.now()
 		try {
 			await addCandle(this.env.DB, coin, tr.t, tr.price, tr.usd)
 		} catch (err) {
 			console.error(`velas: ${(err as Error).message}`)
+			return
 		}
+		if (!live) return
+		const msg = JSON.stringify({ t: 'candle', coin, at: tr.t, price: tr.price, usd: Math.round(tr.usd * 100) / 100, w })
+		for (const ws of this.subscribers(coin).filter((s) => (s.deserializeAttachment() as Sock | null)?.pro))
+			try {
+				ws.send(msg)
+			} catch {}
 	}
 
 	// Una sola vez (al estrenar las velas): se apunta desde cuándo cuentan y se mete lo completado que ya recuerda la
@@ -475,7 +484,7 @@ export class LiveBook {
 		await markCandlesFrom(this.env.DB, Math.ceil(this.bootAt / HOUR_MS) * HOUR_MS).catch((err) => console.error(`velas: ${(err as Error).message}`))
 		for (const [coin, list] of this.acts)
 			for (const a of [...list].reverse())
-				if ((a.kind === 'done' || a.kind === 'partial') && a.t < this.bootAt) await this.addCandle(coin, { t: a.t, side: a.side, ops: 1, usd: a.usd, price: a.price })
+				if ((a.kind === 'done' || a.kind === 'partial') && a.t < this.bootAt) await this.addCandle(coin, { t: a.t, side: a.side, ops: 1, usd: a.usd, price: a.price }, false)
 	}
 
 	// Lo contado de los otros mercados, a D1 como mucho cada OTHER_SAVE_MS; y cada hora, el aviso de los que pasan el

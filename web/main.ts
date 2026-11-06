@@ -111,6 +111,11 @@ function liveConnect() {
 			window.dispatchEvent(new CustomEvent('tp:live', { detail: m.coin }))
 			return
 		}
+		// Una operación apuntada en las velas (Pro): el terminal la suma a la vela en curso
+		if (m.t === 'candle' && isTick(m.coin ?? null)) {
+			window.dispatchEvent(new CustomEvent('tp:candle', { detail: m }))
+			return
+		}
 		// Un lado que el servidor aún no tiene completo no se usa: se sigue leyendo con el token
 		if (m.t !== 'side' || !m.ready || !isTick(m.coin ?? null) || (m.side !== 'ask' && m.side !== 'bid') || !liveSubs.split(',').includes(m.coin!)) return
 		market.setLive(m.coin!, m.side, m.levels ?? [], m.total ?? 0)

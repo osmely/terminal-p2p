@@ -160,11 +160,38 @@ async function loadHistory() {
 	} catch {}
 }
 
-// Velas de lo completado (worker/candles.ts), del modo Pro: todas las del intervalo al abrirlas y, cada 10 s, desde la
-// última (la que está en curso) para verla crecer. Las cuenta el servidor desde el feed de QvaPay, desde el 6 de
-// noviembre de 2026
+// Velas de lo completado (worker/candles.ts), del modo Pro: todas las del intervalo al abrirlas y, desde la última (la
+// que está en curso), cada 10 s o, con el libro en vivo de Pro, cada minuto: ahí cada operación llega al momento
+// (tp:candle) y se suma a la vela en curso. Las cuenta el servidor desde el feed de QvaPay, desde el 6 de noviembre de
+// 2026
 const candlesPro = () => !!(window.TPPro?.enabled && window.TPPro?.active && window.TPPro?.license)
 const candlesLicense = () => encodeURIComponent(window.TPPro.license)
+const CANDLE_MS = { '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 }
+// El inicio de la vela en la que cae t (como frameStart del servidor: las de 4 h y de un día, a la hora de Cuba)
+function candleStart(t, tf) {
+	const ms = CANDLE_MS[tf]
+	const off = ms > 3_600_000 ? cubaOffset(t) : 0
+	return Math.floor((t + off) / ms) * ms - off
+}
+// La operación sumada a la última vela o en una nueva detrás; a una de antes no (la arregla la siguiente lectura)
+function candleAdd(list, tf, x) {
+	const t = candleStart(x.at, tf)
+	const last = list.at(-1)
+	if (last && t < last.t) return null
+	const same = last?.t === t ? last : null
+	const p = x.price
+	const c = { t, o: same?.o ?? p, h: Math.max(same?.h ?? p, p), l: Math.min(same?.l ?? p, p), c: p, ops: (same?.ops ?? 0) + 1, usd: Math.round(((same?.usd ?? 0) + x.usd) * 100) / 100 }
+	return same ? [...list.slice(0, -1), c] : [...list, c]
+}
+// Las que llegaron en vivo y se apuntaron después de leer las velas (w > at, también si la lectura venía de la caché
+// del borde): esas aún no están en lo leído y se vuelven a sumar
+let candleLive = []
+function withLiveCandles(coin, tf, list, at) {
+	candleLive = candleLive.filter((x) => x.coin === coin && x.w > at)
+	for (const x of candleLive) list = candleAdd(list, tf, x) ?? list
+	return list
+}
+let candlesPolled = 0
 async function loadCandles() {
 	const coin = state.coin
 	const tf = state.frame
@@ -174,24 +201,41 @@ async function loadCandles() {
 		if (!r.ok) throw new Error(String(r.status))
 		const d = await r.json()
 		if (coin !== state.coin || tf !== state.frame) return
-		state.candles = { coin, tf, list: d.candles ?? [] }
+		state.candles = { coin, tf, list: withLiveCandles(coin, tf, d.candles ?? [], d.at ?? 0) }
+		candlesPolled = Date.now()
 		if (state.chart === 'candles') drawCandles()
 	} catch {}
 }
 async function pollCandles() {
 	const c = state.candles
 	if (state.chart !== 'candles' || document.hidden || !c || c.coin !== state.coin || c.tf !== state.frame || !candlesPro()) return
+	const live = window.TPApi?.live?.state()
+	if (live?.connected && live.pro && Date.now() - candlesPolled < 55_000) return
+	candlesPolled = Date.now()
 	const since = c.list.at(-1)?.t ?? Math.floor(nowMs())
 	try {
 		const r = await fetch(`/data/candles?coin=${c.coin}&tf=${c.tf}&since=${since}&l=${candlesLicense()}`)
 		if (!r.ok) return
-		const got = (await r.json()).candles ?? []
+		const d = await r.json()
+		const got = d.candles ?? []
 		if (state.candles !== c || !got.length) return
 		const keep = c.list.filter((x) => x.t < (got[0].t < since ? got[0].t : since))
-		state.candles = { ...c, list: [...keep, ...got] }
-		if (state.chart === 'candles') drawCandles(got)
+		const list = withLiveCandles(c.coin, c.tf, [...keep, ...got], d.at ?? 0)
+		state.candles = { ...c, list }
+		if (state.chart === 'candles') drawCandles(list.slice(keep.length))
 	} catch {}
 }
+window.addEventListener('tp:candle', (e) => {
+	const x = e.detail
+	if (x.coin !== state.coin || !(x.price > 0)) return
+	candleLive = [...candleLive, x].slice(-200)
+	const c = state.candles
+	if (!c || c.coin !== x.coin) return
+	const list = candleAdd(c.list, c.tf, x)
+	if (!list) return
+	state.candles = { ...c, list }
+	if (state.chart === 'candles') drawCandles(list.slice(-1))
+})
 
 // Tasa del mercado informal de hoy según elTOQUE (la guarda el servidor, es pública)
 async function loadInformal() {
