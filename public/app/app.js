@@ -1172,10 +1172,16 @@ const withLines = (tone) => (original) => {
 	if (!ps.length) return r
 	return { ...r, priceRange: { minValue: Math.min(lo, ...ps), maxValue: Math.max(hi, ...ps) } }
 }
-function drawChartLines() {
+// Solo si cambiaron (o con force, al cambiar el tema): quitarlas y volver a ponerlas en cada repaso del libro hacía
+// parpadear las líneas y recalcular la escala de la gráfica
+let chartLinesKey = ''
+function drawChartLines(force = false) {
+	const lines = [...linesHere('ask'), ...linesHere('bid')]
+	const key = JSON.stringify([lines, !!historyChart, !!candleChart])
+	if (!force && key === chartLinesKey) return
+	chartLinesKey = key
 	for (const h of chartLineHandles) h.s.removePriceLine(h.line)
 	chartLineHandles = []
-	const lines = [...linesHere('ask'), ...linesHere('bid')]
 	const put = (s, l) => chartLineHandles.push({ s, line: s.createPriceLine({ price: l.price, color: css(l.tone === 'bid' ? '--bid' : '--ask'), lineWidth: 1, lineStyle: l.style ?? 2, axisLabelVisible: true, title: l.title ?? '' }) })
 	// Volver a ponerlo hace que la escala se recalcule con las líneas de ahora
 	if (historyChart) {
@@ -1198,6 +1204,9 @@ let candleSeries = null
 let candleVol = null
 let candlesDrawn = null
 let candlesKey = ''
+// La vela bajo el ratón: su nota se mantiene (y se actualiza si es la que crece) mientras llegan operaciones
+let candleHover = null
+const candleHovered = () => (candleHover ? (state.candles?.list.find((c) => candleTime(c.t) === candleHover) ?? null) : null)
 const CANDLES_SHOWN = 90
 const hexAlpha = (hex, a) => (/^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${Math.round(a * 255).toString(16).padStart(2, '0')}` : hex)
 const candleTime = (t) => Math.floor(t / 1000) + cubaOffset(Date.now()) / 1000
@@ -1216,10 +1225,14 @@ function drawCandles(fresh) {
 			timeScale: { borderColor: css('--line'), timeVisible: true, secondsVisible: false, rightOffset: 3 },
 			localization: { locale: 'es', priceFormatter: (p) => (p < 0 ? '' : fmtP(p)) },
 		})
-		candleSeries = candleChart.addCandlestickSeries({ borderVisible: false, priceLineVisible: false })
+		// El precio de la vela en curso: línea discontinua y su etiqueta en el eje, del color de la vela
+		candleSeries = candleChart.addCandlestickSeries({ borderVisible: false, priceLineVisible: true, lastValueVisible: true, priceLineWidth: 1, priceLineStyle: 2 })
 		candleVol = candleChart.addHistogramSeries({ priceScaleId: 'cvol', lastValueVisible: false, priceLineVisible: false, priceFormat: { type: 'volume' } })
 		candleChart.priceScale('cvol').applyOptions({ scaleMargins: { top: 0.84, bottom: 0 }, visible: false })
-		candleChart.subscribeCrosshairMove((p) => candleNote(p.time ? state.candles?.list.find((c) => candleTime(c.t) === p.time) : null))
+		candleChart.subscribeCrosshairMove((p) => {
+			candleHover = p.time ?? null
+			candleNote(candleHovered())
+		})
 		themeCandles()
 	}
 	const c = state.candles
@@ -1241,7 +1254,7 @@ function drawCandles(fresh) {
 		candleChart.timeScale().setVisibleLogicalRange({ from: list.length - CANDLES_SHOWN, to: list.length + 2 })
 		candlesKey = key
 	}
-	candleNote()
+	candleNote(candleHovered())
 	drawChartLines()
 }
 // Sin nota: solo, al pasar el ratón, los precios de esa vela
@@ -1270,7 +1283,7 @@ function themeCandles() {
 	candleSeries.applyOptions({ upColor: up, downColor: down, wickUpColor: up, wickDownColor: down })
 	const list = state.candles?.list
 	if (list) candleVol.setData(list.map(candleVolBar))
-	drawChartLines()
+	drawChartLines(true)
 }
 
 window.TPChartLines = {
@@ -1457,7 +1470,7 @@ function themeHistory() {
 	usdSeries.applyOptions({ color: css('--warn') })
 	volSeries.applyOptions({ color: css('--text-2') })
 	usdtSeries.applyOptions({ color: css('--accent') })
-	drawChartLines()
+	drawChartLines(true)
 }
 
 function drawActive() {
