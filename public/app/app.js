@@ -57,6 +57,8 @@ const state = {
 	coin: urlCoin ?? store.get('coin', 'BANK_CUP'),
 	chart: store.get('chart', 'depth'),
 	range: store.get('range', 7),
+	frame: store.get('frame', '1h'),
+	candles: null,
 	view: store.get('view', 'book'),
 	grouped: store.get('grouped', false),
 	marketsClosed: store.get('marketsClosed', false),
@@ -158,6 +160,35 @@ async function loadHistory() {
 	} catch {}
 }
 
+// Velas de lo completado (worker/candles.ts): todas las del intervalo al abrirlas y, cada 10 s, desde la última (la
+// que está en curso) para verla crecer. Las cuenta el servidor desde el feed de QvaPay, desde el 6 de noviembre de 2026
+async function loadCandles() {
+	const coin = state.coin
+	const tf = state.frame
+	try {
+		const r = await fetch(`/data/candles?coin=${coin}&tf=${tf}`)
+		if (!r.ok) throw new Error(String(r.status))
+		const d = await r.json()
+		if (coin !== state.coin || tf !== state.frame) return
+		state.candles = { coin, tf, list: d.candles ?? [] }
+		if (state.chart === 'candles') drawCandles()
+	} catch {}
+}
+async function pollCandles() {
+	const c = state.candles
+	if (state.chart !== 'candles' || document.hidden || !c || c.coin !== state.coin || c.tf !== state.frame) return
+	const since = c.list.at(-1)?.t ?? Math.floor(nowMs())
+	try {
+		const r = await fetch(`/data/candles?coin=${c.coin}&tf=${c.tf}&since=${since}`)
+		if (!r.ok) return
+		const got = (await r.json()).candles ?? []
+		if (state.candles !== c || !got.length) return
+		const keep = c.list.filter((x) => x.t < (got[0].t < since ? got[0].t : since))
+		state.candles = { ...c, list: [...keep, ...got] }
+		if (state.chart === 'candles') drawCandles(got)
+	} catch {}
+}
+
 // Tasa del mercado informal de hoy según elTOQUE (la guarda el servidor, es pública)
 async function loadInformal() {
 	try {
@@ -179,6 +210,8 @@ function selectCoin(tick) {
 	render()
 	loadBook()
 	loadHistory()
+	state.candles = null
+	if (state.chart === 'candles') loadCandles()
 	if (state.rank.scope === 'coin') loadRanking()
 }
 
@@ -1051,6 +1084,7 @@ function drawHistory() {
 		opsLegend()
 	}
 	fitHistory()
+	drawChartLines()
 	requestAnimationFrame(() => volTags(null))
 	const first = state.history?.firstPoint
 	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
@@ -1069,6 +1103,134 @@ function drawHistory() {
 		(proSplit() ? ' Con Pro, cada barra se parte en compras (verde) y ventas (rojo).' : '') +
 		(volLine() ? ' La línea sobre las barras son los USD operados en cada periodo.' : '') +
 		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
+}
+
+// Líneas de precio en la gráfica de la tasa, cada pieza con su nombre: set(nombre, [{ coin, price, tone: 'ask' | 'bid',
+// title, style }]). Las pone «Mis operaciones» (tus ofertas publicadas) y el módulo Pro (el radar). Solo se ven las
+// del mercado abierto. style: 1 punteada, 2 discontinua (por defecto)
+const chartLines = new Map()
+let chartLineHandles = []
+const linesHere = (tone) => [...chartLines.values()].flat().filter((l) => l.coin === state.coin && l.price > 0 && (l.tone === 'bid') === (tone === 'bid'))
+// La escala se amplía para que se vean aunque estén algo lejos de la tasa; una muy lejos (una oferta de prueba a 10,000)
+// no la estira: aplastaría la gráfica, y queda fuera
+const LINE_REACH = 0.25
+const withLines = (tone) => (original) => {
+	const r = original()
+	if (!r?.priceRange) return r
+	const { minValue: lo, maxValue: hi } = r.priceRange
+	const ps = linesHere(tone)
+		.map((l) => l.price)
+		.filter((p) => p >= lo * (1 - LINE_REACH) && p <= hi * (1 + LINE_REACH))
+	if (!ps.length) return r
+	return { ...r, priceRange: { minValue: Math.min(lo, ...ps), maxValue: Math.max(hi, ...ps) } }
+}
+function drawChartLines() {
+	for (const h of chartLineHandles) h.s.removePriceLine(h.line)
+	chartLineHandles = []
+	const lines = [...linesHere('ask'), ...linesHere('bid')]
+	const put = (s, l) => chartLineHandles.push({ s, line: s.createPriceLine({ price: l.price, color: css(l.tone === 'bid' ? '--bid' : '--ask'), lineWidth: 1, lineStyle: l.style ?? 2, axisLabelVisible: true, title: l.title ?? '' }) })
+	// Volver a ponerlo hace que la escala se recalcule con las líneas de ahora
+	if (historyChart) {
+		bidSeries.applyOptions({ autoscaleInfoProvider: withLines('bid') })
+		askSeries.applyOptions({ autoscaleInfoProvider: withLines('ask') })
+		for (const l of lines) put(l.tone === 'bid' ? bidSeries : askSeries, l)
+	}
+	// En las velas, las de los dos lados sobre la misma serie
+	if (candleChart) {
+		candleSeries.applyOptions({ autoscaleInfoProvider: (original) => withLines('ask')(() => withLines('bid')(original)) })
+		for (const l of lines) put(candleSeries, l)
+	}
+}
+// ── Velas ───────────────────────────────────────────────────────────────
+// Verdes si cerró por encima de donde abrió, rojas si por debajo; abajo, los USD operados en cada una. En hora de Cuba,
+// como el histórico. Antes del 6 de noviembre de 2026 no hay precio de cada operación: ahí, la mejor venta del libro
+// (una foto cada 10 min) y los USD de cada hora
+let candleChart = null
+let candleSeries = null
+let candleVol = null
+let candlesDrawn = null
+let candlesKey = ''
+const CANDLES_SHOWN = 90
+const hexAlpha = (hex, a) => (/^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${Math.round(a * 255).toString(16).padStart(2, '0')}` : hex)
+const candleTime = (t) => Math.floor(t / 1000) + cubaOffset(Date.now()) / 1000
+// Un periodo con volumen y sin precio (de antes, sin foto del libro), en blanco
+const candleBar = (c) => (c.o == null ? { time: candleTime(c.t) } : { time: candleTime(c.t), open: c.o, high: c.h, low: c.l, close: c.c })
+const candleVolBar = (c) => ({ time: candleTime(c.t), value: c.usd, color: c.o == null ? hexAlpha(css('--muted'), 0.25) : hexAlpha(css(c.c >= c.o ? '--bid' : '--ask'), 0.35) })
+function drawCandles(fresh) {
+	if (!window.LightweightCharts) return
+	if (!candleChart) {
+		candleChart = LightweightCharts.createChart($('candles'), {
+			autoSize: true,
+			layout: { background: { color: 'transparent' }, textColor: css('--muted'), fontFamily: 'JetBrains Mono' },
+			grid: { vertLines: { color: css('--line') }, horzLines: { color: css('--line') } },
+			// Con un ancho mínimo: medido solo, a veces se quedaba corto y las etiquetas salían cortadas
+			rightPriceScale: { borderColor: css('--line'), scaleMargins: { top: 0.08, bottom: 0.2 }, minimumWidth: 84 },
+			timeScale: { borderColor: css('--line'), timeVisible: true, secondsVisible: false, rightOffset: 3 },
+			localization: { locale: 'es', priceFormatter: (p) => (p < 0 ? '' : fmtP(p)) },
+		})
+		candleSeries = candleChart.addCandlestickSeries({ borderVisible: false, priceLineVisible: false })
+		candleVol = candleChart.addHistogramSeries({ priceScaleId: 'cvol', lastValueVisible: false, priceLineVisible: false, priceFormat: { type: 'volume' } })
+		candleChart.priceScale('cvol').applyOptions({ scaleMargins: { top: 0.84, bottom: 0 }, visible: false })
+		candleChart.subscribeCrosshairMove((p) => candleNote(p.time ? state.candles?.list.find((c) => candleTime(c.t) === p.time) : null))
+		themeCandles()
+	}
+	const c = state.candles
+	const list = c?.coin === state.coin && c.tf === state.frame ? c.list : []
+	if (fresh && candlesDrawn && c !== candlesDrawn) {
+		// Lo nuevo de la vela en curso (y la siguiente, si empezó): sin redibujar ni mover lo que se está mirando
+		for (const x of fresh) {
+			candleSeries.update(candleBar(x))
+			candleVol.update(candleVolBar(x))
+		}
+	} else if (c !== candlesDrawn) {
+		candleSeries.setData(list.map(candleBar))
+		candleVol.setData(list.map(candleVolBar))
+	}
+	candlesDrawn = c
+	// Al abrir otro mercado o intervalo, las últimas CANDLES_SHOWN a la derecha (con pocas, se ven a su tamaño)
+	const key = `${state.coin}|${state.frame}|${list.length > 0}`
+	if (key !== candlesKey && candleChart.timeScale().width()) {
+		candleChart.timeScale().setVisibleLogicalRange({ from: list.length - CANDLES_SHOWN, to: list.length + 2 })
+		candlesKey = key
+	}
+	candleNote()
+	drawChartLines()
+}
+// Sin nota: solo, al pasar el ratón, los precios de esa vela
+function candleNote(over) {
+	const note = $('chartNote')
+	if (over) {
+		const when = cubaFmt(over.t, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+		const ops = `${over.ops} ${over.ops === 1 ? 'operación' : 'operaciones'}`
+		const prices = over.o == null ? 'sin foto del libro' : `${over.book ? 'mejor venta del libro: ' : ''}A ${fmtP(over.o)} · Máx ${fmtP(over.h)} · Mín ${fmtP(over.l)} · C ${fmtP(over.c)}`
+		note.textContent = `${when} · ${prices}${over.ops || over.usd ? ` · ${ops} · ${fmtU(over.usd)} USD` : ''}`
+		return
+	}
+	note.textContent = ''
+	note.title = ''
+}
+function themeCandles() {
+	if (!candleChart) return
+	candleChart.applyOptions({
+		layout: { textColor: css('--muted') },
+		grid: { vertLines: { color: css('--line') }, horzLines: { color: css('--line') } },
+		rightPriceScale: { borderColor: css('--line') },
+		timeScale: { borderColor: css('--line') },
+	})
+	const up = css('--bid')
+	const down = css('--ask')
+	candleSeries.applyOptions({ upColor: up, downColor: down, wickUpColor: up, wickDownColor: down })
+	const list = state.candles?.list
+	if (list) candleVol.setData(list.map(candleVolBar))
+	drawChartLines()
+}
+
+window.TPChartLines = {
+	set(key, lines) {
+		if (lines?.length) chartLines.set(key, lines)
+		else chartLines.delete(key)
+		drawChartLines()
+	},
 }
 
 // Las barras de operaciones. Cada barra ocupa los puntos de su periodo (en 7 y 30 días hay muchos) y se dibuja como
@@ -1229,24 +1391,31 @@ function themeHistory() {
 	usdSeries.applyOptions({ color: css('--warn') })
 	volSeries.applyOptions({ color: css('--text-2') })
 	usdtSeries.applyOptions({ color: css('--accent') })
+	drawChartLines()
 }
 
 function drawActive() {
 	if (state.chart === 'depth') drawDepth()
 	else if (state.chart === 'completed') drawCompleted()
-	else drawHistory()
+	else if (state.chart === 'candles') {
+		if (state.candles?.coin !== state.coin || state.candles?.tf !== state.frame) loadCandles()
+		drawCandles()
+	} else drawHistory()
 }
 
 function showChart(name) {
 	state.chart = name
 	store.set('chart', name)
 	for (const t of document.querySelectorAll('[data-chart]')) t.classList.toggle('active', t.dataset.chart === name)
-	$('chartTools').hidden = name !== 'history'
+	$('chartTools').hidden = name !== 'history' && name !== 'candles'
+	$('rangeTabs').hidden = name !== 'history'
+	$('frameTabs').hidden = name !== 'candles'
 	$('opsLegend').hidden = true
 	if (name !== 'history') $('volTags').innerHTML = ''
 	$('depth').hidden = name !== 'depth'
 	$('completed').hidden = name !== 'completed'
 	$('history').hidden = name !== 'history'
+	$('candles').hidden = name !== 'candles'
 	drawActive()
 	// Al volver al histórico, la leyenda vuelve a mostrar el último día
 	if (name === 'history' && historyChart) opsLegend()
@@ -1501,6 +1670,17 @@ function bind() {
 			loadHistory()
 		})
 	}
+	for (const t of document.querySelectorAll('[data-frame]')) {
+		t.classList.toggle('active', t.dataset.frame === state.frame)
+		t.addEventListener('click', () => {
+			state.frame = t.dataset.frame
+			store.set('frame', state.frame)
+			for (const o of document.querySelectorAll('[data-frame]')) o.classList.toggle('active', o === t)
+			state.candles = null
+			drawCandles()
+			loadCandles()
+		})
+	}
 	for (const t of document.querySelectorAll('[data-pane]'))
 		t.addEventListener('click', () => {
 			for (const o of document.querySelectorAll('[data-pane]')) {
@@ -1514,6 +1694,7 @@ function bind() {
 		document.documentElement.dataset.theme = next
 		store.set('theme', next)
 		themeHistory()
+		themeCandles()
 		drawActive()
 	})
 
@@ -1630,6 +1811,7 @@ loadRanking()
 every(10_000, loadRanking)
 every(15_000, loadOverview)
 every(60_000, loadHistory)
+every(10_000, pollCandles)
 loadInformal()
 every(600_000, loadInformal)
 document.addEventListener('visibilitychange', () => {

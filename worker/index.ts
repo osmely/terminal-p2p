@@ -29,6 +29,7 @@ import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { botHtml, loadBot } from './ratebot.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
 import { recordBook } from './bookstats.ts'
+import { FRAMES, frameStart, isFrame, loadCandles } from './candles.ts'
 import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './analysis.ts'
 import { checkAlerts } from './ratealerts.ts'
 import { LiveBook } from './livebook-do.ts'
@@ -198,6 +199,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/analysis' && req.method === 'GET') return secure(await marketAnalysis(url, env))
 	if (url.pathname === '/data/book' && req.method === 'GET') return secure(await book(url, env, ctx))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
+	if (url.pathname === '/data/candles' && req.method === 'GET') return secure(await candles(url, env, ctx))
 	// La hora del servidor, para que el terminal corrija un reloj desviado (public/app/clock.js)
 	if (url.pathname === '/data/now' && req.method === 'GET') return secure(Response.json({ now: await serverNow(url) }, { headers: { 'Cache-Control': 'no-store' } }))
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
@@ -513,6 +515,35 @@ async function stats(url: URL, env: Env, ctx: ExecutionContext) {
 		return jsonError(503, 'Las cifras no están disponibles ahora mismo')
 	}
 	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${STATS_TTL_S}` } })
+	ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
+}
+
+// Las velas de lo completado de un mercado (worker/candles.ts). Sin ?since, todas las de su alcance (un minuto en la
+// caché del borde); con ?since (el inicio de la última vela que tiene el terminal), solo desde ahí, para que la vela en
+// curso se vea crecer (10 s). `at`: la hora del servidor al leerlas
+const CANDLES_TTL_S = 60
+const CANDLES_LIVE_TTL_S = 10
+async function candles(url: URL, env: Env, ctx: ExecutionContext) {
+	const coin = url.searchParams.get('coin')
+	const tf = url.searchParams.get('tf')
+	if (!isCoin(coin) || !isFrame(tf)) return jsonError(400, 'coin o tf inválidos')
+	const now = Date.now()
+	const asked = Number(url.searchParams.get('since'))
+	// Siempre el inicio de una vela y dentro del alcance: así todos piden lo mismo y la caché sirve
+	const since = url.searchParams.has('since') && Number.isFinite(asked) ? frameStart(Math.max(asked, now - FRAMES[tf].span), tf) : null
+	const ttl = since === null ? CANDLES_TTL_S : CANDLES_LIVE_TTL_S
+	const key = new Request(`${url.origin}/data/candles?coin=${coin}&tf=${tf}${since === null ? '' : `&since=${since}`}`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, `public, max-age=${ttl}`)
+	let list
+	try {
+		list = await loadCandles(env.DB, coin, tf, since, now)
+	} catch (err) {
+		console.error(`/data/candles: ${(err as Error).message}`)
+		return jsonError(503, 'Las velas no están disponibles ahora mismo')
+	}
+	const res = new Response(JSON.stringify({ tf, candles: list, at: now }), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${ttl}` } })
 	ctx.waitUntil(caches.default.put(key, res.clone()))
 	return res
 }

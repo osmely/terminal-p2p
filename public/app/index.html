@@ -104,6 +104,7 @@
 					<button class="seg-tab active" data-chart="depth" role="tab">Profundidad</button>
 					<button class="seg-tab" data-chart="completed" role="tab">Operaciones 48 h</button>
 					<button class="seg-tab" data-chart="history" role="tab">Histórico</button>
+					<button class="seg-tab" data-chart="candles" role="tab">Velas</button>
 				</div>
 				<span class="panel-note" id="chartNote"></span>
 			</div>
@@ -115,10 +116,17 @@
 						<button class="seg-tab" data-range="365" role="tab">1 año</button>
 						<button class="seg-tab" data-range="3650" role="tab" title="Desde 2020 con la referencia del mercado informal de elTOQUE">Todo</button>
 					</div>
+					<div class="seg-tabs range-tabs" id="frameTabs" role="tablist" hidden>
+						<button class="seg-tab" data-frame="15m" role="tab">15 min</button>
+						<button class="seg-tab" data-frame="1h" role="tab">1 h</button>
+						<button class="seg-tab" data-frame="4h" role="tab">4 h</button>
+						<button class="seg-tab" data-frame="1d" role="tab">1 día</button>
+					</div>
 				</div>
 				<canvas id="depth" class="chart"></canvas>
 				<canvas id="completed" class="chart" hidden></canvas>
 				<div id="history" class="chart" hidden></div>
+				<div id="candles" class="chart" hidden></div>
 				<div class="ops-legend" id="opsLegend" hidden></div>
 				<!-- Etiquetas en el eje derecho, como las de compra y venta: operaciones (o compras y ventas) y USD operados -->
 				<div class="vol-tags" id="volTags" aria-hidden="true"></div>

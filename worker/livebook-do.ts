@@ -11,6 +11,7 @@ import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES
 import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
 import type { BotEnv } from './userbot.ts'
 import { alertOther, OtherMarkets, saveOther } from './othermarkets.ts'
+import { addCandle, candlePrice, markCandlesFrom } from './candles.ts'
 import type { AlertEnv } from './alerts.ts'
 import { deliverPush, ownerPush, pushTargets, takerPush, TARGETS_TTL_MS, type PushEnv, type PushNotice } from './push.ts'
 
@@ -66,6 +67,9 @@ export class LiveBook {
 	private actsChanged = new Set<string>()
 	// El mejor precio de cada mercado cambió (para la lista de mercados de todos los terminales)
 	private topDirty = false
+	// Cuándo arrancó el objeto y si ya se sembraron las velas (seedCandles)
+	private bootAt = Date.now()
+	private candlesSeeded = false
 	// Para la intención y la actividad de cada mercado: sus operaciones completadas (públicas, se piden cada pocos
 	// minutos) y la hora de cada toma reciente (entera o en parte) de la última media hora
 	private done = new Map<string, { data: CompletedRates | null; at: number }>()
@@ -237,6 +241,7 @@ export class LiveBook {
 		}
 		if (ch?.act) this.addAct(ch.coin, ch.act)
 		if (ch?.trade) await this.addVolume(ch.coin, ch.trade)
+		if (ch?.trade) await this.addCandle(ch.coin, ch.trade)
 		await this.save()
 		if (unknown && this.streaming) void this.periodic().catch(() => {})
 		else if (this.want.size && !this.streaming) await this.soon(unknown ? 100 : 1500)
@@ -445,6 +450,34 @@ export class LiveBook {
 		}
 	}
 
+	// La operación a su vela (worker/candles.ts): solo lo que se toma (una parte que vuelve no es un precio) y sin lo
+	// atípico respecto a la mediana de lo completado de su lado
+	private async addCandle(coin: string, tr: Trade) {
+		const done = this.done.get(coin)?.data
+		// Sin la mediana aún leída, el mejor precio de ese lado del libro
+		const ref = (tr.side === 'ask' ? done?.median_sell : done?.median_buy) || done?.average || this.book.levels(coin, tr.side, 1)[0]?.price || null
+		if (tr.ops < 0 || !candlePrice(tr.price, ref, tr.side)) return
+		try {
+			await addCandle(this.env.DB, coin, tr.t, tr.price, tr.usd)
+		} catch (err) {
+			console.error(`velas: ${(err as Error).message}`)
+		}
+	}
+
+	// Una sola vez (al estrenar las velas): se apunta desde cuándo cuentan y se mete lo completado que ya recuerda la
+	// actividad de cada mercado (las fijas completadas y las partes tomadas de las de rango, de antes de arrancar; lo de
+	// después ya entró en vivo)
+	private async seedCandles() {
+		this.candlesSeeded = true
+		if (await this.ctx.storage.get('candlesSeeded')) return
+		await this.ctx.storage.put('candlesSeeded', Date.now())
+		// Desde la hora entera siguiente, las velas cuentan sus USD; antes, los pone el volumen por hora
+		await markCandlesFrom(this.env.DB, Math.ceil(this.bootAt / HOUR_MS) * HOUR_MS).catch((err) => console.error(`velas: ${(err as Error).message}`))
+		for (const [coin, list] of this.acts)
+			for (const a of [...list].reverse())
+				if ((a.kind === 'done' || a.kind === 'partial') && a.t < this.bootAt) await this.addCandle(coin, { t: a.t, side: a.side, ops: 1, usd: a.usd, price: a.price })
+	}
+
 	// Lo contado de los otros mercados, a D1 como mucho cada OTHER_SAVE_MS; y cada hora, el aviso de los que pasan el
 	// umbral. Si D1 falla se pierde esa tanda y nada más
 	private async saveOthers(now = Date.now()) {
@@ -546,6 +579,7 @@ export class LiveBook {
 			this.book.prune(now)
 			this.flushFree(now)
 			await this.saveOthers(now)
+			if (!this.candlesSeeded) await this.seedCandles()
 			const watched = new Set(this.ctx.getWebSockets().flatMap((ws) => (ws.deserializeAttachment() as Sock | null)?.subs ?? []))
 			const feed = this.feedOn(now)
 			for (const coin of COINS.map((c) => c.tick))

@@ -355,7 +355,20 @@ async function cancelOffer(uuid) {
 	}
 }
 
+// Tus ofertas publicadas en la gráfica de la tasa, a su precio (una venta tuya va del lado de las ventas). Solo si cambian
+let mineLinesKey = ''
+function mineLines() {
+	const lines = bk.acct.connected
+		? bk.openOffers.filter((o) => o.price > 0 && !o.pause).map((o) => ({ coin: o.coin, price: o.price, tone: o.offerType === 'sell' ? 'ask' : 'bid', title: 'tu oferta' }))
+		: []
+	const key = JSON.stringify(lines)
+	if (key === mineLinesKey || !window.TPChartLines) return
+	mineLinesKey = key
+	TPChartLines.set('mine', lines)
+}
+
 function renderTrades() {
+	mineLines()
 	const active = bk.trades.filter((t) => t.status !== 'completed')
 	const done = bk.trades.filter((t) => t.status === 'completed')
 	const badge = (id, n) => {

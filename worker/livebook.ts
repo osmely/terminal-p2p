@@ -126,6 +126,7 @@ export interface Trade {
 	side: Side
 	ops: 1 | -1
 	usd: number
+	price: number
 }
 // Cambios de una oferta de rango en los que lo tomado sube o baja por una operación (al editarla, su dueño puede
 // cambiar el monto: ahí solo se apunta lo tomado, sin contar nada)
@@ -135,7 +136,7 @@ export const TRADES_KEEP_MS = 3 * 86_400_000
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 15
+export const LIVE_VERSION = 18
 
 export interface Applied {
 	coin: string
@@ -214,7 +215,7 @@ export class Book {
 		const user = this.owners.get(d.owner_uuid ?? '')?.username ?? ''
 		const act = (kind: ActKind, actUsd: number, actPrice = price): Act | null =>
 			actUsd > 0 && actPrice > 0 ? { t: at, kind, side, price: actPrice, usd: Math.round(actUsd * 100) / 100, owner: d.owner_uuid ?? '', user, uuid: d.uuid } : null
-		const trade = this.tradeOf(e, side, at, flexible, amount, had)
+		const trade = this.tradeOf(e, side, at, flexible, amount, price, had)
 		const out = (changed: boolean, a: Act | null, unknownOwner = false): Applied | null =>
 			changed || a || trade ? { coin: d.coin, side, changed, unknownOwner, act: a, trade } : null
 
@@ -270,13 +271,13 @@ export class Book {
 	// Lo que el evento suma o resta al volumen. Una fija, al completarse y una sola vez. Una de rango, lo que cambió lo
 	// tomado desde el último aviso: un aviso repetido no suma nada y una parte que vuelve resta. De una oferta que no se
 	// conocía, lo tomado de antes es lo que faltaba en el libro; si tampoco estaba ahí, la primera noticia no cuenta
-	private tradeOf(e: FeedEvent, side: Side, at: number, flexible: boolean, amount: number, had: LiveOffer | undefined): Trade | null {
+	private tradeOf(e: FeedEvent, side: Side, at: number, flexible: boolean, amount: number, price: number, had: LiveOffer | undefined): Trade | null {
 		const d = e.data
 		if (e.event === 'p2p.completed') {
 			if (d.status !== 'completed' || !(amount > 0) || this.completed.has(d.uuid)) return null
 			this.completed.set(d.uuid, at)
 			this.changedTrades.add(`d:${d.uuid}`)
-			return { t: at, side, ops: 1, usd: round(amount, 2) }
+			return { t: at, side, ops: 1, usd: round(amount, 2), price }
 		}
 		if (!flexible || d.available_amount == null || !(amount > 0)) return null
 		const now = Math.max(0, amount - num(d.available_amount))
@@ -290,7 +291,7 @@ export class Book {
 		// es todo lo que se tomó en su vida (se vio una venta con 1,935 USD tomados antes de su primer aviso)
 		if (!prev && !had) return null
 		if (!delta || !TRADE_CHANGES.has(d.change ?? '')) return null
-		return { t: at, side, ops: delta > 0 ? 1 : -1, usd: Math.abs(delta) }
+		return { t: at, side, ops: delta > 0 ? 1 : -1, usd: Math.abs(delta), price }
 	}
 
 	// Olvida lo tomado y las fijas contadas de hace más de TRADES_KEEP_MS (como mucho, una vez por hora). Devuelve las
