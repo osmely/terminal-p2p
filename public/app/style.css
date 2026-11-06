@@ -205,8 +205,13 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .ticker { display: flex; align-items: center; gap: 32px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--surface); flex-wrap: wrap; }
 .ticker-pair h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
 /* El par es un botón: abre la lista de mercados (en escritorio, la columna si estaba colapsada) */
-.pair-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: -3px -6px; padding: 3px 6px; border: 0; border-radius: 8px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+/* max-width suma los 12 px del margen negativo: con 100 % le faltaban y un nombre largo se partía o se cortaba */
+.pair-btn { display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% + 12px); margin: -3px -6px; padding: 3px 6px; border: 0; border-radius: 8px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .pair-btn > span { min-width: 0; }
+/* El par siempre en una línea: con un nombre largo (CUP Transferencia) y el icono, partirse en dos agrandaba la barra.
+   En el móvil, si no cabe, se corta con «…» */
+.ticker-pair { flex: none; min-width: 0; }
+#pairName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pair-btn:hover { background: var(--surface-2); }
 .pair-caret { flex: none; color: var(--muted); }
 .markets-close { display: none; }
