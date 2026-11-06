@@ -199,7 +199,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/book' && req.method === 'GET') return secure(await book(url, env, ctx))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 	// La hora del servidor, para que el terminal corrija un reloj desviado (public/app/clock.js)
-	if (url.pathname === '/data/now' && req.method === 'GET') return secure(Response.json({ now: Date.now() }, { headers: { 'Cache-Control': 'no-store' } }))
+	if (url.pathname === '/data/now' && req.method === 'GET') return secure(Response.json({ now: await serverNow(url) }, { headers: { 'Cache-Control': 'no-store' } }))
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
 	if (url.pathname === '/data/offer' && req.method === 'GET') return secure(await offer(req, url, env, ctx))
 	// El enlace corto de una oferta compartida (terminalp2p.com/o/<uuid>): abre el terminal con ella delante
@@ -637,6 +637,17 @@ async function offer(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 // el navegador guardaría el histórico o la tasa durante horas. Se rehace la respuesta con nuestra cabecera
 function fromCache(hit: Response, cacheControl: string) {
 	return new Response(hit.body, { status: hit.status, headers: { 'Content-Type': hit.headers.get('Content-Type') ?? 'application/json; charset=utf-8', 'Cache-Control': cacheControl } })
+}
+
+// La hora de verdad para clock.js. En Cloudflare, la del servidor. En desarrollo el servidor corre en el mismo equipo
+// y tendría su mismo reloj (si va adelantado, no corregiría nada): se toma la de la cabecera Date de QvaPay
+async function serverNow(url: URL) {
+	if (!/(^|\.)localhost$/.test(url.hostname)) return Date.now()
+	const sent = Date.now()
+	const res = await fetch('https://api.qvapay.com/p2p/averages', { method: 'HEAD' }).catch(() => null)
+	const at = Date.parse(res?.headers.get('date') ?? '')
+	// La cabecera va en segundos enteros: se suma medio segundo y lo que tardó en volver
+	return Number.isFinite(at) ? at + 500 + (Date.now() - sent) / 2 : Date.now()
 }
 
 function secure(res: Response) {
