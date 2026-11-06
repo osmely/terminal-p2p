@@ -160,13 +160,17 @@ async function loadHistory() {
 	} catch {}
 }
 
-// Velas de lo completado (worker/candles.ts): todas las del intervalo al abrirlas y, cada 10 s, desde la última (la
-// que está en curso) para verla crecer. Las cuenta el servidor desde el feed de QvaPay, desde el 6 de noviembre de 2026
+// Velas de lo completado (worker/candles.ts), del modo Pro: todas las del intervalo al abrirlas y, cada 10 s, desde la
+// última (la que está en curso) para verla crecer. Las cuenta el servidor desde el feed de QvaPay, desde el 6 de
+// noviembre de 2026
+const candlesPro = () => !!(window.TPPro?.enabled && window.TPPro?.active && window.TPPro?.license)
+const candlesLicense = () => encodeURIComponent(window.TPPro.license)
 async function loadCandles() {
 	const coin = state.coin
 	const tf = state.frame
+	if (!candlesPro()) return
 	try {
-		const r = await fetch(`/data/candles?coin=${coin}&tf=${tf}`)
+		const r = await fetch(`/data/candles?coin=${coin}&tf=${tf}&l=${candlesLicense()}`)
 		if (!r.ok) throw new Error(String(r.status))
 		const d = await r.json()
 		if (coin !== state.coin || tf !== state.frame) return
@@ -176,10 +180,10 @@ async function loadCandles() {
 }
 async function pollCandles() {
 	const c = state.candles
-	if (state.chart !== 'candles' || document.hidden || !c || c.coin !== state.coin || c.tf !== state.frame) return
+	if (state.chart !== 'candles' || document.hidden || !c || c.coin !== state.coin || c.tf !== state.frame || !candlesPro()) return
 	const since = c.list.at(-1)?.t ?? Math.floor(nowMs())
 	try {
-		const r = await fetch(`/data/candles?coin=${c.coin}&tf=${c.tf}&since=${since}`)
+		const r = await fetch(`/data/candles?coin=${c.coin}&tf=${c.tf}&since=${since}&l=${candlesLicense()}`)
 		if (!r.ok) return
 		const got = (await r.json()).candles ?? []
 		if (state.candles !== c || !got.length) return
@@ -1357,8 +1361,26 @@ const proSplit = () => !!(window.TPPro?.enabled && window.TPPro?.active && (stat
 // Los USD solo de las barras que los traen (las horas del conteo viejo del feed vienen sin ellos)
 const volLine = () => proSplit() && !!state.history.volume?.bars?.some((b) => b.usd != null)
 
+let candlesLicensed = null
+function candlesUpsell() {
+	openModal(`<div class="stack"><h3>★ Gráfico de velas</h3><p class="muted">Las velas de 15 min a 1 día, con el precio de lo completado y la última formándose en vivo, son del modo Pro.</p><button class="btn primary block" id="candlesPro">Ver el modo Pro</button></div>`)
+	$('candlesPro').onclick = () => {
+		closeModal()
+		showPro()
+	}
+}
+
 // Al cambiar Pro (al conectar, comprar o apagarse), se vuelve a dibujar con o sin el reparto
 document.addEventListener('tp:pro', () => {
+	// Las velas (solo si cambió tener Pro: se revisa cada poco): se abren si eran las elegidas y ya hay Pro; se cierran
+	// si se acabó
+	const license = candlesPro() ? window.TPPro.license : null
+	if (license !== candlesLicensed) {
+		candlesLicensed = license
+		state.candles = null
+		if (store.get('chart') === 'candles' && license) showChart('candles', true)
+		else if (state.chart === 'candles' && !license) showChart('depth', true)
+	}
 	historyDrawn = null
 	// Si cambia si tienes Pro, se piden de nuevo (con o sin el reparto)
 	if (!!(window.TPPro?.enabled && window.TPPro?.active && window.TPPro?.license) !== historyPro) return void loadHistory()
@@ -1403,9 +1425,16 @@ function drawActive() {
 	} else drawHistory()
 }
 
-function showChart(name) {
+// quiet: sin guardarla ni avisar (al arrancar o al cambiar Pro). Las velas, solo con Pro: sin él, la ventana del modo
+// Pro; y si se estaba en ellas (al arrancar o al acabarse Pro), la profundidad, sin olvidar que se querían las velas
+function showChart(name, quiet = false) {
+	if (name === 'candles' && !candlesPro()) {
+		if (!quiet) candlesUpsell()
+		if (state.chart !== 'candles') return
+		name = 'depth'
+	}
 	state.chart = name
-	store.set('chart', name)
+	if (!quiet) store.set('chart', name)
 	for (const t of document.querySelectorAll('[data-chart]')) t.classList.toggle('active', t.dataset.chart === name)
 	$('chartTools').hidden = name !== 'history' && name !== 'candles'
 	$('rangeTabs').hidden = name !== 'history'
@@ -1785,7 +1814,7 @@ if (location.hash === '#ops') {
 	history.replaceState(null, '', `${location.pathname}${location.search}`)
 }
 showView(state.view)
-showChart(state.chart)
+showChart(state.chart, true)
 render()
 loadOverview()
 loadBook()

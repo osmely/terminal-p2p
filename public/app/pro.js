@@ -31,6 +31,7 @@ const PRO_FEATURES = [
 	['📲', 'Avisos de tus ofertas', 'por Telegram, aunque cierres el terminal'],
 	['🔔', 'Avisos de tasa', 'por Telegram, cuando la tasa pasa tu precio'],
 	['📊', 'Compras, ventas y USD en el gráfico', 'hacia dónde se mueve el mercado'],
+	['🕯️', 'Gráfico de velas', 'de 15 min a 1 día, con lo completado, en vivo'],
 ]
 // La web del mismo entorno (staging.… desde app.staging.…)
 const PRO_INFO_URL = `${/\.terminalp2p\.com$/.test(location.hostname) ? location.origin.replace('://app.', '://') : 'https://terminalp2p.com'}/blog/modo-pro/`

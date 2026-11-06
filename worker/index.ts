@@ -519,15 +519,17 @@ async function stats(url: URL, env: Env, ctx: ExecutionContext) {
 	return res
 }
 
-// Las velas de lo completado de un mercado (worker/candles.ts). Sin ?since, todas las de su alcance (un minuto en la
-// caché del borde); con ?since (el inicio de la última vela que tiene el terminal), solo desde ahí, para que la vela en
-// curso se vea crecer (10 s). `at`: la hora del servidor al leerlas
+// Las velas de lo completado de un mercado (worker/candles.ts), solo con Pro (?l=licencia). Sin ?since, todas las de
+// su alcance (un minuto en la caché del borde); con ?since (el inicio de la última vela que tiene el terminal), solo
+// desde ahí, para que la vela en curso se vea crecer (10 s). En la caché son las mismas para todos los Pro; a cada uno
+// se le dan sin caché pública. `at`: la hora del servidor al leerlas
 const CANDLES_TTL_S = 60
 const CANDLES_LIVE_TTL_S = 10
 async function candles(url: URL, env: Env, ctx: ExecutionContext) {
 	const coin = url.searchParams.get('coin')
 	const tf = url.searchParams.get('tf')
 	if (!isCoin(coin) || !isFrame(tf)) return jsonError(400, 'coin o tf inválidos')
+	if (!(await hasPro(env, url.searchParams.get('l')))) return jsonError(403, 'Las velas son del modo Pro')
 	const now = Date.now()
 	const asked = Number(url.searchParams.get('since'))
 	// Siempre el inicio de una vela y dentro del alcance: así todos piden lo mismo y la caché sirve
@@ -535,7 +537,7 @@ async function candles(url: URL, env: Env, ctx: ExecutionContext) {
 	const ttl = since === null ? CANDLES_TTL_S : CANDLES_LIVE_TTL_S
 	const key = new Request(`${url.origin}/data/candles?coin=${coin}&tf=${tf}${since === null ? '' : `&since=${since}`}`)
 	const hit = await caches.default.match(key)
-	if (hit) return fromCache(hit, `public, max-age=${ttl}`)
+	if (hit) return fromCache(hit, 'private, no-store')
 	let list
 	try {
 		list = await loadCandles(env.DB, coin, tf, since, now)
@@ -543,9 +545,9 @@ async function candles(url: URL, env: Env, ctx: ExecutionContext) {
 		console.error(`/data/candles: ${(err as Error).message}`)
 		return jsonError(503, 'Las velas no están disponibles ahora mismo')
 	}
-	const res = new Response(JSON.stringify({ tf, candles: list, at: now }), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${ttl}` } })
-	ctx.waitUntil(caches.default.put(key, res.clone()))
-	return res
+	const body = JSON.stringify({ tf, candles: list, at: now })
+	ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${ttl}` } })))
+	return new Response(body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' } })
 }
 
 // La tasa informal más reciente (para la landing y la lectura del mercado), cacheada 10 minutos
