@@ -2317,8 +2317,19 @@ document.addEventListener('paste', (e) => {
 	showTakeOfferById(m[0].toLowerCase())
 })
 
+// Al llegar sin token guardado se pide, una vez por pestaña: cerrándola se sigue viendo el libro. No si al entrar ya
+// se abrió otra cosa (una oferta por su enlace, la invitación a Pro) ni con la cuenta bloqueada
+function askToken() {
+	if (bk.acct.connected || bk.acct.blocked || !$('modal').hidden) return
+	try {
+		if (sessionStorage.getItem('tp-asked-token')) return
+		sessionStorage.setItem('tp-asked-token', '1')
+	} catch {}
+	showConnect()
+}
+
 bindBroker()
-loadAccount().then(openOfferLink)
+loadAccount().then(openOfferLink).then(askToken)
 // Con la pestaña visible, cada 15 s. En segundo plano solo con los avisos activos
 // y algo que vigilar (operaciones en curso u ofertas publicadas), cada 30 s
 let tradeTicks = 0
