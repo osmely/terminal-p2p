@@ -36,6 +36,12 @@ export const QVAPAY = 'https://api.qvapay.com'
 // Lo que se manda de cada lado: las mejores (como el libro del terminal, que lee 50)
 export const SEND_TOP = 60
 export const TAKE = 50
+// El lado entero se lee cada tanto, por páginas de DEEP_TAKE (lo más que da QvaPay) y como mucho DEEP_PAGES: las ofertas
+// que ya estaban antes de que el libro las conociera y nadie tocó desde entonces no llegan por el feed, y si están por
+// detrás de las TAKE mejores tampoco por la lectura normal (se vieron 10 de 94 ventas de CUP que faltaban así)
+export const DEEP_EVERY_MS = 60 * 60_000
+export const DEEP_TAKE = 100
+export const DEEP_PAGES = 5
 // Un evento con la firma de hace más de esto se rechaza (lo pide QvaPay)
 const SIGNATURE_MAX_AGE_MS = 5 * 60_000
 // Sin eventos en este tiempo, el feed se da por parado y el libro se lee con el token
@@ -129,7 +135,7 @@ export const TRADES_KEEP_MS = 3 * 86_400_000
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 13
+export const LIVE_VERSION = 15
 
 export interface Applied {
 	coin: string
@@ -186,6 +192,8 @@ export class Book {
 	completed = new Map<string, number>()
 	changedTrades = new Set<string>()
 	private prunedAt = 0
+	// Las que no salieron en la última lectura del lado entero (ver sweep)
+	private missed = new Set<string>()
 
 	// Un evento del feed. Devuelve el mercado y el lado, si cambió el libro, si su dueño es desconocido y lo que pasó
 	// (para la actividad: el feed sí dice si una oferta se tomó o la retiró su dueño). null si no hay nada que contar
@@ -297,9 +305,11 @@ export class Book {
 	}
 
 	// Una lectura del libro (las mejores TAKE de un lado) con nuestro token: mete o actualiza lo leído, aprende quién
-	// es cada dueño y saca lo que debería estar dentro de lo leído y no está (un evento que se perdió)
-	merge(coin: string, side: Side, list: P2POffer[], now = Date.now()) {
-		const seen = new Set<string>()
+	// es cada dueño y saca lo que debería estar dentro de lo leído y no está (un evento que se perdió). Con addOnly (una
+	// página de la lectura del lado entero) solo mete y actualiza, y apunta en `into` lo que vio: lo que falta lo decide
+	// sweep() al acabar todas las páginas
+	merge(coin: string, side: Side, list: P2POffer[], now = Date.now(), addOnly = false, into?: Set<string>) {
+		const seen = into ?? new Set<string>()
 		for (const o of list) {
 			const u = o.User
 			if (u?.uuid) {
@@ -344,6 +354,7 @@ export class Book {
 				updatedAt: at,
 			})
 		}
+		if (addOnly) return 0
 		// Lo leído son las mejores: lo que falta y estaría entre ellas ya no está (si se leyó todo el lado, todo lo que falta)
 		const prices = list.filter((o) => seen.has(o.uuid)).map((o) => num(o.receive) / num(o.amount))
 		const worst = prices.length ? (side === 'ask' ? Math.max(...prices) : Math.min(...prices)) : null
@@ -354,14 +365,40 @@ export class Book {
 			const inside = complete || worst === null || (side === 'ask' ? o.price <= worst : o.price >= worst)
 			// Una oferta que llegó por el feed hace nada puede no salir aún en el listado
 			if (inside && now - o.updatedAt > 30_000) {
-				this.offers.delete(o.uuid)
-				this.changed.add(o.uuid)
-				this.gone.set(o.uuid, now)
-				this.left.set(o.uuid, { coin: o.coin, side: o.side })
+				this.drop(o, now)
 				removed++
 			}
 		}
 		return removed
+	}
+
+	// Al acabar la lectura del lado entero (todas sus páginas): lo que no salió en ninguna se apunta, y si tampoco sale
+	// en la siguiente lectura entera, se da por ido. Una sola vez no basta: si entre página y página sale una oferta,
+	// las de detrás suben una posición y la primera de la página siguiente no se ve. Devuelve cuántas sacó
+	sweep(coin: string, side: Side, seen: Set<string>, startedAt: number, now = Date.now()) {
+		let removed = 0
+		for (const o of [...this.offers.values()]) {
+			if (o.coin !== coin || o.side !== side) continue
+			if (seen.has(o.uuid) || o.updatedAt > startedAt - 30_000) {
+				this.missed.delete(o.uuid)
+				continue
+			}
+			if (!this.missed.has(o.uuid)) {
+				this.missed.add(o.uuid)
+				continue
+			}
+			this.missed.delete(o.uuid)
+			this.drop(o, now)
+			removed++
+		}
+		return removed
+	}
+
+	private drop(o: LiveOffer, now: number) {
+		this.offers.delete(o.uuid)
+		this.changed.add(o.uuid)
+		this.gone.set(o.uuid, now)
+		this.left.set(o.uuid, { coin: o.coin, side: o.side })
 	}
 
 	// Un lado como lo usa el terminal (los mismos campos que su libro), el mejor precio primero

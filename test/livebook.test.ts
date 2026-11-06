@@ -84,6 +84,21 @@ test('lectura con el token: aprende quién es cada dueño y saca lo que se perdi
 	assert.deepEqual([b.changed.size, b.changedOwners.size], [0, 0])
 })
 
+test('lectura del lado entero: mete las viejas que no se conocían y saca lo que falta dos veces seguidas', () => {
+	const b = new Book()
+	b.apply(ev('p2p.created', { uuid: 'conocida' }), T)
+	const page = [{ uuid: 'vieja', type: 'sell', coin: 'BANK_CUP', amount: '20', receive: '26000', status: 'open', updated_at: '2026-10-20T16:59:00Z', User: ana }] as P2POffer[]
+	assert.equal(b.merge('BANK_CUP', 'ask', page, T + 3600_000, true), 0)
+	assert.deepEqual(b.levels('BANK_CUP', 'ask').map((l) => l.uuid).sort(), ['conocida', 'vieja'])
+	assert.equal(b.count('BANK_CUP', 'ask'), 2)
+	// La siguiente lectura entera ya no trae la vieja: la primera vez solo se apunta, la segunda sale
+	const seen = new Set<string>()
+	b.merge('BANK_CUP', 'ask', [{ uuid: 'conocida', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10500', status: 'open', updated_at: at(0), User: ana }] as P2POffer[], T + 7200_000, true, seen)
+	assert.equal(b.sweep('BANK_CUP', 'ask', seen, T + 7200_000, T + 7200_000), 0)
+	assert.equal(b.sweep('BANK_CUP', 'ask', seen, T + 10800_000, T + 10800_000), 1)
+	assert.deepEqual(b.levels('BANK_CUP', 'ask').map((l) => l.uuid), ['conocida'])
+})
+
 test('firma del webhook: HMAC del cuerpo en crudo, con o sin «sha256=», y hora reciente', async () => {
 	const raw = JSON.stringify(ev('p2p.created', {}))
 	const sig = createHmac('sha256', 'secreto').update(raw).digest('hex')

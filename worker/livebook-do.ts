@@ -7,7 +7,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
-import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES, DEEP_TAKE, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
 import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
 import type { BotEnv } from './userbot.ts'
 import { alertOther, OtherMarkets, saveOther } from './othermarkets.ts'
@@ -53,6 +53,8 @@ export class LiveBook {
 	private otherSavedAt = 0
 	private otherAlertAt = 0
 	private readAt = new Map<string, number>()
+	// Cuándo se leyó cada lado entero (por páginas)
+	private deepAt = new Map<string, number>()
 	// Lados leídos enteros con las credenciales al menos una vez: solo esos se dan por completos (el feed solo trae lo nuevo)
 	private synced = new Set<string>()
 	// Lados y actividad que cambiaron desde el último envío a los terminales sin Pro
@@ -568,6 +570,12 @@ export class LiveBook {
 				this.reads.push(Date.now())
 				if (await this.read(coin, side)) changed = true
 			}
+			// Un lado entero por pasada, el que hace más que no se lee así, con lo que sobre de lecturas
+			const deep = [...this.synced].filter((k) => now - (this.deepAt.get(k) ?? 0) > DEEP_EVERY_MS).sort((a, b) => (this.deepAt.get(a) ?? 0) - (this.deepAt.get(b) ?? 0))[0]
+			if (deep && this.creds() && this.reads.length < READS_PER_MIN - 2) {
+				const [coin, side] = deep.split(':') as [string, Side]
+				if (await this.readDeep(coin, side)) changed = true
+			}
 			if (changed) await this.save()
 		} finally {
 			this.busy = false
@@ -676,6 +684,38 @@ export class LiveBook {
 			this.readError = (e as Error).message
 			return false
 		}
+	}
+
+	// El lado entero, por páginas: mete lo que el libro no conocía y, si llegó a la última página, saca lo que falta
+	// dos lecturas seguidas (ver Book.sweep). Cada página cuenta como una lectura; si se acaban, sigue en la siguiente hora
+	private async readDeep(coin: string, side: Side) {
+		const k = sideKey(coin, side)
+		this.deepAt.set(k, Date.now())
+		const before = this.book.count(coin, side)
+		const startedAt = Date.now()
+		const seen = new Set<string>()
+		let removed = 0
+		try {
+			for (let page = 1; page <= DEEP_PAGES; page++) {
+				if (this.reads.length >= READS_PER_MIN) break
+				this.reads.push(Date.now())
+				const q = new URLSearchParams({ type: side === 'ask' ? 'sell' : 'buy', coin, orderBy: 'best_rate', orderType: 'desc', take: String(DEEP_TAKE), page: String(page) })
+				const res = await fetch(`${QVAPAY}/p2p?${q}`, { headers: { 'app-id': this.env.QVAPAY_APP_ID!, 'app-secret': this.env.QVAPAY_APP_SECRET!, Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
+				if (!res.ok) throw new Error(`QvaPay respondió ${res.status}`)
+				const list = ((await res.json()) as { data?: P2POffer[] }).data ?? []
+				this.book.merge(coin, side, list, Date.now(), true, seen)
+				// La última página: se leyó el lado entero y se puede repasar lo que falta
+				if (list.length < DEEP_TAKE) {
+					removed = this.book.sweep(coin, side, seen, startedAt)
+					break
+				}
+			}
+		} catch (e) {
+			this.readError = (e as Error).message
+		}
+		const changed = removed > 0 || this.book.count(coin, side) !== before
+		if (changed) this.broadcast(coin, side)
+		return changed
 	}
 
 	private async simulate(coin: string) {
