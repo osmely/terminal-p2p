@@ -11,20 +11,33 @@ import { num, type Averages, type CompletedRates, type OfferType, type P2POffer 
 
 const log = logger('market')
 
-export const COINS = [
-	{ tick: 'BANK_CUP', name: 'CUP Transferencia', unit: 'CUP' },
-	{ tick: 'ETECSA', name: 'Saldo ETECSA', unit: 'CUP' },
-	{ tick: 'CLASICA', name: 'Tarjeta Clásica', unit: 'USD' },
-	{ tick: 'BANK_MLC', name: 'MLC', unit: 'MLC' },
-	{ tick: 'ZELLE', name: 'Zelle', unit: 'USD' },
-	{ tick: 'BANDECPREPAGO', name: 'Bandec Prepago', unit: 'USD' },
-	{ tick: 'TROPIPAY', name: 'TropiPay', unit: 'EUR' },
-	{ tick: 'CUPCASH', name: 'CUP Efectivo', unit: 'CUP' },
-	{ tick: 'USDCASH', name: 'USD Efectivo', unit: 'USD' },
-	{ tick: 'BOLSATM', name: 'Bolsa TM', unit: 'CUP' },
+const BASE_COINS = [
+	{ tick: 'BANK_CUP', name: 'CUP Transferencia', unit: 'CUP', logo: 'bankcup' },
+	{ tick: 'ETECSA', name: 'Saldo ETECSA', unit: 'CUP', logo: 'etecsa' },
+	{ tick: 'CLASICA', name: 'Tarjeta Clásica', unit: 'USD', logo: 'clasica' },
+	{ tick: 'BANK_MLC', name: 'MLC', unit: 'MLC', logo: 'bankmlc' },
+	{ tick: 'ZELLE', name: 'Zelle', unit: 'USD', logo: 'zelle' },
+	{ tick: 'BANDECPREPAGO', name: 'Bandec Prepago', unit: 'USD', logo: 'tropical' },
+	{ tick: 'TROPIPAY', name: 'TropiPay', unit: 'EUR', logo: 'tropipay' },
+	{ tick: 'CUPCASH', name: 'CUP Efectivo', unit: 'CUP', logo: 'cupcash' },
+	{ tick: 'USDCASH', name: 'USD Efectivo', unit: 'USD', logo: 'usdcash' },
+	{ tick: 'BOLSATM', name: 'Bolsa TM', unit: 'CUP', logo: 'bolsatm' },
 ] as const
 
-export type Tick = (typeof COINS)[number]['tick']
+// Mercados que solo salen en staging, para ver cómo se mueven antes de añadirlos de verdad. Staging se reconoce por
+// __STAGING__ en el Worker (la pone wrangler en env.staging: define) y por el dominio en el navegador (data.js es el
+// mismo archivo en los dos entornos)
+const STAGING_COINS = [
+	{ tick: 'USDTBSC', name: 'USDT (BSC)', unit: 'USDT', logo: 'usdt', net: 'BSC' },
+	// En QvaPay, USDT a secas es el de TRON (TRC20)
+	{ tick: 'USDT', name: 'USDT (TRON)', unit: 'USDT', logo: 'usdt', net: 'TRON' },
+] as const
+declare const __STAGING__: boolean | undefined
+const IS_STAGING = (typeof __STAGING__ !== 'undefined' && __STAGING__ === true) || /(^|\.)staging\./.test((globalThis as { location?: { hostname?: string } }).location?.hostname ?? '')
+
+export type Tick = (typeof BASE_COINS)[number]['tick'] | (typeof STAGING_COINS)[number]['tick']
+// logo: el icono de QvaPay (media.qvapay.com/coins/<logo>.svg); net: la red, para distinguir mercados con el mismo icono
+export const COINS: readonly { tick: Tick; name: string; unit: string; logo: string; net?: string }[] = IS_STAGING ? [...BASE_COINS, ...STAGING_COINS] : BASE_COINS
 
 export interface Level {
 	uuid: string

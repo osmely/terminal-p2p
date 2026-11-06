@@ -190,6 +190,13 @@ function price(live, avg, cls) {
 	return '<span class="num">—</span>'
 }
 
+// El icono del mercado: el de QvaPay (media.qvapay.com, permitido en la CSP), o su inicial si no carga. Las dos redes
+// de USDT tienen el mismo icono: llevan la suya en una esquina
+const coinIcon = (c) =>
+	`<span class="coin-ic" data-i="${esc((c?.name ?? '?').charAt(0))}">${c?.logo ? `<img src="https://media.qvapay.com/coins/${esc(c.logo)}.svg" alt="" loading="lazy" />` : ''}${c?.net ? `<i>${esc(c.net)}</i>` : ''}</span>`
+// La CSP no deja onerror en línea: un icono que no carga se quita aquí y queda la inicial
+document.addEventListener('error', (e) => e.target?.matches?.('.coin-ic img') && e.target.remove(), true)
+
 function marketRows(query) {
 	const q = (query ?? '').trim().toLowerCase()
 	const rows = state.overview.filter((c) => !q || c.name.toLowerCase().includes(q) || c.tick.toLowerCase().includes(q) || c.unit.toLowerCase().includes(q))
@@ -197,7 +204,7 @@ function marketRows(query) {
 	return rows
 		.map(
 			(c) => `<button class="mrow ${c.tick === state.coin ? 'active' : ''}" data-tick="${c.tick}" role="option" aria-selected="${c.tick === state.coin}">
-				<span class="mname"><b>${esc(c.name)}</b><span>QUSD/${esc(c.unit)}${c.count24h ? ` · ${c.count24h} ops 24 h` : ''}</span></span>
+				<span class="mmeta">${coinIcon(c)}<span class="mname"><b>${esc(c.name)}</b><span>QUSD/${esc(c.unit)}${c.count24h ? ` · ${c.count24h} ops 24 h` : ''}</span></span></span>
 				${price(c.bid, c.avgBuy, 'bid')}${price(c.ask, c.avgSell, 'ask')}</button>`,
 		)
 		.join('')
@@ -206,6 +213,22 @@ function marketRows(query) {
 // Tira horizontal de mercados (pantallas sin la columna de mercados)
 function renderMarkets() {
 	$('marketList').innerHTML = marketRows($('marketSearch').value)
+	renderRail()
+}
+
+// La columna colapsada: los mismos mercados, solo con su icono (el nombre y los precios, al pasar el ratón). Solo se
+// rehace si cambian los mercados o el activo, para no recargar los iconos en cada refresco del libro
+let railKey = ''
+function renderRail() {
+	const key = `${state.coin}|${state.overview.map((c) => `${c.tick}:${c.bid}:${c.ask}`).join(',')}`
+	if (key === railKey) return
+	railKey = key
+	$('marketRail').innerHTML = state.overview
+		.map((c) => {
+			const tip = `${c.name}${c.bid ? ` · compra ${fmtP(c.bid)}` : ''}${c.ask ? ` · venta ${fmtP(c.ask)}` : ''}`
+			return `<button class="rail-btn ${c.tick === state.coin ? 'active' : ''}" data-tick="${c.tick}" title="${esc(tip)}" aria-label="${esc(c.name)}" aria-pressed="${c.tick === state.coin}">${coinIcon(c)}</button>`
+		})
+		.join('')
 }
 
 // Sin la columna de mercados (móvil y pantallas medianas), la misma lista se abre como una hoja desde abajo
@@ -241,6 +264,12 @@ function render() {
 	const b = state.book
 	const meta = b?.coin ?? state.overview.find((c) => c.tick === state.coin) ?? { name: state.coin, unit: '' }
 	$('pairName').textContent = `QUSD / ${meta.name}`
+	// Se rehace al cambiar de mercado o al llegar su icono (al arrancar aún no está la lista de mercados)
+	const iconOf = state.overview.find((c) => c.tick === state.coin) ?? meta
+	if ($('pairIcon').dataset.key !== `${state.coin}:${iconOf.logo ?? ''}`) {
+		$('pairIcon').dataset.key = `${state.coin}:${iconOf.logo ?? ''}`
+		$('pairIcon').innerHTML = coinIcon(iconOf)
+	}
 	$('pairSub').textContent = `Precio en ${meta.unit} por cada USD de saldo QvaPay`
 	if (!b) {
 		$('asks').innerHTML = $('bids').innerHTML = '<div class="empty">Cargando…</div>'
@@ -1404,6 +1433,10 @@ function bind() {
 	$('marketList').addEventListener('click', (e) => {
 		const row = e.target.closest('[data-tick]')
 		if (row) selectCoin(row.dataset.tick)
+	})
+	$('marketRail').addEventListener('click', (e) => {
+		const btn = e.target.closest('[data-tick]')
+		if (btn) selectCoin(btn.dataset.tick)
 	})
 	// El par: en escritorio abre la columna si estaba colapsada y va al buscador; sin columna, abre la hoja
 	$('pairBtn').addEventListener('click', () => {

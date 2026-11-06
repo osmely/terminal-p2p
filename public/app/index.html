@@ -64,7 +64,7 @@
 	<section class="ticker">
 		<div class="ticker-pair">
 			<!-- Sin la columna de mercados (móvil y pantallas medianas), el par abre la lista en una hoja desde abajo -->
-			<h1><button class="pair-btn" id="pairBtn" aria-haspopup="dialog" aria-controls="marketList"><span id="pairName">QUSD / CUP Transferencia</span><svg class="pair-caret" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg></button></h1>
+			<h1><button class="pair-btn" id="pairBtn" aria-haspopup="dialog" aria-controls="marketList"><span class="pair-ic" id="pairIcon"></span><span id="pairName">QUSD / CUP Transferencia</span><svg class="pair-caret" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg></button></h1>
 			<p id="pairSub">Precio en CUP por cada USD de saldo QvaPay</p>
 		</div>
 		<div class="ticker-stats" id="stats"></div>
@@ -94,6 +94,8 @@
 			<div class="markets-search"><input class="input" id="marketSearch" placeholder="Buscar…" autocomplete="off" /></div>
 			<div class="markets-cols"><span>Mercado</span><span>Compra</span><span>Venta</span></div>
 			<div class="markets-list" id="marketList"></div>
+			<!-- Con la columna colapsada: un icono por mercado, para cambiar sin abrirla -->
+			<div class="markets-rail" id="marketRail" aria-label="Mercados"></div>
 		</aside>
 
 		<section class="panel area-chart">

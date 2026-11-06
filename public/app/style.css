@@ -251,7 +251,7 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .layout {
 	display: grid; gap: var(--gap); padding: var(--gap) 16px;
 	/* Tamaños que se pueden cambiar arrastrando los bordes (resize.js) */
-	grid-template-columns: var(--c-markets, 290px) minmax(0, 1fr) var(--c-book, 390px);
+	grid-template-columns: var(--c-markets, 318px) minmax(0, 1fr) var(--c-book, 390px);
 	grid-template-areas:
 		'markets chart book'
 		'markets insights book'
@@ -285,17 +285,33 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .mrow { width: 100%; border: 0; background: none; text-align: left; padding-top: 8px; padding-bottom: 8px; border-left: 2px solid transparent; }
 .mrow:hover { background: var(--surface-2); }
 .mrow.active { background: var(--accent-bg); border-left-color: var(--accent); }
+.mrow .mmeta { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .mrow .mname { display: flex; flex-direction: column; min-width: 0; }
 .mrow .mname b { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mrow .mname span { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mrow .num { font-size: 12px; }
 .mrow .num.bid { color: var(--bid); }
 .mrow .num.ask { color: var(--ask); }
-/* Mercados colapsados (solo en escritorio): una franja estrecha con el botón para abrirlos */
+/* Icono del mercado (de QvaPay): debajo, la inicial, que se ve si la imagen no carga */
+.coin-ic { position: relative; flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 700; }
+.coin-ic::before { content: attr(data-i); }
+.coin-ic:has(img)::before { content: none; }
+.coin-ic img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.coin-ic i { position: absolute; right: -6px; bottom: -4px; padding: 0 2px; border-radius: 4px; background: var(--surface); border: 1px solid var(--line-strong); font: 700 6.5px/10px Inter, system-ui, sans-serif; font-style: normal; color: var(--text-2); letter-spacing: 0.02em; }
+.pair-ic { display: inline-flex; }
+.pair-ic .coin-ic { width: 24px; height: 24px; }
+.markets-rail { display: none; }
+/* Mercados colapsados (solo en escritorio): una franja estrecha con el botón para abrirlos y un icono por mercado */
 @media (min-width: 1281px) {
 	.layout.mk-closed { grid-template-columns: 44px minmax(0, 1fr) var(--c-book, 390px); }
-	.mk-closed .area-markets > :not(.panel-head) { display: none; }
-	.mk-closed .area-markets .panel-head { flex: 1; flex-direction: column-reverse; justify-content: flex-end; gap: 14px; padding: 8px 0; border-bottom: 0; cursor: pointer; }
+	.mk-closed .area-markets > :not(.panel-head):not(.markets-rail) { display: none; }
+	.mk-closed .area-markets .panel-head { flex: none; flex-direction: column-reverse; justify-content: flex-end; gap: 14px; padding: 8px 0; border-bottom: 0; cursor: pointer; }
+	.mk-closed .area-markets h2 { display: none; }
+	.mk-closed .markets-rail { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0 10px; overflow-y: auto; scrollbar-width: none; }
+	.rail-btn { flex: none; width: 34px; height: 34px; border: 0; border-radius: 10px; background: none; display: grid; place-items: center; cursor: pointer; }
+	.rail-btn:hover { background: var(--surface-2); }
+	.rail-btn.active { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent); }
+	.rail-btn .coin-ic { width: 24px; height: 24px; }
 	.mk-closed .area-markets .panel-head:hover { background: var(--surface-2); }
 	.mk-closed .area-markets h2 { writing-mode: vertical-rl; rotate: 180deg; color: var(--muted); letter-spacing: 0.04em; }
 	.mk-closed .markets-toggle svg { rotate: 180deg; }

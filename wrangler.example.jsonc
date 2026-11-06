@@ -66,6 +66,8 @@
 	"env": {
 		"staging": {
 			"name": "terminal-p2p-staging",
+			// Los mercados que solo salen en staging (STAGING_COINS en src/terminal/market.ts)
+			"define": { "__STAGING__": "true" },
 			"d1_databases": [
 				{ "binding": "DB", "database_name": "terminal-p2p-staging", "database_id": "<id de la base D1 de staging>" }
 			],
