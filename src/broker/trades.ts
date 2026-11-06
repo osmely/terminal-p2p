@@ -171,5 +171,8 @@ export function orderTrades(o: P2POffer, meUuid: string): Trade[] {
 export function paymentDetails(d: P2POffer['details']): { name: string; value: string }[] {
 	if (!d) return []
 	if (Array.isArray(d)) return d.filter((x) => x && x.value)
-	return Object.entries(d).map(([name, value]) => ({ name, value: String(value) }))
+	// Los campos que se dejaron vacíos al publicar (QvaPay los devuelve igual) no se enseñan
+	return Object.entries(d)
+		.map(([name, value]) => ({ name, value: String(value ?? '') }))
+		.filter((x) => x.value.trim())
 }

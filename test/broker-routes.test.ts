@@ -131,6 +131,19 @@ test('liberar dos veces: la segunda no llega a QvaPay, y si ya se liberó por fu
 	assert.notEqual((await post('/trade/action', { offer: 'b3', action: 'release' })).status, 200)
 })
 
+test('publicar sin datos de pago (como en QvaPay) y con el mensaje público', async () => {
+	const { fake, post } = await setup()
+	const sent: unknown[] = []
+	;(fake.client as unknown as { createOffer: (b: unknown) => Promise<unknown> }).createOffer = async (b) => (sent.push(b), { p2p: { uuid: 'n1' }, duplicate: false })
+	const r = await post('/offer/create', { type: 'buy', coin: 'BANK_CUP', amount: 10, price: 500, details: [{ name: 'Nro de tarjeta', value: '' }], message: ' Lee el mensaje fijado ' })
+	assert.equal(r.status, 200)
+	const body = sent[0] as { details: unknown[]; message?: string }
+	assert.deepEqual([body.details, body.message], [[], 'Lee el mensaje fijado'])
+	// Una venta con solo algunos datos: van los que se rellenaron
+	await post('/offer/create', { type: 'sell', coin: 'BANK_CUP', amount: 10, price: 500, details: [{ name: 'Nro de tarjeta', value: '9200 1111' }, { name: 'Celular', value: '' }] })
+	assert.deepEqual((sent[1] as { details: unknown[] }).details, [{ name: 'Nro de tarjeta', value: '9200 1111' }])
+})
+
 test('cancelar tu oferta: si alguien la acaba de tomar no se manda nada a QvaPay', async () => {
 	const { fake, post } = await setup()
 	const me = { uuid: 'me', username: 'yo' }

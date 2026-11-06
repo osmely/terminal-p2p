@@ -41,6 +41,8 @@ test('toTrades: roles, lado y acciones', () => {
 
 test('paymentDetails acepta objeto o lista', () => {
 	assert.deepEqual(paymentDetails({ 'Nro de tarjeta': '9200' }), [{ name: 'Nro de tarjeta', value: '9200' }])
+	// Publicada sin algunos datos: QvaPay devuelve los campos vacíos y no se enseñan
+	assert.deepEqual(paymentDetails({ 'Nro de tarjeta': '9200', 'Nro de celular': '', 'Nombre y Apellidos': ' ' }), [{ name: 'Nro de tarjeta', value: '9200' }])
 	assert.deepEqual(paymentDetails([{ name: 'Celular', value: '+53' }, { name: 'x', value: '' }]), [{ name: 'Celular', value: '+53' }])
 	assert.deepEqual(paymentDetails(null), [])
 })

@@ -913,7 +913,8 @@ function createBody(b: Record<string, unknown>): CreateOfferBody | { error: stri
 		.map((d: { name?: unknown; value?: unknown }) => ({ name: String(d?.name ?? '').slice(0, 60), value: String(d?.value ?? '').trim().slice(0, 200) }))
 		.filter((d: { name: string; value: string }) => d.name && d.value)
 		.slice(0, 10)
-	if (!details.length) return { error: 'Completa tus datos de pago' }
+	// Los datos de pago no son obligatorios, como en QvaPay: en una compra quien paga no los necesita, y en una venta
+	// hay quien prefiere pasarlos por el chat. Van los que se rellenaron
 	const key = String(b.idempotencyKey ?? '')
 	return {
 		type,

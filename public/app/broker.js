@@ -757,6 +757,7 @@ const REQ_OPTIONS = {
 	min_completed: ['Operaciones completadas', [5, 10, 25, 50, 100], (v) => `${v} o más`],
 	min_rating: ['Valoración', [4, 4.5], (v) => `${v} ★ o más`],
 	min_account_days: ['Antigüedad de la cuenta', [7, 30, 90, 180, 365], (v) => `${v} días o más`],
+	min_trustscore: ['TrustScore', [50, 85], (v) => `${v} o más`],
 }
 const reqText = (r) =>
 	r
@@ -927,11 +928,17 @@ async function showCreateOffer(preset = null) {
 				<label class="check small"><input type="checkbox" id="ofRemember" /> Recordar estos datos en este navegador</label>
 			</section>
 			<details class="sec-box opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
+				<label class="check"><input type="checkbox" id="ofVip" /> Solo cuentas VIP</label>
+				<label class="check"><input type="checkbox" id="ofPrivate" /> Privada: no se anuncia en el canal de Telegram de QvaPay</label>
+				${
+					bk.acct.gold
+						? '<label class="field">Mensaje público (GOLD)<input class="input" id="ofMsg" maxlength="79" placeholder="Ej.: lee el mensaje fijado antes de tomar" /></label><p class="hint">Hasta 79 caracteres. Sale en tu oferta; QvaPay quita los enlaces.</p>'
+						: '<p class="hint">Mensaje público en la oferta: solo para cuentas GOLD de QvaPay.</p>'
+				}
+				<p class="hint">Requisitos para quien la tome: solo podrán las cuentas que los cumplan. Cuantos más pongas, menos personas podrán tomarla.</p>
 				${Object.entries(REQ_OPTIONS)
 					.map(([k, [label, vals, fmt]]) => `<label class="field">${label}<select class="input" data-req="${k}"><option value="0">Sin requisito</option>${vals.map((v) => `<option value="${v}">${fmt(v)}</option>`).join('')}</select></label>`)
 					.join('')}
-				<label class="check"><input type="checkbox" id="ofPrivate" /> Privada: no se anuncia en el canal de Telegram de QvaPay</label>
-				<label class="check"><input type="checkbox" id="ofVip" /> Solo cuentas VIP</label>
 			</div></details>
 			<div id="ofWarn"></div>
 			<button class="btn primary block" id="ofReview">Revisar</button>
@@ -962,6 +969,7 @@ async function showCreateOffer(preset = null) {
 			requirements,
 			private: $('ofPrivate').checked,
 			onlyVip: $('ofVip').checked,
+			message: $('ofMsg')?.value.trim() || undefined,
 			idempotencyKey: key,
 		}
 	}
@@ -1009,7 +1017,7 @@ async function showCreateOffer(preset = null) {
 		const unit = unitOf(f.coin)
 		$('ofUnit').textContent = unit
 		$('ofFlexBox').hidden = f.kind !== 'flexible'
-		$('ofDetailsTitle').textContent = type === 'sell' ? 'Dónde quieres recibir el pago' : 'Tus datos de pago (los verá quien tome la oferta)'
+		$('ofDetailsTitle').textContent = type === 'sell' ? 'Dónde quieres recibir el pago (opcional)' : 'Tus datos de pago (opcional: los verá quien tome la oferta)'
 		const { refs, mid } = marketRefs(f.coin)
 		$('ofRefs').innerHTML = refs.map(([label, p]) => `<button type="button" class="chip-btn" data-ref="${p}">${label} <b class="mono">${fmtP(p)}</b></button>`).join('')
 		const total = f.amount > 0 && f.price > 0 ? f.amount * f.price : 0
@@ -1097,8 +1105,8 @@ async function showCreateOffer(preset = null) {
 					? 'Pon el precio por cada USD'
 					: f.kind === 'flexible' && !(f.orderMin > 0 && f.orderMax >= f.orderMin && f.orderMax <= f.amount)
 						? 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo ≤ monto'
-						: f.details.some((d) => !d.value)
-							? 'Completa todos tus datos de pago'
+						: smartActive && type === 'sell' && !f.details.some((d) => d.value)
+							? 'Pon dónde quieres recibir el pago: la orden inteligente se los manda por el chat a quien le vendes'
 							: (window.TPNum?.cardError(document.querySelectorAll('[data-detail]')) ?? '')
 		if (err) return toast(err, true)
 		// Los límites de «mantenerla la primera»: se guardan para la oferta al publicarla
@@ -1121,10 +1129,11 @@ async function showCreateOffer(preset = null) {
 				${f.keep ? `<span>★ Precio automático</span><b>${fmtP(f.keep.min)}–${fmtP(f.keep.max)} ${unit}</b><span class="muted">sin salir de esos límites</span>` : ''}
 				${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
 				<span>Visibilidad</span><b>${f.private ? 'Privada' : 'Pública en Telegram'}${f.onlyVip ? ' · solo VIP' : ''}</b><span></span>
+				${f.message ? `<span>Mensaje</span><b>${esc(f.message)}</b><span></span>` : ''}
 			</div>
 			<p class="notice">${
 				type === 'sell'
-					? `Se reservan <b>${fmtM(f.amount)} USD</b> de tu saldo mientras la oferta esté publicada. Cuando alguien la tome, te pagará a tus datos y liberarás los USD al ver el dinero.`
+					? `Se reservan <b>${fmtM(f.amount)} USD</b> de tu saldo mientras la oferta esté publicada. Cuando alguien la tome, te pagará ${f.details.some((d) => d.value) ? 'a tus datos' : 'a los datos que le pases por el chat (no pusiste ninguno en la oferta)'} y liberarás los USD al ver el dinero.`
 					: f.kind === 'flexible'
 						? `No se reserva saldo. Cada vez que alguien tome una parte, tendrás que transferirle lo de esa parte a sus datos y marcar el pago (en total, hasta <b>${fmtM(total)} ${unit}</b>).`
 						: `No se reserva saldo. Cuando alguien la tome, tendrás que transferirle <b>${fmtM(total)} ${unit}</b> a sus datos y marcar el pago.`
@@ -1193,7 +1202,13 @@ function renderManage(o) {
 		<div><h3>${o.type === 'sell' ? 'Vendes' : 'Compras'} ${fmtM(amount)} USD a ${fmtP(o.price)} ${unit}</h3>
 			<p class="muted">${esc(nameOf(o.coin))} · <span class="chip ${o.status}">${STATUS[o.status] ?? o.status}</span>${o.isPrivate ? ' · Privada' : ''}${flex ? ` · Por partes de ${fmtM(o.orderMin)}–${fmtM(o.orderMax)} USD` : ''}</p></div>
 		${o.pause ? `<p class="notice warn">${pauseText(o.pause)}</p>` : rank ? `<p class="hint">Ahora mismo es la <b>${rank}ª</b> ${o.type === 'sell' ? 'venta' : 'compra'} del libro.</p>` : ''}
-		${o.status !== 'open' ? `<p class="notice">Alguien tomó esta oferta. <button class="link" data-open-trade>Ver la operación</button></p>` : ''}
+		${
+			o.status === 'cancelled'
+				? '<p class="notice">Cancelaste esta oferta: ya no está en el mercado.</p>'
+				: o.status !== 'open'
+					? `<p class="notice">Alguien tomó esta oferta. <button class="link" data-open-trade>Ver la operación</button></p>`
+					: ''
+		}
 		${
 			editable
 				? `<div class="stack tight"><p class="hint">Cambiar precio o monto</p>
@@ -1234,9 +1249,15 @@ function renderManage(o) {
 		${keepSlot(o, editable)}
 		${req ? `<p class="hint">Requisitos: ${esc(req)}</p>` : ''}
 		${
-			o.details.length
-				? `<div><p class="hint">Tus datos de pago en esta oferta</p><div class="kv">${o.details.map((d) => `<span>${esc(d.name)}</span><b>${esc(d.value)}</b><span></span>`).join('')}</div></div>`
-				: ''
+			// QvaPay devuelve todos los campos del mercado, también los que dejaste vacíos al publicar: solo van los rellenos
+			o.details.some((d) => d.value)
+				? `<div><p class="hint">Tus datos de pago en esta oferta</p><div class="kv">${o.details
+						.filter((d) => d.value)
+						.map((d) => `<span>${esc(d.name)}</span><b>${esc(d.value)}</b><span></span>`)
+						.join('')}</div></div>`
+				: o.type === 'sell' && o.status === 'open'
+					? '<p class="hint">Esta oferta no tiene datos de pago: pásaselos por el chat a quien la tome.</p>'
+					: ''
 		}
 		${
 			flex && orders.length
@@ -1336,8 +1357,8 @@ function renderManage(o) {
 			toast(r.message || 'Oferta cancelada')
 			loadTrades()
 			loadBook()
-			// La ventana pasa a enseñarla cancelada (sin botones que ya no sirven)
-			refresh()
+			// Cancelada: la ventana ya no tiene nada que hacer (el aviso de abajo dice que se canceló)
+			closeModal()
 		} catch (e) {
 			toast(e.message, true)
 			// Si alguien la acaba de tomar, la oferta se recarga y enseña la operación
