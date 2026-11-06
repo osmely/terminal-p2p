@@ -39,6 +39,25 @@ test('toTrades: roles, lado y acciones', () => {
 	)
 })
 
+test('toTrades: la ficha entera de quien toma tu oferta, aunque no tenga ofertas publicadas', () => {
+	const me = { uuid: 'me', username: 'yo' }
+	const taker = { uuid: 't', username: 'Nuevo', kyc: true, vip: false, golden_check: false, phone_verified: true, telegram_verified: false, rating_avg: 4.9, rating_count: 7, _count: { P2P: 0, P2P_Peer: 12 } }
+	const { trades } = toTrades(
+		[
+			offer({ uuid: 'a', type: 'sell', User: me, Peer: taker, status: 'processing' }),
+			// Sin _count no llegó el perfil: no hay ficha (no se da por «sin verificar»)
+			offer({ uuid: 'b', type: 'sell', User: me, Peer: { uuid: 'z', username: 'Corto' }, status: 'processing' }),
+		],
+		'me',
+	)
+	const p = trades.find((t) => t.id === 'a')?.counterparty?.profile
+	assert.deepEqual(
+		p && { ...p, score: null },
+		{ username: 'Nuevo', image: null, kyc: true, vip: false, gold: false, phone: true, telegram: false, opsOwner: 0, opsTaker: 12, rating: 4.9, ratings: 7, score: null },
+	)
+	assert.equal(trades.find((t) => t.id === 'b')?.counterparty?.profile, null)
+})
+
 test('paymentDetails acepta objeto o lista', () => {
 	assert.deepEqual(paymentDetails({ 'Nro de tarjeta': '9200' }), [{ name: 'Nro de tarjeta', value: '9200' }])
 	// Publicada sin algunos datos: QvaPay devuelve los campos vacíos y no se enseñan

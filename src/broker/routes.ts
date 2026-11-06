@@ -8,10 +8,9 @@ import { logger } from '../log.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
 import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2POrder, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
 import { COINS, type Market } from '../terminal/market.ts'
-import { reputationScore } from '../terminal/ranking.ts'
 import { pendingCount, tradeAlerts } from './alerts.ts'
 import { tradeStats } from './stats.ts'
-import { orderTrades, paymentDetails, toTrades, type Trade } from './trades.ts'
+import { orderTrades, paymentDetails, peerProfile, toTrades, type Trade } from './trades.ts'
 
 const STATS_MS = 10 * 60_000
 
@@ -663,7 +662,7 @@ export class Broker {
 
 	// Su perfil y sus ofertas abiertas en todos los mercados. QvaPay no da el historial de otro
 	// usuario: solo lo que tiene publicado ahora. El perfil llega con sus ofertas; sin ninguna
-	// abierta, profile es null y el terminal usa lo que ya sabe de él
+	// abierta, profile es null y el terminal usa la que vino con tus operaciones con él (o lo que sepa del libro)
 	private async peer({ url }: Ctx, acc: Account) {
 		const user = (url.searchParams.get('user') ?? '').replace(/^@/, '')
 		if (!/^[A-Za-z0-9._-]{1,40}$/.test(user)) return json(400, { error: 'Usuario no válido' })
@@ -800,27 +799,6 @@ export class Broker {
 // ── Ficha de un usuario ────────────────────────────────────────────────
 
 const PEER_TAKE = 100
-
-export function peerProfile(u: P2PUser | undefined | null) {
-	if (!u) return null
-	const owner = u._count?.P2P ?? 0
-	const taker = u._count?.P2P_Peer ?? 0
-	return {
-		username: u.username,
-		image: u.image ?? null,
-		kyc: !!u.kyc,
-		vip: !!u.vip,
-		gold: !!u.golden_check,
-		phone: u.phone_verified ?? null,
-		telegram: u.telegram_verified ?? null,
-		// Operaciones completadas: publicando él la oferta y tomando las de otros
-		opsOwner: owner,
-		opsTaker: taker,
-		rating: u.rating_count ? (u.rating_avg ?? null) : null,
-		ratings: u.rating_count ?? 0,
-		score: reputationScore(u.rating_count ? (u.rating_avg ?? null) : null, owner + taker),
-	}
-}
 
 export function peerOffer(o: P2POffer) {
 	const amount = num(o.amount)

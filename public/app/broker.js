@@ -1662,6 +1662,13 @@ function renderTake(uuid, side, l, coin, preset) {
 // historial de otro usuario: solo lo que tiene publicado ahora y lo que ha pasado entre los dos
 const PEER_OUTLIER_PCT = 0.35
 
+// Su ficha entera, de una operación tuya con él (QvaPay la manda con cada operación): para quien te toma una
+// oferta sin tener ninguna publicada
+function tradeProfile(user) {
+	const u = user.toLowerCase()
+	return bk.trades.find((x) => x.counterparty?.username?.toLowerCase() === u && x.counterparty.profile)?.counterparty.profile ?? null
+}
+
 // Lo que ya se sabe de un usuario por el libro o por tus operaciones (si no tiene ofertas abiertas)
 function knownPeer(user) {
 	const u = user.toLowerCase()
@@ -1718,7 +1725,7 @@ async function showPeer(user) {
 		return
 	}
 	if (!$('modalBody').textContent.includes('Cargando ficha')) return // la cerraron mientras cargaba
-	const p = d.profile
+	const p = d.profile ?? tradeProfile(user)
 	const known = p ? null : knownPeer(user)
 	const name = p?.username ?? user
 	rememberFace(name, p?.image)

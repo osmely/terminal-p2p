@@ -2,6 +2,7 @@
 // desde el usuario: qué lado juega, si le toca pagar y qué puede hacer ahora.
 
 import { num, type P2POffer, type P2PUser, type Pause } from '../qvapay/types.ts'
+import { reputationScore } from '../terminal/ranking.ts'
 
 export type Action = 'pay' | 'cancel' | 'wait_payment' | 'release' | 'dispute' | 'wait_release' | 'wait_moderator' | 'rate' | 'cancel_offer'
 
@@ -20,7 +21,8 @@ export interface Trade {
 	usd: number
 	coinAmount: number
 	price: number
-	counterparty: { username: string; ops: number; rating: number | null; image?: string | null } | null
+	// profile: su ficha completa, si QvaPay la manda (en tus ofertas, Peer trae lo mismo que User)
+	counterparty: { username: string; ops: number; rating: number | null; image?: string | null; profile?: PeerProfile | null } | null
 	kind: 'fixed' | 'flexible'
 	updatedAt: string | null
 	// Fin del plazo de pago (solo tiene sentido mientras se espera el pago)
@@ -46,9 +48,39 @@ export interface ChatSummary {
 
 const FINAL = new Set(['completed', 'cancelled'])
 
+// La ficha de un usuario (GET /peer) sale de sus ofertas abiertas; sin ninguna, de quien opera contigo
+export function peerProfile(u: P2PUser | undefined | null) {
+	if (!u) return null
+	const owner = u._count?.P2P ?? 0
+	const taker = u._count?.P2P_Peer ?? 0
+	return {
+		username: u.username,
+		image: u.image ?? null,
+		kyc: !!u.kyc,
+		vip: !!u.vip,
+		gold: !!u.golden_check,
+		phone: u.phone_verified ?? null,
+		telegram: u.telegram_verified ?? null,
+		// Operaciones completadas: publicando él la oferta y tomando las de otros
+		opsOwner: owner,
+		opsTaker: taker,
+		rating: u.rating_count ? (u.rating_avg ?? null) : null,
+		ratings: u.rating_count ?? 0,
+		score: reputationScore(u.rating_count ? (u.rating_avg ?? null) : null, owner + taker),
+	}
+}
+export type PeerProfile = NonNullable<ReturnType<typeof peerProfile>>
+
 function party(u?: P2PUser | null) {
 	if (!u) return null
-	return { username: u.username, ops: (u._count?.P2P ?? 0) + (u._count?.P2P_Peer ?? 0), rating: u.rating_count ? (u.rating_avg ?? null) : null, image: u.image ?? null }
+	return {
+		username: u.username,
+		ops: (u._count?.P2P ?? 0) + (u._count?.P2P_Peer ?? 0),
+		rating: u.rating_count ? (u.rating_avg ?? null) : null,
+		image: u.image ?? null,
+		// Sin _count no llegó el perfil entero (no se da por «sin verificar» lo que no se sabe)
+		profile: u._count ? peerProfile(u) : null,
+	}
 }
 
 export function actionsFor(status: string, payer: boolean, role: 'owner' | 'taker', hasPeer: boolean): Action[] {
