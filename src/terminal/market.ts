@@ -22,20 +22,20 @@ const BASE_COINS = [
 	{ tick: 'CUPCASH', name: 'CUP Efectivo', unit: 'CUP', logo: 'cupcash' },
 	{ tick: 'USDCASH', name: 'USD Efectivo', unit: 'USD', logo: 'usdcash' },
 	{ tick: 'BOLSATM', name: 'Bolsa TM', unit: 'CUP', logo: 'bolsatm' },
+	// En QvaPay, USDT a secas es el de TRON (TRC20)
+	{ tick: 'USDT', name: 'USDT (TRON)', unit: 'USDT', logo: 'usdt', net: 'TRON' },
+	{ tick: 'USDTBSC', name: 'USDT (BSC)', unit: 'USDT', logo: 'usdt', net: 'BSC' },
 ] as const
 
 // Mercados que solo salen en staging, para ver cómo se mueven antes de añadirlos de verdad. Staging se reconoce por
 // __STAGING__ en el Worker (la pone wrangler en env.staging: define) y por el dominio en el navegador (data.js es el
 // mismo archivo en los dos entornos)
-const STAGING_COINS = [
-	{ tick: 'USDTBSC', name: 'USDT (BSC)', unit: 'USDT', logo: 'usdt', net: 'BSC' },
-	// En QvaPay, USDT a secas es el de TRON (TRC20)
-	{ tick: 'USDT', name: 'USDT (TRON)', unit: 'USDT', logo: 'usdt', net: 'TRON' },
-] as const
+// Ahora ninguno (USDT de TRON y de BSC pasaron a la lista de siempre el 2026-11-06)
+const STAGING_COINS = [] as const as readonly { tick: never; name: string; unit: string; logo: string; net?: string }[]
 declare const __STAGING__: boolean | undefined
 const IS_STAGING = (typeof __STAGING__ !== 'undefined' && __STAGING__ === true) || /(^|\.)staging\./.test((globalThis as { location?: { hostname?: string } }).location?.hostname ?? '')
 
-export type Tick = (typeof BASE_COINS)[number]['tick'] | (typeof STAGING_COINS)[number]['tick']
+export type Tick = (typeof BASE_COINS)[number]['tick']
 // logo: el icono de QvaPay (media.qvapay.com/coins/<logo>.svg); net: la red, para distinguir mercados con el mismo icono
 export const COINS: readonly { tick: Tick; name: string; unit: string; logo: string; net?: string }[] = IS_STAGING ? [...BASE_COINS, ...STAGING_COINS] : BASE_COINS
 
