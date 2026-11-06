@@ -713,8 +713,9 @@ function bindDetail(t) {
 			}
 			return act(a)
 		}
-	// Calificar: la estrella elegida se ve al momento y no se puede tocar otra hasta que QvaPay responda (las llamadas
-	// van en fila y una nota que se cambia varias veces seguidas tardaba en asentarse). Con nota ya puesta, se cambia
+	// Calificar: mientras QvaPay guarda, las estrellas quedan en gris (las elegidas, latiendo) y no se puede tocar otra
+	// (las llamadas van en fila y una nota que se cambia varias veces seguidas tardaba en asentarse). Se encienden solo
+	// cuando QvaPay la guardó; si falla, vuelve la que había. Con nota ya puesta, se cambia
 	const stars = body.querySelector('.stars')
 	for (const b of body.querySelectorAll('[data-rate]'))
 		b.onclick = async () => {
@@ -722,7 +723,8 @@ function bindDetail(t) {
 			const n = Number(b.dataset.rate)
 			stars.classList.add('busy')
 			for (const s of stars.querySelectorAll('[data-rate]')) {
-				s.classList.toggle('on', Number(s.dataset.rate) <= n)
+				s.classList.remove('on')
+				s.classList.toggle('pending', Number(s.dataset.rate) <= n)
 				s.disabled = true
 			}
 			const hint = $('rateHint')
@@ -731,10 +733,16 @@ function bindDetail(t) {
 			try {
 				await api('/trade/action', { offer: t.offer, order: t.order, action: 'rate', rating: n, edit: (t.myRating?.rating ?? 0) > 0 })
 				stars.classList.remove('busy')
-				for (const s of stars.querySelectorAll('[data-rate]')) s.disabled = false
+				for (const s of stars.querySelectorAll('[data-rate]')) {
+					s.classList.remove('pending')
+					s.classList.toggle('on', Number(s.dataset.rate) <= n)
+					s.disabled = false
+				}
 				hint.textContent = 'Calificación guardada.'
 			} catch (e) {
 				toast(e.message, true)
+				hint.textContent = 'No se guardó.'
+				for (const s of stars.querySelectorAll('[data-rate]')) s.classList.remove('pending')
 			}
 			// Se vuelve a leer la operación aunque no haya cambiado (nota igual que antes o error): así queda la nota que
 			// de verdad guardó QvaPay y su plazo

@@ -545,8 +545,11 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .stars button { font-size: 28px; line-height: 1; padding: 2px 3px; background: none; border: 0; color: var(--line-strong); transition: color 0.1s, transform 0.1s; }
 .stars button.on { color: var(--warn); }
 .stars.locked button { cursor: default; }
-/* Guardando: queda la elegida y no se puede tocar otra hasta que QvaPay responda */
+/* Guardando: todas en gris, las elegidas latiendo, y no se puede tocar otra hasta que QvaPay responda */
 .stars.busy button { cursor: progress; }
+.stars button.pending { color: var(--line-strong); animation: star-wait 1s ease-in-out infinite; }
+@keyframes star-wait { 50% { color: var(--muted); } }
+@media (prefers-reduced-motion: reduce) { .stars button.pending { animation: none; color: var(--muted); } }
 .stars:not(.locked):not(.busy):hover button, .stars:not(.locked):not(.busy):focus-within button { color: var(--warn); }
 .stars:not(.locked):not(.busy) button:hover ~ button, .stars:not(.locked):not(.busy) button:focus-visible ~ button { color: var(--line-strong); }
 .stars:not(.locked):not(.busy) button:hover { transform: scale(1.12); }
