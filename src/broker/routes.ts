@@ -363,6 +363,7 @@ export class Broker {
 			counterparty: isOwner ? (ord?.Taker ?? o.Peer)?.username : o.User?.username,
 			counterpartyImage: (isOwner ? (ord?.Taker ?? o.Peer) : o.User)?.image ?? null,
 			chat: chat.slice(-30).map((m) => ({
+				id: m.id,
 				mine: m.peer_id === acc.me.uuid,
 				moderator: !!m.is_moderator,
 				text: m.message,

@@ -120,6 +120,7 @@ function closeModal() {
 	$('modal').hidden = true
 	$('modalBody').innerHTML = ''
 	bk.detail = null
+	stopChatLive()
 	onModalClose?.()
 	onModalClose = null
 }
@@ -448,6 +449,7 @@ async function refreshDetail() {
 	}
 	// Mientras cargaba se abrió otra operación (u otra orden de la misma oferta)
 	if (bk.detail !== d) return
+	syncChatLive(t)
 	// El refresco periódico no debe borrar lo que el usuario está escribiendo ni moverle el scroll:
 	// el chat sigue al final solo si ya estaba al final (si subió a leer, se queda donde estaba)
 	const cb0 = $('chatbox')
@@ -457,6 +459,7 @@ async function refreshDetail() {
 	// Si la operación no cambió (lo normal mientras se chatea), solo se redibujan los mensajes: así la caja de texto
 	// no se reemplaza y quien escribe no pierde el foco (en el móvil, ni el teclado)
 	const sig = JSON.stringify({ ...t, chat: null, dryRun: bk.acct.dryRun })
+	bk.chat = t.chat
 	if (cb0 && sig === bk.detailSig) {
 		const html = chatHtml(t.chat)
 		if (html !== bk.chatHtml) {
@@ -491,6 +494,35 @@ async function refreshDetail() {
 		release.disabled = false
 	}
 }
+
+// El chat al instante: con la operación en curso, cada mensaje nuevo la redibuja sin esperar al refresco periódico
+// (que sigue, para los cambios de estado). QvaPay manda el mensaje por un flujo abierto mientras dura la operación
+let chatLive = null
+const LIVE_CHAT = new Set(['processing', 'paid', 'revision'])
+function syncChatLive(t) {
+	const d = bk.detail
+	const key = d && LIVE_CHAT.has(t?.status) ? `${d.offer}:${d.order ?? ''}` : null
+	if (chatLive?.key === key) return
+	stopChatLive()
+	if (key && window.TPApi?.chat) chatLive = { key, stop: TPApi.chat(d.offer, d.order ?? null, chatArrived) }
+}
+// El mensaje se pinta en cuanto llega, sin esperar a releer la operación (eso va detrás, por si cambió algo más)
+function chatArrived(m) {
+	const cb = $('chatbox')
+	if (cb && m?.id && !bk.chat?.some((x) => x.id === m.id)) {
+		const atEnd = cb.scrollHeight - cb.scrollTop - cb.clientHeight < 40
+		bk.chat = [...(bk.chat ?? []), m].slice(-30)
+		bk.chatHtml = cb.innerHTML = chatHtml(bk.chat)
+		if (atEnd) cb.scrollTop = cb.scrollHeight
+	}
+	refreshSoon()
+}
+function stopChatLive() {
+	chatLive?.stop()
+	chatLive = null
+}
+// Si ya se está cargando, se repite al terminar: el mensaje que llegó puede no estar en esa lectura
+const refreshSoon = () => (detailLoading ? setTimeout(refreshSoon, 300) : refreshDetail())
 
 const chatHtml = (chat) =>
 	chat.length
@@ -1179,6 +1211,7 @@ async function showCreateOffer(preset = null) {
 // ── Gestionar una oferta tuya ─────────────────────────────────────────
 async function showManageOffer(uuid) {
 	bk.detail = null
+	stopChatLive()
 	openModal('<p class="muted">Cargando oferta…</p>')
 	let o
 	try {
@@ -2227,6 +2260,34 @@ function openOfferLink() {
 	showTakeOfferById(m[1].toLowerCase())
 }
 window.addEventListener('hashchange', openOfferLink)
+
+// Una oferta por el enlace que te mandan: las privadas no salen en el libro, su dueño pasa el enlace de QvaPay
+// (qvapay.com/p2p/<uuid>) o el del terminal. Vale también pegar solo el código de la oferta
+const UUID_IN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+function showOpenLink() {
+	openModal(`<div class="stack"><h3>Abrir una oferta por su enlace</h3>
+		<p class="muted">Las ofertas privadas no salen en el libro: quien la publica te manda su enlace. Pega el de QvaPay (qvapay.com/p2p/…) o el del terminal y se abre para tomarla.</p>
+		<form class="row-btns" id="linkForm"><input class="input" id="linkInput" placeholder="https://qvapay.com/p2p/…" autocomplete="off" spellcheck="false" /><button class="btn primary">Abrir</button></form>
+		<p class="hint" id="linkErr" hidden>Ese texto no trae el código de una oferta. Copia el enlace completo que te mandaron.</p>
+		<p class="hint">También puedes pegar el enlace en cualquier parte del terminal (Ctrl+V o ⌘V).</p></div>`)
+	$('linkInput').focus()
+	$('linkForm').addEventListener('submit', (e) => {
+		e.preventDefault()
+		const m = UUID_IN.exec($('linkInput').value)
+		if (!m) return ($('linkErr').hidden = false)
+		showTakeOfferById(m[0].toLowerCase())
+	})
+}
+$('openLinkBtn')?.addEventListener('click', showOpenLink)
+// Pegar el enlace de una oferta fuera de un campo de texto la abre
+document.addEventListener('paste', (e) => {
+	if (e.target?.closest?.('input, textarea, select, [contenteditable]')) return
+	const text = e.clipboardData?.getData('text') ?? ''
+	const m = /qvapay\.com|terminalp2p\.com/i.test(text) && UUID_IN.exec(text)
+	if (!m) return
+	e.preventDefault()
+	showTakeOfferById(m[0].toLowerCase())
+})
 
 bindBroker()
 loadAccount().then(openOfferLink)

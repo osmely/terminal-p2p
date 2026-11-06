@@ -232,7 +232,50 @@ const radar = {
 	scan: () => market.scanWatched(),
 }
 
+// El chat de una operación al instante: cada mensaje nuevo llama a onMessage, ya con la forma de los de /trade. QvaPay corta el flujo cada pocos minutos
+// y se vuelve a conectar; si falla seguido, se espera más entre intentos (hasta 1 min). Devuelve la función que lo para
+const CHAT_RETRY_MS = 10_000
+const CHAT_RETRY_MAX_MS = 60_000
+function chat(offer: string, order: string | null, onMessage: (m: { id: string; mine: boolean; moderator: boolean; text: string | null; image: string | null; at: string }) => void) {
+	const ctl = new AbortController()
+	void (async () => {
+		let wait = CHAT_RETRY_MS
+		while (!ctl.signal.aborted) {
+			const acc = await accounts.get().catch(() => null)
+			if (!acc) return
+			const started = Date.now()
+			try {
+				await acc.client.chatStream(
+					offer,
+					order ?? undefined,
+					(m) => onMessage({ id: m.id, mine: m.peer_id === acc.me.uuid, moderator: !!m.is_moderator, text: m.message, image: m.image, at: m.created_at }),
+					ctl.signal,
+				)
+			} catch (e) {
+				if (ctl.signal.aborted) return
+				// Sin permiso para ese chat o la operación ya no existe: no se insiste (el refresco normal sigue)
+				const status = (e as { status?: number }).status
+				if (status === 401 || status === 403 || status === 404) return
+			}
+			// Un flujo que duró se cerró por tiempo (lo normal): se reconecta enseguida. Si cayó al momento, se espera más
+			const lasted = Date.now() - started > 60_000
+			if (lasted) wait = CHAT_RETRY_MS
+			await new Promise((r) => setTimeout(r, lasted ? 1_000 : wait))
+			if (!lasted) wait = Math.min(wait * 2, CHAT_RETRY_MAX_MS)
+		}
+	})()
+	return () => ctl.abort()
+}
+
 // cross: la mejor oportunidad del libro cruzado (app.js la enseña en la lectura del mercado)
 // live: el libro en tiempo real de Pro (pro.js lo enciende con la huella de tu token)
 // watch: como radar.watch, para otras piezas del módulo Pro, cada una con su nombre (mantener tu oferta la primera: 'keep')
-;(window as unknown as { TPApi: { fetch: typeof api; cross: typeof bestCross; radar: typeof radar; live: typeof live; watch: typeof watchFor } }).TPApi = { fetch: api, cross: bestCross, radar, live, watch: watchFor }
+// chat: los mensajes nuevos de una operación al instante (broker.js redibuja la operación al llegar uno)
+;(window as unknown as { TPApi: { fetch: typeof api; cross: typeof bestCross; radar: typeof radar; live: typeof live; watch: typeof watchFor; chat: typeof chat } }).TPApi = {
+	fetch: api,
+	cross: bestCross,
+	radar,
+	live,
+	watch: watchFor,
+	chat,
+}

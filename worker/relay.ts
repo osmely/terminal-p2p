@@ -35,6 +35,8 @@ const RULES: [method: string, path: RegExp][] = [
 	['GET', /^\/p2p\/completed_pairs_average$/],
 	['GET', new RegExp(`^/p2p/${UUID}$`)],
 	['GET', new RegExp(`^/p2p/${UUID}/chat$`)],
+	// Los mensajes nuevos del chat al instante (SSE): el relé pasa el flujo tal cual, sin leerlo ni guardarlo
+	['GET', new RegExp(`^/p2p/${UUID}/chat/stream$`)],
 	['POST', /^\/p2p\/create$/],
 	['POST', new RegExp(`^/p2p/${UUID}/(paid|received|cancel|chat|rate|edit|pause|apply)$`)],
 	// Cambiar una calificación ya dada (QvaPay lo permite 72 h)
@@ -70,7 +72,8 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 	// Las escrituras solo desde nuestra propia página
 	if (req.method !== 'GET' && req.headers.get('origin') !== url.origin) return text(403, 'Origen no permitido')
 
-	const headers = new Headers({ Accept: 'application/json' })
+	const stream = /\/chat\/stream$/.test(path)
+	const headers = new Headers({ Accept: stream ? 'text/event-stream' : 'application/json' })
 	for (const h of ['authorization', 'content-type']) {
 		const v = req.headers.get(h)
 		if (v) headers.set(h, v)

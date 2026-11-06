@@ -68,6 +68,37 @@ export interface OpMeta {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+// Lee un flujo SSE a trozos: cada evento completo (línea en blanco al final) va a onEvent con su nombre
+// («message» si no trae) y sus líneas data: unidas. Los comentarios (: keepalive) y retry: se ignoran
+export class SseParser {
+	private buf = ''
+	private onEvent: (event: string, data: string) => void
+
+	constructor(onEvent: (event: string, data: string) => void) {
+		this.onEvent = onEvent
+	}
+
+	push(chunk: string) {
+		this.buf += chunk.replace(/\r\n?/g, '\n')
+		let end: number
+		while ((end = this.buf.indexOf('\n\n')) >= 0) {
+			const block = this.buf.slice(0, end)
+			this.buf = this.buf.slice(end + 2)
+			let event = 'message'
+			const data: string[] = []
+			for (const line of block.split('\n')) {
+				const i = line.indexOf(':')
+				if (i === 0) continue
+				const field = i < 0 ? line : line.slice(0, i)
+				const value = i < 0 ? '' : line.slice(i + 1).replace(/^ /, '')
+				if (field === 'event') event = value
+				else if (field === 'data') data.push(value)
+			}
+			if (data.length) this.onEvent(event, data.join('\n'))
+		}
+	}
+}
+
 export class QvaPayClient {
 	readonly dryRun: boolean
 	// Sin token solo funcionan los endpoints públicos (/coins, /p2p/averages…)
@@ -124,6 +155,35 @@ export class QvaPayClient {
 		// QvaPay los devuelve del más nuevo al más antiguo: se ordenan cronológicamente para que
 		// el último del array sea el último mensaje (chat de abajo arriba, avisos de mensaje nuevo)
 		return [...(res.chat ?? [])].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || Number(a.id) - Number(b.id))
+	}
+
+	// Los mensajes nuevos del chat según llegan (SSE). Termina cuando QvaPay cierra la conexión (lo hace cada pocos
+	// minutos) o al abortar `signal`; quien llama vuelve a conectar. Sin cola: lo que llegue mientras tanto se lee con getChat
+	async chatStream(uuid: string, order: string | undefined, onMessage: (m: ChatMessage) => void, signal: AbortSignal) {
+		const url = new URL(`${this.baseUrl}/p2p/${uuid}/chat/stream`)
+		if (order) url.searchParams.set('order', order)
+		const res = await fetch(url, {
+			headers: { ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}), Accept: 'text/event-stream' },
+			cache: 'no-store',
+			signal,
+		})
+		if (!res.ok || !res.body) {
+			const data = (await res.json().catch(() => null)) as { error?: string; message?: string; code?: string } | null
+			throw new QvaPayError(res.status, String(data?.error ?? data?.message ?? res.statusText), data?.code, data)
+		}
+		const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+		const sse = new SseParser((event, data) => {
+			if (event !== 'message') return
+			try {
+				const m = JSON.parse(data) as ChatMessage
+				if (m?.id) onMessage(m)
+			} catch {}
+		})
+		for (;;) {
+			const { value, done } = await reader.read()
+			if (done) return
+			sse.push(value)
+		}
 	}
 
 	// Monedas y sus campos de pago (público)
