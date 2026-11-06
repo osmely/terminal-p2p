@@ -114,7 +114,8 @@ test('aviso de la contraparte que se fue aunque no se viera la operación en cur
 	const paused = { ...open, pause: { reason: 'taker_left' as const, until: '2026-10-23T01:38:38Z' } }
 	const a = tradeAlerts(read([], [open]), [], NOW, new Set(), [paused])
 	assert.deepEqual(kinds(a), ['left'])
-	assert.match(a[0].body, /Quien la tomó canceló.*vuelve al mercado a las/)
+	// 01:38 UTC son las 21:38 en Cuba (UTC-4), sea cual sea la zona del navegador
+	assert.match(a[0].body, /Quien la tomó canceló.*vuelve al mercado a las 21:38/)
 	// La misma pausa en la lectura siguiente no vuelve a avisar
 	assert.deepEqual(tradeAlerts(read([], [paused]), [], NOW, new Set(), [paused]), [])
 })

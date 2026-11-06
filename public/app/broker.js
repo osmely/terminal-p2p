@@ -94,7 +94,14 @@ const ICON_COPY = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="
 const ICON_DONE = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 const copyBtn = (value, label) => `<button class="copy" data-copy="${esc(value)}" title="Copiar ${esc(label)}" aria-label="Copiar ${esc(label)}">${ICON_COPY}</button>`
 
-const unitOf = (tick) => state.overview.find((c) => c.tick === tick)?.unit ?? state.book?.coin?.unit ?? ''
+// Un mercado que el terminal no sigue (USDTBSC, BTC…) no está en el resumen: su unidad sale del nombre (USDTBSC → USDT),
+// nunca la del mercado que tienes abierto (una operación en USDT salía «por 90 CUP»)
+// Los demás salen con su código (PAYPAL, XRP…), salvo los que tienen una moneda clara
+const CRYPTO_UNIT = /^(USDT|USDC|BUSD|BTC|ETH|LTC|BNB|TRX|DOGE|SOL|BCH|DASH|XMR|ADA)/
+const OTHER_UNIT = { BANK: 'USD', BANK_INTL: 'USD', BANK_EUR: 'EUR', EURCASH: 'EUR', SBERBANK: 'RUB', PIX: 'BRL', MATICMAINNET: 'MATIC' }
+const unitOf = (tick) =>
+	state.overview.find((c) => c.tick === tick)?.unit ??
+	(state.book?.coin?.tick === tick ? state.book.coin.unit : (OTHER_UNIT[tick] ?? String(tick ?? '').match(CRYPTO_UNIT)?.[1] ?? String(tick ?? '')))
 const nameOf = (tick) => state.overview.find((c) => c.tick === tick)?.name ?? tick
 
 // ── Modal ─────────────────────────────────────────────────────────────
@@ -393,8 +400,8 @@ function renderTrades() {
 						(o) => `<tr data-offer="${o.offerUuid}">
 							<td class="c-side">${side(o)}</td><td class="c-mkt">${esc(nameOf(o.coin))}</td>
 							<td class="r num c-usd" data-l="USD">${fmtM(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(o.price)}</td><td class="r num c-total" data-l="Total">${fmtM((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
-							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? `Pausada hasta ${new Date(o.pause.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}` : 'Pausada'}</span>` : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}${window.TPProKeep?.chip(o) ?? ''}</td>
-							<td class="muted c-date">${o.updatedAt ? new Date(o.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
+							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? `Pausada hasta ${cubaFmt(o.pause.until, { hour: '2-digit', minute: '2-digit' })}` : 'Pausada'}</span>` : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}${window.TPProKeep?.chip(o) ?? ''}</td>
+							<td class="muted c-date">${o.updatedAt ? cubaFmt(o.updatedAt, { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
 							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}" ${bk.cancelling.has(o.offerUuid) ? 'disabled>Cancelando…' : '>Cancelar'}</button></td></tr>`,
 					)
 					.join('')}</tbody></table>`
@@ -406,7 +413,7 @@ function renderTrades() {
 						(t) => `<tr data-offer="${t.offerUuid}" data-order="${t.order ?? ''}">
 							<td class="c-side">${side(t)}</td><td class="c-mkt">${esc(nameOf(t.coin))}</td>
 							<td class="r num c-usd" data-l="USD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(t.price)}</td><td class="r num c-total" data-l="Total">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
-							<td class="c-who">${who(t)}</td><td class="muted c-date">${t.updatedAt ? new Date(t.updatedAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`,
+							<td class="c-who">${who(t)}</td><td class="muted c-date">${t.updatedAt ? cubaFmt(t.updatedAt, { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`,
 					)
 					.join('')}</tbody></table>`
 			: '<div class="empty">Aún no hay operaciones completadas.</div>'
@@ -490,7 +497,7 @@ const chatHtml = (chat) =>
 		? chat
 				.map(
 					(m) =>
-						`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${mediaUrl(m.image) ? `<a class="msg-img" href="${esc(mediaUrl(m.image))}" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="${esc(mediaUrl(m.image))}" alt="Imagen" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${new Date(m.at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</time></div>`,
+						`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${mediaUrl(m.image) ? `<a class="msg-img" href="${esc(mediaUrl(m.image))}" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="${esc(mediaUrl(m.image))}" alt="Imagen" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${cubaFmt(m.at, { hour: '2-digit', minute: '2-digit' })}</time></div>`,
 				)
 				.join('')
 		: '<p class="muted small">Sin mensajes.</p>'
@@ -550,8 +557,8 @@ function renderDetail(t) {
 	} else if (status === 'completed') {
 		const mine = t.myRating?.rating ?? 0
 		const until = t.myRating?.editableUntil ? Date.parse(t.myRating.editableUntil) : null
-		const locked = mine > 0 && until != null && until < Date.now()
-		const when = until ? new Date(until).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
+		const locked = mine > 0 && until != null && until < nowMs()
+		const when = until ? cubaFmt(until, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 		const stars = [1, 2, 3, 4, 5]
 			.map((n) => `<button data-rate="${n}" class="${n <= mine ? 'on' : ''}" title="${n} de 5" aria-label="${n} de 5 estrellas" aria-pressed="${n === mine}" ${locked ? 'disabled' : ''}>★</button>`)
 			.join('')
@@ -1186,7 +1193,7 @@ async function showManageOffer(uuid) {
 function pauseText(p) {
 	if (!p) return ''
 	if (p.reason === 'owner') return 'Pausada por ti: no aparece en el mercado'
-	const until = p.until ? new Date(p.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) : null
+	const until = p.until ? cubaFmt(p.until, { hour: '2-digit', minute: '2-digit' }) : null
 	return `Pausada porque se fue la contraparte${until ? `: vuelve al mercado a las ${until}` : ''}`
 }
 
@@ -1677,7 +1684,7 @@ async function showPeer(user) {
 	const stat = (label, value, sub = '') => `<div class="peer-stat"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
 	const signals = peerSignals(p, known, d.offers)
 	const rank = typeof rankText === 'function' ? rankText(name) : ''
-	const now = Date.now()
+	const now = nowMs()
 	const offers = d.offers
 		.map((o) => {
 			const unit = unitOf(o.coin)
@@ -1700,7 +1707,7 @@ async function showPeer(user) {
 		.slice(0, 6)
 		.map(
 			(t) => `<button type="button" class="peer-trade" data-peer-trade="${esc(t.offerUuid)}" data-order="${esc(t.order ?? '')}">
-				<span>${t.side === 'buy' ? 'Le compraste' : 'Le vendiste'} <b class="mono">${fmtM(t.usd)} USD</b> · ${esc(nameOf(t.coin))}${t.updatedAt ? ` <small class="muted">· ${new Date(t.updatedAt).toLocaleDateString('es', { day: 'numeric', month: 'short' })}</small>` : ''}</span>
+				<span>${t.side === 'buy' ? 'Le compraste' : 'Le vendiste'} <b class="mono">${fmtM(t.usd)} USD</b> · ${esc(nameOf(t.coin))}${t.updatedAt ? ` <small class="muted">· ${cubaFmt(t.updatedAt, { day: 'numeric', month: 'short' })}</small>` : ''}</span>
 				<span class="chip ${t.status}">${STATUS[t.status] ?? t.status}</span></button>`,
 		)
 		.join('')
@@ -2148,7 +2155,8 @@ function clockText(ms) {
 }
 
 function tickClocks() {
-	const now = Date.now()
+	// Con la hora real, no la del dispositivo (clock.js): un reloj adelantado daba el plazo por vencido antes de tiempo
+	const now = nowMs()
 	for (const el of document.querySelectorAll('[data-expires]')) {
 		const left = Date.parse(el.dataset.expires) - now
 		el.textContent = clockText(left)

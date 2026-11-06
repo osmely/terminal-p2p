@@ -88,7 +88,7 @@ async function proFetch(path, body, again = true) {
 }
 const daysLeft = () => Math.max(0, Math.ceil((pro.expiresAt - Date.now()) / 86_400_000))
 const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
-const proDate = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })
+const proDate = (ms) => cubaFmt(ms, { day: 'numeric', month: 'long', year: 'numeric' })
 
 function applyPro(s) {
 	// Tenía el módulo Pro cargado y ya no tiene Pro (se le acabaron los días, suspendida, bloqueada o desconectó):

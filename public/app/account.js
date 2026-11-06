@@ -10,7 +10,7 @@ const acctRef = (ref) =>
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)
 		? `<a class="link mono acct-ref" href="https://www.qvapay.com/transaction/${ref}" target="_blank" rel="noopener">${ref}</a>`
 		: `<span class="mono acct-ref">${esc(ref)}</span>`
-const acctDay = (ms) => new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' })
+const acctDay = (ms) => cubaFmt(ms, { day: 'numeric', month: 'short', year: 'numeric' })
 const acctMonth = (ym) => new Date(`${ym}-15T12:00:00Z`).toLocaleDateString('es', { month: 'long', year: 'numeric' })
 let acctTab = 'summary'
 

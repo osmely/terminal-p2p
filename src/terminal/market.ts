@@ -286,7 +286,8 @@ export class Market {
 			live: this.hasReader || this.liveCoins.has(tick),
 			// Este mercado llega empujado por el servidor (no se lee con el token)
 			realtime: this.liveCoins.has(tick),
-			serverTime: Date.now(),
+			// La hora real (en el navegador, corregida si el reloj del dispositivo va desviado: public/app/clock.js)
+			serverTime: (globalThis as { nowMs?: () => number }).nowMs?.() ?? Date.now(),
 		}
 	}
 

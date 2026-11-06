@@ -34,7 +34,7 @@ async function loadRates() {
 		})
 		if (!cards.length) throw new Error('vacío')
 		$('rates').innerHTML = cards.join('')
-		$('ratesSrc').textContent = `Fuente: QvaPay · actualizado a las ${new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`
+		$('ratesSrc').textContent = `Fuente: QvaPay · actualizado a las ${inCuba(Date.now()).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}`
 	} catch {
 		if ($('rates').querySelector('.rate:not(.skeleton)')) return // se quedan las últimas que se vieron
 		$('rates').innerHTML = ''

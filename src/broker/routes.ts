@@ -309,7 +309,8 @@ export class Broker {
 		// Los avisos se calculan contra la lectura anterior de esta misma cuenta
 		if (this.seen?.user !== acc.me.uuid) this.seen = { user: acc.me.uuid, last: null, sent: new Set() }
 		const seen = this.seen
-		const alerts = tradeAlerts(seen.last, trades, Date.now(), seen.sent, openOffers)
+		// Con la hora real (clock.js corrige un reloj adelantado): si no, «se acaba el plazo» salía tarde o nunca
+		const alerts = tradeAlerts(seen.last, trades, (globalThis as { nowMs?: () => number }).nowMs?.() ?? Date.now(), seen.sent, openOffers)
 		for (const a of alerts) seen.sent.add(a.key)
 		// Si un chat no se pudo leer, se conserva su resumen anterior para no avisar dos veces
 		const prevChat = new Map(seen.last?.trades.map((t) => [t.id, t.chat]))

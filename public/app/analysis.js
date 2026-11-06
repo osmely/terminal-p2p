@@ -145,7 +145,7 @@
 	const tone = (x) => (x > 0 ? 'up' : x < 0 ? 'down' : '')
 	const unitOf = (tick) => state.overview.find((c) => c.tick === tick)?.unit ?? ''
 	const nameOf = (tick) => state.overview.find((c) => c.tick === tick)?.name ?? tick
-	const hhmm = (t) => new Date(t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })
+	const hhmm = (t) => cubaFmt(t, { hour: '2-digit', minute: '2-digit' })
 	const waiting = (what = '') => `<div class="an-wait"><b>En espera de datos</b>${what ? `<span>${what}</span>` : ''}</div>`
 	// Un mercado con días registrados y ninguna tasa: QvaPay no la publica (USDCASH sale siempre en cero)
 	const NO_RATE = 'QvaPay no publica la tasa de este mercado'
@@ -595,7 +595,7 @@
 			.join('')}</div>`
 		return {
 			html: `<div class="an-head">
-				<div><p class="an-brand">Terminal P2P · terminalp2p.com</p><h3>★ Análisis de mercado<span class="an-market"> · ${esc(nameOf(tick))}</span></h3><p class="muted"><span class="an-market">${label} · </span>${dShort(axis[0] ?? s.from)} – ${dShort(end)}${since} · calculado el ${new Date(an.data.at).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p></div>
+				<div><p class="an-brand">Terminal P2P · terminalp2p.com</p><h3>★ Análisis de mercado<span class="an-market"> · ${esc(nameOf(tick))}</span></h3><p class="muted"><span class="an-market">${label} · </span>${dShort(axis[0] ?? s.from)} – ${dShort(end)}${since} · calculado el ${cubaFmt(an.data.at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p></div>
 				<div class="an-tools"><button class="btn an-pdfbtn" id="anPdf" title="Compartir todo en PDF">${ICON_SHARE} PDF</button><select class="input an-coin" id="anCoin" aria-label="Mercado">${state.overview.map((m) => `<option value="${esc(m.tick)}" ${m.tick === tick ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
 			</div>
 			<div class="seg-tabs an-periods" role="tablist">${PERIODS.map(([k, l]) => `<button class="seg-tab ${an.period === k ? 'active' : ''}" data-an-period="${k}" role="tab">${l}</button>`).join('')}</div>
@@ -768,7 +768,7 @@
 				y += h + 9
 			}
 			const pages = doc.getNumberOfPages()
-			const when = new Date().toLocaleString('es', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+			const when = cubaFmt(nowMs(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 			for (let i = 1; i <= pages; i++) {
 				doc.setPage(i)
 				doc.setFontSize(7.5)
@@ -776,7 +776,7 @@
 				doc.text(`Generado el ${when}`, M, PH - 16)
 				doc.text(`terminalp2p.com · ${i}/${pages}`, PW - M, PH - 16, { align: 'right' })
 			}
-			const name = `analisis-${an.tick.toLowerCase()}-${an.period}-${new Date().toLocaleDateString('sv')}.pdf`
+			const name = `analisis-${an.tick.toLowerCase()}-${an.period}-${cubaDate(nowMs())}.pdf`
 			const file = new File([doc.output('blob')], name, { type: 'application/pdf' })
 			const market = nameOf(an.tick)
 			if (navigator.canShare?.({ files: [file] })) {

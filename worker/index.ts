@@ -16,12 +16,13 @@ import { cleanupLog, hourKey, logUser } from './userlog.ts'
 import { accessOf, profileAccess, relayAccess } from './blocks.ts'
 import { relayIncident } from './incidents.ts'
 import { sha256, verify } from './crypto.ts'
-import { adminPage, askKey } from './admin.ts'
+import { adminPage, askKey, panel } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 import { expiryReminders } from './userbot.ts'
 import { dailyPost } from './community.ts'
 import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
+import { loadOther, otherHtml } from './othermarkets.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveSocket, type LiveEnv } from './livebook.ts'
 import { COINS, isOutlier } from '../src/terminal/market.ts'
@@ -197,6 +198,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/analysis' && req.method === 'GET') return secure(await marketAnalysis(url, env))
 	if (url.pathname === '/data/book' && req.method === 'GET') return secure(await book(url, env, ctx))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
+	// La hora del servidor, para que el terminal corrija un reloj desviado (public/app/clock.js)
+	if (url.pathname === '/data/now' && req.method === 'GET') return secure(Response.json({ now: Date.now() }, { headers: { 'Cache-Control': 'no-store' } }))
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
 	if (url.pathname === '/data/offer' && req.method === 'GET') return secure(await offer(req, url, env, ctx))
 	// El enlace corto de una oferta compartida (terminalp2p.com/o/<uuid>): abre el terminal con ella delante
@@ -494,7 +497,7 @@ async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
-	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days), hitsHtml(await loadHits(env.DB, days)) + botHtml(await loadBot(env.DB, days))))
+	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days), hitsHtml(await loadHits(env.DB, days)) + botHtml(await loadBot(env.DB, days)) + otherHtml(await loadOther(env.DB), panel)))
 }
 
 // Las cifras públicas del terminal (para la landing): lo publicado, tomado y completado desde aquí, cacheadas 10 minutos

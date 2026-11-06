@@ -363,7 +363,7 @@ function pulseScore(b) {
 const OPS_TAU_MS = 5 * 60_000
 const OPS_HORIZON_MS = 30 * 60_000
 function opsPerMin(b) {
-	const now = Date.now()
+	const now = nowMs()
 	const taken = (a) => (b.activitySource === 'feed' ? a.kind === 'taken' || a.kind === 'partial' : a.kind === 'gone')
 	// Con el libro del servidor, sus tomas (todas las de la última media hora); si no, la actividad que hay aquí
 	const times = b.stats ? b.stats.takes : b.activity.filter(taken).map((a) => a.t)
@@ -747,8 +747,7 @@ function renderActivity(b) {
 				.map((a) => {
 					const [icon, text, tip] = ACT[a.kind] ?? ACT.gone
 					// Con milisegundos: lo que pasa en el libro va a ritmo de bots
-					const d = new Date(a.t)
-					const t = `${d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')}`
+					const t = `${cubaFmt(a.t, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}.${String(new Date(a.t).getUTCMilliseconds()).padStart(3, '0')}`
 					const what = text.replace('{s}', a.side === 'ask' ? 'una venta' : 'una compra')
 					const who = a.user && a.user !== '—' ? ` · <button type="button" class="link peer-link" data-peer="${esc(a.user)}" title="Ver su ficha">@${esc(a.user)}</button>` : ''
 					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} USD${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
@@ -939,6 +938,9 @@ const showInformal = () => INFORMAL_MARKETS.has(state.coin) && (state.history?.i
 
 // Leyenda: operaciones y tasa informal del día bajo el cursor o, si no, del último día
 const cubaTime = (ms) => inCuba(ms).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
+// Cualquier fecha u hora del terminal, en hora de Cuba (opciones de toLocaleString): no con la zona del navegador, que
+// puede ser otra o creer que Cuba está en UTC-5
+const cubaFmt = (t, opts) => inCuba(new Date(t).getTime()).toLocaleString('es', { ...opts, timeZone: 'UTC' })
 function opsLegend(ms) {
 	const el = $('opsLegend')
 	const daily = state.history?.daily ?? []
@@ -946,7 +948,7 @@ function opsLegend(ms) {
 	const informal = showInformal() ? state.history.informal : []
 	const near = (xs) => (ms == null ? null : xs.find((x) => Math.abs(x.t - ms) < DAY_MS / 2))
 	// Con el feed: la barra bajo el cursor o, sin cursor, la última que ya terminó
-	const bar = vol && (ms == null ? vol.bars.filter((b) => b.t + vol.bucketMs <= Date.now()).at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs))
+	const bar = vol && (ms == null ? vol.bars.filter((b) => b.t + vol.bucketMs <= nowMs()).at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs))
 	const d = ms == null ? (daily.filter((x) => !x.partial).at(-1) ?? daily.at(-1)) : bar ? null : near(daily)
 	const i = ms == null ? informal.at(-1) : near(informal)
 	const parts = []
@@ -1080,7 +1082,7 @@ function opsBars(points, tz) {
 function volTags(ms) {
 	const box = $('volTags')
 	const vol = state.history?.volume
-	const bar = historyChart && state.chart === 'history' && vol ? (ms == null ? vol.bars.filter((b) => b.t + vol.bucketMs <= Date.now()).at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs)) : null
+	const bar = historyChart && state.chart === 'history' && vol ? (ms == null ? vol.bars.filter((b) => b.t + vol.bucketMs <= nowMs()).at(-1) : vol.bars.find((b) => ms >= b.t && ms < b.t + vol.bucketMs)) : null
 	if (!bar) return void (box.innerHTML = '')
 	const tags = proSplit() && bar.buy != null
 		? [
@@ -1274,7 +1276,7 @@ function rankValue(c, u) {
 		case 'maker':
 			return [`${fmtU(u.usdBid)} / ${fmtU(u.usdAsk)} USD`, 'compra / venta']
 		case 'active':
-			return [`${plural(u.recent, 'oferta', 'ofertas')} en 24 h`, u.lastUpdate ? `la última hace ${ago(Date.now() - u.lastUpdate)}` : '']
+			return [`${plural(u.recent, 'oferta', 'ofertas')} en 24 h`, u.lastUpdate ? `la última hace ${ago(nowMs() - u.lastUpdate)}` : '']
 	}
 	return ['', '']
 }

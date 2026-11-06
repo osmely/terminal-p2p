@@ -3,6 +3,7 @@
 // mensaje nuevo, se acaba el plazo de pago…). Sin estado propio: quien llama
 // guarda la lectura anterior y las claves ya avisadas.
 
+import { inCuba } from '../../worker/rates.ts'
 import { COINS } from '../terminal/market.ts'
 import type { Trade } from './trades.ts'
 
@@ -96,7 +97,8 @@ export function tradeAlerts(
 			const pp = wasPaused.get(o.id)
 			const freshPause = o.pause?.reason === 'taker_left' && !(pp?.reason === 'taker_left' && pp.until === o.pause.until)
 			if (!wasActive && !freshPause) continue
-			const until = o.pause?.until ? new Date(o.pause.until).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }) : null
+			// En hora de Cuba, no la del navegador (puede creer que Cuba está en UTC-5)
+			const until = o.pause?.until ? inCuba(Date.parse(o.pause.until)).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) : null
 			push(
 				o,
 				'left',

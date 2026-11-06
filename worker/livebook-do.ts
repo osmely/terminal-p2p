@@ -10,6 +10,8 @@ import { intentOf } from '../src/terminal/stats.ts'
 import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
 import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
 import type { BotEnv } from './userbot.ts'
+import { alertOther, OtherMarkets, saveOther } from './othermarkets.ts'
+import type { AlertEnv } from './alerts.ts'
 import { deliverPush, ownerPush, pushTargets, takerPush, TARGETS_TTL_MS, type PushEnv, type PushNotice } from './push.ts'
 
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
@@ -17,6 +19,9 @@ const DONE_EVERY_MS = 5 * 60_000
 // Las mejores de cada lado que ve la mini app
 const BOOK_TOP = 30
 const TAKES_KEEP_MS = 30 * 60_000
+// Los otros mercados (othermarkets.ts) se guardan en D1 cada tanto, y el umbral se mira cada hora
+const OTHER_SAVE_MS = 60_000
+const OTHER_ALERT_MS = 60 * 60_000
 
 interface Sock {
 	subs: string[]
@@ -43,6 +48,10 @@ export class LiveBook {
 	private pushTimes = new Map<string, number[]>()
 	// Los últimos eventos tal como llegaron, para ver en el panel qué manda QvaPay
 	private recent: FeedSample[] = []
+	// Los mercados que el terminal no sigue, contados para saber si tienen movimiento
+	private others = new OtherMarkets(TICKS)
+	private otherSavedAt = 0
+	private otherAlertAt = 0
 	private readAt = new Map<string, number>()
 	// Lados leídos enteros con las credenciales al menos una vez: solo esos se dan por completos (el feed solo trae lo nuevo)
 	private synced = new Set<string>()
@@ -210,6 +219,7 @@ export class LiveBook {
 		this.events++
 		this.lastEvent = Date.now()
 		this.addLag(e)
+		if (this.others.add(e)) await this.saveOthers()
 		const ch = this.book.apply(e)
 		this.notice(e, ch?.trade ?? null)
 		this.push(e, ch?.trade ?? null)
@@ -433,6 +443,19 @@ export class LiveBook {
 		}
 	}
 
+	// Lo contado de los otros mercados, a D1 como mucho cada OTHER_SAVE_MS; y cada hora, el aviso de los que pasan el
+	// umbral. Si D1 falla se pierde esa tanda y nada más
+	private async saveOthers(now = Date.now()) {
+		if (this.others.hasPending() && now - this.otherSavedAt >= OTHER_SAVE_MS) {
+			this.otherSavedAt = now
+			await saveOther(this.env.DB, this.others.take()).catch((err) => console.error(`otros mercados: ${(err as Error).message}`))
+		}
+		if (now - this.otherAlertAt >= OTHER_ALERT_MS && this.otherSavedAt) {
+			this.otherAlertAt = now
+			this.ctx.waitUntil(alertOther(this.env.DB, this.env as LiveEnv & AlertEnv, now).catch((err) => console.error(`otros mercados, aviso: ${(err as Error).message}`)))
+		}
+	}
+
 	private addAct(coin: string, a: Act) {
 		const list = this.acts.get(coin) ?? []
 		if (list.some((x) => x.uuid === a.uuid && x.kind === a.kind && x.t === a.t)) return
@@ -520,6 +543,7 @@ export class LiveBook {
 			const now = Date.now()
 			this.book.prune(now)
 			this.flushFree(now)
+			await this.saveOthers(now)
 			const watched = new Set(this.ctx.getWebSockets().flatMap((ws) => (ws.deserializeAttachment() as Sock | null)?.subs ?? []))
 			const feed = this.feedOn(now)
 			for (const coin of COINS.map((c) => c.tick))
