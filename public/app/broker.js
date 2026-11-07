@@ -58,7 +58,11 @@ function rememberFace(user, img) {
 }
 function avatar(user, img, cls = '') {
 	const url = mediaUrl(img ?? faces.get(String(user ?? '').toLowerCase()))
-	return `<span class="avatar ${cls}${onlineCls(user)}"${onlineAttr(user)}${onlineCls(user) ? ` title="${ONLINE_TITLE[onlineOf(user)] ?? 'No está en línea'}"` : ''} aria-hidden="true">${esc(String(user ?? '?').slice(0, 2))}${url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}</span>`
+	// Tu propia foto no lleva el punto de en línea
+	const self = !!user && String(user).toLowerCase() === String(myUsername() ?? '').toLowerCase()
+	const on = self ? '' : onlineCls(user)
+	const attrs = self ? '' : `${onlineAttr(user)}${on ? ` title="${ONLINE_TITLE[onlineOf(user)] ?? 'No está en línea'}"` : ''}`
+	return `<span class="avatar ${cls}${on}"${attrs} aria-hidden="true">${esc(String(user ?? '?').slice(0, 2))}${url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}</span>`
 }
 document.addEventListener('error', (e) => e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains('avatar') && e.target.remove(), true)
 // «en el terminal» o «en línea» (solo QvaPay), escrito junto a su nombre (solo se ve encendido)

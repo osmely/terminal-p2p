@@ -759,7 +759,10 @@ a.icon-btn { text-decoration: none; }
 	.account .btn { padding: 8px 12px; }
 	.swap-btn { padding: 8px 10px; }
 	.swap-input, .swap-out { font-size: 24px; }
-	.hide-sm, .acct > div, .account > .badge { display: none; }
+	.hide-sm, .acct-open > div, .account > .badge { display: none; }
+	/* Solo la foto (abre «Mi cuenta», que tiene el saldo y el botón de desconectar) */
+	.acct { padding: 0; border: 0; background: none; }
+	#disconnectBtn { display: none; }
 
 	.ticker { gap: 10px; padding: 12px; }
 	.ticker-pair h1 { font-size: 17px; }
