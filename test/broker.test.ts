@@ -53,9 +53,10 @@ test('toTrades: la ficha entera de quien toma tu oferta, aunque no tenga ofertas
 	const p = trades.find((t) => t.id === 'a')?.counterparty?.profile
 	assert.deepEqual(
 		p && { ...p, score: null },
-		{ username: 'Nuevo', image: null, kyc: true, vip: false, gold: false, phone: true, telegram: false, opsOwner: 0, opsTaker: 12, rating: 4.9, ratings: 7, score: null },
+		{ username: 'Nuevo', uuid: 't', image: null, kyc: true, vip: false, gold: false, phone: true, telegram: false, opsOwner: 0, opsTaker: 12, rating: 4.9, ratings: 7, score: null },
 	)
 	assert.equal(trades.find((t) => t.id === 'b')?.counterparty?.profile, null)
+	assert.equal(trades.find((t) => t.id === 'b')?.counterparty?.uuid, 'z')
 })
 
 test('paymentDetails acepta objeto o lista', () => {

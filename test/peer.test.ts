@@ -33,7 +33,7 @@ test('ficha de un usuario: perfil y ofertas abiertas en todos los mercados', asy
 	assert.deepEqual(lists[0], { peer: 'LockBefore', take: 100 })
 	assert.deepEqual(
 		{ ...body.profile, score: Math.round(body.profile.score * 1000) / 1000 },
-		{ username: 'LockBefore', image: 'profiles/u1/avatar-1.webp', kyc: true, vip: true, gold: true, phone: true, telegram: true, opsOwner: 245, opsTaker: 1476, rating: 4.91, ratings: 524, score: 4.903 },
+		{ username: 'LockBefore', uuid: 'u1', image: 'profiles/u1/avatar-1.webp', kyc: true, vip: true, gold: true, phone: true, telegram: true, opsOwner: 245, opsTaker: 1476, rating: 4.91, ratings: 524, score: 4.903 },
 	)
 	assert.deepEqual(
 		body.offers.map((o: { offer: string; type: string; price: number; usd: number; orderMax: number | null }) => [o.offer, o.type, o.price, o.usd, o.orderMax]),

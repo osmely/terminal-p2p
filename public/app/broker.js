@@ -58,9 +58,30 @@ function rememberFace(user, img) {
 }
 function avatar(user, img, cls = '') {
 	const url = mediaUrl(img ?? faces.get(String(user ?? '').toLowerCase()))
-	return `<span class="avatar ${cls}" aria-hidden="true">${esc(String(user ?? '?').slice(0, 2))}${url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}</span>`
+	return `<span class="avatar ${cls}${onlineCls(user)}"${onlineAttr(user)}${onlineCls(user) ? ` title="${ONLINE_TITLE[onlineOf(user)] ?? 'No está en línea'}"` : ''} aria-hidden="true">${esc(String(user ?? '?').slice(0, 2))}${url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}</span>`
 }
 document.addEventListener('error', (e) => e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains('avatar') && e.target.remove(), true)
+// «en el terminal» o «en línea» (solo QvaPay), escrito junto a su nombre (solo se ve encendido)
+const onlineTag = (user) => `<span class="online-tag${isOnline(user) ? onlineCls(user) : ''}"${onlineAttr(user)}>${onlineOf(user) === 'term' ? 'en el terminal' : 'en línea'}</span>`
+// Los dueños de las ofertas del libro ya se consultan solos. Para los demás (con quien operas, una ficha abierta) se
+// le pide al servidor que los siga: [{ id: uuid de QvaPay, u: usuario }]. Cada uno, como mucho cada 5 min
+const onlineAsked = new Map()
+function watchOnline(list) {
+	const now = Date.now()
+	const users = list.filter((x) => x?.id && x.u && now - (onlineAsked.get(x.id) ?? 0) > 5 * 60_000).slice(0, 20)
+	if (!users.length) return
+	for (const x of users) onlineAsked.set(x.id, now)
+	fetch('/data/online', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ users: users.map((x) => ({ id: x.id, u: x.u })) }) })
+		.then((r) => (r.ok ? r.json() : null))
+		.then((r) => {
+			if (!r?.term?.length && !r?.qp?.length) return
+			window.TPOnline ??= new Map()
+			for (const u of r.qp ?? []) if (!window.TPOnline.has(u)) window.TPOnline.set(u, 'qp')
+			for (const u of r.term ?? []) window.TPOnline.set(u, 'term')
+			paintOnline()
+		})
+		.catch(() => {})
+}
 
 // Antes de enviarla, la imagen se reduce a 1000 px como mucho y a JPG, lo mismo que deja QvaPay: se ve igual en el
 // chat y sube antes con la conexión lenta. Un GIF pequeño va tal cual para no perder la animación
@@ -302,6 +323,7 @@ async function loadTrades() {
 		bk.trades = r.trades
 		bk.openOffers = r.openOffers
 		for (const t of r.trades) rememberFace(t.counterparty?.username, t.counterparty?.image)
+		watchOnline(r.trades.filter((t) => t.status === 'processing' || t.status === 'paid').map((t) => ({ id: t.counterparty?.uuid, u: t.counterparty?.username })))
 		if (moved) refreshBalance(true)
 		document.title = r.pending ? `(${r.pending}) ${BASE_TITLE}` : BASE_TITLE
 		deliver(r.alerts ?? [])
@@ -613,10 +635,11 @@ function renderDetail(t) {
 </div>`
 	}
 
+	if (t.counterpartyUuid) watchOnline([{ id: t.counterpartyUuid, u: t.counterparty }])
 	$('modalBody').innerHTML = `<div class="stack">
 		${d.parent ? '<button type="button" class="link" id="backParts">← Todas las partes de la oferta</button>' : ''}
 		<div><h3>${buy ? 'Compras' : 'Vendes'} ${fmtM(t.usd)} USD por ${fmtM(t.coinAmount)} ${unit}</h3>
-			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button>` : t.parts ? 'por partes' : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
+			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button> ${onlineTag(t.counterparty)}` : t.parts ? 'por partes' : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
 		${
 			payTo.length
 				? `<div><p class="hint">Datos de pago de @${esc(t.counterparty)}:</p><div class="kv">${payTo
@@ -1727,6 +1750,7 @@ async function showPeer(user) {
 	if (!$('modalBody').textContent.includes('Cargando ficha')) return // la cerraron mientras cargaba
 	const p = d.profile ?? tradeProfile(user)
 	const known = p ? null : knownPeer(user)
+	if (p?.uuid) watchOnline([{ id: p.uuid, u: p.username }])
 	const name = p?.username ?? user
 	rememberFace(name, p?.image)
 	const me = myUsername()
@@ -1776,7 +1800,7 @@ async function showPeer(user) {
 	$('modalBody').innerHTML = `<div class="stack peer">
 		<div class="peer-head">
 			${avatar(name, p?.image ?? known?.image, 'lg')}
-			<div><h3>@${esc(name)}${isMe ? ' <span class="badge info">tú</span>' : ''}</h3><div class="peer-badges">${badges || '<span class="muted small">Sin datos de verificación</span>'}</div></div>
+			<div><h3>@${esc(name)}${isMe ? ' <span class="badge info">tú</span>' : ` ${onlineTag(name)}`}</h3><div class="peer-badges">${badges || '<span class="muted small">Sin datos de verificación</span>'}</div></div>
 		</div>
 		<div class="peer-stats">
 			${stat('Operaciones', ops != null ? ops.toLocaleString('en-US') : '—', p ? `${p.opsOwner.toLocaleString('en-US')} publicando · ${p.opsTaker.toLocaleString('en-US')} tomando` : '')}

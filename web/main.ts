@@ -111,6 +111,15 @@ function liveConnect() {
 			window.dispatchEvent(new CustomEvent('tp:live', { detail: m.coin }))
 			return
 		}
+		// Quién está en línea (sus usuarios, en minúsculas): term, con el terminal abierto (verde); qp, solo con QvaPay
+		// abierto (amarillo)
+		if (m.t === 'online') {
+			const o = m as { term?: unknown[]; qp?: unknown[] }
+			const w = window as unknown as { TPOnline?: Map<string, 'term' | 'qp'> }
+			w.TPOnline = new Map([...(o.qp ?? []).map((u) => [String(u).toLowerCase(), 'qp'] as const), ...(o.term ?? []).map((u) => [String(u).toLowerCase(), 'term'] as const)])
+			window.dispatchEvent(new CustomEvent('tp:online'))
+			return
+		}
 		// Una operación apuntada en las velas (Pro): el terminal la suma a la vela en curso
 		if (m.t === 'candle' && isTick(m.coin ?? null)) {
 			window.dispatchEvent(new CustomEvent('tp:candle', { detail: m }))

@@ -136,7 +136,7 @@ export const TRADES_KEEP_MS = 3 * 86_400_000
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 19
+export const LIVE_VERSION = 21
 
 export interface Applied {
 	coin: string
@@ -625,6 +625,13 @@ export async function liveOfferOf(env: LiveEnv, uuid: string): Promise<ReturnTyp
 	return r.ok ? r.json() : null
 }
 
+// Seguir quién está en línea aparte de los dueños del libro (la contraparte de una operación, una ficha abierta)
+export async function liveOnline(env: LiveEnv, users: { id: string; u: string }[]): Promise<{ on: boolean; term: string[]; qp: string[]; at: number | null } | null> {
+	if (!env.LIVE) return null
+	const r = await liveStub(env).fetch('https://live/online', { method: 'POST', body: JSON.stringify({ users }) })
+	return r.ok ? r.json() : null
+}
+
 export async function liveClients(env: LiveEnv): Promise<LiveClient[] | null> {
 	if (!env.LIVE) return null
 	return liveStub(env)
@@ -705,4 +712,6 @@ export interface LiveState {
 	stream?: { on: boolean; since: number | null; events: number; error: string | null; connects?: number; gap?: number | null }
 	lastRead: number | null
 	readError: string | null
+	// Quién está en línea: si se consulta QvaPay, su última consulta, cuántos ahí y con el terminal abierto, y el error
+	presence?: { on: boolean; at: number | null; online: number; terminal: number; error: string | null }
 }

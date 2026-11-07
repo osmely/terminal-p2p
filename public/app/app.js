@@ -93,6 +93,27 @@ const ago = (ms) =>
 				? `${Math.round(ms / 3600_000)} h`
 				: `${Math.round(ms / 86_400_000)} d`
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+// Si está en línea: 'term' con el terminal abierto (verde, aunque también tenga QvaPay abierto), 'qp' solo con la web o
+// la app de QvaPay abierta (amarillo); en ninguno, gris. La lista llega por el WebSocket del libro en vivo (main.ts) y
+// cada elemento con data-online se enciende o apaga solo al cambiar, sin volver a pintar nada
+const onlineOf = (user) => (user ? (window.TPOnline?.get(String(user).toLowerCase()) ?? null) : null)
+const isOnline = (user) => !!onlineOf(user)
+const ONLINE_TITLE = { term: 'Con el terminal abierto', qp: 'En línea en QvaPay' }
+// Gris (off) si no está en ninguno, pero solo cuando ya llegó la lista: sin ella no se sabe
+const onlineCls = (user) => (onlineOf(user) ? ` on ${onlineOf(user)}` : window.TPOnline ? ' off' : '')
+const onlineAttr = (user) => (user && user !== '—' ? ` data-online="${esc(String(user).toLowerCase())}"` : '')
+function paintOnline() {
+	for (const el of document.querySelectorAll('[data-online]')) {
+		const where = onlineOf(el.dataset.online)
+		el.classList.toggle('on', !!where)
+		el.classList.toggle('off', !where && !!window.TPOnline && !el.classList.contains('online-tag'))
+		el.classList.toggle('term', where === 'term')
+		el.classList.toggle('qp', where === 'qp')
+		if (el.classList.contains('avatar')) el.title = ONLINE_TITLE[where] ?? (window.TPOnline ? 'No está en línea' : '')
+		if (el.classList.contains('online-tag')) el.textContent = where === 'term' ? 'en el terminal' : 'en línea'
+	}
+}
+window.addEventListener('tp:online', paintOnline)
 
 // Con el lado, también «Solo las que puedo tomar» (canTake, en broker.js); sin él (referencias de precio, puesto de una
 // oferta tuya), ese filtro no aplica
@@ -598,7 +619,7 @@ function levelRow(l, side, cum, maxCum) {
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em${l.user === '—' ? ' class="anon"' : ` title="Ver la ficha de ${esc(l.user)}"`}>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${onlineAttr(l.user)}${onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="Ver la ficha de ${esc(l.user)}"`}>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 // ── Libro agrupado por rangos de precio ───────────────────────────────

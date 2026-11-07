@@ -24,7 +24,7 @@ import { dailyPost } from './community.ts'
 import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { loadOther, otherHtml } from './othermarkets.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
-import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveSocket, type LiveEnv } from './livebook.ts'
+import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveOnline, liveSocket, type LiveEnv } from './livebook.ts'
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { botHtml, loadBot } from './ratebot.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
@@ -204,6 +204,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/now' && req.method === 'GET') return secure(Response.json({ now: await serverNow(url) }, { headers: { 'Cache-Control': 'no-store' } }))
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
 	if (url.pathname === '/data/offer' && req.method === 'GET') return secure(await offer(req, url, env, ctx))
+	if (url.pathname === '/data/online' && req.method === 'POST') return secure(await online(req, env))
 	// El enlace corto de una oferta compartida (terminalp2p.com/o/<uuid>): abre el terminal con ella delante
 	const shared = SHARED_OFFER.exec(url.pathname)
 	if (shared && folderFor(url.hostname) !== 'sim') {
@@ -641,6 +642,18 @@ async function book(url: URL, env: Env, ctx: ExecutionContext) {
 	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': ready ? `public, max-age=${BOOK_TTL_S}` : 'no-store' } })
 	if (ready) ctx.waitUntil(caches.default.put(key, res.clone()))
 	return res
+}
+
+// Quién está en línea, para usuarios que no tienen ofertas en el libro: el terminal manda hasta 20 { id, u } (uuid de
+// QvaPay y usuario) y desde entonces entran en lo que mira el libro en vivo; responde los que ya se
+// saben en línea: term, con el terminal abierto, y qp, solo con QvaPay. Lo de los dueños del libro llega por el WebSocket
+async function online(req: Request, env: Env) {
+	if (!(await underLimit(env.STATUS_LIMIT, req))) return jsonError(429, 'Demasiadas consultas seguidas: espera un minuto')
+	const body = (await req.json().catch(() => null)) as { users?: unknown } | null
+	const users = (Array.isArray(body?.users) ? body.users : []).slice(0, 20).map((x) => ({ id: String((x as { id?: unknown })?.id ?? '').toLowerCase(), u: String((x as { u?: unknown })?.u ?? '') }))
+	const r = await liveOnline(env as unknown as LiveEnv, users).catch(() => null)
+	if (!r) return jsonError(503, 'No se puede saber ahora mismo')
+	return Response.json(r, { headers: { 'Cache-Control': 'no-store' } })
 }
 
 // Una oferta del libro por su uuid, para quien abre el enlace que compartió su dueño sin tener la cuenta conectada:

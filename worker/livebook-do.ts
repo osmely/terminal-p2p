@@ -12,9 +12,12 @@ import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNo
 import type { BotEnv } from './userbot.ts'
 import { alertOther, OtherMarkets, saveOther } from './othermarkets.ts'
 import { addCandle, candlePrice, markCandlesFrom } from './candles.ts'
-import type { AlertEnv } from './alerts.ts'
+import { notify, type AlertEnv } from './alerts.ts'
 import { deliverPush, ownerPush, pushTargets, takerPush, TARGETS_TTL_MS, type PushEnv, type PushNotice } from './push.ts'
+import { Presence, type PresenceEnv } from '../pro/presence.ts'
 
+// Un terminal cuenta como en línea si su conexión dio señal de vida (cada 25 s) en este rato
+const TERMINAL_SEEN_MS = 90_000
 // Las completadas de cada mercado se piden así de seguido, y las tomas cuentan para la actividad durante esto
 const DONE_EVERY_MS = 5 * 60_000
 // Las mejores de cada lado que ve la mini app
@@ -70,6 +73,9 @@ export class LiveBook {
 	// Cuándo arrancó el objeto y si ya se sembraron las velas (seedCandles)
 	private bootAt = Date.now()
 	private candlesSeeded = false
+	// Quién está en línea en QvaPay (módulo privado): los dueños del libro y a quien se sigue aparte
+	private presence = new Presence()
+	private onlineSent = ''
 	// Para la intención y la actividad de cada mercado: sus operaciones completadas (públicas, se piden cada pocos
 	// minutos) y la hora de cada toma reciente (entera o en parte) de la última media hora
 	private done = new Map<string, { data: CompletedRates | null; at: number }>()
@@ -128,6 +134,7 @@ export class LiveBook {
 		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
 		if (url.pathname === '/offer') return Response.json(this.book.find(url.searchParams.get('id') ?? ''))
 		if (url.pathname === '/status') return Response.json(this.state())
+		if (url.pathname === '/online' && req.method === 'POST') return Response.json(this.watchOnline(await req.json().catch(() => null)))
 		if (url.pathname === '/snapshot' && req.method === 'POST') return Response.json(this.snapshot(((await req.json().catch(() => ({}))) as { refs?: BookRefs }).refs ?? {}))
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
 		return new Response('no encontrado', { status: 404 })
@@ -194,6 +201,7 @@ export class LiveBook {
 			stream: { on: this.streaming, since: this.streamSince, events: this.streamEvents, error: this.streamError, connects: this.streamConnects, gap: this.streamGap },
 			lastRead: this.lastRead,
 			readError: this.readError,
+			presence: { on: this.presence.enabled(this.env as LiveEnv & PresenceEnv), at: this.presence.at, online: this.presence.online.size, terminal: this.terminalUsers(now).size, error: this.presence.error },
 		}
 	}
 
@@ -351,6 +359,7 @@ export class LiveBook {
 		this.ctx.acceptWebSocket(server)
 		server.serializeAttachment({ subs: [], pro, u, at: Date.now() } satisfies Sock)
 		server.send(JSON.stringify({ t: 'hello', feed: this.feedOn(), pro, every: pro ? 0 : FREE_EVERY_MS }))
+		server.send(this.onlineMsg())
 		return new Response(null, { status: 101, webSocket: client })
 	}
 
@@ -589,6 +598,7 @@ export class LiveBook {
 			this.flushFree(now)
 			await this.saveOthers(now)
 			if (!this.candlesSeeded) await this.seedCandles()
+			await this.checkPresence(now)
 			const watched = new Set(this.ctx.getWebSockets().flatMap((ws) => (ws.deserializeAttachment() as Sock | null)?.subs ?? []))
 			const feed = this.feedOn(now)
 			for (const coin of COINS.map((c) => c.tick))
@@ -759,6 +769,79 @@ export class LiveBook {
 		const changed = removed > 0 || this.book.count(coin, side) !== before
 		if (changed) this.broadcast(coin, side)
 		return changed
+	}
+
+	// En línea es cualquiera de las dos señales: el terminal abierto (su WebSocket con señal de vida reciente) o QvaPay
+	// abierto (módulo privado, cada PRESENCE_MS, por los dueños del libro y los que se siguen aparte). Se repasa en cada
+	// vuelta (5 s) y, si cambió la lista, se les manda a todos los terminales
+	private async checkPresence(now: number) {
+		const env = this.env as LiveEnv & PresenceEnv
+		if (this.presence.enabled(env) && this.presence.due(now)) {
+			const ids = new Set([...this.book.offers.values()].map((o) => o.owner).filter(Boolean))
+			for (const id of this.presence.extra(now).keys()) ids.add(id)
+			if (ids.size) await this.presence.check(env, [...ids], now)
+			const warning = this.presence.warning()
+			if (warning) this.ctx.waitUntil(notify(this.env as LiveEnv & AlertEnv, warning, '/admin').catch(() => false))
+		}
+		const online = this.onlineUsers(now)
+		const key = JSON.stringify(online)
+		if (key === this.onlineSent) return
+		this.onlineSent = key
+		const msg = this.onlineMsg(online)
+		for (const ws of this.ctx.getWebSockets())
+			try {
+				ws.send(msg)
+			} catch {}
+	}
+
+	// Quien tiene el terminal abierto: su conexión mandó señal de vida (cada 25 s) hace poco
+	private terminalUsers(now = Date.now()) {
+		const out = new Set<string>()
+		for (const ws of this.ctx.getWebSockets()) {
+			const s = ws.deserializeAttachment() as Sock | null
+			if (!s?.u) continue
+			const seen = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? s.at ?? 0
+			if (now - seen <= TERMINAL_SEEN_MS) out.add(s.u.toLowerCase())
+		}
+		return out
+	}
+
+	// Los usuarios en línea, en minúsculas y en orden (el terminal los compara por usuario): term, con el terminal
+	// abierto (punto verde); qp, solo con QvaPay abierto (punto amarillo)
+	private onlineUsers(now = Date.now()) {
+		const extra = this.presence.extra(now)
+		const term = this.terminalUsers(now)
+		const qp = new Set<string>()
+		for (const id of this.presence.online) {
+			const u = (this.book.owners.get(id)?.username ?? extra.get(id)?.user)?.toLowerCase()
+			if (u && !term.has(u)) qp.add(u)
+		}
+		return { term: [...term].sort(), qp: [...qp].sort() }
+	}
+
+	private onlineMsg(online = this.onlineUsers()) {
+		return JSON.stringify({ t: 'online', ...online, at: this.presence.at })
+	}
+
+	// El terminal pide seguir a quien no tiene ofertas abiertas (su contraparte en una operación, una ficha abierta):
+	// entra en la siguiente consulta. Devuelve los de la lista que ya se saben en línea
+	private watchOnline(body: unknown) {
+		const list = Array.isArray((body as { users?: unknown } | null)?.users) ? ((body as { users: unknown[] }).users as { id?: unknown; u?: unknown }[]) : []
+		const asked: string[] = []
+		for (const x of list.slice(0, 20)) {
+			const id = String(x?.id ?? '')
+			const user = String(x?.u ?? '').slice(0, 40)
+			if (this.presence.watch(id, user)) asked.push(id)
+		}
+		const terminal = this.terminalUsers()
+		const term: string[] = []
+		const qp: string[] = []
+		for (const x of list.slice(0, 20)) {
+			const u = String(x?.u ?? '').toLowerCase()
+			if (terminal.has(u)) term.push(u)
+			else if (this.presence.online.has(String(x?.id ?? ''))) qp.push(u)
+		}
+		return { on: this.presence.enabled(this.env as LiveEnv & PresenceEnv), term, qp, at: this.presence.at }
 	}
 
 	private async simulate(coin: string) {

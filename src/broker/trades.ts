@@ -22,7 +22,7 @@ export interface Trade {
 	coinAmount: number
 	price: number
 	// profile: su ficha completa, si QvaPay la manda (en tus ofertas, Peer trae lo mismo que User)
-	counterparty: { username: string; ops: number; rating: number | null; image?: string | null; profile?: PeerProfile | null } | null
+	counterparty: { username: string; uuid?: string | null; ops: number; rating: number | null; image?: string | null; profile?: PeerProfile | null } | null
 	kind: 'fixed' | 'flexible'
 	updatedAt: string | null
 	// Fin del plazo de pago (solo tiene sentido mientras se espera el pago)
@@ -55,6 +55,7 @@ export function peerProfile(u: P2PUser | undefined | null) {
 	const taker = u._count?.P2P_Peer ?? 0
 	return {
 		username: u.username,
+		uuid: u.uuid ?? null,
 		image: u.image ?? null,
 		kyc: !!u.kyc,
 		vip: !!u.vip,
@@ -75,6 +76,7 @@ function party(u?: P2PUser | null) {
 	if (!u) return null
 	return {
 		username: u.username,
+		uuid: u.uuid ?? null,
 		ops: (u._count?.P2P ?? 0) + (u._count?.P2P_Peer ?? 0),
 		rating: u.rating_count ? (u.rating_avg ?? null) : null,
 		image: u.image ?? null,
