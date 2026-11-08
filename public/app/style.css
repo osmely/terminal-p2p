@@ -1,15 +1,16 @@
 /* ══ Tokens ═══════════════════════════════════════════════════════════ */
 :root,
 :root[data-theme='dark'] {
-	--bg: #0a0d12;
-	--surface: #10151c;
-	--surface-2: #151b24;
-	--surface-3: #1b2330;
-	--line: #1e2733;
-	--line-strong: #2a3545;
-	--text: #e7ecf3;
-	--text-2: #a9b4c3;
-	--muted: #7a8799;
+	/* Gris pizarra: el casi negro de antes (#0a0d12) apenas separaba los paneles del fondo */
+	--bg: #181a20;
+	--surface: #1e2329;
+	--surface-2: #242a32;
+	--surface-3: #2b3139;
+	--line: #2b3139;
+	--line-strong: #3a424d;
+	--text: #eaecef;
+	--text-2: #b7bdc6;
+	--muted: #8b95a3;
 	--ask: #f6465d;
 	--ask-bg: rgba(246, 70, 93, 0.12);
 	--bid: #1fc28b;
@@ -20,8 +21,8 @@
 	--accent-bg: rgba(91, 140, 255, 0.14);
 	--warn: #f0b93a;
 	--warn-bg: rgba(240, 185, 58, 0.13);
-	--shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-	--overlay: rgba(4, 6, 10, 0.7);
+	--shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+	--overlay: rgba(12, 14, 18, 0.6);
 	color-scheme: dark;
 }
 
