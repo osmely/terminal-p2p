@@ -65,8 +65,6 @@ function avatar(user, img, cls = '') {
 	return `<span class="avatar ${cls}${on}"${attrs} aria-hidden="true">${esc(String(user ?? '?').slice(0, 2))}${url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}</span>`
 }
 document.addEventListener('error', (e) => e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains('avatar') && e.target.remove(), true)
-// «en el terminal» o «en línea» (solo QvaPay), escrito junto a su nombre (solo se ve encendido)
-const onlineTag = (user) => `<span class="online-tag${isOnline(user) ? onlineCls(user) : ''}"${onlineAttr(user)}>${onlineOf(user) === 'term' ? 'en el terminal' : 'en línea'}</span>`
 // Los dueños de las ofertas del libro ya se consultan solos. Para los demás (con quien operas, una ficha abierta) se
 // le pide al servidor que los siga: [{ id: uuid de QvaPay, u: usuario }]. Cada uno, como mucho cada 5 min
 const onlineAsked = new Map()
@@ -643,7 +641,7 @@ function renderDetail(t) {
 	$('modalBody').innerHTML = `<div class="stack">
 		${d.parent ? '<button type="button" class="link" id="backParts">← Todas las partes de la oferta</button>' : ''}
 		<div><h3>${buy ? 'Compras' : 'Vendes'} ${fmtM(t.usd)} USD por ${fmtM(t.coinAmount)} ${unit}</h3>
-			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button> ${onlineTag(t.counterparty)}` : t.parts ? 'por partes' : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
+			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button>` : t.parts ? 'por partes' : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
 		${
 			payTo.length
 				? `<div><p class="hint">Datos de pago de @${esc(t.counterparty)}:</p><div class="kv">${payTo
@@ -1804,7 +1802,7 @@ async function showPeer(user) {
 	$('modalBody').innerHTML = `<div class="stack peer">
 		<div class="peer-head">
 			${avatar(name, p?.image ?? known?.image, 'lg')}
-			<div><h3>@${esc(name)}${isMe ? ' <span class="badge info">tú</span>' : ` ${onlineTag(name)}`}</h3><div class="peer-badges">${badges || '<span class="muted small">Sin datos de verificación</span>'}</div></div>
+			<div><h3>@${esc(name)}${isMe ? ' <span class="badge info">tú</span>' : ''}</h3><div class="peer-badges">${badges || '<span class="muted small">Sin datos de verificación</span>'}</div></div>
 		</div>
 		<div class="peer-stats">
 			${stat('Operaciones', ops != null ? ops.toLocaleString('en-US') : '—', p ? `${p.opsOwner.toLocaleString('en-US')} publicando · ${p.opsTaker.toLocaleString('en-US')} tomando` : '')}

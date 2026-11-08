@@ -106,11 +106,10 @@ function paintOnline() {
 	for (const el of document.querySelectorAll('[data-online]')) {
 		const where = onlineOf(el.dataset.online)
 		el.classList.toggle('on', !!where)
-		el.classList.toggle('off', !where && !!window.TPOnline && !el.classList.contains('online-tag'))
+		el.classList.toggle('off', !where && !!window.TPOnline)
 		el.classList.toggle('term', where === 'term')
 		el.classList.toggle('qp', where === 'qp')
 		if (el.classList.contains('avatar')) el.title = ONLINE_TITLE[where] ?? (window.TPOnline ? 'No está en línea' : '')
-		if (el.classList.contains('online-tag')) el.textContent = where === 'term' ? 'en el terminal' : 'en línea'
 	}
 }
 window.addEventListener('tp:online', paintOnline)

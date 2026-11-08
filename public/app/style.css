@@ -168,15 +168,12 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .avatar.sm { width: 22px; height: 22px; font-size: 9.5px; }
 /* En línea (app.js paintOnline): verde con el terminal abierto, amarillo solo con QvaPay abierto, gris en ninguno
    (solo si ya se sabe quién está en línea). Un círculo arriba a la
-   derecha de la foto (en todas), un punto antes del usuario en el libro y escrito en la ficha y la operación. «en línea» escrito no sale si no lo está */
+   derecha de la foto (en todas) y un punto antes del usuario en el libro. */
 .on.term { --on-color: var(--online); }
 .on.qp { --on-color: var(--online-qp); }
 .off { --on-color: var(--muted); }
 .avatar.on::after, .avatar.off::after { content: ''; position: absolute; top: -1px; right: -1px; z-index: 1; width: 32%; height: 32%; min-width: 7px; min-height: 7px; border-radius: 50%; background: var(--on-color); box-shadow: 0 0 0 1.5px var(--surface); }
 .lvl .who em.on::before, .lvl .who em.off::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--on-color); vertical-align: 1px; }
-.online-tag { display: none; font-size: 11.5px; font-weight: 600; color: var(--on-color); white-space: nowrap; }
-.online-tag.on { display: inline-flex; align-items: center; gap: 4px; }
-.online-tag.on::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .who-ava { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .acct-name { font-size: 12.5px; font-weight: 600; line-height: 1.2; }
 .acct-bal { font: 11.5px var(--mono); color: var(--muted); line-height: 1.2; }
