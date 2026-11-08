@@ -29,12 +29,14 @@ const BASE_COINS = [
 	{ tick: 'PAYPAL', name: 'PayPal', unit: 'USD', logo: 'paypal' },
 	// Pagos en reales de Brasil
 	{ tick: 'PIX', name: 'Pix', unit: 'BRL', logo: 'pix' },
+	{ tick: 'EURCASH', name: 'EUR Efectivo', unit: 'EUR', logo: 'eur' },
 ] as const
 
 // Mercados que solo salen en staging, para ver cómo se mueven antes de añadirlos de verdad. Staging se reconoce por
 // __STAGING__ en el Worker (la pone wrangler en env.staging: define) y por el dominio en el navegador (data.js es el
 // mismo archivo en los dos entornos)
-// Ahora ninguno (USDT de TRON y de BSC pasaron a la lista de siempre el 2026-11-06, PayPal y Pix el 2026-11-08)
+// Ahora ninguno (USDT de TRON y de BSC pasaron a la lista de siempre el 2026-11-06; PayPal, Pix y EUR Efectivo el
+// 2026-11-08)
 const STAGING_COINS = [] as const as readonly { tick: never; name: string; unit: string; logo: string; net?: string }[]
 declare const __STAGING__: boolean | undefined
 const IS_STAGING = (typeof __STAGING__ !== 'undefined' && __STAGING__ === true) || /(^|\.)staging\./.test((globalThis as { location?: { hostname?: string } }).location?.hostname ?? '')

@@ -159,6 +159,7 @@ export const RADAR_MARKETS: Record<string, { name: string; unit: string }> = {
 	USDTBSC: { name: 'USDT (BSC)', unit: 'USDT' },
 	PAYPAL: { name: 'PayPal', unit: 'USD' },
 	PIX: { name: 'Pix', unit: 'BRL' },
+	EURCASH: { name: 'EUR Efectivo', unit: 'EUR' },
 }
 
 export interface RadarHit {
