@@ -27,12 +27,14 @@ const BASE_COINS = [
 	{ tick: 'USDTBSC', name: 'USDT (BSC)', unit: 'USDT', logo: 'usdt', net: 'BSC' },
 	// Se cobra en USD por PayPal
 	{ tick: 'PAYPAL', name: 'PayPal', unit: 'USD', logo: 'paypal' },
+	// Pagos en reales de Brasil
+	{ tick: 'PIX', name: 'Pix', unit: 'BRL', logo: 'pix' },
 ] as const
 
 // Mercados que solo salen en staging, para ver cómo se mueven antes de añadirlos de verdad. Staging se reconoce por
 // __STAGING__ en el Worker (la pone wrangler en env.staging: define) y por el dominio en el navegador (data.js es el
 // mismo archivo en los dos entornos)
-// Ahora ninguno (USDT de TRON y de BSC pasaron a la lista de siempre el 2026-11-06, PayPal el 2026-11-08)
+// Ahora ninguno (USDT de TRON y de BSC pasaron a la lista de siempre el 2026-11-06, PayPal y Pix el 2026-11-08)
 const STAGING_COINS = [] as const as readonly { tick: never; name: string; unit: string; logo: string; net?: string }[]
 declare const __STAGING__: boolean | undefined
 const IS_STAGING = (typeof __STAGING__ !== 'undefined' && __STAGING__ === true) || /(^|\.)staging\./.test((globalThis as { location?: { hostname?: string } }).location?.hostname ?? '')
@@ -95,7 +97,7 @@ interface CoinState {
 	// La actividad que manda el servidor (del feed): mientras el mercado llega desde el servidor, se usa esta
 	feedActivity: BookActivity[] | null
 	// Las mejores ofertas de cada lado que manda el servidor para la lista de mercados (de todos, se miren o no)
-	top: { ask: Level[]; bid: Level[]; at: number } | null
+	top: { ask: Level[]; bid: Level[]; at: number; ref?: number } | null
 	// Intención y actividad calculadas en el servidor (ver src/terminal/stats.ts)
 	stats: LiveStats | null
 	hotUntil: number
@@ -343,10 +345,10 @@ export class Market {
 	}
 
 	// Las mejores ofertas de cada mercado, para la lista de mercados
-	setTop(top: Record<string, { ask: Level[]; bid: Level[] }>, at = Date.now()) {
+	setTop(top: Record<string, { ask: Level[]; bid: Level[]; ref?: number }>, at = Date.now()) {
 		for (const [tick, t] of Object.entries(top ?? {})) {
 			const c = this.coins.get(tick as Tick)
-			if (c && Array.isArray(t?.ask) && Array.isArray(t?.bid)) c.top = { ask: t.ask, bid: t.bid, at }
+			if (c && Array.isArray(t?.ask) && Array.isArray(t?.bid)) c.top = { ask: t.ask, bid: t.bid, at, ...(t.ref! > 0 ? { ref: t.ref } : {}) }
 		}
 	}
 
@@ -498,7 +500,9 @@ export class Market {
 		if (c && c.count >= 3) return { buy: c.median_buy || c.average_buy, sell: c.median_sell || c.average_sell }
 		const a = this.averages?.[tick]
 		if (a && a.count >= 3) return { buy: a.median_buy || a.average_buy || a.average, sell: a.median_sell || a.average_sell || a.average }
-		return null
+		// Sin medianas de QvaPay (Pix, PayPal, USDT), la propia del libro en vivo: la de lo que apuntamos del feed
+		const own = this.coins.get(tick)!.top?.ref
+		return own ? { buy: own, sell: own } : null
 	}
 
 	// ── Histórico propio (QvaPay no lo da para monedas fiat) ──────────────

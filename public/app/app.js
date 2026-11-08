@@ -747,6 +747,9 @@ function renderBook(b, asks, bids) {
 	}
 }
 
+// Un usuario nombrado en Actividad o en la lectura del mercado: al tocarlo se abre su ficha
+const peerLink = (user) => (user && user !== '—' ? `<button type="button" class="link peer-link" data-peer="${esc(user)}" title="Ver su ficha">@${esc(user)}</button>` : '@—')
+
 function renderInsight(b, asks, bids) {
 	const out = []
 	const ask = asks[0]
@@ -757,7 +760,7 @@ function renderInsight(b, asks, bids) {
 	const pro = window.TPPro
 	if (ask && bid && bid.price > ask.price && !window.TPProCross) {
 		const net = bid.price / ask.price - 1 - 0.0025
-		const legs = `comprar a <b>${fmtP(ask.price)}</b> (@${esc(ask.user)}, ${ask.ops} ops) y vender a <b>${fmtP(bid.price)}</b> (@${esc(bid.user)}, ${bid.ops} ops)`
+		const legs = `comprar a <b>${fmtP(ask.price)}</b> (${peerLink(ask.user)}, ${ask.ops} ops) y vender a <b>${fmtP(bid.price)}</b> (${peerLink(bid.user)}, ${bid.ops} ops)`
 		const more = pro?.enabled ? ' Con <b>Pro</b> ves si puedes aprovecharlo, cuántos USD encajan y cuánto te quedaría.' : ''
 		out.push(
 			net > 0
@@ -778,12 +781,17 @@ function renderInsight(b, asks, bids) {
 		return { user, share: usd / total }
 	}
 	const ta = top(asks)
-	if (ta && ta.share > 0.3) out.push(`<li>@${esc(ta.user)} concentra el <b>${Math.round(ta.share * 100)}%</b> de la liquidez vendedora visible.</li>`)
+	if (ta && ta.share > 0.3) out.push(`<li>${peerLink(ta.user)} concentra el <b>${Math.round(ta.share * 100)}%</b> de la liquidez vendedora visible.</li>`)
 	const outliers = [...b.ask.levels, ...b.bid.levels].filter((l) => l.outlier).length
 	if (outliers) out.push(`<li><b>${outliers}</b> oferta(s) con precio atípico (probable error de tipeo), ocultas por defecto.</li>`)
 	const ref = m ?? (ask && bid ? (ask.price + bid.price) / 2 : (b.averages24h?.average ?? null))
 	out.push(...informalInsight(b.coin.tick, ref))
-	$('insight').innerHTML = out.length ? `<ul class="insight-list">${out.join('')}</ul>` : '<div class="empty">Sin observaciones destacables por ahora.</div>'
+	// Solo si cambió: repintar con cada repaso del libro haría perder el toque en un nombre
+	const html = out.length ? `<ul class="insight-list">${out.join('')}</ul>` : '<div class="empty">Sin observaciones destacables por ahora.</div>'
+	if ($('insight').dataset.html !== html) {
+		$('insight').dataset.html = html
+		$('insight').innerHTML = html
+	}
 }
 
 // Mercado informal según elTOQUE: cómo cotiza este mercado frente a él, la tendencia y la
@@ -878,7 +886,7 @@ function renderActivity(b) {
 					// Con milisegundos: lo que pasa en el libro va a ritmo de bots
 					const t = `${cubaFmt(a.t, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}.${String(new Date(a.t).getUTCMilliseconds()).padStart(3, '0')}`
 					const what = text.replace('{s}', a.side === 'ask' ? 'una venta' : 'una compra')
-					const who = a.user && a.user !== '—' ? ` · <button type="button" class="link peer-link" data-peer="${esc(a.user)}" title="Ver su ficha">@${esc(a.user)}</button>` : ''
+					const who = a.user && a.user !== '—' ? ` · ${peerLink(a.user)}` : ''
 					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} USD${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
 				})
 				.join('')
@@ -1747,11 +1755,12 @@ function bind() {
 			store.set('rankCrit', state.rank.crit)
 			renderRanking()
 		})
-	// Los nombres de la actividad abren la ficha de esa contraparte
-	$('activity').addEventListener('click', (e) => {
-		const who = e.target.closest('[data-peer]')
-		if (who && typeof showPeer === 'function') showPeer(who.dataset.peer)
-	})
+	// Los nombres de la actividad y de la lectura del mercado abren la ficha de ese usuario
+	for (const id of ['activity', 'insight'])
+		$(id).addEventListener('click', (e) => {
+			const who = e.target.closest('[data-peer]')
+			if (who && typeof showPeer === 'function') showPeer(who.dataset.peer)
+		})
 	$('rankList').addEventListener('click', (e) => {
 		const li = e.target.closest('li[data-user]')
 		if (li && typeof showPeer === 'function') showPeer(li.dataset.user)

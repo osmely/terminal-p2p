@@ -64,6 +64,29 @@ export function frameStart(t: number, frame: Frame) {
 // ¿Cuenta para las velas? Lo atípico respecto a la mediana de lo completado de su lado no (como en el libro)
 export const candlePrice = (price: number, ref: number | null, side: 'ask' | 'bid') => price > 0 && !isOutlier(price, ref, side)
 
+// Referencia propia de cada mercado: la mediana de los cierres de sus franjas de 15 min de las últimas 48 h, con 3
+// operaciones o más. Es para los mercados de los que QvaPay no publica la mediana de lo completado (Pix, PayPal, USDT):
+// sin ella no se ve qué precio es raro. Sin lado (las velas juntan compras y ventas)
+export const OWN_REF_MS = 48 * HOUR_MS
+export async function ownRefs(db: D1, now = Date.now()): Promise<Map<string, number>> {
+	const { results } = await db.prepare('SELECT coin, c, ops FROM candles WHERE t >= ? AND c > 0').bind(now - OWN_REF_MS).all<{ coin: string; c: number; ops: number }>()
+	const by = new Map<string, { closes: number[]; ops: number }>()
+	for (const r of results) {
+		const m = by.get(r.coin) ?? { closes: [], ops: 0 }
+		m.closes.push(r.c)
+		m.ops += r.ops
+		by.set(r.coin, m)
+	}
+	const out = new Map<string, number>()
+	for (const [coin, m] of by) {
+		if (m.ops < 3) continue
+		const s = m.closes.sort((a, b) => a - b)
+		const mid = s.length >> 1
+		out.set(coin, s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2)
+	}
+	return out
+}
+
 // Suma una operación a su franja de 15 min. En el UPDATE cada columna se calcula con lo que había antes
 export async function addCandle(db: D1, coin: string, at: number, price: number, usd: number) {
 	await db

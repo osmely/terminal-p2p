@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
-import { addCandle, candlePrice, frameStart, joinCandles, loadCandles, markCandlesFrom } from '../worker/candles.ts'
+import { addCandle, candlePrice, frameStart, joinCandles, loadCandles, markCandlesFrom, ownRefs } from '../worker/candles.ts'
 
 function memD1() {
 	const db = new DatabaseSync(':memory:')
@@ -97,4 +97,19 @@ test('velas: lo atípico no cuenta', () => {
 	assert.equal(candlePrice(10_000, 1115, 'ask'), false)
 	assert.equal(candlePrice(10_000, null, 'ask'), true) // sin referencia no se marca nada
 	assert.equal(candlePrice(0, 1115, 'bid'), false)
+})
+
+test('velas: la referencia propia es la mediana de los cierres de 48 h, con 3 operaciones o más', async () => {
+	const { d1 } = memD1()
+	const now = T + 10 * MIN
+	await addCandle(d1, 'PIX', T - 40 * MIN, 5.6, 100)
+	await addCandle(d1, 'PIX', T - 20 * MIN, 5.9, 50)
+	await addCandle(d1, 'PIX', T + 5 * MIN, 0.59, 10) // un error de tipeo no la mueve
+	await addCandle(d1, 'PIX', T + 6 * MIN, 5.7, 10) // misma franja: cierra en 5.7
+	await addCandle(d1, 'PIX', T - 50 * 60 * MIN, 9, 10) // de hace más de 48 h no cuenta
+	await addCandle(d1, 'PAYPAL', T - 5 * MIN, 1.05, 30) // con solo 2 operaciones, sin referencia
+	await addCandle(d1, 'PAYPAL', T + 5 * MIN, 1.1, 30)
+	const refs = await ownRefs(d1, now)
+	assert.equal(refs.get('PIX'), 5.7)
+	assert.equal(refs.has('PAYPAL'), false)
 })

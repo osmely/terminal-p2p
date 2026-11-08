@@ -23,7 +23,7 @@
 	// Comparar mercados: cada mercado lleva siempre el mismo color (los 8 de la paleta, en orden fijo, de más a menos
 	// volumen). Los que sobran repiten un color con trazo discontinuo. Nunca más de 8 líneas a la vez
 	const CMP_ORDER = ['BANK_CUP', 'CLASICA', 'ZELLE', 'BANDECPREPAGO', 'ETECSA', 'USDCASH', 'BANK_MLC', 'TROPIPAY']
-	const CMP_EXTRA = { BOLSATM: 3, CUPCASH: 7, USDT: 2, USDTBSC: 6, PAYPAL: 5 }
+	const CMP_EXTRA = { BOLSATM: 3, CUPCASH: 7, USDT: 2, USDTBSC: 6, PAYPAL: 5, PIX: 4 }
 	const CMP_MAX = 8
 	const cmpStyle = (tick) => {
 		const i = CMP_ORDER.indexOf(tick)

@@ -11,7 +11,7 @@ import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES
 import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
 import type { BotEnv } from './userbot.ts'
 import { alertOther, OtherMarkets, saveOther } from './othermarkets.ts'
-import { addCandle, candlePrice, markCandlesFrom } from './candles.ts'
+import { addCandle, candlePrice, markCandlesFrom, ownRefs, SLOT_MS } from './candles.ts'
 import { notify, type AlertEnv } from './alerts.ts'
 import { deliverPush, ownerPush, pushTargets, takerPush, TARGETS_TTL_MS, type PushEnv, type PushNotice } from './push.ts'
 import { Presence, type PresenceEnv } from '../pro/presence.ts'
@@ -73,6 +73,9 @@ export class LiveBook {
 	// Cuándo arrancó el objeto y si ya se sembraron las velas (seedCandles)
 	private bootAt = Date.now()
 	private candlesSeeded = false
+	// La referencia propia de cada mercado (candles.ts ownRefs), para los que QvaPay no publica la suya; cada 15 min
+	private own = new Map<string, number>()
+	private ownAt = 0
 	// Quién está en línea en QvaPay (módulo privado): los dueños del libro y a quien se sigue aparte
 	private presence = new Presence()
 	private onlineSent = ''
@@ -154,7 +157,7 @@ export class LiveBook {
 		const sides: BookSnapshot['sides'] = []
 		for (const c of COINS)
 			for (const side of ['ask', 'bid'] as const)
-				if (this.synced.has(sideKey(c.tick, side))) sides.push({ coin: c.tick, side, stat: this.book.stats(c.tick, side, refs[c.tick]?.[side] ?? null, now) })
+				if (this.synced.has(sideKey(c.tick, side))) sides.push({ coin: c.tick, side, stat: this.book.stats(c.tick, side, refs[c.tick]?.[side] ?? this.own.get(c.tick) ?? null, now) })
 		return { stale: !this.feedOn(now), sides }
 	}
 
@@ -440,10 +443,12 @@ export class LiveBook {
 
 	// El mejor precio de cada mercado y lado (las primeras ofertas; el terminal salta las solo-VIP y las de precio raro)
 	private topMsg() {
-		const top: Record<string, { ask: unknown[]; bid: unknown[] }> = {}
+		// ref: la referencia propia, para marcar lo raro en los mercados de los que QvaPay no publica la mediana
+		const top: Record<string, { ask: unknown[]; bid: unknown[]; ref?: number }> = {}
 		for (const c of COINS) {
 			if (!this.synced.has(sideKey(c.tick, 'ask')) || !this.synced.has(sideKey(c.tick, 'bid'))) continue
-			top[c.tick] = { ask: this.book.levels(c.tick, 'ask', 5), bid: this.book.levels(c.tick, 'bid', 5) }
+			const ref = this.own.get(c.tick)
+			top[c.tick] = { ask: this.book.levels(c.tick, 'ask', 5), bid: this.book.levels(c.tick, 'bid', 5), ...(ref ? { ref } : {}) }
 		}
 		return JSON.stringify({ t: 'top', top, at: Date.now() })
 	}
@@ -464,8 +469,8 @@ export class LiveBook {
 	// para que la vela en curso crezca sin esperar a /data/candles (w: cuándo se apuntó, para no sumarla dos veces)
 	private async addCandle(coin: string, tr: Trade, live = true) {
 		const done = this.done.get(coin)?.data
-		// Sin la mediana aún leída, el mejor precio de ese lado del libro
-		const ref = (tr.side === 'ask' ? done?.median_sell : done?.median_buy) || done?.average || this.book.levels(coin, tr.side, 1)[0]?.price || null
+		// Sin la mediana de QvaPay, la propia y, sin ninguna, el mejor precio de ese lado del libro
+		const ref = (tr.side === 'ask' ? done?.median_sell : done?.median_buy) || done?.average || this.own.get(coin) || this.book.levels(coin, tr.side, 1)[0]?.price || null
 		if (tr.ops < 0 || !candlePrice(tr.price, ref, tr.side)) return
 		const w = Date.now()
 		try {
@@ -598,6 +603,10 @@ export class LiveBook {
 			this.flushFree(now)
 			await this.saveOthers(now)
 			if (!this.candlesSeeded) await this.seedCandles()
+			if (now - this.ownAt > SLOT_MS) {
+				this.ownAt = now
+				this.own = await ownRefs(this.env.DB, now).catch((err) => (console.error(`referencia propia: ${(err as Error).message}`), this.own))
+			}
 			await this.checkPresence(now)
 			const watched = new Set(this.ctx.getWebSockets().flatMap((ws) => (ws.deserializeAttachment() as Sock | null)?.subs ?? []))
 			const feed = this.feedOn(now)
