@@ -610,7 +610,6 @@ function levelRow(l, side, cum, maxCum) {
 	const flags = [l.promoted ? '★' : '', l.kind === 'flexible' ? '↔' : '', l.requirements ? '🔒' : '', l.vipOnly ? '👑' : '', l.outlier ? '⚠️' : '']
 		.filter(Boolean)
 		.join('')
-	const rep = l.rating ? `⭐${l.rating.toFixed(1)}` : 'nuevo'
 	// Tus propias ofertas se marcan en el libro (broker.js sabe quién eres)
 	const mine = typeof myUsername === 'function' && myUsername() === l.user
 	const medal = rankMedal(l.user)
@@ -618,7 +617,7 @@ function levelRow(l, side, cum, maxCum) {
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="Ver la ficha de ${esc(l.user)}"`}>${esc(l.user)}</em> ${l.ops} · ${rep}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="Ver la ficha de ${esc(l.user)}"`}>${esc(l.user)}</em> ${l.ops}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 // ── Libro agrupado por rangos de precio ───────────────────────────────
