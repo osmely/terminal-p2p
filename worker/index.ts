@@ -9,7 +9,7 @@
 
 import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
 import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
-import { collect, isCoin, query, RANGES, withoutPro, type RatesData } from './rates.ts'
+import { collect, inCuba, isCoin, query, RANGES, withoutPro, type RatesData } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { readWho, tokenPrint, whoCookie } from './session.ts'
 import { cleanupLog, hourKey, logUser } from './userlog.ts'
@@ -57,6 +57,7 @@ interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'>, Om
 	SIM_LIMIT?: RateLimiter
 	PRO_LIMIT?: RateLimiter
 	STATUS_LIMIT?: RateLimiter
+	PEER_LIMIT?: RateLimiter
 	RELAY_LIMIT?: RateLimiter
 	// «1» en el entorno de staging (wrangler deploy --env staging)
 	STAGING?: string
@@ -402,6 +403,7 @@ async function dailyPro(env: ProEnv, at: number) {
 		await cleanupLive(env.DB, at)
 		await cleanupPush(env.DB, at)
 		await cleanupInbox(env.DB, at)
+		await env.DB.prepare('DELETE FROM peer_stats_use WHERE day < ?').bind(inCuba(at - 7 * 86_400_000).toISOString().slice(0, 10)).run()
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
 	}
@@ -415,9 +417,14 @@ async function dailyPro(env: ProEnv, at: number) {
 
 // ¿Trae una licencia Pro en vigor? (la firmada que da /pro/status; vale un día y el terminal la renueva)
 async function hasPro(env: Env, license: string | null, now = Date.now()) {
-	if (!license || !env.PRO_KEY) return false
-	const l = await verify<{ e?: number; x?: number }>(license, env.PRO_KEY)
-	return !!l && (l.e ?? 0) > now && (l.x ?? 0) > now
+	return !!(await proLicense(env, license, now))
+}
+
+// La licencia de Pro vigente (u: el uuid de la licencia) o null
+async function proLicense(env: Env, license: string | null, now = Date.now()) {
+	if (!license || !env.PRO_KEY) return null
+	const l = await verify<{ u?: string; e?: number; x?: number }>(license, env.PRO_KEY)
+	return l && (l.e ?? 0) > now && (l.x ?? 0) > now ? l : null
 }
 
 // Datos públicos y agregados: se cachean 2 minutos en el borde (si hay datos). Con Pro (?l=licencia), también el
@@ -661,16 +668,25 @@ async function online(req: Request, env: Env) {
 }
 
 // ★ Pro: la actividad de un usuario en el P2P para su ficha (módulo privado), por su uuid de QvaPay (?l=licencia).
-// Media hora en la caché del borde: cambia poco y así nadie la usa para barrer QvaPay
+// Media hora en la caché del borde: cambia poco. Para que nadie la use para barrer QvaPay, cada licencia puede pedir
+// 10 por minuto y 40 al día (hora de Cuba); las que ya están en la caché no cuentan
 const PEER_STATS_TTL_S = 1800
+const PEER_STATS_PER_DAY = 40
 async function peerStatsRoute(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	const id = (url.searchParams.get('id') ?? '').toLowerCase()
 	if (!UUID.test(id)) return jsonError(400, 'Usuario desconocido')
-	if (!(await hasPro(env, url.searchParams.get('l')))) return jsonError(403, 'La actividad en QvaPay es del modo Pro')
+	const lic = await proLicense(env, url.searchParams.get('l'))
+	if (!lic?.u) return jsonError(403, 'La actividad en QvaPay es del modo Pro')
 	const key = new Request(`${url.origin}/data/peer-stats?id=${id}&v=3`)
 	const hit = await caches.default.match(key)
 	if (hit) return fromCache(hit, `private, max-age=${PEER_STATS_TTL_S}`)
 	if (!(await underLimit(env.STATUS_LIMIT, req))) return jsonError(429, 'Demasiadas consultas seguidas: espera un minuto')
+	if (!(await underLimit(env.PEER_LIMIT, req, lic.u))) return jsonError(429, 'Muchas fichas seguidas: espera un minuto')
+	const day = inCuba(Date.now()).toISOString().slice(0, 10)
+	const used = await env.DB.prepare('INSERT INTO peer_stats_use (license, day, n) VALUES (?, ?, 1) ON CONFLICT (license, day) DO UPDATE SET n = n + 1 RETURNING n')
+		.bind(lic.u, day)
+		.first<{ n: number }>()
+	if ((used?.n ?? 0) > PEER_STATS_PER_DAY) return jsonError(429, `Por hoy ya viste la actividad de ${PEER_STATS_PER_DAY} usuarios: mañana se renueva`)
 	const stats = await peerStats(env, id).catch(() => null)
 	if (!stats) return jsonError(503, 'No se puede ver ahora mismo')
 	const res = new Response(JSON.stringify(stats), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${PEER_STATS_TTL_S}` } })

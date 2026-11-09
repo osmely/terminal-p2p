@@ -1844,6 +1844,12 @@ async function showPeerStats(uuid) {
 	let s
 	try {
 		const r = await fetch(`/data/peer-stats?id=${encodeURIComponent(uuid)}&l=${encodeURIComponent(window.TPPro.license ?? '')}`)
+		// El tope de fichas por minuto o por día: se dice en el bloque en vez de quitarlo
+		if (r.status === 429) {
+			const msg = (await r.json().catch(() => null))?.error
+			if ($('peerQp')) $('peerQp').innerHTML = `<p class="hint">★ Su actividad en el P2P de QvaPay</p><p class="muted small">${esc(msg || 'Espera un minuto para ver más')}</p>`
+			return
+		}
 		if (!r.ok) throw new Error()
 		s = await r.json()
 	} catch {
