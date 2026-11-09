@@ -340,6 +340,8 @@ export class Broker {
 						.map((x) => ({
 							order: x.uuid,
 							counterparty: x.Taker?.username ?? null,
+							// Para abrir su ficha desde la lista (con su actividad en QvaPay)
+							counterpartyUuid: x.Taker?.uuid ?? null,
 							image: x.Taker?.image ?? null,
 							usd: num(x.amount),
 							coinAmount: num(x.receive),

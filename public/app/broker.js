@@ -615,13 +615,13 @@ function renderDetail(t) {
 		const rows = t.parts
 			.map(
 				(p) =>
-					`<button type="button" class="part-row" data-part="${esc(p.order)}"><span class="who-ava">${p.counterparty ? avatar(p.counterparty, p.image, 'sm') : ''}@${esc(p.counterparty ?? '—')}</span><span>${fmtM(p.usd)} USD</span>${
+					`<button type="button" class="part-row" data-part="${esc(p.order)}"><span class="who-ava">${p.counterparty ? `${avatar(p.counterparty, p.image, 'sm')}<span class="link peer-link" role="link" tabindex="0" data-part-peer="${esc(p.counterparty)}" data-peer-id="${esc(p.counterpartyUuid ?? '')}">@${esc(p.counterparty)}</span>` : '@—'}</span><span>${fmtM(p.usd)} USD</span>${
 						p.status !== 'completed' ? `<span class="chip ${p.status}">${STATUS[p.status] ?? p.status}</span>` : p.rated ? `<span class="muted">${'★'.repeat(p.rated)}</span>` : '<b>Calificar</b>'
 					}</button>`,
 			)
 			.join('')
 		action = t.parts.length
-			? `<div class="stack tight"><p>Se completó en ${t.parts.length === 1 ? 'una parte' : `${t.parts.length} partes`}. Toca cada una para calificar a quien la tomó:</p><div class="part-list">${rows}</div></div>`
+			? `<div class="stack tight"><p>Se completó en ${t.parts.length === 1 ? 'una parte' : `${t.parts.length} partes`}. Toca el usuario para ver su ficha, o la parte para calificarlo:</p><div class="part-list">${rows}</div></div>`
 			: '<p class="muted">Operación completada.</p>'
 	} else if (status === 'completed') {
 		const mine = t.myRating?.rating ?? 0
@@ -641,7 +641,7 @@ function renderDetail(t) {
 	$('modalBody').innerHTML = `<div class="stack">
 		${d.parent ? '<button type="button" class="link" id="backParts">← Todas las partes de la oferta</button>' : ''}
 		<div><h3>${buy ? 'Compras' : 'Vendes'} ${fmtM(t.usd)} USD por ${fmtM(t.coinAmount)} ${unit}</h3>
-			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}">@${esc(t.counterparty)}</button>` : t.parts ? 'por partes' : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
+			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}" data-peer-id="${esc(t.counterpartyUuid ?? '')}">@${esc(t.counterparty)}</button>` : t.parts ? 'por partes' : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
 		${
 			payTo.length
 				? `<div><p class="hint">Datos de pago de @${esc(t.counterparty)}:</p><div class="kv">${payTo
@@ -675,9 +675,17 @@ function bindCopy(body) {
 
 function bindDetail(t) {
 	const body = $('modalBody')
-	body.querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer))
+	// Con el uuid de la contraparte de esta operación: el de quien tomó una orden de tu oferta por rango no está en
+	// tus operaciones recientes si la oferta ya no está abierta, y sin él la ficha no trae su actividad en QvaPay
+	body.querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer, e.currentTarget.dataset.peerId))
 	// Las partes de una oferta por rango: cada una abre su detalle, desde donde se vuelve a la lista
-	for (const b of body.querySelectorAll('[data-part]')) b.onclick = () => openTrade(t.offer, b.dataset.part, true)
+	for (const b of body.querySelectorAll('[data-part]'))
+		b.onclick = (e) => {
+			// El nombre abre su ficha; el resto de la fila, esa parte para calificarla
+			const who = e.target.closest('[data-part-peer]')
+			if (who) return showPeer(who.dataset.partPeer, who.dataset.peerId)
+			openTrade(t.offer, b.dataset.part, true)
+		}
 	const back = $('backParts')
 	if (back) back.onclick = () => openTrade(t.offer, null)
 	const act = async (action, extra = {}) => {
@@ -1736,11 +1744,14 @@ function peerSignals(p, known, offers) {
 	return out
 }
 
-async function showPeer(user) {
+async function showPeer(user, peerId = null) {
 	user = String(user ?? '').trim().replace(/^@/, '')
 	// «—» u otro hueco: aún no se sabe de quién es (no se abre una ficha vacía que solo dice «Usuario no válido»)
 	if (!/^[A-Za-z0-9._-]{1,40}$/.test(user)) return toast('Aún no se sabe quién publicó esta oferta: ábrela para verlo', true)
 	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para ver la ficha', true)
+	// Abierta desde una operación: esa deja de refrescarse (cada 8 s), si no volvía a pintarse encima de la ficha
+	bk.detail = null
+	stopChatLive()
 	openModal(`<div class="stack"><h3>@${esc(user)}</h3><p class="muted">Cargando ficha…</p></div>`)
 	let d
 	try {
@@ -1753,7 +1764,7 @@ async function showPeer(user) {
 	const p = d.profile ?? tradeProfile(user)
 	const known = p ? null : knownPeer(user)
 	if (p?.uuid) watchOnline([{ id: p.uuid, u: p.username }])
-	const qpId = p?.uuid ?? tradePeerId(user)
+	const qpId = p?.uuid ?? (/^[0-9a-f-]{36}$/i.test(peerId ?? '') ? peerId : null) ?? tradePeerId(user)
 	const name = p?.username ?? user
 	rememberFace(name, p?.image)
 	const me = myUsername()
@@ -1869,6 +1880,25 @@ async function showPeerStats(uuid) {
 			${stat('Canceladas', s.cancelled.toLocaleString('en-US'), 'por cualquiera de las partes')}
 		</div>
 		${s.raters ? `<div class="qp-stars" title="${s.raters.toLocaleString('en-US')} valoraciones recibidas">${stars}</div>` : ''}`
+	fillFromQp(s)
+}
+
+// Sin su perfil (quien tomó tu oferta y no tiene nada publicado) arriba faltan operaciones y valoración, y las señales
+// decían «Pocas operaciones (0)» o «Sin valoraciones todavía». Con su actividad en QvaPay se completan y se quitan
+function fillFromQp(s) {
+	const body = $('modalBody')
+	const card = (label) => [...body.querySelectorAll('.peer > .peer-stats .peer-stat')].find((c) => c.querySelector('span')?.textContent === label)?.querySelector('b')
+	const avg = s.raters ? ['1', '2', '3', '4', '5'].reduce((t, k) => t + Number(k) * s.stars[k], 0) / s.raters : null
+	const ops = card('Operaciones')
+	if (ops?.textContent === '—') ops.textContent = s.completed.toLocaleString('en-US')
+	const rate = card('Valoración')
+	if (rate?.textContent === '—' && avg != null) rate.textContent = `⭐ ${avg.toFixed(2)}`
+	for (const li of body.querySelectorAll('.peer-signals li')) {
+		const t = li.textContent
+		if ((avg != null && t === 'Sin valoraciones todavía') || (s.completed >= 10 && /^Pocas operaciones \(0\)/.test(t))) li.remove()
+	}
+	const list = body.querySelector('.peer-signals')
+	if (list && !list.children.length) list.remove()
 }
 
 // ── Comprar ya: comprar USD a la oferta de venta más barata en la que cabe tu monto ──
