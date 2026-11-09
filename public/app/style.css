@@ -641,7 +641,13 @@ details.sec-box { display: block; }
 .inbox-item.new { border-left-color: var(--accent); background: var(--accent-bg); }
 .inbox-item-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
 .inbox-item-head b { font-size: 13.5px; }
+.inbox-item-head b { flex: 1; min-width: 0; }
 .inbox-item-head span { flex: none; font-size: 11.5px; color: var(--muted); }
+.inbox-del { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin: -4px -4px -4px 0; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; align-self: center; }
+.inbox-del:hover { color: var(--ask); background: var(--surface-3); }
+.inbox-head-act { display: flex; align-items: center; gap: 6px; }
+.inbox-all { border: 0; background: none; padding: 4px 6px; border-radius: 6px; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.inbox-all:hover { color: var(--ask); background: var(--surface-3); }
 .inbox-item p { margin: 4px 0 0; font-size: 12.5px; color: var(--text-2); line-height: 1.45; white-space: pre-line; }
 .inbox-item .btn { margin-top: 8px; }
 .inbox-empty { margin: 0; padding: 18px 12px; font-size: 12.5px; color: var(--muted); text-align: center; line-height: 1.5; }

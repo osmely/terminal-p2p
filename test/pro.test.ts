@@ -1742,3 +1742,44 @@ test('buzón: el fin de los días de Pro llega también al buzón, aunque no ten
 	const a = (await s.post('/pro/inbox', { print: P1, username: 'ana' })).body
 	assert.deepEqual(a.items.map((i: { kind: string; title: string; cta: string; ctaLabel: string }) => [i.kind, i.title, i.cta, i.ctaLabel]), [['system', 'A tus días gratis de Pro les quedan 2 días', 'pro', 'Comprar días']])
 })
+
+test('buzón: cada uno borra de su buzón (uno o todos) sin tocar el de los demás', async () => {
+	const s = setup()
+	const { sendInbox } = await import('../worker/inbox.ts')
+	await sendInbox(s.env as never, { to: 'all', title: 'Para todos', body: 'a' }, s.now())
+	await sendInbox(s.env as never, { to: ['ana'], title: 'Para ana', body: 'b' }, s.now())
+	const box = async (print: string, username: string) => (await s.post('/pro/inbox', { print, username })).body
+	const ids = (await box(P1, 'ana')).items.map((i: { id: number }) => i.id)
+	const forAll = ids[1]
+	const forAna = ids[0]
+	// Leo no puede borrar el de ana (no es suyo): no pasa nada
+	await s.post('/pro/inbox/hide', { print: P2, username: 'leo', ids: [forAna] })
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM inbox_read').get()?.n, 0)
+	// Ana borra el de todos: a ella no le sale (y cuenta como leído); a leo sí
+	const a = (await s.post('/pro/inbox/hide', { print: P1, username: 'ana', ids: [forAll] })).body
+	assert.deepEqual([a.items.map((i: { title: string }) => i.title), a.unread], [['Para ana'], 1])
+	assert.deepEqual((await box(P2, 'leo')).items.map((i: { title: string }) => i.title), ['Para todos'])
+	// Leer y luego borrar también vale; borrar todos deja el buzón vacío
+	await s.post('/pro/inbox/read', { print: P1, username: 'ana', ids: [forAna] })
+	assert.deepEqual((await s.post('/pro/inbox/hide', { print: P1, username: 'ana', ids: [forAna] })).body, { items: [], unread: 0 })
+})
+
+test('tiempo a la vista: una pestaña en segundo plano (sin mercados) cuenta como conectada pero no como uso', async () => {
+	const { recordLive } = await import('../worker/livehistory.ts')
+	const { heavyUse } = await import('../worker/pro.ts')
+	const s = setup()
+	const c = (u: string, subs: string[]) => ({ u, pro: false, subs, at: s.now(), seen: s.now() })
+	// ana: una pestaña a la vista y otra en segundo plano (cuenta a la vista); leo: solo en segundo plano
+	for (let i = 0; i < 3; i++) await recordLive(s.env.DB, [c('Ana', ['BANK_CUP']), c('ana', []), c('leo', [])], s.now() + i * 60_000)
+	const rows = s.db.prepare('SELECT account, minutes, active FROM live_seen ORDER BY account').all().map((r) => ({ ...r }))
+	assert.deepEqual(rows, [
+		{ account: 'ana', minutes: 3, active: 3 },
+		{ account: 'leo', minutes: 3, active: 0 },
+	])
+	// Un día de antes de contarlo (active NULL) vale lo que estuvo abierto; uno contado, solo lo que estuvo a la vista
+	const day = (i: number) => new Date(s.now() - 4 * 3600_000 - i * 86_400_000).toISOString().slice(0, 10)
+	for (const i of [1, 2, 3]) s.db.prepare('INSERT INTO live_seen (day, account, name, first_at, last_at, minutes, active, pro) VALUES (?, ?, ?, ?, ?, ?, ?, 0)').run(day(i), 'leo', 'leo', s.now(), s.now(), 600, 0)
+	assert.equal(await heavyUse(s.env.DB, 'leo', s.now()), null)
+	for (const i of [1, 2, 3]) s.db.prepare('INSERT INTO live_seen (day, account, name, first_at, last_at, minutes, active, pro) VALUES (?, ?, ?, ?, ?, ?, NULL, 0)').run(day(i), 'eva', 'eva', s.now(), s.now(), 120)
+	assert.deepEqual(await heavyUse(s.env.DB, 'eva', s.now()), { days: 3, hours: 6 })
+})

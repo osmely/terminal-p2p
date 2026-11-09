@@ -23,7 +23,7 @@ import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
 import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS } from './ratealerts.ts'
 import { offerAlertsOn, setOfferAlerts } from './offeralerts.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
-import { BODY_MAX, cleanupInbox, ctaOf, isSegment, listInbox, markRead, retireMessage, SEGMENTS, segmentAccounts, sendInbox, sentMessages, TITLE_MAX, type InboxEnv } from './inbox.ts'
+import { BODY_MAX, ctaOf, hideMessages, isSegment, listInbox, markRead, retireMessage, SEGMENTS, segmentAccounts, sendInbox, sentMessages, TITLE_MAX, type InboxEnv } from './inbox.ts'
 import { diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
 
 export interface ProEnv extends AlertEnv {
@@ -148,14 +148,15 @@ export async function attachPrint(db: D1, license: string, print: string, now: n
 export const accountOf = (username: string) => `qp:${username.toLowerCase()}`
 // Cuánto tiempo después de acabarse los días el terminal sigue avisando de que se acabaron
 const ENDED_SHOWN_MS = 7 * 86_400_000
-// «Usa mucho el terminal»: en las últimas 2 semanas, al menos 3 días y 5 horas con él abierto (live_seen)
+// «Usa mucho el terminal»: en las últimas 2 semanas, al menos 3 días y 5 horas con él a la vista (live_seen.active; en
+// los días de antes de contarlo, el total con él abierto). Una pestaña olvidada en segundo plano no cuenta
 const HEAVY_DAYS = 3
 const HEAVY_MINUTES = 300
 const HEAVY_SPAN_DAYS = 14
 export async function heavyUse(db: D1, username: string, now: number) {
 	const from = inCuba(now - HEAVY_SPAN_DAYS * 86_400_000).toISOString().slice(0, 10)
 	const r = await db
-		.prepare('SELECT COUNT(*) AS days, COALESCE(SUM(minutes), 0) AS minutes FROM live_seen WHERE account = ? AND day >= ?')
+		.prepare('SELECT COUNT(*) AS days, COALESCE(SUM(m), 0) AS minutes FROM (SELECT COALESCE(active, minutes) AS m FROM live_seen WHERE account = ? AND day >= ?) WHERE m > 0')
 		.bind(username.toLowerCase(), from)
 		.first<{ days: number; minutes: number }>()
 	return r && r.days >= HEAVY_DAYS && r.minutes >= HEAVY_MINUTES ? { days: r.days, hours: Math.round(r.minutes / 60) } : null
@@ -945,14 +946,15 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 	try {
 		// Con Pro apagado en el panel: nadie es Pro ni puede comprar, y no empiezan los días gratis. La consulta de
 		// estado sigue dejando la sesión del simulador, y los avisos de pago de QvaPay se siguen atendiendo
-		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook', 'POST /pro/telegram/webhook', 'POST /pro/telegram/unlink', 'POST /pro/diag', 'POST /pro/inbox', 'POST /pro/inbox/read'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
+		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook', 'POST /pro/telegram/webhook', 'POST /pro/telegram/unlink', 'POST /pro/diag', 'POST /pro/inbox', 'POST /pro/inbox/read', 'POST /pro/inbox/hide'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
 		// El buzón: los mensajes de tu cuenta (la que confirmó QvaPay) y marcar leídos. Va aunque Pro esté apagado
-		if (route === 'POST /pro/inbox' || route === 'POST /pro/inbox/read') {
+		if (route === 'POST /pro/inbox' || route === 'POST /pro/inbox/read' || route === 'POST /pro/inbox/hide') {
 			const b = await readBody(req)
 			const who = await readWho(req.headers.get('cookie'), printOf(b.print), env.PRO_KEY, now)
 			t.skip = true
 			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para ver tus mensajes', code: 'TP_WHO' })
 			if (route === 'POST /pro/inbox/read') await markRead(db, who.username, Array.isArray(b.ids) ? b.ids.map(Number) : [], now)
+			if (route === 'POST /pro/inbox/hide') await hideMessages(db, who.username, Array.isArray(b.ids) ? b.ids.map(Number) : [], now)
 			return json(200, await listInbox(db, who.username, now))
 		}
 		// ¿Este dispositivo es Pro?
@@ -2556,10 +2558,10 @@ async function livePage(env: ProEnv, flash: string, now: number, url: URL) {
 	const shift = (d: number) => cubaDate(from + 12 * 3600_000 + d * 86_400_000)
 	const nav = `<a class="btn" href="/admin/pro?view=envivo&d=${shift(-1)}">← ${escHtml(shift(-1).slice(5).split('-').reverse().join('/'))}</a>${isToday ? '' : `<a class="btn" href="/admin/pro?view=envivo&d=${shift(1)}">${escHtml(shift(1).slice(5).split('-').reverse().join('/'))} →</a><a class="btn" href="/admin/pro?view=envivo">Hoy</a>`}`
 	const seenTable = hist.seen.length
-		? `<div class="wrap"><table class="left"><thead><tr><th>Cuenta</th><th>Pro</th><th>Primera vez</th><th>Última vez</th><th class="num">Tiempo conectada</th></tr></thead><tbody>${hist.seen
+		? `<div class="wrap"><table class="left"><thead><tr><th>Cuenta</th><th>Pro</th><th>Primera vez</th><th>Última vez</th><th class="num">Tiempo conectada</th><th class="num">A la vista</th></tr></thead><tbody>${hist.seen
 				.map(
 					(x) =>
-						`<tr><td>${userLink(x.name)}</td><td>${x.pro ? '<span class="pill approved-ok">Pro</span>' : '<span class="note">—</span>'}</td><td>${hHM(x.first_at)}</td><td>${isToday && online.has(x.account) ? '<span class="pill approved-ok">ahora</span>' : hHM(x.last_at)}</td><td class="num">${minutesText(x.minutes)}</td></tr>`,
+						`<tr><td>${userLink(x.name)}</td><td>${x.pro ? '<span class="pill approved-ok">Pro</span>' : '<span class="note">—</span>'}</td><td>${hHM(x.first_at)}</td><td>${isToday && online.has(x.account) ? '<span class="pill approved-ok">ahora</span>' : hHM(x.last_at)}</td><td class="num">${minutesText(x.minutes)}</td><td class="num">${x.active == null ? '<span class="note">—</span>' : `${minutesText(x.active)}${x.minutes ? ` <span class="note">(${Math.round((x.active / x.minutes) * 100)}%)</span>` : ''}`}</td></tr>`,
 				)
 				.join('')}</tbody></table></div>`
 		: '<p class="empty">Nadie se conectó este día (o aún no se guardaba).</p>'
@@ -2578,7 +2580,7 @@ async function livePage(env: ProEnv, flash: string, now: number, url: URL) {
 		}
 		<h2 class="sec-title">${isToday ? 'Hoy' : escHtml(dayName)}</h2>${dayCards}
 		${panel('A lo largo del día', liveChart(hist.slots, from), { sub: 'Cuántas cuentas había conectadas a la vez: el máximo de cada 10 minutos, en hora de Cuba. Pasa el ratón por una barra para ver la franja.' })}
-		${panel('Quién se conectó', seenTable, { flush: !!hist.seen.length, sub: 'La primera y la última vez que se la vio con el terminal abierto, y cuánto tiempo en total (se mira cada minuto).' })}`,
+		${panel('Quién se conectó', seenTable, { flush: !!hist.seen.length, sub: 'La primera y la última vez que se la vio con el terminal abierto, cuánto tiempo en total y cuánto de él con la pestaña a la vista o el radar encendido (se mira cada minuto; una pestaña en segundo plano deja de contar a los 90 s). «—» en los días de antes de contarlo.' })}`,
 	)
 }
 

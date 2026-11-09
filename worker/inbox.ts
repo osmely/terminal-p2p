@@ -35,7 +35,7 @@ export async function segmentAccounts(db: D1, seg: Segment, now: number): Promis
 	const rows = await (() => {
 		if (seg === 'heavy')
 			return db
-				.prepare("SELECT account FROM live_seen WHERE day >= ? GROUP BY account HAVING COUNT(*) >= 3 AND SUM(minutes) >= 300 AND NOT EXISTS (SELECT 1 FROM pro_licenses WHERE uuid = 'qp:' || account)")
+				.prepare("SELECT account FROM live_seen WHERE day >= ? AND COALESCE(active, minutes) > 0 GROUP BY account HAVING COUNT(*) >= 3 AND SUM(COALESCE(active, minutes)) >= 300 AND NOT EXISTS (SELECT 1 FROM pro_licenses WHERE uuid = 'qp:' || account)")
 				.bind(from14)
 				.all<{ account: string }>()
 		if (seg === 'active') return db.prepare('SELECT DISTINCT account FROM live_seen WHERE day >= ?').bind(from14).all<{ account: string }>()
@@ -136,7 +136,7 @@ export async function listInbox(db: D1, account: string, now: number) {
 		.prepare(
 			`SELECT m.id, m.kind, m.title, m.body, m.cta, m.cta_label, m.created_at, r.read_at FROM inbox m
 			LEFT JOIN inbox_read r ON r.account = ?1 AND r.msg = m.id
-			WHERE m.expires_at > ?2 AND (m.audience = 'all' OR m.id IN (SELECT msg FROM inbox_to WHERE account = ?1))
+			WHERE m.expires_at > ?2 AND COALESCE(r.hidden, 0) = 0 AND (m.audience = 'all' OR m.id IN (SELECT msg FROM inbox_to WHERE account = ?1))
 			ORDER BY m.created_at DESC, m.id DESC LIMIT ${LIST_MAX}`,
 		)
 		.bind(a, now)
@@ -150,6 +150,16 @@ export async function markRead(db: D1, account: string, ids: number[], now: numb
 	const a = account.toLowerCase()
 	const ok = [...new Set(ids.filter((n) => Number.isInteger(n) && n > 0))].slice(0, LIST_MAX)
 	if (ok.length) await db.batch(ok.map((id) => db.prepare('INSERT OR IGNORE INTO inbox_read (account, msg, read_at) VALUES (?, ?, ?)').bind(a, id, now)))
+	return ok.length
+}
+
+// Borrar de tu buzón (solo los tuyos; para los demás el mensaje sigue). Cuenta como leído
+export async function hideMessages(db: D1, account: string, ids: number[], now: number) {
+	const a = account.toLowerCase()
+	const mine = new Set((await listInbox(db, a, now)).items.map((i) => i.id))
+	const ok = [...new Set(ids)].filter((id) => mine.has(id))
+	if (ok.length)
+		await db.batch(ok.map((id) => db.prepare('INSERT INTO inbox_read (account, msg, read_at, hidden) VALUES (?, ?, ?, 1) ON CONFLICT (account, msg) DO UPDATE SET hidden = 1').bind(a, id, now)))
 	return ok.length
 }
 

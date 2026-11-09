@@ -21,6 +21,7 @@
 		if (d < 86_400_000) return `hace ${Math.floor(d / 3_600_000)} h`
 		return inCuba(ms).toLocaleDateString('es', { timeZone: 'UTC', day: 'numeric', month: 'short' })
 	}
+	const TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 	const unread = () => items.filter((i) => !i.read).length
 
 	function paintBadge() {
@@ -94,15 +95,31 @@
 		} catch {}
 	}
 
+	// Borrar de tu buzón (para los demás sigue)
+	async function hide(ids) {
+		items = items.filter((i) => !ids.includes(i.id))
+		paintBadge()
+		if (panel) paintPanel()
+		try {
+			const d = await proFetch('/pro/inbox/hide', { print: pro.print, ids })
+			if (Array.isArray(d.items)) items = d.items
+		} catch {
+			load(true)
+		}
+		paintBadge()
+		if (panel) paintPanel()
+	}
+
 	function paintPanel() {
 		const list = items.length
 			? items
 					.map(
-						(it) => `<div class="inbox-item${it.read && !fresh.has(it.id) ? '' : ' new'}"><div class="inbox-item-head"><b>${esc(it.title)}</b><span>${when(it.at)}</span></div><p>${esc(it.body)}</p>${it.cta ? `<div>${ctaBtn(it, 'btn small')}</div>` : ''}</div>`,
+						(it) => `<div class="inbox-item${it.read && !fresh.has(it.id) ? '' : ' new'}"><div class="inbox-item-head"><b>${esc(it.title)}</b><span>${when(it.at)}</span><button class="inbox-del" data-del="${it.id}" title="Borrar" aria-label="Borrar este mensaje">${TRASH}</button></div><p>${esc(it.body)}</p>${it.cta ? `<div>${ctaBtn(it, 'btn small')}</div>` : ''}</div>`,
 					)
 					.join('')
 			: '<p class="inbox-empty">No tienes mensajes. Aquí te llegarán los avisos de tu cuenta y las novedades del terminal.</p>'
 		panel.querySelector('.inbox-list').innerHTML = list
+		panel.querySelector('[data-all]').hidden = items.length < 2
 	}
 
 	function openPanel() {
@@ -113,11 +130,13 @@
 		panel.className = 'inbox-panel'
 		panel.setAttribute('role', 'dialog')
 		panel.setAttribute('aria-label', 'Buzón')
-		panel.innerHTML = '<div class="inbox-panel-head"><b>Buzón</b><button class="icon-btn small" data-x aria-label="Cerrar">✕</button></div><div class="inbox-list"></div>'
+		panel.innerHTML = '<div class="inbox-panel-head"><b>Buzón</b><span class="inbox-head-act"><button class="inbox-all" data-all hidden>Borrar todos</button><button class="icon-btn small" data-x aria-label="Cerrar">✕</button></span></div><div class="inbox-list"></div>'
 		panel.addEventListener('click', (e) => {
 			const t = e.target.closest('button')
 			if (!t) return
 			if (t.dataset.x !== undefined) return closePanel()
+			if (t.dataset.del) return hide([Number(t.dataset.del)])
+			if (t.dataset.all !== undefined) return confirm('¿Borrar todos los mensajes de tu buzón?') && hide(items.map((i) => i.id))
 			const it = items.find((i) => String(i.id) === t.dataset.cta)
 			if (it) {
 				closePanel()
@@ -141,7 +160,8 @@
 		openPanel()
 	})
 	document.addEventListener('click', (e) => {
-		if (panel && !panel.contains(e.target) && e.target !== btn) closePanel()
+		// composedPath: el botón pulsado puede haberse quitado ya al repintar la lista (borrar)
+		if (panel && !e.composedPath().includes(panel) && e.target !== btn) closePanel()
 	})
 	document.addEventListener('keydown', (e) => e.key === 'Escape' && closePanel())
 	window.addEventListener('tp:inbox', () => load(true))
