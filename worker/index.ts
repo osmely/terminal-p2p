@@ -28,6 +28,7 @@ import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveOnline, liveSock
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { botHtml, loadBot } from './ratebot.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
+import { cleanupInbox } from './inbox.ts'
 import { recordBook } from './bookstats.ts'
 import { FRAMES, frameStart, isFrame, loadCandles } from './candles.ts'
 import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './analysis.ts'
@@ -398,6 +399,7 @@ async function dailyPro(env: ProEnv, at: number) {
 		await cleanupLog(env.DB, at)
 		await cleanupLive(env.DB, at)
 		await cleanupPush(env.DB, at)
+		await cleanupInbox(env.DB, at)
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
 	}

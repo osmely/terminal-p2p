@@ -1,0 +1,166 @@
+// Buzón del terminal: la campanita con los mensajes del equipo y los avisos de tu cuenta (como el fin de tus días de
+// Pro). Se piden con tu cuenta (la que confirmó QvaPay). Si llega uno con el terminal abierto, el libro en vivo lo
+// avisa (tp:inbox) y salta al momento en una tarjeta; los que llegaron con el terminal cerrado saltan al entrar
+;(() => {
+	const btn = document.getElementById('inboxBtn')
+	if (!btn) return
+	const badge = btn.querySelector('.inbox-n')
+	const POP_SHOWN = 'inbox.popped'
+	const POP_MAX_MS = 3 * 86_400_000
+	let items = []
+	let loadedFor = null
+	let lastLoad = 0
+	let panel = null
+	// Los que estaban sin leer al abrir el buzón siguen resaltados mientras está abierto
+	let fresh = new Set()
+
+	const when = (ms) => {
+		const d = Date.now() - ms
+		if (d < 60_000) return 'ahora'
+		if (d < 3_600_000) return `hace ${Math.floor(d / 60_000)} min`
+		if (d < 86_400_000) return `hace ${Math.floor(d / 3_600_000)} h`
+		return inCuba(ms).toLocaleDateString('es', { timeZone: 'UTC', day: 'numeric', month: 'short' })
+	}
+	const unread = () => items.filter((i) => !i.read).length
+
+	function paintBadge() {
+		const n = unread()
+		btn.hidden = !loadedFor
+		badge.hidden = !n
+		badge.textContent = n > 9 ? '9+' : String(n)
+		btn.title = n ? `Buzón: ${n === 1 ? '1 mensaje nuevo' : `${n} mensajes nuevos`}` : 'Buzón'
+		btn.setAttribute('aria-label', btn.title)
+	}
+
+	function act(it) {
+		if (!it.cta) return
+		if (it.cta === 'pro') return typeof showPro === 'function' && showPro()
+		window.open(it.cta, '_blank', 'noopener')
+	}
+
+	const ctaBtn = (it, cls = 'btn primary small') => (it.cta ? `<button class="${cls}" data-cta="${it.id}">${esc(it.ctaLabel || 'Abrir')}</button>` : '')
+
+	async function load(force = false) {
+		if (typeof pro === 'undefined' || !pro.print || typeof proFetch !== 'function') return
+		if (!force && loadedFor === pro.print && Date.now() - lastLoad < 60_000) return
+		lastLoad = Date.now()
+		try {
+			const d = await proFetch('/pro/inbox', { print: pro.print })
+			loadedFor = pro.print
+			items = Array.isArray(d.items) ? d.items : []
+			paintBadge()
+			if (panel) paintPanel()
+			popNewest()
+		} catch {}
+	}
+
+	// La tarjeta que salta: el más nuevo sin leer que aún no saltó (de los últimos 3 días)
+	function popNewest() {
+		const shown = new Set(store.getMine(POP_SHOWN, []))
+		const it = items.find((i) => !i.read && !shown.has(i.id) && Date.now() - i.at < POP_MAX_MS)
+		if (!it || panel) return
+		store.setMine(POP_SHOWN, [it.id, ...shown].slice(0, 50))
+		document.getElementById('inboxPop')?.remove()
+		const el = document.createElement('div')
+		el.id = 'inboxPop'
+		el.className = 'inbox-pop'
+		el.setAttribute('role', 'status')
+		el.innerHTML = `<div class="inbox-pop-head"><span class="inbox-pop-tag">${it.kind === 'system' ? 'Aviso de tu cuenta' : 'Mensaje de Terminal P2P'}</span><button class="icon-btn small" data-x aria-label="Cerrar">✕</button></div>
+			<b>${esc(it.title)}</b><p>${esc(it.body)}</p>
+			<div class="inbox-pop-act">${ctaBtn(it)}<button class="btn small" data-open>Ver buzón</button></div>`
+		el.addEventListener('click', (e) => {
+			const t = e.target.closest('button')
+			if (!t) return
+			if (t.dataset.cta) {
+				markRead([it.id])
+				act(it)
+			}
+			if (t.dataset.open) openPanel()
+			el.remove()
+		})
+		document.body.append(el)
+		document.getElementById('proNudge')?.setAttribute('hidden', '')
+	}
+
+	async function markRead(ids) {
+		const todo = ids.filter((id) => items.find((i) => i.id === id && !i.read))
+		if (!todo.length) return
+		for (const i of items) if (todo.includes(i.id)) i.read = true
+		paintBadge()
+		try {
+			const d = await proFetch('/pro/inbox/read', { print: pro.print, ids: todo })
+			if (Array.isArray(d.items)) items = d.items
+			paintBadge()
+		} catch {}
+	}
+
+	function paintPanel() {
+		const list = items.length
+			? items
+					.map(
+						(it) => `<div class="inbox-item${it.read && !fresh.has(it.id) ? '' : ' new'}"><div class="inbox-item-head"><b>${esc(it.title)}</b><span>${when(it.at)}</span></div><p>${esc(it.body)}</p>${it.cta ? `<div>${ctaBtn(it, 'btn small')}</div>` : ''}</div>`,
+					)
+					.join('')
+			: '<p class="inbox-empty">No tienes mensajes. Aquí te llegarán los avisos de tu cuenta y las novedades del terminal.</p>'
+		panel.querySelector('.inbox-list').innerHTML = list
+	}
+
+	function openPanel() {
+		document.getElementById('inboxPop')?.remove()
+		if (panel) return closePanel()
+		fresh = new Set(items.filter((i) => !i.read).map((i) => i.id))
+		panel = document.createElement('div')
+		panel.className = 'inbox-panel'
+		panel.setAttribute('role', 'dialog')
+		panel.setAttribute('aria-label', 'Buzón')
+		panel.innerHTML = '<div class="inbox-panel-head"><b>Buzón</b><button class="icon-btn small" data-x aria-label="Cerrar">✕</button></div><div class="inbox-list"></div>'
+		panel.addEventListener('click', (e) => {
+			const t = e.target.closest('button')
+			if (!t) return
+			if (t.dataset.x !== undefined) return closePanel()
+			const it = items.find((i) => String(i.id) === t.dataset.cta)
+			if (it) {
+				closePanel()
+				act(it)
+			}
+		})
+		btn.parentNode.append(panel)
+		paintPanel()
+		btn.setAttribute('aria-expanded', 'true')
+		markRead(items.filter((i) => !i.read).map((i) => i.id))
+		load(true)
+	}
+	function closePanel() {
+		panel?.remove()
+		panel = null
+		btn.setAttribute('aria-expanded', 'false')
+	}
+
+	btn.addEventListener('click', (e) => {
+		e.stopPropagation()
+		openPanel()
+	})
+	document.addEventListener('click', (e) => {
+		if (panel && !panel.contains(e.target) && e.target !== btn) closePanel()
+	})
+	document.addEventListener('keydown', (e) => e.key === 'Escape' && closePanel())
+	window.addEventListener('tp:inbox', () => load(true))
+	document.addEventListener('visibilitychange', () => !document.hidden && load())
+	window.TPInbox = { open: openPanel, load }
+
+	// Hasta que el terminal sabe la huella de tu token no se puede pedir nada; luego, cada 5 min por si el aviso en vivo
+	// no llegó (sin libro en vivo, por ejemplo)
+	let wantOpen = new URLSearchParams(location.search).get('buzon') === 'open'
+	setInterval(() => {
+		if (typeof pro === 'undefined' || !pro.print) {
+			if (loadedFor) (loadedFor = null), (items = []), paintBadge()
+			return
+		}
+		if (loadedFor !== pro.print && Date.now() - lastLoad > 20_000) {
+			load(true).then(() => {
+				if (wantOpen && loadedFor) (wantOpen = false), openPanel()
+			})
+		}
+	}, 1500)
+	setInterval(() => load(), 5 * 60_000)
+})()

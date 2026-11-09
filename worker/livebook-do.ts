@@ -133,6 +133,7 @@ export class LiveBook {
 		if (url.pathname === '/push-refresh') return (this.pushT = null), Response.json({ ok: true })
 		if (url.pathname === '/push-sim' && req.method === 'POST') return Response.json(await this.pushSim(await req.json()))
 		if (url.pathname === '/ws') return this.connect(url.searchParams.get('pro') === '1', url.searchParams.get('u') || null)
+		if (url.pathname === '/inbox' && req.method === 'POST') return Response.json(this.inboxPing(await req.json().catch(() => null)))
 		if (url.pathname === '/clients') return Response.json(this.clients())
 		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
 		if (url.pathname === '/offer') return Response.json(this.book.find(url.searchParams.get('id') ?? ''))
@@ -801,6 +802,24 @@ export class LiveBook {
 			try {
 				ws.send(msg)
 			} catch {}
+	}
+
+	// Buzón: a los terminales abiertos de esas cuentas (o de todas, sin lista) se les dice que tienen mensaje nuevo. Solo
+	// el aviso, sin el mensaje: el terminal lo pide con su cuenta
+	private inboxPing(body: unknown) {
+		const list = (body as { users?: unknown } | null)?.users
+		const users = Array.isArray(list) ? new Set(list.map((u) => String(u).toLowerCase())) : null
+		const msg = JSON.stringify({ t: 'inbox' })
+		let sent = 0
+		for (const ws of this.ctx.getWebSockets()) {
+			const u = (ws.deserializeAttachment() as Sock | null)?.u?.toLowerCase()
+			if (!u || (users && !users.has(u))) continue
+			try {
+				ws.send(msg)
+				sent++
+			} catch {}
+		}
+		return { sent }
 	}
 
 	// Quien tiene el terminal abierto: su conexión mandó señal de vida (cada 25 s) hace poco

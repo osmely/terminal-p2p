@@ -5,6 +5,7 @@
 
 import { hex, hmac } from './crypto.ts'
 import { tgEsc, type AlertEnv } from './alerts.ts'
+import { sendInbox, type InboxEnv } from './inbox.ts'
 import { deliverPush, vapidOf, type PushEnv, type PushMsg } from './push.ts'
 import { inCuba, type D1 } from './rates.ts'
 import { BOT_MENU, commandOf, HELP, JOINED, leftGroup, membersDue, miniUrl, rateCommand, saveMembers, seenGroup, type Chat } from './ratebot.ts'
@@ -113,7 +114,6 @@ export async function expiryReminders(env: BotEnv & Partial<Pick<PushEnv, 'VAPID
 	const db = env.DB
 	await db.prepare('DELETE FROM pro_tg_links WHERE created_at < ?').bind(now - LINK_MS).run()
 	const pushOn = !!vapidOf(env as PushEnv)
-	if (!env.TELEGRAM_BOT_TOKEN && !pushOn) return 0
 	const { results } = await db
 		.prepare(
 			`SELECT l.uuid, l.username, l.plan, l.expires_at, t.chat_id FROM pro_licenses l LEFT JOIN pro_telegram t ON t.license = l.uuid
@@ -142,14 +142,22 @@ export async function expiryReminders(env: BotEnv & Partial<Pick<PushEnv, 'VAPID
 				n++
 			}
 		}
+		const title = ended ? (trial ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó') : `${trial ? 'A tus días gratis de Pro' : 'A tu Pro'} ${left === 1 ? (trial ? 'les queda' : 'le queda') : trial ? 'les quedan' : 'le quedan'} ${daysText(left)}`
+		const body = ended
+			? 'Tu cuenta sigue guardada: compra días desde el terminal y sigues donde lo dejaste.'
+			: `Terminan el ${day(l.expires_at)}. Nada se cobra solo: ${buy ? 'compra días' : 'renueva'} desde ★ Pro en el terminal.`
+		// En el buzón del terminal, siempre (aunque no tenga Telegram ni avisos al móvil)
+		const ikey = `inbox-${key}`
+		if (!(await sent(l.uuid, ikey))) {
+			const r = await sendInbox(env as InboxEnv, { to: [l.username], title, body, cta: 'pro', ctaLabel: ended || buy ? 'Comprar días' : 'Renovar', kind: 'system', days: 10 }, now, fetcher)
+			if (r.id) await mark(l.uuid, ikey)
+		}
 		const pkey = `push-${key}`
 		if (pushOn && !(await sent(l.uuid, pkey))) {
 			const owners = (await db.prepare('SELECT DISTINCT owner FROM push_subs WHERE lower(username) = ?').bind(l.username.toLowerCase()).all<{ owner: string }>()).results
 			const msg: PushMsg = {
-				title: ended ? (trial ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó') : `${trial ? 'A tus días gratis de Pro' : 'A tu Pro'} ${left === 1 ? (trial ? 'les queda' : 'le queda') : trial ? 'les quedan' : 'le quedan'} ${daysText(left)}`,
-				body: ended
-					? 'Tu cuenta sigue guardada: compra días desde el terminal y sigues donde lo dejaste.'
-					: `Terminan el ${day(l.expires_at)}. Nada se cobra solo: ${buy ? 'compra días' : 'renueva'} desde ★ Pro en el terminal.`,
+				title,
+				body,
 				tag: 'tp:pro-exp',
 				url: '/?pro=open',
 				urgent: false,

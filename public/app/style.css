@@ -630,6 +630,28 @@ details.sec-box { display: block; }
 .pro-nudge-text span { color: var(--text-2); font-size: 12.5px; }
 .pro-nudge .btn { flex: none; white-space: nowrap; }
 @media (max-width: 640px) { .pro-nudge { left: 16px; right: 16px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); max-width: none; } }
+.inbox { position: relative; }
+.inbox-btn { position: relative; }
+.inbox-n { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--ask); color: #fff; font: 700 10px/16px var(--sans); text-align: center; pointer-events: none; }
+.inbox-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(360px, calc(100vw - 24px)); max-height: min(70vh, 520px); display: flex; flex-direction: column; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow); overflow: hidden; }
+.inbox-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.inbox-list { overflow-y: auto; padding: 6px; }
+.inbox-item { padding: 10px 10px 10px 12px; border-radius: 8px; border-left: 3px solid transparent; }
+.inbox-item + .inbox-item { margin-top: 2px; }
+.inbox-item.new { border-left-color: var(--accent); background: var(--accent-bg); }
+.inbox-item-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.inbox-item-head b { font-size: 13.5px; }
+.inbox-item-head span { flex: none; font-size: 11.5px; color: var(--muted); }
+.inbox-item p { margin: 4px 0 0; font-size: 12.5px; color: var(--text-2); line-height: 1.45; white-space: pre-line; }
+.inbox-item .btn { margin-top: 8px; }
+.inbox-empty { margin: 0; padding: 18px 12px; font-size: 12.5px; color: var(--muted); text-align: center; line-height: 1.5; }
+.inbox-pop { position: fixed; right: 20px; top: 68px; z-index: 46; width: min(380px, calc(100vw - 32px)); padding: 12px 14px 14px; background: var(--surface); border: 1px solid var(--accent); border-radius: var(--r-sm); box-shadow: var(--shadow); font-size: 13px; animation: inbox-in .25s ease-out; }
+.inbox-pop-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.inbox-pop-tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); }
+.inbox-pop p { margin: 4px 0 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; white-space: pre-line; }
+.inbox-pop-act { display: flex; gap: 8px; margin-top: 10px; }
+@keyframes inbox-in { from { opacity: 0; transform: translateY(-8px); } }
+@media (max-width: 640px) { .inbox-pop { left: 16px; right: 16px; width: auto; top: 60px; } .inbox-panel { position: fixed; left: 12px; right: 12px; top: 56px; width: auto; max-height: calc(100dvh - 80px); } }
 .toast { position: fixed; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 50; background: var(--surface); border: 1px solid var(--line-strong); padding: 10px 16px; border-radius: var(--r-sm); font-size: 13px; box-shadow: var(--shadow); }
 .toast.bad { border-color: var(--ask); color: var(--ask); }
 .tip { position: fixed; z-index: 30; pointer-events: none; max-width: 290px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 10px 12px; font-size: 12px; box-shadow: var(--shadow); }

@@ -23,6 +23,7 @@ import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
 import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS } from './ratealerts.ts'
 import { offerAlertsOn, setOfferAlerts } from './offeralerts.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
+import { BODY_MAX, cleanupInbox, ctaOf, isSegment, listInbox, markRead, retireMessage, SEGMENTS, segmentAccounts, sendInbox, sentMessages, TITLE_MAX, type InboxEnv } from './inbox.ts'
 import { diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
 
 export interface ProEnv extends AlertEnv {
@@ -147,6 +148,18 @@ export async function attachPrint(db: D1, license: string, print: string, now: n
 export const accountOf = (username: string) => `qp:${username.toLowerCase()}`
 // Cuánto tiempo después de acabarse los días el terminal sigue avisando de que se acabaron
 const ENDED_SHOWN_MS = 7 * 86_400_000
+// «Usa mucho el terminal»: en las últimas 2 semanas, al menos 3 días y 5 horas con él abierto (live_seen)
+const HEAVY_DAYS = 3
+const HEAVY_MINUTES = 300
+const HEAVY_SPAN_DAYS = 14
+export async function heavyUse(db: D1, username: string, now: number) {
+	const from = inCuba(now - HEAVY_SPAN_DAYS * 86_400_000).toISOString().slice(0, 10)
+	const r = await db
+		.prepare('SELECT COUNT(*) AS days, COALESCE(SUM(minutes), 0) AS minutes FROM live_seen WHERE account = ? AND day >= ?')
+		.bind(username.toLowerCase(), from)
+		.first<{ days: number; minutes: number }>()
+	return r && r.days >= HEAVY_DAYS && r.minutes >= HEAVY_MINUTES ? { days: r.days, hours: Math.round(r.minutes / 60) } : null
+}
 export type DayKind = 'trial' | 'purchase' | 'gift' | 'refund' | 'adjust'
 
 export async function addDays(
@@ -932,7 +945,16 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 	try {
 		// Con Pro apagado en el panel: nadie es Pro ni puede comprar, y no empiezan los días gratis. La consulta de
 		// estado sigue dejando la sesión del simulador, y los avisos de pago de QvaPay se siguen atendiendo
-		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook', 'POST /pro/telegram/webhook', 'POST /pro/telegram/unlink', 'POST /pro/diag'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
+		if (!(await proEnabled(db, now)) && !['POST /pro/status', 'POST /pro/leave', 'POST /pro/rotate', 'POST /pro/webhook', 'POST /api/pro/webhook', 'POST /pro/telegram/webhook', 'POST /pro/telegram/unlink', 'POST /pro/diag', 'POST /pro/inbox', 'POST /pro/inbox/read'].includes(route)) return json(404, { error: 'Pro aún no está disponible' })
+		// El buzón: los mensajes de tu cuenta (la que confirmó QvaPay) y marcar leídos. Va aunque Pro esté apagado
+		if (route === 'POST /pro/inbox' || route === 'POST /pro/inbox/read') {
+			const b = await readBody(req)
+			const who = await readWho(req.headers.get('cookie'), printOf(b.print), env.PRO_KEY, now)
+			t.skip = true
+			if (!who) return json(403, { error: 'Conecta tu cuenta de QvaPay para ver tus mensajes', code: 'TP_WHO' })
+			if (route === 'POST /pro/inbox/read') await markRead(db, who.username, Array.isArray(b.ids) ? b.ids.map(Number) : [], now)
+			return json(200, await listInbox(db, who.username, now))
+		}
 		// ¿Este dispositivo es Pro?
 		if (route === 'POST /pro/status') {
 			const b = await readBody(req)
@@ -983,7 +1005,9 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 							.bind(accountOf(username), now, now - ENDED_SHOWN_MS)
 							.first<{ plan: string; expires_at: number }>()
 					: null
-			const res = json(200, { ...(await statusOf(env, l, now)), canTrial, trialUsed, ...(ended ? { ended: { plan: ended.plan, at: ended.expires_at } } : {}) })
+			// Usa mucho el terminal y nunca probó Pro: el terminal le invita a probarlo (sus días y horas de las últimas 2 semanas)
+			const usage = canTrial ? await heavyUse(db, username!, now) : null
+			const res = json(200, { ...(await statusOf(env, l, now)), canTrial, trialUsed, ...(ended ? { ended: { plan: ended.plan, at: ended.expires_at } } : {}), ...(usage ? { usage } : {}) })
 			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
 			return res
 		}
@@ -1343,8 +1367,10 @@ function activityRow(r: TimelineRow) {
 		what = '🛠 Tú, en el panel'
 		detail = escHtml(r.detail ?? r.kind)
 	} else if (r.src === 'tg') {
-		what = '✈️ Aviso por Telegram'
-		detail = r.kind.startsWith('exp3') ? 'Le quedan 3 días o menos' : r.kind.startsWith('exp0') ? 'Se le acabaron los días' : escHtml(r.kind)
+		const via = r.kind.match(/^(push|inbox)-/)?.[1]
+		const k = via ? r.kind.slice(via.length + 1) : r.kind
+		what = via === 'push' ? '📱 Aviso al móvil' : via === 'inbox' ? '🔔 Aviso en el buzón' : '✈️ Aviso por Telegram'
+		detail = k.startsWith('exp3') ? 'Le quedan 3 días o menos' : k.startsWith('exp0') ? 'Se le acabaron los días' : escHtml(r.kind)
 	} else if (r.src === 'diag') {
 		what = '📋 Diagnóstico'
 		detail = `<a href="/admin/pro?diag=${Number(f[0])}">Ver lo que envió</a> · ${Number(f[1])} líneas${f.slice(2).join('|') ? ` · «${escHtml(f.slice(2).join('|').slice(0, 200))}»` : ''}`
@@ -1411,7 +1437,7 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 			env,
 			'pro-cuentas',
 			`@${u}`,
-			`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>${pageHead(`@${u}${blockPill}`, 'No tiene cuenta Pro todavía. Puedes darle días: se le activan al conectar su cuenta en el terminal.')}${notice}${panel('Dar o quitar días', daysForm(name))}${panel('Acceso al terminal', accessForm(name, block, now), { sub: ACCESS_HELP })}${await activityPanel(env, name, url)}`,
+			`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>${pageHead(`@${u}${blockPill}`, 'No tiene cuenta Pro todavía. Puedes darle días: se le activan al conectar su cuenta en el terminal.', writeTo(u))}${notice}${panel('Dar o quitar días', daysForm(name))}${panel('Acceso al terminal', accessForm(name, block, now), { sub: ACCESS_HELP })}${await activityPanel(env, name, url)}`,
 		)
 	const all = <T>(sql: string) => db.prepare(sql).bind(id).all<T>().then((r) => r.results)
 	const tg = await db.prepare('SELECT linked_at FROM pro_telegram WHERE license = ?').bind(id).first<{ linked_at: number }>()
@@ -1457,7 +1483,7 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 		'pro-cuentas',
 		`@${u}`,
 		`<a class="crumb" href="/admin/pro?view=cuentas">← Cuentas</a>
-		${pageHead(`@${u} ${state}${blockPill}`, `Cuenta <span class="mono">${escHtml(l.uuid)}</span> · ${tg ? `avisos por Telegram desde el ${hDay(tg.linked_at)}` : 'sin avisos por Telegram'} · días gratis usados: ${trials.map((t) => `${escHtml(t.key.startsWith('print:') ? 'un dispositivo' : t.key)} (${hDay(t.created_at)})`).join(', ') || 'ninguno'}`, suspend)}
+		${pageHead(`@${u} ${state}${blockPill}`, `Cuenta <span class="mono">${escHtml(l.uuid)}</span> · ${tg ? `avisos por Telegram desde el ${hDay(tg.linked_at)}` : 'sin avisos por Telegram'} · días gratis usados: ${trials.map((t) => `${escHtml(t.key.startsWith('print:') ? 'un dispositivo' : t.key)} (${hDay(t.created_at)})`).join(', ') || 'ninguno'}`, `${writeTo(u)} ${suspend}`)}
 		${notice}
 		<div class="cards">
 			<div class="card"><span>Pro hasta</span><b>${hDay(l.expires_at)}</b><small>${left > 0 ? `${left} días` : 'vencido'} · ${escHtml((l.plan in PLANS ? 'comprados' : (({ trial: 'gratis', gift: 'regalados' } as Record<string, string>)[l.plan] ?? l.plan)))}</small></div>
@@ -1756,6 +1782,47 @@ async function incidentsPage(env: ProEnv, notice: string, now: number, url?: URL
 	)
 }
 
+// Desde la ficha: escribirle al buzón del terminal
+const writeTo = (u: string) => `<a class="btn ghost" href="/admin/pro?view=buzon&amp;to=${encodeURIComponent(u)}">Escribirle al buzón</a>`
+
+// El buzón del panel: escribir un mensaje y lo que se ha mandado (a cuántos, cuántos lo leyeron)
+async function inboxPage(env: ProEnv, notice: string, now: number, url?: URL) {
+	const to = (url?.searchParams.get('to') ?? '').replace(/^@/, '')
+	const sizes = await Promise.all((Object.keys(SEGMENTS) as (keyof typeof SEGMENTS)[]).map(async (k) => [k, (await segmentAccounts(env.DB, k, now)).length] as const))
+	const opts = [
+		`<option value="users"${to ? ' selected' : ''}>Usuarios concretos</option>`,
+		...sizes.map(([k, n]) => `<option value="seg:${k}">${escHtml(SEGMENTS[k])} (${n.toLocaleString('en-US')})</option>`),
+		'<option value="all">Todos</option>',
+	].join('')
+	const form = `<div class="panel-b"><form method="post" onsubmit="var a=this.audience.value;return confirm(a==='all'?'¿Mandar a TODOS los usuarios?':a.indexOf('seg:')===0?'¿Mandar a '+this.audience.selectedOptions[0].text+'?':'¿Mandar el mensaje?')" style="display:grid;gap:10px;max-width:720px">
+		<input type="hidden" name="action" value="inbox-send">
+		<label class="note">A quién<br><select name="audience" style="width:100%" onchange="this.form.to.parentNode.style.display=this.value==='users'?'':'none'">${opts}</select></label>
+		<label class="note">Usuarios de QvaPay (separados por coma o espacio)<br><input name="to" value="${escHtml(to)}" placeholder="thebear, otrousuario" style="width:100%"></label>
+		<label class="note">Título<br><input name="title" maxlength="${TITLE_MAX}" required style="width:100%" placeholder="Tienes 7 días de Pro gratis"></label>
+		<label class="note">Texto<br><textarea name="body" maxlength="${BODY_MAX}" required style="min-height:110px;font:inherit" placeholder="Lo que quieras contarle"></textarea></label>
+		<div class="row"><label class="note" style="flex:1 1 200px">Botón (opcional): «pro» abre Pro, o una dirección https<br><input name="cta" placeholder="pro" style="width:100%"></label><label class="note" style="flex:1 1 160px">Texto del botón<br><input name="cta_label" maxlength="30" placeholder="Probar Pro" style="width:100%"></label></div>
+		<label class="note" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="push" value="1" style="width:auto;margin:0"> enviarlo también al móvil (a quien activó los avisos)</label>
+		<div><button>Mandar</button> <span class="note">Le salta al momento a quien tiene el terminal abierto; el resto lo ve al entrar. Caduca a los 30 días.</span></div>
+	</form></div>`
+	const sent = await sentMessages(env.DB)
+	const rows = sent
+		.map((m) => {
+			const live = m.expires_at > now
+			const aud = m.audience === 'all' ? 'Todos' : m.segment && Object.hasOwn(SEGMENTS, m.segment) ? `${escHtml(SEGMENTS[m.segment as keyof typeof SEGMENTS])} · ${count(m.recipients, 'cuenta', 'cuentas')}` : count(m.recipients, 'cuenta', 'cuentas')
+			const retire = live && m.kind === 'admin' ? `<form method="post" style="display:inline" onsubmit="return confirm('¿Retirar el mensaje de todos los buzones?')"><input type="hidden" name="action" value="inbox-retire"><input type="hidden" name="id" value="${m.id}"><button class="ghost">Retirar</button></form>` : ''
+			return `<tr><td>${hWhen(m.created_at)}</td><td style="white-space:normal"><b>${escHtml(m.title)}</b><br><span class="note">${escHtml(m.body.slice(0, 140))}${m.body.length > 140 ? '…' : ''}</span>${m.cta ? `<br><span class="note">botón «${escHtml(m.cta_label ?? '')}» → ${escHtml(m.cta)}</span>` : ''}</td><td style="white-space:normal">${m.kind === 'system' ? '<span class="pill">sistema</span> ' : ''}${aud}</td><td class="num">${m.reads.toLocaleString('en-US')}</td><td class="num">${m.pushed ? m.pushed.toLocaleString('en-US') : '—'}</td><td>${live ? `hasta el ${hDay(m.expires_at)}` : '<span class="note">caducado</span>'}</td><td class="num">${retire}</td></tr>`
+		})
+		.join('')
+	return proPage(
+		env,
+		'pro-buzon',
+		'Buzón',
+		`${pageHead('Buzón', 'Mensajes al buzón del terminal: a usuarios concretos, a un grupo o a todos. Salen en la campanita del terminal y, a quien lo tiene abierto, le saltan al momento.')}${notice}
+		${panel('Escribir', form)}
+		${panel('Mandados', `<div class="wrap"><table class="left"><thead><tr><th>Cuándo</th><th>Mensaje</th><th>A quién</th><th class="num">Leído</th><th class="num">Móviles</th><th>Se ve</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">Aún no se ha mandado nada.</td></tr>'}</tbody></table></div>`, { flush: true })}`,
+	)
+}
+
 async function proExport(env: ProEnv, kind: string, now: number) {
 	const db = env.DB
 	const day = new Date(now).toISOString().slice(0, 10)
@@ -2015,9 +2082,37 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 				await db.prepare('UPDATE pro_licenses SET revoked = ?, updated_at = ? WHERE uuid = ? AND merged_into IS NULL').bind(action === 'revoke' ? 1 : 0, now, uuid).run()
 				notice = `<p class="ok">${action === 'revoke' ? 'Cuenta suspendida: deja de ser Pro (sus días y dispositivos se guardan)' : 'Cuenta reactivada: vuelve a ser Pro con sus días'}.</p>`
 			}
+			// Buzón: un mensaje a una cuenta, a varias, a un grupo o a todos; salta al momento a quien tiene el terminal
+			// abierto y, si se marca, también al móvil
+			if (action === 'inbox-send') {
+				const aud = String(f.get('audience') ?? '')
+				const title = String(f.get('title') ?? '').trim()
+				const body = String(f.get('body') ?? '').trim()
+				if (!title || !body) throw new ProError(400, 'Falta el título o el texto del mensaje')
+				const rawCta = String(f.get('cta') ?? '').trim()
+				if (rawCta && !ctaOf(rawCta)) throw new ProError(400, 'El botón solo puede abrir Pro («pro») o una dirección https')
+				let to: 'all' | string[]
+				let segment: string | null = null
+				if (aud === 'all') to = 'all'
+				else if (aud === 'users') {
+					to = String(f.get('to') ?? '').split(/[\s,;]+/).filter(Boolean)
+					if (!to.length) throw new ProError(400, 'Escribe al menos un usuario')
+				} else if (aud.startsWith('seg:') && isSegment(aud.slice(4))) {
+					segment = aud.slice(4)
+					to = await segmentAccounts(db, aud.slice(4) as keyof typeof SEGMENTS, now)
+					if (!to.length) throw new ProError(400, `Nadie en «${SEGMENTS[segment as keyof typeof SEGMENTS]}» ahora mismo: no se mandó`)
+				} else throw new ProError(400, 'Elige a quién va')
+				const r = await sendInbox(env as InboxEnv, { to, title, body, cta: rawCta || null, ctaLabel: String(f.get('cta_label') ?? ''), segment, actor: 'panel', push: f.get('push') === '1' }, now, fetcher)
+				if (!r.id) throw new ProError(400, 'Ningún usuario válido')
+				notice = `<p class="ok">Mensaje mandado ${to === 'all' ? 'a todos' : `a ${count(r.recipients, 'cuenta', 'cuentas')}`}: le saltó al momento a ${count(r.live, 'terminal abierto', 'terminales abiertos')}${f.get('push') === '1' ? ` y llegó a ${count(r.pushed, 'móvil', 'móviles')}` : ''}.</p>`
+			}
+			if (action === 'inbox-retire') {
+				await retireMessage(db, Number(f.get('id')), now)
+				notice = '<p class="ok">Mensaje retirado: ya no se ve en ningún buzón.</p>'
+			}
 			// Todo lo que sale bien queda en el registro: qué, sobre quién y lo que dijo el panel
 			if (action && notice.startsWith('<p class="ok">')) {
-				const target = ['username', 'u', 'checkout', 'id', 'invoice', 'uuid', 'license'].map((k) => String(f.get(k) ?? '')).find(Boolean) ?? null
+				const target = ['username', 'u', 'to', 'checkout', 'id', 'invoice', 'uuid', 'license'].map((k) => String(f.get(k) ?? '')).find(Boolean) ?? null
 				const detail = notice.replace(/<button[\s\S]*?<\/button>/g, '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 300)
 				await db.prepare('INSERT INTO pro_audit (at, action, target, detail) VALUES (?, ?, ?, ?)').bind(now, action, target, detail).run()
 			}
@@ -2045,6 +2140,7 @@ async function panelResponse(req: Request, env: ProEnv, now: number, fetcher: ty
 	if (view === 'cuentas') return accountsPage(env, flash, now, url)
 	if (view === 'envivo') return livePage(env, flash, now, url)
 	if (view === 'incidencias') return incidentsPage(env, flash, now, url)
+	if (view === 'buzon') return inboxPage(env, flash, now, url)
 	if (q) return searchPage(env, flash, now, q, url)
 	return homePage(env, flash, now)
 }

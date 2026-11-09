@@ -91,13 +91,15 @@ const daysLeft = () => Math.max(0, Math.ceil((pro.expiresAt - Date.now()) / 86_4
 const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
 // A 3 días o menos del fin (y hasta una semana después de acabarse), un aviso que se queda a la vista con el botón de
 // comprar días. Muchos no conectan Telegram: sin esto, nadie les decía que se les acababa. Se cierra hasta mañana
-// (antes del fin) o para siempre (ya acabado)
+// (antes del fin) o para siempre (ya acabado). Y a quien usa mucho el terminal sin haber probado Pro, la invitación a
+// sus días gratis
 const NUDGE_MS = 3 * 86_400_000
 function renderProNudge() {
 	document.getElementById('proNudge')?.remove()
 	if (!pro.enabled) return
 	const today = new Date().toDateString()
 	let key, html
+	let buy = 'Comprar días'
 	if (pro.active && pro.expiresAt - Date.now() <= NUDGE_MS) {
 		key = `left:${pro.expiresAt}:${today}`
 		const n = daysLeft()
@@ -106,13 +108,18 @@ function renderProNudge() {
 	} else if (!pro.active && pro.ended) {
 		key = `ended:${pro.ended.at}`
 		html = `<b>🔔 ${pro.ended.plan === 'trial' ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó'}</b><span>El ${proDate(pro.ended.at)}. Tu cuenta sigue guardada: compra días y sigues donde lo dejaste.</span>`
+	} else if (!pro.active && pro.canTrial && pro.usage) {
+		// Lo usa mucho y nunca probó Pro: la invitación, una vez por semana si la cierra
+		key = `try:${Math.floor(Date.now() / (7 * 86_400_000))}`
+		buy = `Probar ${proTrialDays} días gratis`
+		html = `<b>★ Llevas ${pro.usage.hours} horas con el terminal en ${daysText(pro.usage.days)}</b><span>Prueba Pro ${proTrialDays} días gratis: radar, precio automático, velas y más. Nada se cobra solo.</span>`
 	} else return
 	if (store.getMine('pro.nudgeClosed', '') === key) return
 	const el = document.createElement('div')
 	el.id = 'proNudge'
 	el.className = 'pro-nudge'
 	el.setAttribute('role', 'status')
-	el.innerHTML = `<div class="pro-nudge-text">${html}</div><button class="btn primary sm" data-nudge="buy">Comprar días</button><button class="icon-btn small" data-nudge="close" title="Cerrar" aria-label="Cerrar">✕</button>`
+	el.innerHTML = `<div class="pro-nudge-text">${html}</div><button class="btn primary sm" data-nudge="buy">${buy}</button><button class="icon-btn small" data-nudge="close" title="Cerrar" aria-label="Cerrar">✕</button>`
 	el.addEventListener('click', (e) => {
 		const b = e.target.closest('[data-nudge]')
 		if (!b) return
@@ -129,7 +136,7 @@ function applyPro(s) {
 	// se recarga para que la orden inteligente y el radar desaparezcan de la memoria
 	if (pro.loaded && !s.pro) return location.reload()
 	// Bloqueada desde el panel: Pro ni se ofrece
-	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null, ended: !s.pro && s.ended?.at ? s.ended : null })
+	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null, ended: !s.pro && s.ended?.at ? s.ended : null, usage: !s.pro && s.canTrial && s.usage?.hours ? s.usage : null })
 	if (Array.isArray(s.plans)) proPlans = s.plans
 	if (s.trialDays > 0) proTrialDays = s.trialDays
 

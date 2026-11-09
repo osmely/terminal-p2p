@@ -120,6 +120,11 @@ function liveConnect() {
 			window.dispatchEvent(new CustomEvent('tp:online'))
 			return
 		}
+		// Mensaje nuevo en el buzón: el terminal lo pide con tu cuenta
+		if (m.t === 'inbox') {
+			window.dispatchEvent(new CustomEvent('tp:inbox'))
+			return
+		}
 		// Una operación apuntada en las velas (Pro): el terminal la suma a la vela en curso
 		if (m.t === 'candle' && isTick(m.coin ?? null)) {
 			window.dispatchEvent(new CustomEvent('tp:candle', { detail: m }))

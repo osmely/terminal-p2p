@@ -1104,6 +1104,31 @@ test('fin de días: aviso al móvil aunque no tenga Telegram, y al acabarse el t
 	assert.equal((await s.post('/pro/status', { print: P2, username: 'leo' })).body.ended, undefined)
 })
 
+test('invitación a probar Pro: solo a quien usa mucho el terminal y aún puede probarlo', async () => {
+	const s = setup()
+	const seen = (user: string, days: number, minutes: number) => {
+		for (let i = 0; i < days; i++) {
+			const day = new Date(s.now() - 4 * 3600_000 - i * 86_400_000).toISOString().slice(0, 10)
+			s.db.prepare('INSERT INTO live_seen (day, account, name, first_at, last_at, minutes, pro) VALUES (?, ?, ?, ?, ?, ?, 0)').run(day, user, user, s.now(), s.now(), minutes)
+		}
+	}
+	seen('ana', 4, 120) // 4 días, 8 horas
+	seen('leo', 2, 400) // muchas horas, pocos días
+	seen('eva', 5, 30) // muchos días, poco rato
+	const st = async (print: string, username: string) => (await s.post('/pro/status', { print, username })).body
+	assert.deepEqual((await st(P1, 'ana')).usage, { days: 4, hours: 8 })
+	assert.equal((await st(P2, 'leo')).usage, undefined)
+	assert.equal((await st(P3, 'eva')).usage, undefined)
+	// Lo de hace más de 2 semanas no cuenta
+	s.tick(15 * 86_400_000)
+	assert.equal((await st(P1, 'ana')).usage, undefined)
+	seen('ana', 3, 120)
+	assert.deepEqual((await st(P1, 'ana')).usage, { days: 3, hours: 6 })
+	// Con los días gratis activados (o ya usados) no se le invita
+	await s.trial(P1, 'ana')
+	assert.equal((await st(P1, 'ana')).usage, undefined)
+})
+
 test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto escrito aquí y tope por hora', async () => {
 	const { webhookSecret } = await import('../worker/userbot.ts')
 	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot' })
@@ -1653,4 +1678,67 @@ test('cuánto se devuelve (solo por error en el pago): lo pagado menos los días
 	s.tick(8 * D)
 	assert.match(await admin(undefined, '?u=max'), /ya usó todos sus días/)
 	assert.match(await admin({ action: 'refund', checkout: old.checkout.id, note: 'x' }), /no queda nada que devolver/)
+})
+
+test('buzón: el panel escribe a usuarios concretos, a un grupo o a todos; salta en vivo y cada uno ve solo lo suyo', async () => {
+	const pings: unknown[] = []
+	const LIVE = { idFromName: () => 'book', get: () => ({ fetch: async (_u: string, init?: RequestInit) => (pings.push(JSON.parse(String(init?.body))), Response.json({ sent: 1 })) }) }
+	const s = setup({ LIVE } as never)
+	const admin = (fields?: Record<string, string>, query = '') =>
+		proAdmin(
+			new Request(`https://app.terminalp2p.com/admin/pro${query}`, { method: fields ? 'POST' : 'GET', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: fields ? new URLSearchParams(fields) : undefined }),
+			s.env,
+			s.now(),
+		).then((r) => r.text())
+	const box = async (print: string, username: string) => (await s.post('/pro/inbox', { print, username })).body
+	// Sin saber de quién es el token, nada
+	assert.equal((await s.post('/pro/inbox', { print: P1 })).status, 403)
+	assert.deepEqual(await box(P1, 'ana'), { items: [], unread: 0 })
+	// A una cuenta (con @ y mayúsculas da igual): solo ella lo ve, y el libro en vivo avisa solo a su terminal
+	assert.match(await admin({ action: 'inbox-send', audience: 'users', to: '@Ana', title: 'Hola', body: 'Prueba Pro', cta: 'pro', cta_label: 'Probar' }), /Mensaje mandado a 1 cuenta: le saltó al momento a 1 terminal abierto/)
+	assert.deepEqual(pings.at(-1), { users: ['ana'] })
+	let a = await box(P1, 'ana')
+	assert.deepEqual([a.unread, a.items[0].title, a.items[0].cta, a.items[0].ctaLabel, a.items[0].kind], [1, 'Hola', 'pro', 'Probar', 'admin'])
+	assert.equal((await box(P2, 'leo')).unread, 0)
+	// A todos: le llega también a quien aún no existía en ninguna lista
+	await admin({ action: 'inbox-send', audience: 'all', title: 'Novedad', body: 'Mercado nuevo' })
+	assert.deepEqual(pings.at(-1), { users: null })
+	assert.deepEqual((await box(P2, 'leo')).items.map((i: { title: string }) => i.title), ['Novedad'])
+	a = await box(P1, 'ana')
+	assert.deepEqual([a.unread, a.items.map((i: { title: string }) => i.title)], [2, ['Novedad', 'Hola']])
+	// Leer: solo cuenta para quien lo lee
+	a = (await s.post('/pro/inbox/read', { print: P1, username: 'ana', ids: a.items.map((i: { id: number }) => i.id) })).body
+	assert.equal(a.unread, 0)
+	assert.equal((await box(P2, 'leo')).unread, 1)
+	// El botón solo abre Pro o una dirección https; sin texto no se manda
+	assert.match(await admin({ action: 'inbox-send', audience: 'all', title: 'x', body: 'y', cta: 'javascript:alert(1)' }), /solo puede abrir Pro/)
+	assert.match(await admin({ action: 'inbox-send', audience: 'all', title: '', body: 'y' }), /Falta el título/)
+	// Un grupo: los que usan mucho el terminal sin haber probado Pro (se resuelve al mandar)
+	for (let i = 0; i < 3; i++) s.db.prepare('INSERT INTO live_seen (day, account, name, first_at, last_at, minutes, pro) VALUES (?, ?, ?, ?, ?, ?, 0)').run(new Date(s.now() - 4 * 3600_000 - i * 86_400_000).toISOString().slice(0, 10), 'eva', 'eva', s.now(), s.now(), 200)
+	assert.match(await admin(undefined, '?view=buzon'), /Usan mucho el terminal y nunca probaron Pro \(1\)/)
+	assert.match(await admin({ action: 'inbox-send', audience: 'seg:heavy', title: 'Te invitamos', body: '7 días gratis' }), /a 1 cuenta/)
+	assert.deepEqual((await box(P3, 'eva')).items.map((i: { title: string }) => i.title), ['Te invitamos', 'Novedad'])
+	assert.match(await admin({ action: 'inbox-send', audience: 'seg:trial', title: 'x', body: 'y' }), /Nadie en/)
+	// El panel lo lista con cuántos lo leyeron, y se puede retirar
+	const page = await admin(undefined, '?view=buzon')
+	assert.match(page, /Te invitamos/)
+	const id = (s.db.prepare("SELECT id FROM inbox WHERE title = 'Novedad'").get() as { id: number }).id
+	assert.match(await admin({ action: 'inbox-retire', id: String(id) }), /Mensaje retirado/)
+	assert.deepEqual((await box(P2, 'leo')).items, [])
+	// Caduca a los 30 días y se borra
+	s.tick(31 * 86_400_000)
+	const { cleanupInbox } = await import('../worker/inbox.ts')
+	await cleanupInbox(s.env.DB, s.now())
+	assert.deepEqual([s.db.prepare('SELECT COUNT(*) AS n FROM inbox').get()?.n, s.db.prepare('SELECT COUNT(*) AS n FROM inbox_to').get()?.n, s.db.prepare('SELECT COUNT(*) AS n FROM inbox_read').get()?.n], [0, 0, 0])
+})
+
+test('buzón: el fin de los días de Pro llega también al buzón, aunque no tenga Telegram ni avisos al móvil, una vez', async () => {
+	const { expiryReminders } = await import('../worker/userbot.ts')
+	const s = setup()
+	await s.trial(P1, 'ana')
+	s.tick(5 * 86_400_000) // le quedan 2 días
+	await expiryReminders(s.env as never, s.now())
+	await expiryReminders(s.env as never, s.now())
+	const a = (await s.post('/pro/inbox', { print: P1, username: 'ana' })).body
+	assert.deepEqual(a.items.map((i: { kind: string; title: string; cta: string; ctaLabel: string }) => [i.kind, i.title, i.cta, i.ctaLabel]), [['system', 'A tus días gratis de Pro les quedan 2 días', 'pro', 'Comprar días']])
 })
