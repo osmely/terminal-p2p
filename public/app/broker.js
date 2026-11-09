@@ -1753,6 +1753,7 @@ async function showPeer(user) {
 	const p = d.profile ?? tradeProfile(user)
 	const known = p ? null : knownPeer(user)
 	if (p?.uuid) watchOnline([{ id: p.uuid, u: p.username }])
+	const qpId = p?.uuid ?? tradePeerId(user)
 	const name = p?.username ?? user
 	rememberFace(name, p?.image)
 	const me = myUsername()
@@ -1809,6 +1810,7 @@ async function showPeer(user) {
 			${stat('Valoración', rating != null ? `⭐ ${rating.toFixed(2)}` : '—', p ? `${p.ratings.toLocaleString('en-US')} valoraciones` : '')}
 			${stat('Ofertas abiertas', String(d.offers.length), d.offers.length ? `${fmtM(d.offers.reduce((s, o) => s + o.usd, 0))} USD en total` : '')}
 		</div>
+		${qpId ? (window.TPPro?.active ? '<div id="peerQp" class="peer-qp"></div>' : `<button type="button" class="peer-qp-up" data-peer-pro><b>★ Pro</b> Mira su actividad en todo el P2P de QvaPay: operaciones de 30 días, completadas, canceladas y sus estrellas</button>`) : ''}
 		${rank ? `<p class="rank-line">🏆 Ranking: ${esc(rank)}</p>` : ''}
 		${signals.length ? `<ul class="peer-signals">${signals.map(([k, t]) => `<li class="${k}">${esc(t)}</li>`).join('')}</ul>` : ''}
 		<div><p class="hint">Ofertas abiertas ahora</p>${offers ? `<div class="peer-offers">${offers}</div>` : '<p class="muted small">No tiene ofertas publicadas ahora.</p>'}</div>
@@ -1824,6 +1826,43 @@ async function showPeer(user) {
 	</div>`
 	for (const b of $('modalBody').querySelectorAll('[data-peer-offer]')) b.onclick = () => showTakeOfferById(b.dataset.peerOffer)
 	for (const b of $('modalBody').querySelectorAll('[data-peer-trade]')) b.onclick = () => openTrade(b.dataset.peerTrade, b.dataset.order || null)
+	const up = $('modalBody').querySelector('[data-peer-pro]')
+	if (up) up.onclick = () => (closeModal(), typeof showPro === 'function' && showPro())
+	if (qpId && window.TPPro?.active) showPeerStats(qpId)
+}
+
+// El uuid de QvaPay de un usuario por tus operaciones con él: quien aplica a tu oferta sin tener nada publicado no
+// trae el perfil entero, pero sí su uuid
+function tradePeerId(user) {
+	const u = user.toLowerCase()
+	return bk.trades.find((x) => x.counterparty?.username?.toLowerCase() === u && x.counterparty.uuid)?.counterparty.uuid ?? null
+}
+
+// ★ Pro: su actividad en el P2P de QvaPay (de todo QvaPay, no solo del terminal). Llega aparte y, si no se puede, el
+// bloque no sale. Sin volumen ni mercados: en QvaPay eso solo lo ven las cuentas GOLD
+async function showPeerStats(uuid) {
+	let s
+	try {
+		const r = await fetch(`/data/peer-stats?id=${encodeURIComponent(uuid)}&l=${encodeURIComponent(window.TPPro.license ?? '')}`)
+		if (!r.ok) throw new Error()
+		s = await r.json()
+	} catch {
+		$('peerQp')?.remove()
+		return
+	}
+	const box = $('peerQp')
+	if (!box) return // la cerraron o abrieron otra ficha
+	const stat = (label, value, sub = '') => `<div class="peer-stat"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
+	const since = s.since ? cubaFmt(Date.parse(s.since), { month: 'short', year: 'numeric' }) : null
+	const most = Math.max(1, ...Object.values(s.stars))
+	const stars = ['5', '4', '3', '2', '1'].map((k) => `<div class="qp-star"><span>${k}★</span><i style="--w:${(s.stars[k] / most) * 100}%"></i><b>${s.stars[k].toLocaleString('en-US')}</b></div>`).join('')
+	box.innerHTML = `<p class="hint">★ Su actividad en el P2P de QvaPay${since ? ` · desde ${esc(since)}` : ''}</p>
+		<div class="peer-stats">
+			${stat('Últimos 30 días', `${s.ops30d.toLocaleString('en-US')} ops`)}
+			${stat('Completadas', s.completed.toLocaleString('en-US'), s.peers != null ? `con ${s.peers.toLocaleString('en-US')} usuarios distintos` : '')}
+			${stat('Canceladas', s.cancelled.toLocaleString('en-US'), 'por cualquiera de las partes')}
+		</div>
+		${s.raters ? `<div class="qp-stars" title="${s.raters.toLocaleString('en-US')} valoraciones recibidas">${stars}</div>` : ''}`
 }
 
 // ── Comprar ya: comprar USD a la oferta de venta más barata en la que cabe tu monto ──

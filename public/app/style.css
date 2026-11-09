@@ -678,6 +678,15 @@ a.icon-btn { text-decoration: none; }
 .peer-stat span { font-size: 11.5px; color: var(--muted); }
 .peer-stat b { font: 600 17px var(--mono); }
 .peer-stat small { font-size: 11px; color: var(--muted); }
+.peer-qp { display: flex; flex-direction: column; gap: 8px; }
+.peer-qp:empty { display: none; }
+.peer-qp-up { text-align: left; font: inherit; font-size: 12.5px; line-height: 1.45; color: var(--text-2); padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px dashed var(--line); cursor: pointer; }
+.peer-qp-up b { color: var(--accent); margin-right: 4px; }
+.peer-qp-up:hover { border-color: var(--accent); }
+.qp-stars { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.qp-star { display: grid; grid-template-columns: 26px 1fr 44px; align-items: center; gap: 8px; color: var(--muted); }
+.qp-star i { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--warn) var(--w), var(--surface-3) var(--w)); }
+.qp-star b { font: 500 11.5px var(--mono); color: var(--text-2); text-align: right; }
 .peer-signals { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .peer-signals li { display: flex; gap: 8px; align-items: baseline; }
 .peer-signals li::before { flex: none; width: 16px; text-align: center; font-weight: 700; }

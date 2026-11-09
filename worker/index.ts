@@ -25,6 +25,7 @@ import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { loadOther, otherHtml } from './othermarkets.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
 import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveOnline, liveSocket, type LiveEnv } from './livebook.ts'
+import { peerStats, type PeerStatsEnv } from '../pro/peerstats.ts'
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { botHtml, loadBot } from './ratebot.ts'
 import { cleanupLive, recordLive } from './livehistory.ts'
@@ -41,7 +42,7 @@ import { TASA_KEY, TASA_PATH, tasaData, tasaPage, type TasaData } from './tasa.t
 // El libro en tiempo real de Pro (un Durable Object)
 export { LiveBook }
 
-interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'>, Omit<LiveEnv, 'DB'> {
+interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'>, Omit<LiveEnv, 'DB'>, PeerStatsEnv {
 	ASSETS: Fetcher
 	DB: D1Database
 	// Clave de la API de tasas de elTOQUE (secreto del Worker). Sin ella no hay referencia informal
@@ -206,6 +207,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
 	if (url.pathname === '/data/offer' && req.method === 'GET') return secure(await offer(req, url, env, ctx))
 	if (url.pathname === '/data/online' && req.method === 'POST') return secure(await online(req, env))
+	if (url.pathname === '/data/peer-stats' && req.method === 'GET') return secure(await peerStatsRoute(req, url, env, ctx))
 	// El enlace corto de una oferta compartida (terminalp2p.com/o/<uuid>): abre el terminal con ella delante
 	const shared = SHARED_OFFER.exec(url.pathname)
 	if (shared && folderFor(url.hostname) !== 'sim') {
@@ -656,6 +658,24 @@ async function online(req: Request, env: Env) {
 	const r = await liveOnline(env as unknown as LiveEnv, users).catch(() => null)
 	if (!r) return jsonError(503, 'No se puede saber ahora mismo')
 	return Response.json(r, { headers: { 'Cache-Control': 'no-store' } })
+}
+
+// ★ Pro: la actividad de un usuario en el P2P para su ficha (módulo privado), por su uuid de QvaPay (?l=licencia).
+// Media hora en la caché del borde: cambia poco y así nadie la usa para barrer QvaPay
+const PEER_STATS_TTL_S = 1800
+async function peerStatsRoute(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
+	const id = (url.searchParams.get('id') ?? '').toLowerCase()
+	if (!UUID.test(id)) return jsonError(400, 'Usuario desconocido')
+	if (!(await hasPro(env, url.searchParams.get('l')))) return jsonError(403, 'La actividad en QvaPay es del modo Pro')
+	const key = new Request(`${url.origin}/data/peer-stats?id=${id}&v=3`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, `private, max-age=${PEER_STATS_TTL_S}`)
+	if (!(await underLimit(env.STATUS_LIMIT, req))) return jsonError(429, 'Demasiadas consultas seguidas: espera un minuto')
+	const stats = await peerStats(env, id).catch(() => null)
+	if (!stats) return jsonError(503, 'No se puede ver ahora mismo')
+	const res = new Response(JSON.stringify(stats), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${PEER_STATS_TTL_S}` } })
+	ctx.waitUntil(caches.default.put(key, res.clone()))
+	return new Response(res.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `private, max-age=${PEER_STATS_TTL_S}` } })
 }
 
 // Una oferta del libro por su uuid, para quien abre el enlace que compartió su dueño sin tener la cuenta conectada:
