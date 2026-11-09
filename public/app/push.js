@@ -91,6 +91,8 @@ window.TPPush = (() => {
 		navigator.serviceWorker.addEventListener('message', (e) => {
 			const d = e.data
 			if (d?.type !== 'tp:open' || typeof showView !== 'function') return
+			// El aviso de que se acaban los días de Pro abre la ventana de Pro
+			if (d.kind === 'pro') return typeof showPro === 'function' && showPro()
 			state.view = 'orders'
 			showView('orders')
 			// Un aviso del terminal abierto sabe qué operación es: se abre (si la contraparte se fue, la oferta)

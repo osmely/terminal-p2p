@@ -89,6 +89,39 @@ async function proFetch(path, body, again = true) {
 }
 const daysLeft = () => Math.max(0, Math.ceil((pro.expiresAt - Date.now()) / 86_400_000))
 const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
+// A 3 días o menos del fin (y hasta una semana después de acabarse), un aviso que se queda a la vista con el botón de
+// comprar días. Muchos no conectan Telegram: sin esto, nadie les decía que se les acababa. Se cierra hasta mañana
+// (antes del fin) o para siempre (ya acabado)
+const NUDGE_MS = 3 * 86_400_000
+function renderProNudge() {
+	document.getElementById('proNudge')?.remove()
+	if (!pro.enabled) return
+	const today = new Date().toDateString()
+	let key, html
+	if (pro.active && pro.expiresAt - Date.now() <= NUDGE_MS) {
+		key = `left:${pro.expiresAt}:${today}`
+		const n = daysLeft()
+		const what = pro.plan === 'trial' ? `A tus días gratis de Pro ${n === 1 ? 'les queda' : 'les quedan'}` : `A tu Pro ${n === 1 ? 'le queda' : 'le quedan'}`
+		html = `<b>⏳ ${what} ${daysText(n)}</b><span>Hasta el ${proDate(pro.expiresAt)}. Nada se cobra solo.</span>`
+	} else if (!pro.active && pro.ended) {
+		key = `ended:${pro.ended.at}`
+		html = `<b>🔔 ${pro.ended.plan === 'trial' ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó'}</b><span>El ${proDate(pro.ended.at)}. Tu cuenta sigue guardada: compra días y sigues donde lo dejaste.</span>`
+	} else return
+	if (store.getMine('pro.nudgeClosed', '') === key) return
+	const el = document.createElement('div')
+	el.id = 'proNudge'
+	el.className = 'pro-nudge'
+	el.setAttribute('role', 'status')
+	el.innerHTML = `<div class="pro-nudge-text">${html}</div><button class="btn primary sm" data-nudge="buy">Comprar días</button><button class="icon-btn small" data-nudge="close" title="Cerrar" aria-label="Cerrar">✕</button>`
+	el.addEventListener('click', (e) => {
+		const b = e.target.closest('[data-nudge]')
+		if (!b) return
+		store.setMine('pro.nudgeClosed', key)
+		el.remove()
+		if (b.dataset.nudge === 'buy') showPro()
+	})
+	document.body.append(el)
+}
 const proDate = (ms) => cubaFmt(ms, { day: 'numeric', month: 'long', year: 'numeric' })
 
 function applyPro(s) {
@@ -96,7 +129,7 @@ function applyPro(s) {
 	// se recarga para que la orden inteligente y el radar desaparezcan de la memoria
 	if (pro.loaded && !s.pro) return location.reload()
 	// Bloqueada desde el panel: Pro ni se ofrece
-	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null })
+	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null, ended: !s.pro && s.ended?.at ? s.ended : null })
 	if (Array.isArray(s.plans)) proPlans = s.plans
 	if (s.trialDays > 0) proTrialDays = s.trialDays
 
@@ -158,10 +191,11 @@ async function refreshPro() {
 			} catch {}
 			return location.assign(SIM_URL)
 		}
-		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && store.getMine('pro.renewTold', '') !== new Date().toDateString()) {
+		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && pro.expiresAt - Date.now() > NUDGE_MS && store.getMine('pro.renewTold', '') !== new Date().toDateString()) {
 			store.setMine('pro.renewTold', new Date().toDateString())
 			toast(`Te quedan ${daysText(daysLeft())} de Pro. Añade más desde el botón ★.`)
 		}
+		renderProNudge()
 		resumeCheckout()
 	} catch {
 		// Sin conexión con el servidor no se pierde nada: se reintenta en la próxima revisión

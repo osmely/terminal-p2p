@@ -1070,6 +1070,40 @@ test('aviso de fin de días: si Telegram falla no se da por enviado y sale en el
 	assert.equal(await expiryReminders(s.env, s.now(), s.q.fetcher), 0)
 })
 
+test('fin de días: aviso al móvil aunque no tenga Telegram, y al acabarse el terminal lo dice una semana', async () => {
+	const { expiryReminders } = await import('../worker/userbot.ts')
+	const { newVapidJwk, b64u } = await import('../worker/webpush.ts')
+	const s = setup({ VAPID_PRIVATE_JWK: JSON.stringify(await newVapidJwk()) } as Partial<ProEnv>)
+	await s.trial(P1, 'ana')
+	// Activó los avisos en un navegador (no conectó Telegram)
+	const ua = (await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])) as CryptoKeyPair
+	const p256dh = b64u(new Uint8Array(await crypto.subtle.exportKey('raw', ua.publicKey)))
+	const auth = b64u(crypto.getRandomValues(new Uint8Array(16)))
+	s.db.prepare('INSERT INTO push_subs (endpoint, p256dh, auth, owner, username, created_at) VALUES (?, ?, ?, ?, ?, ?)').run('https://fcm.googleapis.com/fcm/send/x', p256dh, auth, 'u-ana', 'Ana', s.now())
+	const pushes: string[] = []
+	const f = (async (url: string, init?: RequestInit) => (url.startsWith('https://fcm.googleapis.com/') ? (pushes.push(url), new Response(null, { status: 201 })) : s.q.fetcher(url, init))) as typeof fetch
+	// A 2 días del fin: un aviso (una vez)
+	s.tick(5 * 86_400_000)
+	assert.equal(await expiryReminders(s.env as never, s.now(), f), 1)
+	assert.equal(await expiryReminders(s.env as never, s.now(), f), 0)
+	assert.equal(pushes.length, 1)
+	// Si el móvil no lo recibe, no se da por enviado
+	s.tick(2 * 86_400_000 + 60_000)
+	const down = (async (url: string, init?: RequestInit) => (url.startsWith('https://fcm.googleapis.com/') ? new Response(null, { status: 500 }) : s.q.fetcher(url, init))) as typeof fetch
+	assert.equal(await expiryReminders(s.env as never, s.now(), down), 0)
+	assert.equal(await expiryReminders(s.env as never, s.now(), f), 1)
+	assert.equal(pushes.length, 2)
+	// Ya sin Pro, el terminal sabe que se le acabaron (y de qué eran) durante una semana
+	const st = (await s.post('/pro/status', { print: P1, username: 'ana' })).body
+	assert.equal(st.pro, false)
+	assert.equal(st.ended.plan, 'trial')
+	assert.ok(st.ended.at < s.now())
+	s.tick(7 * 86_400_000)
+	assert.equal((await s.post('/pro/status', { print: P1, username: 'ana' })).body.ended, undefined)
+	// Otra cuenta en el mismo navegador no ve el aviso de la primera
+	assert.equal((await s.post('/pro/status', { print: P2, username: 'leo' })).body.ended, undefined)
+})
+
 test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto escrito aquí y tope por hora', async () => {
 	const { webhookSecret } = await import('../worker/userbot.ts')
 	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot' })

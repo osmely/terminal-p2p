@@ -5,6 +5,7 @@
 
 import { hex, hmac } from './crypto.ts'
 import { tgEsc, type AlertEnv } from './alerts.ts'
+import { deliverPush, vapidOf, type PushEnv, type PushMsg } from './push.ts'
 import { inCuba, type D1 } from './rates.ts'
 import { BOT_MENU, commandOf, HELP, JOINED, leftGroup, membersDue, miniUrl, rateCommand, saveMembers, seenGroup, type Chat } from './ratebot.ts'
 
@@ -105,39 +106,64 @@ export function tellDays(env: BotEnv, license: string, username: string, days: n
 	return tellUser(env, license, text, days > 0 ? openApp(env) : undefined, fetcher)
 }
 
-// Cada día (a media mañana en Cuba): a quien le quedan 3 días o menos, y a quien se le acabaron ayer u hoy. Uno
-// por vencimiento: si renueva, el siguiente vencimiento vuelve a avisar
-export async function expiryReminders(env: BotEnv, now: number, fetcher: typeof fetch = fetch) {
-	if (!env.TELEGRAM_BOT_TOKEN) return 0
+// Cada día (a media mañana en Cuba): a quien le quedan 3 días o menos, y a quien se le acabaron ayer u hoy. Por
+// Telegram si lo conectó y por los avisos al móvil si los activó en algún navegador (la mayoría no conecta Telegram).
+// Uno por vencimiento y canal: si renueva, el siguiente vencimiento vuelve a avisar
+export async function expiryReminders(env: BotEnv & Partial<Pick<PushEnv, 'VAPID_PRIVATE_JWK'>>, now: number, fetcher: typeof fetch = fetch) {
 	const db = env.DB
 	await db.prepare('DELETE FROM pro_tg_links WHERE created_at < ?').bind(now - LINK_MS).run()
+	const pushOn = !!vapidOf(env as PushEnv)
+	if (!env.TELEGRAM_BOT_TOKEN && !pushOn) return 0
 	const { results } = await db
 		.prepare(
-			`SELECT l.uuid, l.username, l.plan, l.expires_at FROM pro_licenses l JOIN pro_telegram t ON t.license = l.uuid
+			`SELECT l.uuid, l.username, l.plan, l.expires_at, t.chat_id FROM pro_licenses l LEFT JOIN pro_telegram t ON t.license = l.uuid
 			WHERE l.merged_into IS NULL AND l.revoked = 0 AND l.expires_at > ? AND l.expires_at <= ?`,
 		)
 		.bind(now - 2 * DAY_MS, now + 3 * DAY_MS)
-		.all<{ uuid: string; username: string; plan: string; expires_at: number }>()
-	let sent = 0
+		.all<{ uuid: string; username: string; plan: string; expires_at: number; chat_id: number | null }>()
+	const sent = (license: string, key: string) => db.prepare('SELECT 1 FROM pro_tg_sent WHERE license = ? AND key = ?').bind(license, key).first()
+	const mark = (license: string, key: string) => db.prepare('INSERT OR IGNORE INTO pro_tg_sent (license, key, at) VALUES (?, ?, ?)').bind(license, key, now).run()
+	let n = 0
 	for (const l of results) {
 		const ended = l.expires_at <= now
 		const key = `${ended ? 'exp0' : 'exp3'}:${l.expires_at}`
-		if (await db.prepare('SELECT 1 FROM pro_tg_sent WHERE license = ? AND key = ?').bind(l.uuid, key).first()) continue
-		const u = `@${tgEsc(l.username)}`
 		const trial = l.plan === 'trial'
 		// Con días gratis o regalados no hay nada que renovar: se compran días
 		const buy = trial || l.plan === 'gift'
 		const left = Math.ceil((l.expires_at - now) / DAY_MS)
-		const text = ended
-			? `🔔 <b>${trial ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó'}</b>\n\n${u}, se acabaron tus días de Pro. Tu cuenta y tu historial siguen guardados: cuando quieras, compras días desde el terminal y sigues donde lo dejaste.`
-			: `⏳ <b>${trial ? `A tus días gratis de Pro ${left === 1 ? 'les queda' : 'les quedan'}` : `A tu Pro ${left === 1 ? 'le queda' : 'le quedan'}`} ${daysText(left)}</b>\n\n${u}, tus días terminan el <b>${day(l.expires_at)}</b>. Nada se cobra solo: si quieres seguir con el modo Pro, ${buy ? 'compra días' : 'renueva'} desde el terminal en «Mi cuenta» → ★ Pro.`
-		// Se apunta solo si salió: si Telegram falló, se reintenta en el próximo repaso (sigue dentro de la ventana)
-		if (await tellUser(env, l.uuid, text, openApp(env, ended || buy ? 'Comprar días' : 'Renovar en el terminal'), fetcher)) {
-			await db.prepare('INSERT OR IGNORE INTO pro_tg_sent (license, key, at) VALUES (?, ?, ?)').bind(l.uuid, key, now).run()
-			sent++
+		// Se apunta solo si salió: si falló, se reintenta en el próximo repaso (sigue dentro de la ventana)
+		if (env.TELEGRAM_BOT_TOKEN && l.chat_id != null && !(await sent(l.uuid, key))) {
+			const u = `@${tgEsc(l.username)}`
+			const text = ended
+				? `🔔 <b>${trial ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó'}</b>\n\n${u}, se acabaron tus días de Pro. Tu cuenta y tu historial siguen guardados: cuando quieras, compras días desde el terminal y sigues donde lo dejaste.`
+				: `⏳ <b>${trial ? `A tus días gratis de Pro ${left === 1 ? 'les queda' : 'les quedan'}` : `A tu Pro ${left === 1 ? 'le queda' : 'le quedan'}`} ${daysText(left)}</b>\n\n${u}, tus días terminan el <b>${day(l.expires_at)}</b>. Nada se cobra solo: si quieres seguir con el modo Pro, ${buy ? 'compra días' : 'renueva'} desde el terminal en «Mi cuenta» → ★ Pro.`
+			if (await tellUser(env, l.uuid, text, openApp(env, ended || buy ? 'Comprar días' : 'Renovar en el terminal'), fetcher)) {
+				await mark(l.uuid, key)
+				n++
+			}
+		}
+		const pkey = `push-${key}`
+		if (pushOn && !(await sent(l.uuid, pkey))) {
+			const owners = (await db.prepare('SELECT DISTINCT owner FROM push_subs WHERE lower(username) = ?').bind(l.username.toLowerCase()).all<{ owner: string }>()).results
+			const msg: PushMsg = {
+				title: ended ? (trial ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó') : `${trial ? 'A tus días gratis de Pro' : 'A tu Pro'} ${left === 1 ? (trial ? 'les queda' : 'le queda') : trial ? 'les quedan' : 'le quedan'} ${daysText(left)}`,
+				body: ended
+					? 'Tu cuenta sigue guardada: compra días desde el terminal y sigues donde lo dejaste.'
+					: `Terminan el ${day(l.expires_at)}. Nada se cobra solo: ${buy ? 'compra días' : 'renueva'} desde ★ Pro en el terminal.`,
+				tag: 'tp:pro-exp',
+				url: '/?pro=open',
+				urgent: false,
+				kind: 'pro',
+			}
+			let ok = 0
+			for (const o of owners) ok += await deliverPush(env as PushEnv, { owner: o.owner, key: pkey, msg }, now, undefined, fetcher)
+			if (ok) {
+				await mark(l.uuid, pkey)
+				n++
+			}
 		}
 	}
-	return sent
+	return n
 }
 
 // ── Radar de Pro ─────────────────────────────────────────────────────

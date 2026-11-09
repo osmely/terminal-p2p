@@ -145,6 +145,8 @@ export async function attachPrint(db: D1, license: string, print: string, now: n
 // saldo de antes y de después. Nada se borra: una devolución resta los días de esa compra y ya
 
 export const accountOf = (username: string) => `qp:${username.toLowerCase()}`
+// Cuánto tiempo después de acabarse los días el terminal sigue avisando de que se acabaron
+const ENDED_SHOWN_MS = 7 * 86_400_000
 export type DayKind = 'trial' | 'purchase' | 'gift' | 'refund' | 'adjust'
 
 export async function addDays(
@@ -973,7 +975,15 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 				? `Abrió el terminal · Pro ${({ trial: 'gratis', gift: 'regalado' } as Record<string, string>)[l.plan] ?? 'comprado'} hasta el ${hDay(l.expires_at)}`
 				: `Abrió el terminal · sin Pro${canTrial ? ' (puede probarlo gratis)' : trialUsed ? ' (ya usó los días gratis)' : username ? '' : ' · sin saber de quién es el token'}`
 			// La sesión compartida con el simulador: con ella entra sin otro login y hereda tus días de Pro
-			const res = json(200, { ...(await statusOf(env, l, now)), canTrial, trialUsed })
+			// Se le acabaron hace poco: el terminal se lo dice (con un botón para comprar días) aunque no tenga Telegram
+			const ended =
+				!l && username
+					? await db
+							.prepare('SELECT plan, expires_at FROM pro_licenses WHERE uuid = ? AND revoked = 0 AND merged_into IS NULL AND expires_at <= ? AND expires_at > ?')
+							.bind(accountOf(username), now, now - ENDED_SHOWN_MS)
+							.first<{ plan: string; expires_at: number }>()
+					: null
+			const res = json(200, { ...(await statusOf(env, l, now)), canTrial, trialUsed, ...(ended ? { ended: { plan: ended.plan, at: ended.expires_at } } : {}) })
 			res.headers.set('Set-Cookie', sessionCookie(url, await sessionToken(print, env.PRO_KEY, now)))
 			return res
 		}

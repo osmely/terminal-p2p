@@ -625,6 +625,11 @@ details.sec-box { display: block; }
 .similar-row .bid { color: var(--bid); }
 .lvl .who .you { font: 700 10px var(--sans); color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 0 4px; margin-right: 4px; }
 
+.pro-nudge { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 45; display: flex; align-items: center; gap: 12px; max-width: 460px; padding: 12px 12px 12px 16px; background: var(--surface); border: 1px solid var(--accent); border-radius: var(--r-sm); box-shadow: var(--shadow); font-size: 13px; }
+.pro-nudge-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pro-nudge-text span { color: var(--text-2); font-size: 12.5px; }
+.pro-nudge .btn { flex: none; white-space: nowrap; }
+@media (max-width: 640px) { .pro-nudge { left: 16px; right: 16px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); max-width: none; } }
 .toast { position: fixed; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); z-index: 50; background: var(--surface); border: 1px solid var(--line-strong); padding: 10px 16px; border-radius: var(--r-sm); font-size: 13px; box-shadow: var(--shadow); }
 .toast.bad { border-color: var(--ask); color: var(--ask); }
 .tip { position: fixed; z-index: 30; pointer-events: none; max-width: 290px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 10px 12px; font-size: 12px; box-shadow: var(--shadow); }
