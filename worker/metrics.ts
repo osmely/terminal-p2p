@@ -92,7 +92,7 @@ export function parseMeta(header: string | null) {
 		coin: cleanCoin(p.get('coin')),
 		side: cleanSide(p.get('side')),
 		usd: cleanUsd(p.get('usd')),
-		via: ['swap', 'smart', 'radar'].includes(p.get('via') ?? '') ? (p.get('via') as string) : '',
+		via: ['swap', 'swap-buy', 'smart', 'radar'].includes(p.get('via') ?? '') ? (p.get('via') as string) : '',
 		ms: p.has('ms') && Number.isInteger(ms) && ms >= 0 && ms <= 600_000 ? ms : null,
 	}
 }
@@ -208,6 +208,9 @@ export interface Summary {
 	swaps: number
 	swapsCompleted: number
 	swapVolume: number
+	buys: number
+	buysCompleted: number
+	buyVolume: number
 	// Por acción: cuántas se intentaron, cuántas rechazó QvaPay y por qué (motivo → veces)
 	errors: Record<string, { tries: number; failed: number; why: Record<string, number> }>
 	byCoin: { coin: string; created: number; taken: number; completed: number; volume: number }[]
@@ -242,6 +245,8 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 	// las operaciones de quien usa el terminal: lo completado sobre una oferta vendida con «Vender ya» es suyo
 	const swapOffers = new Set(ok.filter((e) => e.event === 'take' && e.via === 'swap').map((e) => e.offer))
 	const swapDone = [...doneKeys].filter((k) => swapOffers.has(offerOfKey(k)))
+	const buyOffers = new Set(ok.filter((e) => e.event === 'take' && e.via === 'swap-buy').map((e) => e.offer))
+	const buyDone = [...doneKeys].filter((k) => buyOffers.has(offerOfKey(k)))
 
 	const errors: Summary['errors'] = {}
 	for (const e of rows) {
@@ -300,6 +305,9 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 		swaps: ok.filter((e) => e.event === 'take' && e.via === 'swap').length,
 		swapsCompleted: swapDone.length,
 		swapVolume: Math.round(swapDone.reduce((s, k) => s + usdDone(k), 0) * 100) / 100,
+		buys: ok.filter((e) => e.event === 'take' && e.via === 'swap-buy').length,
+		buysCompleted: buyDone.length,
+		buyVolume: Math.round(buyDone.reduce((s, k) => s + usdDone(k), 0) * 100) / 100,
 		errors,
 		byCoin: [...coins.values()].sort((a, b) => b.completed - a.completed || b.created - a.created),
 		byDay: [...byDayMap.values()].sort((a, b) => (a.day < b.day ? 1 : -1)),
@@ -449,6 +457,7 @@ ${card('Ofertas publicadas aquí', n(s.created))}
 ${card('Operaciones tomadas aquí', n(s.taken))}
 ${card('Operaciones completadas', n(s.completed), 'liberadas aquí o vistas completadas por quien las empezó aquí')}
 ${card('Volumen completado', `${n(s.volume)} USD`)}
+${card('Comprar ya', n(s.buys), `${n(s.buysCompleted)} completadas · ${n(s.buyVolume)} USD`)}
 ${card('Vender ya', n(s.swaps), `${n(s.swapsCompleted)} completadas · ${n(s.swapVolume)} USD`)}
 ${s.radar.tries ? card('Tomas del radar', `${n(s.radar.ok)} de ${n(s.radar.tries)}`, s.radar.p50 != null ? `de ver la oferta a pedirla: ${n(s.radar.p50)} ms la mitad, ${n(s.radar.p90 ?? 0)} ms el 90 %` : '') : ''}
 </div>
@@ -457,8 +466,10 @@ ${s.radar.tries ? card('Tomas del radar', `${n(s.radar.ok)} de ${n(s.radar.tries
 ${step('publicadas', s.created, null)}${step('con contraparte', s.createdTaken, s.created)}${step('con al menos una operación completada', s.createdCompleted, s.created)}</ol></div>
 <div class="funnel"><h3>Ofertas tomadas desde el terminal</h3><p>De las ofertas que alguien tomó aquí, cuántas se pagaron y cuántas se completaron.</p><ol>
 ${step('tomadas', s.taken, null)}${step('pagadas', s.takenPaid, s.taken)}${step('completadas', s.takenCompleted, s.taken)}</ol></div>
-<div class="funnel"><h3>Vender ya</h3><p>Ventas de saldo a ofertas VIP hechas con «Vender ya», y cuántas se completaron.</p><ol>
+<div class="funnel"><h3>Vender ya</h3><p>Ventas de saldo a la oferta de compra que más paga hechas con «Vender» del botón de la cabecera, y cuántas se completaron.</p><ol>
 ${step('ventas empezadas', s.swaps, null)}${step('completadas', s.swapsCompleted, s.swaps)}</ol></div>
+<div class="funnel"><h3>Comprar ya</h3><p>Compras de USD a la oferta de venta más barata hechas con «Comprar» del botón de la cabecera, y cuántas se completaron.</p><ol>
+${step('compras empezadas', s.buys, null)}${step('completadas', s.buysCompleted, s.buys)}</ol></div>
 </div>
 ${panel(
 	'Por mercado',

@@ -722,7 +722,10 @@ a.icon-btn { text-decoration: none; }
 .swap-input:focus { outline: none; }
 .swap-input::-webkit-outer-spin-button, .swap-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .swap-out { flex: 1; min-width: 0; font-size: 28px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--bid); }
+.swap-out.pay { color: var(--text); }
 .swap-out.dim { color: var(--muted); }
+.swap-tabs { font-size: 14px; }
+.swap-tabs .seg-tab { padding: 6px 16px; font-size: 14px; font-weight: 600; }
 .swap-asset, .swap-select {
 	flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px;
 	background: var(--surface); border: 1px solid var(--line-strong); font-size: 13px; font-weight: 600; color: var(--text);

@@ -18,10 +18,16 @@ function fakeQvaPay() {
 		v4: { uuid: 'v4', type: 'buy', coin: 'BANK_CUP', amount: '100', receive: '103000', status: 'open', only_vip: true, User: vip('x') },
 		v5: { uuid: 'v5', type: 'buy', coin: 'BANK_CUP', amount: '100', receive: '103000', status: 'open', requirements_met: false, User: vip('y') },
 		v6: { uuid: 'v6', type: 'buy', coin: 'BANK_CUP', amount: '100', receive: '1010000', status: 'open', User: vip('typo') },
+		// Ofertas de venta (para «Comprar»): de cualquier vendedor, VIP o no
+		s1: { uuid: 's1', type: 'sell', coin: 'BANK_CUP', amount: '300', receive: '336000', available_amount: '300', order_min: '10', order_max: '300', offer_kind: 'flexible', status: 'open', User: { ...vip('ana'), vip: false, golden_check: false } },
+		s2: { uuid: 's2', type: 'sell', coin: 'BANK_CUP', amount: '50', receive: '55500', status: 'open', User: vip('leo') },
+		s3: { uuid: 's3', type: 'sell', coin: 'BANK_CUP', amount: '100', receive: '113000', status: 'open', User: vip('eva') },
+		s4: { uuid: 's4', type: 'sell', coin: 'BANK_CUP', amount: '100', receive: '100000', status: 'open', only_vip: true, User: vip('solovip') },
+		s5: { uuid: 's5', type: 'sell', coin: 'BANK_CUP', amount: '100', receive: '100000', status: 'open', User: { ...vip('yo'), uuid: 'me' } },
 	}
 	const client = {
 		me: async () => ({ uuid: 'me', username: 'yo', balance: 300, kyc: true, golden_check: false, p2p_enabled: true }),
-		listOffers: async (p: ListParams) => (lists.push(p), { current_page: 1, per_page: 30, total: 6, data: Object.values(offers).map((o) => structuredClone(o)) }),
+		listOffers: async (p: ListParams) => (lists.push(p), { current_page: 1, per_page: 30, total: 6, data: Object.values(offers).filter((o) => !p.type || o.type === p.type).map((o) => structuredClone(o)) }),
 		getOffer: async (uuid: string) => structuredClone(offers[uuid]),
 		applyOffer: async (uuid: string, amount?: number, meta?: unknown) => (calls.push(`apply:${uuid}:${amount}:${JSON.stringify(meta)}`), { order: 'o1' }),
 		sendChat: async (uuid: string, message: string, order?: string) => void calls.push(`chat:${uuid}:${order}:${message}`),
@@ -44,10 +50,10 @@ async function setup() {
 	return { fake, get: (p: string) => call('GET', p), post: (p: string, b: unknown) => call('POST', p, b) }
 }
 
-test('Vender ya: solo ofertas VIP que puedes tomar, de mejor a peor precio', async () => {
+test('Vender ya: ofertas de compra que puedes tomar (VIP o no), de mejor a peor precio', async () => {
 	const { fake, get } = await setup()
 	const { body } = await get('/swap/quote?coin=BANK_CUP&amount=200')
-	assert.deepEqual(fake.lists[0], { type: 'buy', coin: 'BANK_CUP', vip_maker: 1, orderBy: 'best_rate', orderType: 'desc', take: 30 })
+	assert.deepEqual(fake.lists[0], { type: 'buy', coin: 'BANK_CUP', orderBy: 'best_rate', orderType: 'desc', take: 30 })
 	assert.deepEqual(
 		body.offers.map((o: { offer: string; price: number }) => [o.offer, o.price]),
 		[
@@ -96,7 +102,7 @@ test('Vender ya: toma la oferta, manda tus datos por el chat y nunca libera', as
 	assert.ok(!fake.calls.includes('received'))
 })
 
-test('Vender ya: no vende si el precio bajó, si no cabe el monto o si no es VIP', async () => {
+test('Vender ya: no vende si el precio bajó, si no cabe el monto o si es solo para VIP', async () => {
 	const { fake, post } = await setup()
 	const details = [{ label: 'Tarjeta', value: '9200' }]
 	fake.offers.v1.receive = '4000000' // ahora paga 1.000
@@ -111,8 +117,7 @@ test('Vender ya: no vende si el precio bajó, si no cabe el monto o si no es VIP
 	const over = await post('/swap', { offer: 'v1', amount: 400, minPrice: 1000, details })
 	assert.equal(over.status, 400)
 	assert.match(over.body.error, /saldo/)
-	fake.offers.v2.User = { ...vip('azi'), vip: false }
-	assert.equal((await post('/swap', { offer: 'v2', amount: 100, minPrice: 1015, details })).status, 400)
+	assert.equal((await post('/swap', { offer: 'v4', amount: 100, minPrice: 1000, details })).status, 400)
 	fake.offers.v3.status = 'processing'
 	assert.equal((await post('/swap', { offer: 'v3', amount: 50, minPrice: 990, details })).status, 409)
 	assert.deepEqual(fake.calls, [])
@@ -380,4 +385,49 @@ test('radar: otra toma seguida solo si QvaPay deja tomar ya; vendiendo nunca se 
 	const sell = (await post({ offer: 'b1', amount: 50, side: 'sell', coin: 'BANK_CUP', price: 1040, details: [{ label: 'Tarjeta', value: '9200' }], seen: Date.now(), kind: 'fixed', user: 'eva' })).body
 	assert.deepEqual([sell.fast, sell.step.status], [false, 'skipped'])
 	assert.deepEqual(fake.calls, [])
+})
+
+test('Comprar ya: la oferta de venta más barata en la que cabe el monto, de cualquier vendedor', async () => {
+	const { fake, get } = await setup()
+	const { body } = await get('/swap/quote?side=buy&coin=BANK_CUP&amount=50')
+	assert.deepEqual(fake.lists[0], { type: 'sell', coin: 'BANK_CUP', orderBy: 'best_rate', orderType: 'asc', take: 30 })
+	// Sin las solo-VIP ni las tuyas; de más barata a más cara
+	assert.deepEqual(
+		body.offers.map((o: { offer: string; price: number; vip: boolean }) => [o.offer, o.price, o.vip]),
+		[
+			['s2', 1110, true],
+			['s1', 1120, false],
+			['s3', 1130, true],
+		],
+	)
+	assert.equal(body.best.offer, 's2')
+	// 60 USD no caben en la fija de 50: la siguiente más barata
+	assert.equal((await get('/swap/quote?side=buy&coin=BANK_CUP&amount=60')).body.best.offer, 's1')
+	// Comprar y vender no comparten la lectura guardada
+	assert.deepEqual((await get('/swap/quote?coin=BANK_CUP&amount=200')).body.best.offer, 'v1')
+})
+
+test('Comprar ya: toma la oferta de venta (sin chat ni saldo) y no compra si el precio subió o no cabe', async () => {
+	const { fake, post } = await setup()
+	fake.offers.s1.receive = '345000' // ahora a 1,150
+	const up = await post('/swap/buy', { offer: 's1', amount: 60, maxPrice: 1120 })
+	assert.deepEqual([up.status, /subió/.test(up.body.error)], [409, true])
+	assert.equal((await post('/swap/buy', { offer: 's2', amount: 20, maxPrice: 1110 })).status, 409) // la fija, entera
+	assert.equal((await post('/swap/buy', { offer: 'v1', amount: 20, maxPrice: 2000 })).status, 400) // es de compra
+	assert.equal((await post('/swap/buy', { offer: 's4', amount: 100, maxPrice: 1000 })).status, 400) // solo VIP
+	assert.equal((await post('/swap/buy', { offer: 's5', amount: 100, maxPrice: 1000 })).status, 400) // tuya
+	assert.deepEqual(fake.calls, [])
+	// Más de tu saldo (300 USD) da igual: compras, no gastas USD
+	const r = await post('/swap/buy', { offer: 's1', amount: 280, maxPrice: 1150 })
+	assert.deepEqual([r.status, r.body.offer, r.body.order], [200, 's1', 'o1'])
+	assert.deepEqual(fake.calls, [`apply:s1:280:${JSON.stringify({ coin: 'BANK_CUP', side: 'sell', usd: 280, via: 'swap-buy' })}`])
+})
+
+test('Vender ya: también a un comprador que no es VIP (y sigue sin liberar nada)', async () => {
+	const { fake, post } = await setup()
+	fake.offers.v2.User = { ...vip('azi'), vip: false }
+	const r = await post('/swap', { offer: 'v2', amount: 100, minPrice: 1015, details: [{ label: 'Tarjeta', value: '9200' }] })
+	assert.equal(r.status, 200)
+	assert.ok(fake.calls[0].startsWith('apply:v2:100:'))
+	assert.ok(!fake.calls.includes('received'))
 })

@@ -161,6 +161,13 @@ test('Vender ya: ventas empezadas y completadas, también en ofertas por partes'
 	assert.deepEqual([s.taken, s.completed, s.volume], [3, 2, 50])
 })
 
+test('Comprar ya: compras empezadas y completadas, aparte de Vender ya', () => {
+	assert.equal(parseMeta('coin=BANK_CUP&side=sell&usd=20&via=swap-buy').via, 'swap-buy')
+	const ev = (event: MetricEvent['event'], offer: string, o: Partial<MetricEvent> = {}): MetricEvent => ({ t: NOW, event, status: 'ok', offer, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 0, source: 'relay', via: '', ...o })
+	const s = summarize([ev('take', 'b', { usd: 25, via: 'swap-buy' }), ev('completed', 'b', { usd: 25, source: 'client' }), ev('take', 'c', { usd: 30, via: 'swap-buy' }), ev('take', 'v', { usd: 40, via: 'swap' })], 30)
+	assert.deepEqual([s.buys, s.buysCompleted, s.buyVolume, s.swaps], [2, 1, 25, 1])
+})
+
 test('comisión del P2P: 0,25 % de lo que recibe quien compra (GOLD no paga), y aviso si QvaPay cobra otra cosa', () => {
 	assert.deepEqual([p2pFee(100), netUsd(100), p2pFee(100, true), netUsd(100, true)], [0.25, 99.75, 0, 100])
 	assert.deepEqual([p2pFee(48), netUsd(48)], [0.12, 47.88])

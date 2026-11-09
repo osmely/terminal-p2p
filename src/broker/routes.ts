@@ -90,6 +90,7 @@ export class Broker {
 	private connectAttempts = new Map<string, number[]>()
 	private seen: Seen | null = null
 	private coinFields: Record<string, PaymentField[]> | null = null
+	// Por lado y mercado («sell:BANK_CUP» para vender, «buy:BANK_CUP» para comprar)
 	private swapQuotes = new Map<string, { user: string; at: number; offers: SwapOffer[] }>()
 	// Lo que liberaste desde esta pestaña y cuándo: QvaPay sigue diciendo «pagado» unos segundos después de liberar,
 	// y un segundo «Liberar» en ese rato acababa en «403: No se puede recibir esta oferta»
@@ -160,6 +161,8 @@ export class Broker {
 					return await this.swapQuote(ctx, acc)
 				case 'POST /swap':
 					return await this.swap(ctx, acc)
+				case 'POST /swap/buy':
+					return await this.swapBuy(ctx, acc)
 			}
 			return json(404, { error: 'Ruta desconocida' })
 		} catch (err) {
@@ -673,34 +676,61 @@ export class Broker {
 		return json(200, { user, profile: peerProfile(mine[0]?.User), offers: mine.map(peerOffer), total: res.total })
 	}
 
-	// ── Vender ya: vender saldo a la mejor oferta de compra de una cuenta VIP ──
+	// ── Vender ya: vender saldo a la oferta de compra que más paga ──
 
-	// Ofertas de compra de cuentas VIP en un mercado, de mejor a peor precio, y la mejor en la que cabe
+	// Ofertas de compra de un mercado (de cualquiera, VIP o no), de mejor a peor precio, y la mejor en la que cabe
 	// ?amount. Sin las solo-VIP (no las puede tomar cualquiera), las propias, las de requisitos que no
 	// cumples y las de precio atípico. Se leen de QvaPay como mucho cada SWAP_FRESH_MS (o con ?fresh=1)
+	// Con ?side=buy, al revés: comprar USD a la oferta de venta más barata en la que cabe el monto, de cualquier
+	// vendedor (sus USD ya están en el escrow de QvaPay y tú pagas después de tomarla)
 	private async swapQuote({ url }: Ctx, acc: Account) {
 		const coin = url.searchParams.get('coin') ?? ''
 		if (!TICKS.has(coin)) return json(400, { error: 'Mercado no válido' })
-		let q = this.swapQuotes.get(coin)
+		const buying = url.searchParams.get('side') === 'buy'
+		const key = `${buying ? 'buy' : 'sell'}:${coin}`
+		let q = this.swapQuotes.get(key)
 		if (!q || q.user !== acc.me.uuid || url.searchParams.get('fresh') === '1' || Date.now() - q.at > SWAP_FRESH_MS) {
-			const res = await acc.client.listOffers({ type: 'buy', coin, vip_maker: 1, orderBy: 'best_rate', orderType: 'desc', take: SWAP_TAKE })
+			const res = await acc.client.listOffers(
+				{ type: buying ? 'sell' : 'buy', coin, orderBy: 'best_rate', orderType: buying ? 'asc' : 'desc', take: SWAP_TAKE },
+			)
 			const offers = res.data
 				.filter((o) => o.status === 'open' && !o.pause && !o.only_vip && o.User?.uuid !== acc.me.uuid && o.requirements_met !== false)
 				.map(swapOffer)
 				.filter((o) => o.usd > 0 && o.price > 0)
-			q = { user: acc.me.uuid, at: Date.now(), offers: dropOutliers(offers).sort((a, b) => b.price - a.price) }
-			this.swapQuotes.set(coin, q)
+			q = { user: acc.me.uuid, at: Date.now(), offers: dropOutliers(offers).sort((a, b) => (buying ? a.price - b.price : b.price - a.price)) }
+			this.swapQuotes.set(key, q)
 		}
 		return json(200, { coin, offers: q.offers, best: bestSwap(q.offers, round2(Number(url.searchParams.get('amount')))), at: q.at })
 	}
 
-	// Toma la oferta y le pasa al VIP por el chat dónde pagarte. Antes comprueba con el estado
-	// fresco que sigue abierta, que es de una cuenta VIP y que el precio no bajó del que viste
+	// Comprar ya: toma la oferta de venta. Antes comprueba con el estado fresco que sigue abierta y que el precio no
+	// subió del que viste. Lo demás es una compra normal: el vendedor te da sus datos y le pagas desde «Mis operaciones»
+	private async swapBuy({ req }: Ctx, acc: Account) {
+		const b = await readJson(req)
+		const o = await acc.client.getOffer(String(b.offer ?? ''))
+		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
+		if (o.type !== 'sell') return json(400, { error: 'Comprar ya solo compra a ofertas de venta' })
+		if (o.only_vip) return json(400, { error: 'Esa oferta es solo para cuentas VIP' })
+		if (o.status !== 'open' || o.pause) return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
+		const q = swapOffer(o)
+		const maxPrice = Number(b.maxPrice)
+		if (maxPrice > 0 && q.price > maxPrice * (1 + 1e-9)) return json(409, { error: `El precio subió a ${q.price.toLocaleString('en-US')} mientras decidías. Revisa el nuevo precio.` })
+		const amount = round2(Number(b.amount))
+		if (q.kind === 'flexible' ? !(amount >= (q.orderMin ?? 0) && amount <= q.orderMax!) : amount !== q.usd)
+			return json(409, { error: 'El monto ya no cabe en esa oferta. Actualizo el precio.' })
+		const r = await acc.client.applyOffer(o.uuid, q.kind === 'flexible' ? amount : undefined, { coin: o.coin, side: o.type, usd: amount, via: 'swap-buy' })
+		this.swapQuotes.delete(`buy:${o.coin}`)
+		return json(200, { ok: true, offer: o.uuid, order: r.order ?? null })
+	}
+
+	// Toma la oferta y le pasa al comprador por el chat dónde pagarte. Antes comprueba con el estado
+	// fresco que sigue abierta, que no es solo para VIP y que el precio no bajó del que viste
 	private async swap({ req }: Ctx, acc: Account) {
 		const b = await readJson(req)
 		const o = await acc.client.getOffer(String(b.offer ?? ''))
 		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
-		if (o.type !== 'buy' || o.User?.vip === false) return json(400, { error: 'Vender ya solo vende a ofertas de compra de cuentas VIP' })
+		if (o.type !== 'buy') return json(400, { error: 'Vender ya solo vende a ofertas de compra' })
+		if (o.only_vip) return json(400, { error: 'Esa oferta es solo para cuentas VIP' })
 		if (o.status !== 'open' || o.pause) return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
 		const q = swapOffer(o)
 		const minPrice = Number(b.minPrice)
@@ -718,7 +748,7 @@ export class Broker {
 		acc.me = me
 		if (amount > num(me.balance)) return json(400, { error: `No tienes saldo suficiente: tienes ${num(me.balance).toLocaleString('en-US')} USD` })
 		const r = await acc.client.applyOffer(o.uuid, q.kind === 'flexible' ? amount : undefined, { coin: o.coin, side: o.type, usd: amount, via: 'swap' })
-		this.swapQuotes.delete(o.coin)
+		this.swapQuotes.delete(`sell:${o.coin}`)
 		const order = r.order ?? undefined
 		// Si el chat falla, la orden ya está tomada: se avisa para que los mande a mano
 		const text = `Hola. Vendo ${amount} USD desde Terminal P2P. Págame aquí:\n${details.map((d: { label: string; value: string }) => `${d.label}: ${d.value}`).join('\n')}`
@@ -830,7 +860,7 @@ export function peerOffer(o: P2POffer) {
 
 const SWAP_TAKE = 30
 const SWAP_FRESH_MS = 15_000
-// Lejos de la mediana de las ofertas VIP: casi siempre un error de tipeo
+// Lejos de la mediana de las ofertas: casi siempre un error de tipeo
 const SWAP_OUTLIER_PCT = 0.35
 
 export interface SwapOffer {
@@ -844,6 +874,7 @@ export interface SwapOffer {
 	ops: number | null
 	rating: number | null
 	gold: boolean
+	vip: boolean
 }
 
 export function swapOffer(o: P2POffer): SwapOffer {
@@ -863,6 +894,7 @@ export function swapOffer(o: P2POffer): SwapOffer {
 		ops: u?._count ? (u._count.P2P ?? 0) + (u._count.P2P_Peer ?? 0) : null,
 		rating: u?.rating_count ? (u.rating_avg ?? null) : null,
 		gold: !!u?.golden_check,
+		vip: !!u?.vip,
 	}
 }
 

@@ -1826,20 +1826,200 @@ async function showPeer(user) {
 	for (const b of $('modalBody').querySelectorAll('[data-peer-trade]')) b.onclick = () => openTrade(b.dataset.peerTrade, b.dataset.order || null)
 }
 
-// ── Vender ya: vender saldo a la mejor oferta de compra de una cuenta VIP ──
+// ── Comprar ya: comprar USD a la oferta de venta más barata en la que cabe tu monto ──
+// Como «Vender», pero al revés y con cualquier vendedor: sus USD ya están en el escrow de QvaPay y tú pagas después de
+// tomarla, a los datos que te da por el chat. Lo demás es una compra normal en «Mis operaciones»
+async function showBuy() {
+	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin) }]
+	const sw = { coin: store.get('swap.buyCoin', state.coin || 'BANK_CUP'), amount: store.get('swap.buyAmount', 50), quote: null, loading: false, error: '', timer: null, seq: 0, tried: 0 }
+	if (!markets.some((m) => m.tick === sw.coin)) sw.coin = markets[0].tick
+	openModal(
+		`<div class="stack swap">
+		<div class="swap-head">${swapTabs('buy')}</div>
+		<p class="muted swap-sub">Compra saldo de QvaPay a la oferta de venta más barata del mercado y págala desde tu cuenta.</p>
+		<div class="swap-box">
+			<div class="swap-row"><span>Compras</span></div>
+			<div class="swap-main">
+				<input class="swap-input mono" id="swAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${sw.amount}" aria-label="USD que compras" />
+				<span class="swap-asset"><span class="swap-coin usd">$</span>USD QvaPay</span>
+			</div>
+		</div>
+		<div class="swap-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+		<div class="swap-box">
+			<div class="swap-row"><span>Pagas</span><span class="swap-age" id="swAge"></span></div>
+			<div class="swap-main">
+				<b class="swap-out pay mono" id="swOut">—</b>
+				<select class="swap-select" id="swCoin" aria-label="Con qué pagas">${markets.map((m) => `<option value="${m.tick}" ${m.tick === sw.coin ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+			</div>
+		</div>
+		<div id="swQuote" class="swap-quote"></div>
+		${bk.acct.connected ? '<button class="btn primary block swap-go" id="swGo" disabled>Comprar</button>' : '<button class="btn primary block" id="swConnect">Conectar QvaPay para comprar</button>'}
+		<p class="hint swap-foot">Los USD del vendedor ya están en el escrow de QvaPay. Al comprar, te pasa sus datos por el chat, le pagas y marcas «Ya pagué»: QvaPay te suelta los USD cuando él confirma. La sigues en «Mis operaciones».</p>
+	</div>`,
+		() => clearInterval(sw.timer),
+	)
+	bindSwapTabs(() => clearInterval(sw.timer))
+	$('swConnect')?.addEventListener('click', showConnect)
+	const amount = () => num2($('swAmount')?.value)
+	const unit = () => unitOf(sw.coin)
+
+	const options = (offers) =>
+		offers
+			.slice(0, 4)
+			.map((o) => {
+				const target = o.kind === 'flexible' ? Math.min(Math.max(amount() || 0, o.orderMin ?? 0), o.orderMax ?? o.usd) : o.usd
+				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} USD` : `${fmtM(o.usd)} USD exactos`
+				return `<button type="button" class="chip-btn" data-sw-pick="${target}">${range} a <b class="mono">${fmtP(o.price)}</b></button>`
+			})
+			.join('')
+
+	function render() {
+		if (!$('swOut')) return
+		const q = sw.quote
+		const best = q?.best
+		const a = amount()
+		$('swOut').textContent = best && a > 0 ? fmtM(a * best.price) : '—'
+		$('swOut').classList.toggle('dim', !best)
+		if ($('swAge')) $('swAge').textContent = sw.loading ? 'Actualizando…' : q ? `Precio de hace ${Math.max(0, Math.round((Date.now() - q.at) / 1000))} s` : ''
+		let html = ''
+		if (!bk.acct.connected) html = '<p class="notice">Para ver los precios y comprar, conecta tu cuenta de QvaPay con tu token.</p>'
+		else if (sw.error) html = `<p class="notice warn">${esc(sw.error)}</p>`
+		else if (!q) html = '<p class="hint">Buscando ofertas de venta…</p>'
+		else if (!q.offers.length) html = `<p class="notice warn">Ahora mismo nadie vende USD en ${esc(nameOf(sw.coin))}. Prueba otro mercado o vuelve en un rato.</p>`
+		else if (!best) html = `<p class="notice warn">${a > 0 ? `Nadie vende ${fmtM(a)} USD de una vez en este mercado.` : 'Pon cuántos USD compras.'} Montos posibles:</p><div class="swap-picks">${options(q.offers)}</div>`
+		else
+			html = `<div class="kv swap-kv">
+				<span>Precio</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
+				<span>Vende</span><b>@${esc(best.user)}${best.vip ? ' <span class="badge ok">VIP</span>' : ''}${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
+				<span>Reputación</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : 'sin valoraciones'}${best.ops != null ? ` · ${best.ops.toLocaleString('en-US')} operaciones` : ''}</b><span></span>
+			</div>`
+		$('swQuote').innerHTML = html
+		const go = $('swGo')
+		if (go) {
+			go.disabled = !best || !(a > 0) || sw.loading
+			go.textContent = !best ? 'Comprar' : `Comprar ${fmtM(a)} USD por ${fmtM(a * best.price)} ${unit()}`
+		}
+	}
+
+	async function quote(fresh = false) {
+		if (!bk.acct.connected) return render()
+		const seq = ++sw.seq
+		sw.tried = Date.now()
+		sw.loading = true
+		render()
+		try {
+			const q = await api(`/swap/quote?side=buy&coin=${sw.coin}&amount=${amount() || 0}${fresh ? '&fresh=1' : ''}`)
+			if (seq !== sw.seq) return
+			sw.quote = q
+			sw.error = ''
+		} catch (e) {
+			if (seq !== sw.seq) return
+			sw.error = e.message
+		}
+		sw.loading = false
+		render()
+	}
+
+	let typing = null
+	$('swAmount').addEventListener('input', () => {
+		store.set('swap.buyAmount', amount())
+		render()
+		clearTimeout(typing)
+		typing = setTimeout(() => quote(), 250)
+	})
+	$('swCoin').addEventListener('change', () => {
+		sw.coin = $('swCoin').value
+		store.set('swap.buyCoin', sw.coin)
+		sw.quote = null
+		quote()
+	})
+	$('swQuote').addEventListener('click', (e) => {
+		const b = e.target.closest('[data-sw-pick]')
+		if (!b) return
+		$('swAmount').value = b.dataset.swPick
+		$('swAmount').dispatchEvent(new Event('input'))
+	})
+	$('swGo')?.addEventListener('click', async () => {
+		const best = sw.quote?.best
+		const a = amount()
+		if (!best) return
+		const total = a * best.price
+		const ok = await askConfirm(
+			'Confirmar compra',
+			`<div class="kv">
+				<span>Compras</span><b>${fmtM(a)} USD</b><span></span>
+				<span>Pagas</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
+				<span>Con</span><b>${esc(nameOf(sw.coin))}</b><span></span>
+				<span>Vende</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>
+			</div>
+			<p class="notice">Tomas su oferta: sus ${fmtM(a)} USD quedan reservados para ti en el escrow de QvaPay. Le pagas ${fmtM(total)} ${esc(unit())} a los datos que te pase y marcas «Ya pagué».</p>`,
+			'Comprar',
+			'primary',
+		)
+		if (!ok) return
+		const btn = $('swGo')
+		btn.disabled = true
+		btn.textContent = 'Comprando…'
+		try {
+			const r = await api('/swap/buy', { offer: best.offer, amount: a, maxPrice: best.price })
+			markOrigin(r.offer)
+			window.TPPush?.watch(r.offer)
+			toast(`Compra en marcha: págale a @${best.user} y marca «Ya pagué»`)
+			bk.tab = 'active'
+			await loadTrades()
+			loadBook()
+			openTrade(r.offer, r.order)
+		} catch (e) {
+			toast(e.message, true)
+			if (e.status === 409) quote(true)
+			else render()
+		}
+	})
+
+	sw.timer = setInterval(() => {
+		if (document.hidden || sw.loading) return
+		if (bk.acct.connected && Date.now() - Math.max(sw.quote?.at ?? 0, sw.tried) >= SWAP_REFRESH_MS) quote(true)
+		else render()
+	}, 1000)
+	quote()
+}
+
+// ── Vender ya: vender saldo a la oferta de compra que más paga ──
 // Se ve como un swap: pones cuántos USD vendes y dónde quieres el dinero, y el terminal elige la
-// oferta VIP que más paga en la que cabe ese monto. Por dentro es una operación P2P normal:
-// tus USD quedan en el escrow de QvaPay y el VIP te transfiere a los datos que le pasas por el chat
+// oferta de compra que más paga en la que cabe ese monto. Por dentro es una operación P2P normal:
+// tus USD quedan en el escrow de QvaPay y el comprador te transfiere a los datos que le pasas por el chat (si no es
+// VIP, liberas tú al ver el pago)
 const SWAP_REFRESH_MS = 15_000
 
-async function showSwap() {
+// Comprar o vender: dos pestañas en la misma ventana. Se abre en la última que usaste (Comprar la primera vez: en el
+// terminal casi todo es comprar USD)
+const swapTabs = (mode) =>
+	`<div class="seg-tabs swap-tabs" role="tablist">${[
+		['buy', 'Comprar'],
+		['sell', 'Vender'],
+	]
+		.map(([m, t]) => `<button type="button" role="tab" class="seg-tab${m === mode ? ' active' : ''}" aria-selected="${m === mode}" data-sw-mode="${m}">${t}</button>`)
+		.join('')}</div>`
+function bindSwapTabs(stop) {
+	for (const b of document.querySelectorAll('[data-sw-mode]'))
+		b.addEventListener('click', () => {
+			if (b.classList.contains('active')) return
+			stop()
+			showSwap(b.dataset.swMode)
+		})
+}
+
+async function showSwap(mode) {
+	mode = mode === 'buy' || mode === 'sell' ? mode : store.get('swap.mode', 'buy')
+	store.set('swap.mode', mode)
+	if (mode === 'buy') return showBuy()
 	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin) }]
 	const sw = { coin: store.get('swap.coin', 'BANK_CUP'), amount: store.get('swap.amount', 100), quote: null, loading: false, error: '', timer: null, seq: 0, tried: 0 }
 	if (!markets.some((m) => m.tick === sw.coin)) sw.coin = markets[0].tick
 	openModal(
 		`<div class="stack swap">
-		<div class="swap-head"><h3>Vender</h3></div>
-		<p class="muted swap-sub">Vende tu saldo de QvaPay y recibe el dinero en tu cuenta.</p>
+		<div class="swap-head">${swapTabs('sell')}</div>
+		<p class="muted swap-sub">Vende tu saldo de QvaPay a la oferta de compra que más paga del mercado y recibe el dinero en tu cuenta.</p>
 		<div class="swap-box">
 			<div class="swap-row"><span>Vendes</span>${bk.acct.connected ? `<button type="button" class="link small" id="swMax">Saldo: <b class="mono">${fmtM(bk.acct.balance ?? 0)}</b> USD</button>` : ''}</div>
 			<div class="swap-main">
@@ -1859,17 +2039,18 @@ async function showSwap() {
 		<div id="swDetailsBox" class="stack tight">
 			<div class="swap-saved" id="swSaved" hidden></div>
 			<div id="swEdit" class="stack tight">
-				<p class="hint">Dónde quieres recibir el pago (se lo enviamos al VIP por el chat de la operación)</p>
+				<p class="hint">Dónde quieres recibir el pago (se lo enviamos al comprador por el chat de la operación)</p>
 				<div class="saved-methods" id="swMethods" hidden></div>
 				<div id="swDetails" class="stack tight"></div>
 				<label class="check"><input type="checkbox" id="swRemember" /> Recordar en este navegador</label>
 			</div>
 		</div>
 		${bk.acct.connected ? '<button class="btn buy block swap-go" id="swGo" disabled>Vender</button>' : '<button class="btn primary block" id="swConnect">Conectar QvaPay para vender</button>'}
-		<p class="hint swap-foot">Tus USD quedan en el escrow de QvaPay hasta que el VIP te paga. En las ventas a cuentas VIP no tienes que liberar tú. Sigues la venta en «Mis operaciones».</p>
+		<p class="hint swap-foot">Tus USD quedan en el escrow de QvaPay hasta que el comprador te paga. Si es una cuenta VIP no tienes que liberar tú; si no, cuando veas el pago en tu cuenta lo confirmas y QvaPay le pasa los USD. Sigues la venta en «Mis operaciones».</p>
 	</div>`,
 		() => clearInterval(sw.timer),
 	)
+	bindSwapTabs(() => clearInterval(sw.timer))
 	$('swConnect')?.addEventListener('click', showConnect)
 
 	const fields = bk.acct.connected ? await loadCoinFields() : {}
@@ -1947,18 +2128,18 @@ async function showSwap() {
 		$('swOut').classList.toggle('dim', !best)
 		renderAge()
 		let html = ''
-		if (!bk.acct.connected) html = '<p class="notice">Para ver los precios de los VIP y vender, conecta tu cuenta de QvaPay con tu token.</p>'
+		if (!bk.acct.connected) html = '<p class="notice">Para ver los precios y vender, conecta tu cuenta de QvaPay con tu token.</p>'
 		else if (sw.error) html = `<p class="notice warn">${esc(sw.error)}</p>`
-		else if (!q) html = '<p class="hint">Buscando ofertas VIP…</p>'
-		else if (!q.offers.length) html = `<p class="notice warn">Ahora mismo ningún VIP compra USD en ${esc(nameOf(sw.coin))}. Prueba otro mercado o vuelve en un rato.</p>`
+		else if (!q) html = '<p class="hint">Buscando ofertas de compra…</p>'
+		else if (!q.offers.length) html = `<p class="notice warn">Ahora mismo nadie compra USD en ${esc(nameOf(sw.coin))}. Prueba otro mercado o vuelve en un rato.</p>`
 		else if (!best && !reachable(q.offers).length)
-			html = `<p class="notice warn">${maxUsd() > 0 ? `Con tu saldo (${fmtM(maxUsd())} USD) no llegas al mínimo de ningún VIP en este mercado.` : 'No tienes saldo en QvaPay para vender.'}</p>`
+			html = `<p class="notice warn">${maxUsd() > 0 ? `Con tu saldo (${fmtM(maxUsd())} USD) no llegas al mínimo de ninguna oferta de compra en este mercado.` : 'No tienes saldo en QvaPay para vender.'}</p>`
 		else if (!best)
-			html = `<p class="notice warn">${a > 0 ? `Ningún VIP compra ${fmtM(a)} USD de una vez en este mercado.` : 'Pon cuántos USD vendes.'} Montos posibles:</p><div class="swap-picks">${options(q.offers)}</div>`
+			html = `<p class="notice warn">${a > 0 ? `Nadie compra ${fmtM(a)} USD de una vez en este mercado.` : 'Pon cuántos USD vendes.'} Montos posibles:</p><div class="swap-picks">${options(q.offers)}</div>`
 		else {
 			html = `<div class="kv swap-kv">
 				<span>Precio</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
-				<span>Compra</span><b>@${esc(best.user)} <span class="badge ok">VIP</span>${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
+				<span>Compra</span><b>@${esc(best.user)}${best.vip ? ' <span class="badge ok">VIP</span>' : ''}${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
 				<span>Reputación</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : 'sin valoraciones'}${best.ops != null ? ` · ${best.ops.toLocaleString('en-US')} operaciones` : ''}</b><span></span>
 			</div>`
 		}
@@ -2034,10 +2215,10 @@ async function showSwap() {
 				<span>Vendes</span><b>${fmtM(a)} USD</b><span></span>
 				<span>Recibes</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
 				<span>En</span><b>${esc(nameOf(sw.coin))}</b><span></span>
-				<span>Compra</span><b>@${esc(best.user)} (VIP)</b><span></span>
+				<span>Compra</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>
 				${d.map((x) => `<span>${x.label}</span><b>${esc(x.value)}</b><span></span>`).join('')}
 			</div>
-			<p class="notice">Se reservan ${fmtM(a)} USD de tu saldo en el escrow de QvaPay y se le envían tus datos al VIP por el chat para que te pague.</p>`,
+			<p class="notice">Se reservan ${fmtM(a)} USD de tu saldo en el escrow de QvaPay y se le envían tus datos por el chat para que te pague.${best.vip ? '' : ' No es una cuenta VIP: cuando te llegue el pago a tu cuenta, confírmalo en «Mis operaciones» para que QvaPay le pase los USD. No lo confirmes antes de verlo.'}</p>`,
 			'Vender',
 			'buy',
 		)
