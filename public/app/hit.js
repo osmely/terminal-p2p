@@ -25,7 +25,7 @@
 	const de = (q.get('de') ?? '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20)
 	if (q.has('de')) {
 		q.delete('de')
-		history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
+		history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}${location.hash}`)
 	}
 	if (de) set(sessionStorage, 'tp.de', de)
 	if (de && site === 'app' && !get(localStorage, 'tp.de')) set(localStorage, 'tp.de', de)

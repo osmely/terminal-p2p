@@ -13,6 +13,15 @@
 	const $ = (id) => document.getElementById(id)
 	const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 	const fmtP = (p) => (p == null ? '—' : p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: p < 10 ? 4 : 2 }))
+	// Hora de Cuba: UTC-4 en verano (del segundo domingo de marzo al primer domingo de noviembre) y UTC-5 en invierno.
+	// El verano de 2026 sigue hasta el 7 nov 2027 (Cuba no atrasó el reloj) y los móviles aún dicen UTC-5 para
+	// America/Havana: igual que en el servidor (worker/rates.ts), app.js y site.js
+	function cubaOffset(ms) {
+		const sunday = (y, m, nth) => Date.UTC(y, m, 1 + ((7 - new Date(Date.UTC(y, m, 1)).getUTCDay()) % 7) + (nth - 1) * 7, 5)
+		const summer = (y) => [sunday(y, 2, 2), y === 2026 ? sunday(2027, 10, 1) : sunday(y, 10, 1)]
+		const y = new Date(ms).getUTCFullYear()
+		return [summer(y), summer(y - 1)].some(([a, b]) => ms >= a && ms < b) ? -4 * 3_600_000 : -5 * 3_600_000
+	}
 	const fmtU = (n) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 	const get = (k, d) => {
 		try {
@@ -171,6 +180,7 @@
 			const [, r] = await Promise.all([lib(), fetch(`/data/rates?coin=${encodeURIComponent(coin)}&days=${days}`).then((x) => x.json())])
 			if (my !== chartSeq) return
 			if (!chart) {
+				$('chart').textContent = ''
 				chart = LightweightCharts.createChart($('chart'), {
 					autoSize: true,
 					localization: { locale: 'es', priceFormatter: (p) => fmtP(p) },
@@ -182,14 +192,20 @@
 				buy = chart.addLineSeries({ lineWidth: 2, priceLineVisible: false })
 				paintChart()
 			}
-			// En la hora del móvil (la librería dibuja en UTC)
-			const tz = -new Date().getTimezoneOffset() * 60
-			const line = (k) => (r.points ?? []).filter((p) => p[k] != null).map((p) => ({ time: Math.floor(p.t / 1000) + tz, value: p[k] }))
+			// En hora de Cuba (la librería dibuja en UTC): no con la zona del móvil, que puede ser otra o creer que Cuba
+			// está en UTC-5
+			const line = (k) => (r.points ?? []).filter((p) => p[k] != null).map((p) => ({ time: Math.floor((p.t + cubaOffset(p.t)) / 1000), value: p[k] }))
 			sell.setData(line('sell'))
 			buy.setData(line('buy'))
 			chart.timeScale().fitContent()
 		} catch {
-			if (my === chartSeq) $('chart').innerHTML = '<p class="empty">El gráfico no está disponible ahora mismo.</p>'
+			if (my !== chartSeq) return
+			// El aviso sustituye al gráfico: la próxima vez se crea de nuevo (si no, se quedaba el aviso hasta recargar)
+			try {
+				chart?.remove()
+			} catch {}
+			chart = sell = buy = null
+			$('chart').innerHTML = '<p class="empty">El gráfico no está disponible ahora mismo.</p>'
 		}
 	}
 	document.addEventListener('click', (e) => {

@@ -41,7 +41,7 @@ const SIM_BACK_MS = 10 * 60_000
 if (new URLSearchParams(location.search).get('connect') === 'sim') {
 	const q = new URLSearchParams(location.search)
 	q.delete('connect')
-	history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
+	history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}${location.hash}`)
 	try {
 		sessionStorage.setItem('tp.backToSim', String(Date.now()))
 	} catch {}
@@ -60,7 +60,7 @@ const PRO_WANT_MS = 30 * 60_000
 if (new URLSearchParams(location.search).get('pro') === 'open') {
 	const q = new URLSearchParams(location.search)
 	q.delete('pro')
-	history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
+	history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}${location.hash}`)
 	try {
 		sessionStorage.setItem('tp.wantPro', String(Date.now()))
 	} catch {}
@@ -343,7 +343,7 @@ function resumeCheckout() {
 	const back = q.get('pro')
 	if (back) {
 		q.delete('pro')
-		history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
+		history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}${location.hash}`)
 	}
 	if (!pro.enabled) return
 	// Venías de la web o del simulador para hacerte Pro

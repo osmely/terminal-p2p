@@ -47,7 +47,7 @@ const urlCoin = (() => {
 	const c = q.get('coin')
 	if (!c) return null
 	q.delete('coin')
-	history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`)
+	history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}${location.hash}`)
 	if (!/^[A-Z_]{2,20}$/.test(c)) return null
 	store.set('coin', c)
 	return c
