@@ -29,7 +29,7 @@ async function api(path, body) {
 	if (!r.ok) {
 		// Bloqueada en Terminal P2P con el terminal abierto: se relee la cuenta, que lo dice y la desconecta
 		if (data.code === 'TP_ACCOUNT_BLOCKED' && path !== '/me') loadAccount()
-		throw Object.assign(new Error(data.error || `Error ${r.status}`), { status: r.status, code: data.code })
+		throw Object.assign(new Error(data.error || `Error ${r.status}`), { status: r.status, code: data.code, fresh: data.fresh })
 	}
 	return data
 }
@@ -689,12 +689,16 @@ function bindDetail(t) {
 	const back = $('backParts')
 	if (back) back.onclick = () => openTrade(t.offer, null)
 	const act = async (action, extra = {}) => {
-		// Mientras QvaPay responde no se puede tocar otro botón (ni el mismo dos veces)
-		for (const b of body.querySelectorAll('[data-act]')) b.disabled = true
+		// Mientras QvaPay responde no se puede tocar otro botón (ni el mismo dos veces). Un mensaje del chat no bloquea
+		// nada: tras enviarlo la operación sigue igual y los botones tienen que seguir a mano («Ya pagué», «Liberar»)
+		const chat = action === 'chat'
+		if (!chat) for (const b of body.querySelectorAll('[data-act]')) b.disabled = true
 		try {
 			const r = await api('/trade/action', { offer: t.offer, order: t.order, action, ...extra })
 			if (action === 'release') bk.released.set(`${t.offer}:${t.order ?? ''}`, Date.now())
 			if (r.message) toast(r.message)
+			// Entera otra vez: si la operación aún no cambió de estado, los botones vuelven a poder tocarse
+			if (!chat) bk.detailSig = null
 			await refreshDetail()
 			loadTrades()
 		} catch (e) {
@@ -1673,7 +1677,8 @@ function renderTake(uuid, side, l, coin, preset) {
 		btn.disabled = true
 		btn.textContent = 'Tomando…'
 		try {
-			const r = await api('/offer/apply', { offer: uuid, amount: flex ? a : undefined })
+			// Con el precio y el monto que ves: si cambiaron, el servidor no la toma
+			const r = await api('/offer/apply', { offer: uuid, amount: flex ? a : undefined, price: l.price, usd: flex ? undefined : l.usd })
 			markOrigin(r.offer)
 			// Una fija: el servidor te avisa de lo que haga su dueño (en las de rango QvaPay no avisa de cada parte)
 			if (!flex) window.TPPush?.watch(r.offer)
@@ -1683,9 +1688,11 @@ function renderTake(uuid, side, l, coin, preset) {
 			loadBook()
 			openTrade(r.offer, r.order)
 		} catch (e) {
+			toast(e.message, true)
+			// Cambió mientras decidías: se vuelve a enseñar con el precio y el monto de ahora, para que decidas otra vez
+			if (e.fresh?.price > 0) return renderTake(uuid, side, { ...l, price: e.fresh.price, usd: flex ? l.usd : e.fresh.usd }, coin, a)
 			btn.disabled = false
 			upd()
-			toast(e.message, true)
 		}
 	})
 }
@@ -1906,7 +1913,7 @@ function fillFromQp(s) {
 // tomarla, a los datos que te da por el chat. Lo demás es una compra normal en «Mis operaciones»
 async function showBuy() {
 	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin) }]
-	const sw = { coin: store.get('swap.buyCoin', state.coin || 'BANK_CUP'), amount: store.get('swap.buyAmount', 50), quote: null, loading: false, error: '', timer: null, seq: 0, tried: 0 }
+	const sw = { coin: store.get('swap.buyCoin', state.coin || 'BANK_CUP'), amount: store.get('swap.buyAmount', 50), quote: null, loading: false, error: '', timer: null, seq: 0, tried: 0, taking: false }
 	if (!markets.some((m) => m.tick === sw.coin)) sw.coin = markets[0].tick
 	openModal(
 		`<div class="stack swap">
@@ -1971,8 +1978,9 @@ async function showBuy() {
 		$('swQuote').innerHTML = html
 		const go = $('swGo')
 		if (go) {
-			go.disabled = !best || !(a > 0) || sw.loading
-			go.textContent = !best ? 'Comprar' : `Comprar ${fmtM(a)} USD por ${fmtM(a * best.price)} ${unit()}`
+			// Mientras se toma, ni el refresco de cada segundo ni una cotización nueva lo vuelven a activar
+			go.disabled = sw.taking || !best || !(a > 0) || sw.loading
+			go.textContent = sw.taking ? 'Comprando…' : !best ? 'Comprar' : `Comprar ${fmtM(a)} USD por ${fmtM(a * best.price)} ${unit()}`
 		}
 	}
 
@@ -2017,7 +2025,7 @@ async function showBuy() {
 	$('swGo')?.addEventListener('click', async () => {
 		const best = sw.quote?.best
 		const a = amount()
-		if (!best) return
+		if (!best || sw.taking) return
 		const total = a * best.price
 		const ok = await askConfirm(
 			'Confirmar compra',
@@ -2031,20 +2039,21 @@ async function showBuy() {
 			'Comprar',
 			'primary',
 		)
-		if (!ok) return
-		const btn = $('swGo')
-		btn.disabled = true
-		btn.textContent = 'Comprando…'
+		if (!ok || sw.taking) return
+		sw.taking = true
+		render()
 		try {
 			const r = await api('/swap/buy', { offer: best.offer, amount: a, maxPrice: best.price })
 			markOrigin(r.offer)
 			window.TPPush?.watch(r.offer)
 			toast(`Compra en marcha: págale a @${best.user} y marca «Ya pagué»`)
+			clearInterval(sw.timer)
 			bk.tab = 'active'
 			await loadTrades()
 			loadBook()
 			openTrade(r.offer, r.order)
 		} catch (e) {
+			sw.taking = false
 			toast(e.message, true)
 			if (e.status === 409) quote(true)
 			else render()
@@ -2052,7 +2061,7 @@ async function showBuy() {
 	})
 
 	sw.timer = setInterval(() => {
-		if (document.hidden || sw.loading) return
+		if (document.hidden || sw.loading || sw.taking) return
 		if (bk.acct.connected && Date.now() - Math.max(sw.quote?.at ?? 0, sw.tried) >= SWAP_REFRESH_MS) quote(true)
 		else render()
 	}, 1000)
@@ -2089,7 +2098,7 @@ async function showSwap(mode) {
 	store.set('swap.mode', mode)
 	if (mode === 'buy') return showBuy()
 	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin) }]
-	const sw = { coin: store.get('swap.coin', 'BANK_CUP'), amount: store.get('swap.amount', 100), quote: null, loading: false, error: '', timer: null, seq: 0, tried: 0 }
+	const sw = { coin: store.get('swap.coin', 'BANK_CUP'), amount: store.get('swap.amount', 100), quote: null, loading: false, error: '', timer: null, seq: 0, tried: 0, taking: false }
 	if (!markets.some((m) => m.tick === sw.coin)) sw.coin = markets[0].tick
 	openModal(
 		`<div class="stack swap">
@@ -2224,8 +2233,8 @@ async function showSwap(mode) {
 			const missing = details().some((d) => !d.value)
 			const badCard = window.TPNum?.cardError(document.querySelectorAll('[data-sw-detail]')) ?? ''
 			const over = a > maxUsd()
-			go.disabled = !best || !(a > 0) || missing || badCard || over || sw.loading
-			go.textContent = maxUsd() <= 0 ? 'No tienes saldo en QvaPay' : !best ? 'Vender' : over ? 'No tienes saldo suficiente' : missing ? 'Completa dónde recibes el pago' : badCard ? 'La tarjeta lleva 16 cifras' : `Vender ${fmtM(a)} USD por ${fmtM(a * best.price)} ${unit()}`
+			go.disabled = sw.taking || !best || !(a > 0) || missing || badCard || over || sw.loading
+			go.textContent = sw.taking ? 'Vendiendo…' : maxUsd() <= 0 ? 'No tienes saldo en QvaPay' : !best ? 'Vender' : over ? 'No tienes saldo suficiente' : missing ? 'Completa dónde recibes el pago' : badCard ? 'La tarjeta lleva 16 cifras' : `Vender ${fmtM(a)} USD por ${fmtM(a * best.price)} ${unit()}`
 		}
 	}
 
@@ -2281,7 +2290,7 @@ async function showSwap(mode) {
 	$('swGo')?.addEventListener('click', async () => {
 		const best = sw.quote?.best
 		const a = amount()
-		if (!best) return
+		if (!best || sw.taking) return
 		const d = details()
 		const total = a * best.price
 		const ok = await askConfirm(
@@ -2291,16 +2300,15 @@ async function showSwap(mode) {
 				<span>Recibes</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
 				<span>En</span><b>${esc(nameOf(sw.coin))}</b><span></span>
 				<span>Compra</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>
-				${d.map((x) => `<span>${x.label}</span><b>${esc(x.value)}</b><span></span>`).join('')}
+				${d.map((x) => `<span>${esc(x.label)}</span><b>${esc(x.value)}</b><span></span>`).join('')}
 			</div>
 			<p class="notice">Se reservan ${fmtM(a)} USD de tu saldo en el escrow de QvaPay y se le envían tus datos por el chat para que te pague.${best.vip ? '' : ' No es una cuenta VIP: cuando te llegue el pago a tu cuenta, confírmalo en «Mis operaciones» para que QvaPay le pase los USD. No lo confirmes antes de verlo.'}</p>`,
 			'Vender',
 			'buy',
 		)
-		if (!ok) return
-		const btn = $('swGo')
-		btn.disabled = true
-		btn.textContent = 'Vendiendo…'
+		if (!ok || sw.taking) return
+		sw.taking = true
+		render()
 		try {
 			const r = await api('/swap', { offer: best.offer, amount: a, minPrice: best.price, details: d })
 			markOrigin(r.offer)
@@ -2308,11 +2316,13 @@ async function showSwap(mode) {
 			if ($('swRemember').checked) store.setMine(`details.${sw.coin}`, Object.fromEntries(d.map((x) => [x.name, x.value])))
 			else store.setMine(`details.${sw.coin}`, {})
 			toast(r.chatSent ? `Venta en marcha: @${best.user} ya tiene tus datos para pagarte` : 'Venta en marcha. No se pudo enviar el chat: manda tus datos de pago a mano', !r.chatSent)
+			clearInterval(sw.timer)
 			bk.tab = 'active'
 			await loadTrades()
 			loadBook()
 			openTrade(r.offer, r.order)
 		} catch (e) {
+			sw.taking = false
 			toast(e.message, true)
 			// Si la oferta cambió o se agotó, se busca de nuevo la mejor
 			if (e.status === 409) quote(true)
@@ -2330,7 +2340,7 @@ async function showSwap(mode) {
 		})
 	// Cada segundo la edad del precio; cada SWAP_REFRESH_MS, precio nuevo
 	sw.timer = setInterval(() => {
-		if (document.hidden || sw.loading) return
+		if (document.hidden || sw.loading || sw.taking) return
 		if (bk.acct.connected && Date.now() - Math.max(sw.quote?.at ?? 0, sw.tried) >= SWAP_REFRESH_MS) quote(true)
 		else renderAge()
 	}, 1000)

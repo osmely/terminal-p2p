@@ -371,7 +371,16 @@ document.addEventListener('click', (e) => e.target.closest('#proBtn') && showPro
 document.addEventListener('click', (e) => e.target.closest('#radarBtn') && (pro.active && window.TPProRadar ? window.TPProRadar.open() : showPro()))
 // Cada 5 minutos y al volver a la pestaña: si se apaga o enciende Pro en el panel, o se te acaban los días, se
 // nota sin recargar (y la licencia firmada de un día se renueva sola)
-setInterval(() => !document.hidden && bk.acct.connected && refreshPro(), 5 * 60_000)
+// Con Pro activo también con la pestaña oculta: el radar y el precio automático siguen trabajando en segundo plano y
+// tienen que parar si te quitan los días (devolución, suspensión)
+setInterval(() => (!document.hidden || pro.active) && bk.acct.connected && refreshPro(), 5 * 60_000)
+// Al acabarse los días se para al momento, sin esperar a esa consulta: el radar y el precio automático miran pro.active
+setInterval(() => {
+	if (pro.active && pro.expiresAt && Date.now() >= pro.expiresAt) {
+		pro.active = false
+		if (bk.acct.connected) refreshPro()
+	}
+}, 15_000)
 document.addEventListener('visibilitychange', () => !document.hidden && bk.acct.connected && refreshPro())
 // La cuenta ya se leyó antes de cargar este archivo (pasa sin token): lo que loadAccount no pudo llamar
 if (bk.acctReady) refreshPro()

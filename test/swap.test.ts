@@ -423,6 +423,27 @@ test('Comprar ya: toma la oferta de venta (sin chat ni saldo) y no compra si el 
 	assert.deepEqual(fake.calls, [`apply:s1:280:${JSON.stringify({ coin: 'BANK_CUP', side: 'sell', usd: 280, via: 'swap-buy' })}`])
 })
 
+test('Tomar desde el libro: no toma si el precio o el monto de una fija cambiaron en tu contra mientras decidías', async () => {
+	const { fake, post } = await setup()
+	// Comprando a 1,120: si sube a 1,150, no; si baja, sí
+	fake.offers.s1.receive = '345000'
+	const up = await post('/offer/apply', { offer: 's1', amount: 50, price: 1120 })
+	assert.deepEqual([up.status, /cambió a 1,150/.test(up.body.error), up.body.fresh.price], [409, true, 1150])
+	// Vendiendo a 1,015: si baja a 1,000, no
+	fake.offers.v2.receive = '1100000'
+	assert.equal((await post('/offer/apply', { offer: 'v2', amount: 100, price: 1015 })).status, 409)
+	// Una fija que pasó de 50 a 500 USD: no se toma entera sin que la veas
+	Object.assign(fake.offers.s2, { amount: '500', receive: '555000' })
+	const big = await post('/offer/apply', { offer: 's2', price: 1110, usd: 50 })
+	assert.deepEqual([big.status, big.body.fresh.usd], [409, 500])
+	assert.deepEqual(fake.calls, [])
+	// Igual o mejor que lo que viste: se toma (y sin precio, como antes)
+	assert.equal((await post('/offer/apply', { offer: 's1', amount: 50, price: 1150 })).status, 200)
+	assert.equal((await post('/offer/apply', { offer: 'v2', amount: 100, price: 1000 })).status, 200)
+	assert.equal((await post('/offer/apply', { offer: 's2', price: 1110, usd: 500 })).status, 200)
+	assert.equal(fake.calls.length, 3)
+})
+
 test('Vender ya: también a un comprador que no es VIP (y sigue sin liberar nada)', async () => {
 	const { fake, post } = await setup()
 	fake.offers.v2.User = { ...vip('azi'), vip: false }

@@ -634,6 +634,15 @@ export class Broker {
 		const o = await acc.client.getOffer(String(b.offer ?? ''))
 		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
 		if (o.status !== 'open' || o.pause) return json(409, { error: 'Esta oferta ya no está disponible' })
+		// Lo que viste en la ventana: si su dueño cambió el precio (o el monto de una fija) mientras decidías, no se toma
+		// a ciegas. Solo frena si te perjudica: comprando, que suba; vendiendo, que baje
+		const cur = swapOffer(o)
+		const seenPrice = Number(b.price)
+		if (seenPrice > 0 && (o.type === 'sell' ? cur.price > seenPrice * (1 + 1e-6) : cur.price < seenPrice * (1 - 1e-6)))
+			return json(409, { error: `El precio cambió a ${cur.price.toLocaleString('en-US')} mientras decidías. Revisa la oferta antes de tomarla.`, fresh: { price: cur.price, usd: cur.usd } })
+		const seenUsd = Number(b.usd)
+		if (o.offer_kind !== 'flexible' && seenUsd > 0 && Math.abs(round2(seenUsd) - round2(cur.usd)) >= 0.01)
+			return json(409, { error: `El monto cambió a ${cur.usd.toLocaleString('en-US')} USD mientras decidías. Revisa la oferta antes de tomarla.`, fresh: { price: cur.price, usd: cur.usd } })
 		let amount: number | undefined
 		if (o.offer_kind === 'flexible') {
 			amount = Math.round(Number(b.amount) * 100) / 100
