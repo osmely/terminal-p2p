@@ -309,6 +309,17 @@ export class Book {
 	// es cada dueño y saca lo que debería estar dentro de lo leído y no está (un evento que se perdió). Con addOnly (una
 	// página de la lectura del lado entero) solo mete y actualiza, y apunta en `into` lo que vio: lo que falta lo decide
 	// sweep() al acabar todas las páginas
+	// Una lectura normal de QvaPay: la lista y su oferta promocionada. La promocionada va aparte y solo se añade: QvaPay
+	// la pone en su hueco aunque su precio sea peor que el de la última de la lista, y contándola el «peor precio leído»
+	// bajaba hasta ella y se borraba del libro todo lo que hay entre las mejores y su precio. Cuenta como vista (si no,
+	// con el lado entero leído se borraría por no estar en la lista). La lista va tal cual: con su largo se sabe si se
+	// leyó el lado entero
+	read(coin: string, side: Side, list: P2POffer[], promoted?: P2POffer | null, now = Date.now()) {
+		const seen = new Set<string>()
+		if (promoted) this.merge(coin, side, [promoted], now, true, seen)
+		return this.merge(coin, side, list, now, false, seen)
+	}
+
 	merge(coin: string, side: Side, list: P2POffer[], now = Date.now(), addOnly = false, into?: Set<string>) {
 		const seen = into ?? new Set<string>()
 		for (const o of list) {

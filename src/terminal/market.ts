@@ -486,11 +486,13 @@ export class Market {
 		const t = Date.now()
 		const events: BookActivity[] = []
 		for (const [id, l] of after) if (!before.has(id) && !l.outlier) events.push({ t, kind: 'new', side, price: l.price, usd: l.usd, user: l.user })
-		// Solo cuenta como retirada si estaba dentro de lo que leemos (no si salió del top por precio)
-		const worst = next.at(-1)?.price
+		// Solo cuenta como retirada si estaba dentro de lo que leemos (no si salió del top por precio). Sin la
+		// promocionada: QvaPay la pone aunque su precio sea peor que el de la última de la lista
+		const read = next.filter((l) => !l.promoted)
+		const worst = read.at(-1)?.price
 		for (const [id, l] of before) {
 			if (after.has(id) || l.outlier) continue
-			const insideWindow = next.length < TAKE || worst === undefined || (side === 'ask' ? l.price <= worst : l.price >= worst)
+			const insideWindow = read.length < TAKE || worst === undefined || (side === 'ask' ? l.price <= worst : l.price >= worst)
 			if (insideWindow) events.push({ t, kind: 'gone', side, price: l.price, usd: l.usd, user: l.user })
 		}
 		c.activity = [...events, ...c.activity].slice(0, 100)

@@ -84,6 +84,22 @@ test('lectura con el token: aprende quién es cada dueño y saca lo que se perdi
 	assert.deepEqual([b.changed.size, b.changedOwners.size], [0, 0])
 })
 
+test('lectura con la promocionada: no borra las ofertas que hay entre las 50 mejores y su precio, y ella no sale al leer el lado entero', () => {
+	const b = new Book()
+	const mk = (i: number, price: number) => ({ uuid: `s${i}`, type: 'sell', coin: 'BANK_CUP', amount: '10', receive: String(price * 10), status: 'open', updated_at: at(0), User: ana }) as P2POffer
+	const all = Array.from({ length: 80 }, (_, i) => mk(i, 400 + i))
+	b.merge('BANK_CUP', 'ask', all, T + 60_000, true)
+	assert.equal(b.count('BANK_CUP', 'ask'), 80)
+	// Las 50 mejores (400–449) y la promocionada a 470: siguen las 80
+	assert.equal(b.read('BANK_CUP', 'ask', all.slice(0, 50), mk(70, 470), T + 120_000), 0)
+	assert.equal(b.count('BANK_CUP', 'ask'), 80)
+	// Lado entero (menos de 50) con una promocionada que no sale en la lista: lo demás que falta sale, ella se queda
+	const c = new Book()
+	c.merge('BANK_CUP', 'ask', all.slice(0, 5), T + 60_000, true)
+	c.read('BANK_CUP', 'ask', all.slice(0, 3), mk(60, 460), T + 120_000)
+	assert.deepEqual(c.levels('BANK_CUP', 'ask').map((l) => l.uuid), ['s0', 's1', 's2', 's60'])
+})
+
 test('lectura del lado entero: mete las viejas que no se conocían y saca lo que falta dos veces seguidas', () => {
 	const b = new Book()
 	b.apply(ev('p2p.created', { uuid: 'conocida' }), T)

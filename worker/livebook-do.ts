@@ -735,9 +735,7 @@ export class LiveBook {
 			const res = await fetch(`${QVAPAY}/p2p?${q}`, { headers: { 'app-id': this.env.QVAPAY_APP_ID!, 'app-secret': this.env.QVAPAY_APP_SECRET!, Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
 			if (!res.ok) throw new Error(`QvaPay respondió ${res.status}`)
 			const body = (await res.json()) as { data?: P2POffer[]; promoted?: { offer?: P2POffer } }
-			const promoted = body.promoted?.offer
-			const list = promoted ? [promoted, ...(body.data ?? []).filter((o) => o.uuid !== promoted.uuid)] : (body.data ?? [])
-			this.book.merge(coin, side, list)
+			this.book.read(coin, side, body.data ?? [], body.promoted?.offer)
 			this.synced.add(k)
 			this.lastRead = Date.now()
 			this.readError = null
