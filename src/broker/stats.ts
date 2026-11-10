@@ -1,6 +1,7 @@
 // Estadísticas de trading del usuario («Mi cuenta»), con sus propias operaciones de QvaPay. Se calculan en su
 // navegador: a nuestro servidor no llega nada.
 
+import { inCuba } from '../../worker/rates.ts'
 import type { Trade } from './trades.ts'
 
 export interface MarketStats {
@@ -39,7 +40,9 @@ export function tradeStats(trades: Trade[]): TradeStats {
 		const buy = t.side === 'buy'
 		if (buy) usdBought += t.usd
 		else usdSold += t.usd
-		const month = (t.updatedAt ?? '').slice(0, 7)
+		// El mes en hora de Cuba (una de las 21:00 del último día es de ese mes, no del siguiente)
+		const at = t.updatedAt ? Date.parse(t.updatedAt) : NaN
+		const month = Number.isFinite(at) ? inCuba(at).toISOString().slice(0, 7) : ''
 		if (month) {
 			const m = months.get(month) ?? { usdBought: 0, usdSold: 0, ops: 0 }
 			m.ops++

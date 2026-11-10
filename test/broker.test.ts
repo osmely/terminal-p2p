@@ -66,3 +66,16 @@ test('paymentDetails acepta objeto o lista', () => {
 	assert.deepEqual(paymentDetails([{ name: 'Celular', value: '+53' }, { name: 'x', value: '' }]), [{ name: 'Celular', value: '+53' }])
 	assert.deepEqual(paymentDetails(null), [])
 })
+
+test('toTrades: las partes canceladas no salen «En curso»; para «Mi cuenta», las canceladas con contraparte sí cuentan', () => {
+	const me = { uuid: 'me', username: 'yo' }
+	const other = { uuid: 'x', username: 'otro' }
+	const list = [
+		offer({ uuid: 'd', type: 'sell', offer_kind: 'flexible', User: other, status: 'open', my_order: { uuid: 'ord', amount: '20', receive: '20200', status: 'cancelled' } }),
+		offer({ uuid: 'e', type: 'sell', User: other, Peer: me, status: 'cancelled' }),
+		// Mi oferta cancelada sin que nadie la tomara: no es una operación cancelada
+		offer({ uuid: 'f', type: 'sell', User: me, Peer: null, status: 'cancelled' }),
+	]
+	assert.deepEqual(toTrades(list, 'me').trades, [])
+	assert.deepEqual(toTrades(list, 'me', true).trades.map((t) => t.id), ['d:ord', 'e'])
+})

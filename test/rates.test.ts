@@ -126,3 +126,29 @@ test('operaciones por día en enero de 2027 (Cuba sigue en UTC-4 desde el verano
 	assert.equal(days.at(-1), '2027-01-10')
 	assert.equal(days.at(-2), '2027-01-09')
 })
+
+test('rangos de un año o más: un punto por día de Cuba, con t en su medianoche (verano e invierno)', async () => {
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5, variableNumber: 100 } })
+	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
+	const stmt = (sql: string, args: unknown[] = []) => ({
+		bind: (...a: unknown[]) => stmt(sql, a),
+		all: async () => ({ results: db.prepare(sql).all(...(args as never[])) as never[] }),
+		first: async () => (db.prepare(sql).get(...(args as never[])) ?? null) as never,
+		run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...(args as never[])).changes) } }),
+	})
+	const d1 = { prepare: (sql: string) => stmt(sql), batch: async () => [] }
+	const ins = db.prepare('INSERT INTO rates (coin, t, average, count, window_h) VALUES (?, ?, ?, 100, 24)')
+	// 9 nov 2026 a las 21:00 y 23:00 de Cuba (UTC-4: 10 nov 01:00 y 03:00 UTC): día 9, no 10
+	ins.run('BANK_CUP', Date.parse('2026-11-10T01:00:00Z'), 500)
+	ins.run('BANK_CUP', Date.parse('2026-11-10T03:00:00Z'), 520)
+	ins.run('BANK_CUP', Date.parse('2026-11-10T05:00:00Z'), 600) // 10 nov a la 01:00 de Cuba
+	// Invierno de 2027: UTC-5. 1 dic 2027 a las 23:30 de Cuba = 2 dic 04:30 UTC
+	ins.run('BANK_CUP', Date.parse('2027-12-02T04:30:00Z'), 700)
+	const r = await query(d1 as never, 'BANK_CUP', 3650, Date.parse('2027-12-05T12:00:00Z'))
+	const pts = r.points.map((p: { t: number; avg: number | null }) => [new Date(p.t).toISOString(), p.avg])
+	assert.deepEqual(pts, [
+		['2026-11-09T04:00:00.000Z', 510],
+		['2026-11-10T04:00:00.000Z', 600],
+		['2027-12-01T05:00:00.000Z', 700],
+	])
+})

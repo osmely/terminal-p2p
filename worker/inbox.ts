@@ -151,10 +151,12 @@ export async function listInbox(db: D1, account: string, now: number) {
 	return { items, unread: items.filter((i) => !i.read).length }
 }
 
-// Marcar leídos (los que vio al abrir el buzón)
+// Marcar leídos (los que vio al abrir el buzón): solo los de su buzón, para no contar lecturas de mensajes ajenos ni
+// dejar leídos los que aún no existen
 export async function markRead(db: D1, account: string, ids: number[], now: number) {
 	const a = account.toLowerCase()
-	const ok = [...new Set(ids.filter((n) => Number.isInteger(n) && n > 0))].slice(0, LIST_MAX)
+	const mine = new Set((await listInbox(db, a, now)).items.map((i) => i.id))
+	const ok = [...new Set(ids)].filter((id) => mine.has(id))
 	if (ok.length) await db.batch(ok.map((id) => db.prepare('INSERT OR IGNORE INTO inbox_read (account, msg, read_at) VALUES (?, ?, ?)').bind(a, id, now)))
 	return ok.length
 }

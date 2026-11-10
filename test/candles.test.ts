@@ -92,6 +92,18 @@ test('velas: antes de contarlas, la mejor venta del libro y el volumen por hora'
 	assert.deepEqual((await loadCandles(d1, 'BANK_CUP', '15m', null, cut + 10 * MIN))[0], { t: T, o: 1120, h: 1120, l: 1120, c: 1120, ops: 0, usd: 0, book: true })
 })
 
+test('velas: los USD del volumen de antes del 31 oct no salen (no son de fiar); las operaciones sí', async () => {
+	const { db, d1 } = memD1()
+	const H = 3600_000
+	const old = Date.parse('2026-10-29T18:00:00Z')
+	await markCandlesFrom(d1, T)
+	const vol = db.prepare("INSERT INTO volume (coin, hour, side, ops, usd) VALUES ('BANK_CUP', ?, ?, ?, ?)")
+	vol.run(old, 'buy', 4, 900)
+	vol.run(T - H, 'buy', 2, 30)
+	const c = await loadCandles(d1, 'BANK_CUP', '1h', old, T)
+	assert.deepEqual(c.map((x) => [x.t, x.ops, x.usd]), [[old, 4, 0], [T - H, 2, 30]])
+})
+
 test('velas: lo atípico no cuenta', () => {
 	assert.equal(candlePrice(1120, 1115, 'ask'), true)
 	assert.equal(candlePrice(10_000, 1115, 'ask'), false)

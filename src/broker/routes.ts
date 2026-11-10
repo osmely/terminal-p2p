@@ -269,7 +269,7 @@ export class Broker {
 		let more = true
 		while (more && pages < STATS_PAGES) {
 			const list = await acc.client.listOffers({ my: true, take: 50, page: ++pages })
-			trades.push(...toTrades(list.data, acc.me.uuid).trades)
+			trades.push(...toTrades(list.data, acc.me.uuid, true).trades)
 			more = list.data.length === 50 && pages * 50 < list.total
 		}
 		// done: cada operación completada (lo justo para las ganancias de Pro en «Mi cuenta», que se calculan aquí mismo)

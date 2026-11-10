@@ -86,8 +86,8 @@ async function setup() {
 	const auth = b64u(crypto.getRandomValues(new Uint8Array(16)))
 	const subOf = (n: number) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/dev${n}`, keys: { p256dh, auth } })
 	const ctx = { waitUntil: (p: Promise<unknown>) => void p }
-	const call = async (path: string, body: unknown, withCookie = true) => {
-		const req = new Request(`https://app.terminalp2p.com${path}`, { method: 'POST', body: JSON.stringify(body), headers: withCookie ? { cookie } : {} })
+	const call = async (path: string, body: unknown, withCookie: boolean | string = true) => {
+		const req = new Request(`https://app.terminalp2p.com${path}`, { method: 'POST', body: JSON.stringify(body), headers: withCookie ? { cookie: typeof withCookie === 'string' ? withCookie : cookie } : {} })
 		const res = await pushApi(req, new URL(req.url), env, ctx, T, fetcher)
 		return { status: res.status, body: (await res.json()) as Record<string, unknown> }
 	}
@@ -162,4 +162,24 @@ test('push: el evento inventado de las pruebas lleva tu cuenta de dueño y pasa 
 	assert.equal(ownerPush(e, null, T)?.msg?.title, 'Te pagaron: comprueba y libera')
 	assert.equal(ownerPush(simEvent(OWNER, 'released', 'buy', T)!, null, T)?.msg?.title, 'Te liberaron 10.00 USD')
 	assert.equal(simEvent(OWNER, 'otro', 'sell', T), null)
+})
+
+test('push: dos cuentas en el mismo navegador reciben las dos, y el aviso dice de cuál es', async () => {
+	const s = await setup()
+	const OWNER2 = '22222222-2222-4222-8222-222222222222'
+	const print2 = 'c'.repeat(64)
+	const cookie2 = `tpw=${await whoToken(print2, OWNER2, 'leo', 'clave', T)}`
+	await s.call('/push/subscribe', { print: s.print, sub: s.subOf(1) })
+	await s.call('/push/subscribe', { print: print2, sub: s.subOf(1) }, cookie2)
+	assert.deepEqual(s.db.prepare('SELECT owner, username FROM push_subs ORDER BY username').all().map((r) => ({ ...r })), [{ owner: OWNER, username: 'ana' }, { owner: OWNER2, username: 'leo' }])
+	// La de ana sigue recibiendo lo suyo, aunque leo se conectó después
+	assert.equal(await deliverPush(s.env, ownerPush(ev('p2p.paid'), null, T)!, T, new Map(), s.fetcher), 1)
+	assert.equal(await deliverPush(s.env, ownerPush(ev('p2p.paid', { owner_uuid: OWNER2 }), null, T)!, T, new Map(), s.fetcher), 1)
+	// Las dos cuentas pueden vigilar desde ese navegador
+	const offer = '7f1c2d3e-aaaa-4bbb-8ccc-0123456789ab'
+	assert.equal((await s.call('/push/watch', { print: print2, endpoint: s.subOf(1).endpoint, offer }, cookie2)).status, 200)
+	assert.equal(await deliverPush(s.env, takerPush(ev('p2p.paid', { uuid: offer, type: 'buy' }), T)!, T, new Map(), s.fetcher), 1)
+	// Desactivar los avisos en el navegador los quita para todas sus cuentas
+	await s.call('/push/unsubscribe', { endpoint: s.subOf(1).endpoint }, false)
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM push_subs').get()!.n, 0)
 })

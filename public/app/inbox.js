@@ -45,9 +45,12 @@
 		if (typeof pro === 'undefined' || !pro.print || typeof proFetch !== 'function') return
 		if (!force && loadedFor === pro.print && Date.now() - lastLoad < 60_000) return
 		lastLoad = Date.now()
+		const print = pro.print
 		try {
-			const d = await proFetch('/pro/inbox', { print: pro.print })
-			loadedFor = pro.print
+			const d = await proFetch('/pro/inbox', { print })
+			// Si mientras tanto se cambió de cuenta, estos mensajes son de la otra
+			if (pro.print !== print) return
+			loadedFor = print
 			items = Array.isArray(d.items) ? d.items : []
 			paintBadge()
 			if (panel) paintPanel()
@@ -176,7 +179,18 @@
 			if (loadedFor) (loadedFor = null), (items = []), paintBadge()
 			return
 		}
-		if (loadedFor !== pro.print && Date.now() - lastLoad > 20_000) {
+		if (loadedFor !== pro.print) {
+			// Otra cuenta: los mensajes de la anterior no se ven ni un momento
+			if (loadedFor) {
+				loadedFor = null
+				items = []
+				closePanel()
+				document.getElementById('inboxPop')?.remove()
+				paintBadge()
+				// Y los de la nueva se piden ya
+				lastLoad = 0
+			}
+			if (Date.now() - lastLoad <= 20_000) return
 			load(true).then(() => {
 				if (wantOpen && loadedFor) (wantOpen = false), openPanel()
 			})

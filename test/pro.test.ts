@@ -883,6 +883,10 @@ test('informes por meses (cobrado, devuelto, neto, nuevos y los que repiten) y r
 	assert.deepEqual([r.buyers, r.repeat, r.trialAccounts, r.converted, r.paidCount, r.refundedCount], [2, 1, 1, 1, 3, 1])
 	const total = r.months.reduce((t, m) => ({ gross: t.gross + m.gross, refunded: t.refunded + m.refunded, newPaying: t.newPaying + m.newPaying, renewals: t.renewals + m.renewals }), { gross: 0, refunded: 0, newPaying: 0, renewals: 0 })
 	assert.deepEqual([Math.round(total.gross * 100) / 100, total.refunded, total.newPaying, total.renewals], [17.97, 3.99, 2, 1])
+	// Una devolución parcial cuenta lo que se devolvió, no el pago entero
+	s.db.prepare('UPDATE pro_checkouts SET refund_usd = 2.5 WHERE id = ?').run(second.checkout.id)
+	const partial = (await proReport(s.env.DB, s.now())).months.reduce((t, m) => t + m.refunded, 0)
+	assert.equal(partial, 2.5)
 	const page = await (await admin(undefined, '?view=informes')).text()
 	assert.match(page, /<h1>Informes<\/h1>/)
 	assert.match(page, /Repiten compra<\/span><b>50 %/)
@@ -1760,6 +1764,9 @@ test('buzón: cada uno borra de su buzón (uno o todos) sin tocar el de los dem�
 	const a = (await s.post('/pro/inbox/hide', { print: P1, username: 'ana', ids: [forAll] })).body
 	assert.deepEqual([a.items.map((i: { title: string }) => i.title), a.unread], [['Para ana'], 1])
 	assert.deepEqual((await box(P2, 'leo')).items.map((i: { title: string }) => i.title), ['Para todos'])
+	// Leo tampoco puede marcar como leído el de ana, ni uno que aún no existe
+	await s.post('/pro/inbox/read', { print: P2, username: 'leo', ids: [forAna, 999] })
+	assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM inbox_read WHERE account = 'leo'").get()?.n, 0)
 	// Leer y luego borrar también vale; borrar todos deja el buzón vacío
 	await s.post('/pro/inbox/read', { print: P1, username: 'ana', ids: [forAna] })
 	assert.deepEqual((await s.post('/pro/inbox/hide', { print: P1, username: 'ana', ids: [forAna] })).body, { items: [], unread: 0 })
@@ -1801,4 +1808,13 @@ test('tiempo a la vista: una pestaña en segundo plano (sin mercados) cuenta com
 	assert.equal(await heavyUse(s.env.DB, 'leo', s.now()), null)
 	for (const i of [1, 2, 3]) s.db.prepare('INSERT INTO live_seen (day, account, name, first_at, last_at, minutes, active, pro) VALUES (?, ?, ?, ?, ?, ?, NULL, 0)').run(day(i), 'eva', 'eva', s.now(), s.now(), 120)
 	assert.deepEqual(await heavyUse(s.env.DB, 'eva', s.now()), { days: 3, hours: 6 })
+})
+
+test('el mes del panel empieza a las 00:00 de Cuba, no de UTC', async () => {
+	const { cubaMonthStart } = await import('../worker/pro.ts')
+	// 30 nov 2026 a las 21:00 de Cuba (1 dic 01:00 UTC): sigue siendo noviembre
+	assert.equal(new Date(cubaMonthStart(Date.parse('2026-12-01T01:00:00Z'))).toISOString(), '2026-11-01T04:00:00.000Z')
+	assert.equal(new Date(cubaMonthStart(Date.parse('2026-12-01T04:30:00Z'))).toISOString(), '2026-12-01T04:00:00.000Z')
+	// En invierno (desde nov 2027), UTC-5
+	assert.equal(new Date(cubaMonthStart(Date.parse('2027-12-15T12:00:00Z'))).toISOString(), '2027-12-01T05:00:00.000Z')
 })

@@ -305,3 +305,24 @@ test('foto del libro: mejor precio sin lo atípico ni lo solo-VIP, USD cerca del
 	const empty = b.stats('BANK_CUP', 'bid', 1060, T)
 	assert.deepEqual([empty.offers, empty.best, empty.usd, empty.top1, empty.age, empty.fill100], [0, null, 0, null, null, null])
 })
+
+test('libro: se olvida al dueño que no sale en 30 días y no tiene ofertas; lo que salió no queda pendiente de barrer', () => {
+	const b = new Book()
+	const leo = { ...ana, uuid: 'u-leo', username: 'leo' }
+	const list = [
+		{ uuid: 'a1', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10600', status: 'open', updated_at: at(0), User: ana },
+		{ uuid: 'l1', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10700', status: 'open', updated_at: at(0), User: leo },
+	] as P2POffer[]
+	b.merge('BANK_CUP', 'ask', list, T)
+	assert.equal(b.owners.get('u-ana')?.seen, '2026-10-27')
+	// La de leo sale del libro; pasan 31 días: leo se olvida, ana (con oferta) no
+	b.apply(ev('p2p.cancelled', { uuid: 'l1', owner_uuid: 'u-leo', status: 'cancelled' }, 10), T + 10_000)
+	const later = T + 31 * 86_400_000
+	assert.deepEqual(b.pruneTrades(later), ['u:u-leo'])
+	assert.deepEqual([...b.owners.keys()], ['u-ana'])
+	// Un dueño guardado de antes (sin día) cuenta desde hoy
+	b.owners.set('u-old', { username: 'old', ops: 1, rating: null, kyc: false, vip: false, gold: false })
+	b.pruneTrades(later + 2 * 3600_000)
+	assert.equal(b.owners.get('u-old')?.seen, new Date(later + 2 * 3600_000).toISOString().slice(0, 10))
+	assert.ok(b.changedOwners.has('u-old'))
+})

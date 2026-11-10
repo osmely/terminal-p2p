@@ -4,16 +4,18 @@
 'use strict'
 ;(() => {
 	const site = location.hostname.startsWith('app.') ? 'app' : location.hostname.startsWith('sim.') ? 'sim' : 'site'
-	const get = (s, k) => {
+	// El almacenamiento se pide dentro del try: con las cookies del sitio bloqueadas, solo nombrarlo ya lanza un error
+	const store = (n) => (n === 'local' ? localStorage : sessionStorage)
+	const get = (n, k) => {
 		try {
-			return s.getItem(k)
+			return store(n).getItem(k)
 		} catch {
 			return null
 		}
 	}
-	const set = (s, k, v) => {
+	const set = (n, k, v) => {
 		try {
-			s.setItem(k, v)
+			store(n).setItem(k, v)
 		} catch {}
 	}
 	const send = (kind, ref) =>
@@ -27,9 +29,9 @@
 		q.delete('de')
 		history.replaceState(null, '', `${location.pathname}${q.toString() ? `?${q}` : ''}${location.hash}`)
 	}
-	if (de) set(sessionStorage, 'tp.de', de)
-	if (de && site === 'app' && !get(localStorage, 'tp.de')) set(localStorage, 'tp.de', de)
-	const ref = get(sessionStorage, 'tp.de') ?? ''
+	if (de) set('session', 'tp.de', de)
+	if (de && site === 'app' && !get('local', 'tp.de')) set('local', 'tp.de', de)
+	const ref = get('session', 'tp.de') ?? ''
 
 	// Al pasar de la web al terminal o al simulador, el enlace de origen va con el clic
 	if (ref && site === 'site')
@@ -42,19 +44,23 @@
 			a.href = u.toString()
 		})
 
-	if (!get(sessionStorage, `tp.hit.${site}`)) {
-		set(sessionStorage, `tp.hit.${site}`, '1')
+	if (!get('session', `tp.hit.${site}`)) {
+		set('session', `tp.hit.${site}`, '1')
 		send('visit', ref)
 	}
 
 	// El terminal avisa cuando hay una cuenta conectada (broker.js): una vez al día por navegador, y «first» la primera vez
 	window.TPHit = {
 		connected() {
-			const today = new Date().toDateString()
-			if (get(localStorage, 'tp.hit.conn') === today) return
-			const first = !get(localStorage, 'tp.hit.conn')
-			set(localStorage, 'tp.hit.conn', today)
-			const origin = get(localStorage, 'tp.de') ?? ref
+			// El día de Cuba (app.js), no el del móvil, que puede ir en otra zona
+			const now = typeof nowMs === 'function' ? nowMs() : Date.now()
+			const today = typeof inCuba === 'function' ? inCuba(now).toISOString().slice(0, 10) : new Date().toDateString()
+			const last = get('local', 'tp.hit.conn')
+			// Lo apuntado antes con el día del navegador también vale para hoy (si no, hoy contaría dos veces)
+			if (last === today || last === new Date().toDateString()) return void set('local', 'tp.hit.conn', today)
+			const first = !last
+			set('local', 'tp.hit.conn', today)
+			const origin = get('local', 'tp.de') ?? ref
 			send('connect', origin)
 			if (first) send('first', origin)
 		},

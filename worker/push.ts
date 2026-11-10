@@ -31,6 +31,8 @@ export const TARGETS_TTL_MS = 5 * 60_000
 export const WATCH_MS = 3 * 86_400_000
 // Navegadores por cuenta y ofertas vigiladas por navegador
 const SUBS_PER_OWNER = 10
+// Cuentas con avisos en un mismo navegador
+const OWNERS_PER_SUB = 5
 const WATCH_PER_SUB = 50
 // Tope por navegador y hora (un error o una oferta que se edita sin parar no inunda el móvil)
 export const PUSH_PER_HOUR = 30
@@ -148,6 +150,8 @@ interface SubRow {
 	endpoint: string
 	p256dh: string
 	auth: string
+	username?: string
+	shared?: number
 }
 
 const ENDPOINT = /^https:\/\/[^\s]{10,1000}$/
@@ -166,9 +170,16 @@ export async function saveSub(db: D1, sub: PushSub, who: Who, now: number) {
 	await db
 		.prepare(
 			`INSERT INTO push_subs (endpoint, p256dh, auth, owner, username, created_at) VALUES (?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, owner = excluded.owner, username = excluded.username, fails = 0`,
+			 ON CONFLICT(endpoint, owner) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, username = excluded.username, created_at = excluded.created_at, fails = 0`,
 		)
 		.bind(sub.endpoint, sub.p256dh, sub.auth, owner, who.username, now)
+		.run()
+	// Las claves son del navegador: si las renovó, para todas sus cuentas
+	await db.prepare('UPDATE push_subs SET p256dh = ?, auth = ? WHERE endpoint = ? AND owner <> ?').bind(sub.p256dh, sub.auth, sub.endpoint, owner).run()
+	// Las cuentas que más hace que no se activan en ese navegador, fuera
+	await db
+		.prepare(`DELETE FROM push_subs WHERE endpoint = ? AND owner NOT IN (SELECT owner FROM push_subs WHERE endpoint = ? ORDER BY created_at DESC LIMIT ${OWNERS_PER_SUB})`)
+		.bind(sub.endpoint, sub.endpoint)
 		.run()
 	// Los más viejos de esa cuenta, fuera
 	await db
@@ -211,8 +222,13 @@ export async function deliverPush(env: PushEnv, n: PushNotice, now: number, sent
 	if (!v) return 0
 	const db = env.DB
 	const subs = n.owner
-		? (await db.prepare('SELECT endpoint, p256dh, auth FROM push_subs WHERE owner = ?').bind(n.owner).all<SubRow>()).results
-		: (await db.prepare('SELECT s.endpoint, s.p256dh, s.auth FROM push_watch w JOIN push_subs s ON s.endpoint = w.endpoint WHERE w.offer = ?').bind(n.offer!).all<SubRow>()).results
+		? (
+				await db
+					.prepare('SELECT endpoint, p256dh, auth, username, (SELECT COUNT(*) FROM push_subs x WHERE x.endpoint = s.endpoint) AS shared FROM push_subs s WHERE owner = ?')
+					.bind(n.owner)
+					.all<SubRow>()
+			).results
+		: (await db.prepare('SELECT DISTINCT s.endpoint, s.p256dh, s.auth FROM push_watch w JOIN push_subs s ON s.endpoint = w.endpoint WHERE w.offer = ?').bind(n.offer!).all<SubRow>()).results
 	if (n.end && n.offer) await db.prepare('DELETE FROM push_watch WHERE offer = ?').bind(n.offer).run()
 	if (!n.msg) return 0
 	let ok = 0
@@ -221,7 +237,9 @@ export async function deliverPush(env: PushEnv, n: PushNotice, now: number, sent
 		if (times.length >= PUSH_PER_HOUR) continue
 		times.push(now)
 		sentTimes.set(s.endpoint, times)
-		const r = await sendPush(s, n.msg, v, { urgency: n.msg.urgent ? 'high' : 'normal', topic: n.msg.tag.replace(/^tp:/, ''), ttlS: 6 * 3600, fetcher }).catch(() => ({ ok: false, status: 0, gone: false }))
+		// Con varias cuentas en ese navegador, de cuál es
+		const msg = (s.shared ?? 0) > 1 && s.username ? { ...n.msg, title: `@${s.username}: ${n.msg.title}` } : n.msg
+		const r = await sendPush(s, msg, v, { urgency: n.msg.urgent ? 'high' : 'normal', topic: n.msg.tag.replace(/^tp:/, ''), ttlS: 6 * 3600, fetcher }).catch(() => ({ ok: false, status: 0, gone: false }))
 		if (r.ok) {
 			ok++
 			await db.prepare('UPDATE push_subs SET sent_at = ?, fails = 0 WHERE endpoint = ?').bind(now, s.endpoint).run()

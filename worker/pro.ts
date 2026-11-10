@@ -1532,13 +1532,19 @@ const daysForm = (username?: string) =>
 // Pagos en CSV (uno por fila, con quién pagó y su identificador en QvaPay) o copia completa de Pro en JSON
 // Mes en hora de Cuba (AAAA-MM)
 const cubaMonth = (ms: number) => inCuba(ms).toLocaleString('en-CA', { timeZone: 'UTC', year: 'numeric', month: '2-digit' }).slice(0, 7)
+// Cuándo empezó (ms UTC) el mes de Cuba en el que cae ms: el día 1 a las 00:00 de Cuba
+export function cubaMonthStart(ms: number) {
+	const c = inCuba(ms)
+	const day1 = Date.UTC(c.getUTCFullYear(), c.getUTCMonth(), 1)
+	return day1 - cubaOffset(day1 + 5 * 3_600_000)
+}
 
 // Las cuentas del negocio, mes a mes: lo cobrado, lo devuelto, el neto, clientes nuevos y los que repiten
 export async function proReport(db: D1, now: number) {
 	const pays = (
 		await db
-			.prepare("SELECT license, amount, COALESCE(paid_at, created_at) AS at, refunded_at FROM pro_checkouts WHERE status = 'paid' AND license IS NOT NULL ORDER BY at")
-			.all<{ license: string; amount: number; at: number; refunded_at: number | null }>()
+			.prepare("SELECT license, amount, COALESCE(paid_at, created_at) AS at, refunded_at, refund_usd FROM pro_checkouts WHERE status = 'paid' AND license IS NOT NULL ORDER BY at")
+			.all<{ license: string; amount: number; at: number; refunded_at: number | null; refund_usd: number | null }>()
 	).results
 	const trials = (await db.prepare("SELECT license, created_at FROM pro_days WHERE kind = 'trial'").all<{ license: string; created_at: number }>()).results
 	type Month = { month: string; pays: number; gross: number; refunded: number; refunds: number; newPaying: number; renewals: number; trials: number }
@@ -1560,7 +1566,8 @@ export async function proReport(db: D1, now: number) {
 		if (p.refunded_at) {
 			const r = m(cubaMonth(p.refunded_at))
 			r.refunds++
-			r.refunded += p.amount
+			// Lo que de verdad se devolvió (una devolución parcial no es el pago entero)
+			r.refunded += p.refund_usd ?? p.amount
 		}
 	}
 	for (const t of trials) m(cubaMonth(t.created_at)).trials++
@@ -1667,7 +1674,7 @@ async function reportsPage(env: ProEnv, notice: string, now: number) {
 	const [r, rn] = await Promise.all([proReport(env.DB, now), renewalReport(env.DB, now)])
 	const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)} %` : '—')
 	const thisMonth = r.months.find((x) => x.month === cubaMonth(now))
-	const lastMonth = r.months.find((x) => x.month === cubaMonth(Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 0, 12)))
+	const lastMonth = r.months.find((x) => x.month === cubaMonth(cubaMonthStart(now) - 1))
 	const name = (ym: string) => new Date(`${ym}-15T12:00:00Z`).toLocaleDateString('es', { month: 'long', year: 'numeric' })
 	const card = (label: string, value: string, small = '') => `<div class="card"><span>${label}</span><b>${value}</b>${small ? `<small>${small}</small>` : ''}</div>`
 	const rows = r.months
@@ -2177,7 +2184,7 @@ const like = (q: string) => `%${q}%`
 // Inicio: lo pendiente, las cifras del negocio, los interruptores y el repaso de pagos
 async function homePage(env: ProEnv, flash: string, now: number) {
 	const db = env.DB
-	const monthStart = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1)
+	const monthStart = cubaMonthStart(now)
 	const sum = await db
 		.prepare(
 			`SELECT

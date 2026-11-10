@@ -5,7 +5,7 @@
 // oferta ni usuario
 
 import { isOutlier } from '../src/terminal/market.ts'
-import { cubaOffset, type D1 } from './rates.ts'
+import { cubaOffset, VOLUME_USD_SINCE, type D1 } from './rates.ts'
 
 export const SLOT_MS = 15 * 60_000
 const HOUR_MS = 3600_000
@@ -157,7 +157,8 @@ export async function loadCandles(db: D1, coin: string, frame: Frame, since: num
 	for (const v of vol.results) {
 		const c = at(v.hour)
 		c.ops += v.ops
-		c.usd += v.usd
+		// Los USD de antes de VOLUME_USD_SINCE no son de fiar (como en el histórico y el análisis): solo las operaciones
+		if (v.hour >= VOLUME_USD_SINCE) c.usd += v.usd
 	}
 	for (const r of joinCandles(rows.results, frame, hourly ? cut : 0)) {
 		const c = at(r.t)

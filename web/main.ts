@@ -16,7 +16,17 @@ const RELAY = `${location.origin}/qp`
 // Si la próxima lectura está lejos (nadie miraba), se adelanta al abrir un mercado
 const WAKE_IF_FURTHER_THAN_MS = 5_000
 
-const accounts = new BrowserAccounts({ storage: { session: sessionStorage, local: localStorage }, baseUrl: RELAY })
+// Con getters: con el almacenamiento bloqueado (cookies del sitio bloqueadas) solo leer sessionStorage ya lanza un
+// error, y aquí tumbaba todo el terminal. Así lo lanza al usarlo, dentro del try de accounts.ts (el token queda en memoria)
+const storage = {
+	get session() {
+		return sessionStorage
+	},
+	get local() {
+		return localStorage
+	},
+}
+const accounts = new BrowserAccounts({ storage, baseUrl: RELAY })
 const market = new Market({
 	// Promedios y operaciones completadas son públicos: sin token
 	publicClient: new QvaPayClient({ dryRun: true, baseUrl: RELAY }),

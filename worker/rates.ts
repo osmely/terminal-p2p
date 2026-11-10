@@ -86,19 +86,28 @@ export function bucketFor(days: number) {
 export async function query(db: D1, coin: string, days: number, now = Date.now()) {
 	const bucket = bucketFor(days)
 	const since = now - days * 86_400_000
+	// Los puntos de un día van por día de Cuba (con su verano de cada año del rango), y su t es la medianoche de Cuba;
+	// los de 10 min y de una hora, tal cual (Cuba va en horas enteras respecto de UTC)
+	const daily = bucket === 86_400_000
+	const years: number[] = []
+	if (daily) for (let y = new Date(since).getUTCFullYear() - 1; y <= new Date(now).getUTCFullYear(); y++) years.push(y)
+	const key = daily
+		? `CAST((t + CASE WHEN ${years.map((_, i) => `(t >= ?${4 + 2 * i} AND t < ?${5 + 2 * i})`).join(' OR ')} THEN ${CDT} ELSE ${CST} END) / ?1 AS INTEGER)`
+		: 'CAST(t / ?1 AS INTEGER)'
 	const { results } = await db
 		.prepare(
 			// D1 enlaza los números de JS como REAL: sin CAST la división no trunca y no agrupa nada
-			`SELECT CAST(t / ?1 AS INTEGER) * ?1 AS t,
+			`SELECT ${key} * ?1 AS t,
 			        AVG(COALESCE(median_buy, avg_buy))   AS buy,
 			        AVG(COALESCE(median_sell, avg_sell)) AS sell,
 			        AVG(average)                         AS avg,
 			        MAX(count)                           AS count
 			   FROM rates WHERE coin = ?2 AND t >= ?3
-			  GROUP BY CAST(t / ?1 AS INTEGER) ORDER BY 1`,
+			  GROUP BY ${key} ORDER BY 1`,
 		)
-		.bind(bucket, coin, since)
+		.bind(bucket, coin, since, ...years.flatMap((y) => summer(y)))
 		.all<{ t: number; buy: number | null; sell: number | null; avg: number | null; count: number }>()
+	if (daily) for (const r of results) r.t -= cubaOffset(r.t + 12 * 3600_000)
 	const first = await db.prepare('SELECT MIN(t) AS t FROM rates WHERE coin = ?').bind(coin).first<{ t: number | null }>()
 	// Operaciones por día: el último registro de cada día de Cuba (su conteo es el de las 24 h previas)
 	const { results: last } = await db

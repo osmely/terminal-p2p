@@ -416,15 +416,24 @@ async function dailyPro(env: ProEnv, at: number) {
 		}
 	try {
 		await backupPro(env, at)
-		await cleanupPro(env.DB, at)
-		await cleanupLog(env.DB, at)
-		await cleanupLive(env.DB, at)
-		await cleanupPush(env.DB, at)
-		await cleanupInbox(env.DB, at)
-		await env.DB.prepare('DELETE FROM peer_stats_use WHERE day < ?').bind(inCuba(at - 7 * 86_400_000).toISOString().slice(0, 10)).run()
 	} catch (err) {
 		console.error(`pro, copia: ${(err as Error).message}`)
 	}
+	// Cada limpieza aparte: si falla la copia o una de ellas, las demás siguen
+	const cleanups: [string, () => Promise<unknown>][] = [
+		['pro', () => cleanupPro(env.DB, at)],
+		['actividad', () => cleanupLog(env.DB, at)],
+		['libro en vivo', () => cleanupLive(env.DB, at)],
+		['avisos al móvil', () => cleanupPush(env.DB, at)],
+		['buzón', () => cleanupInbox(env.DB, at)],
+		['fichas', () => env.DB.prepare('DELETE FROM peer_stats_use WHERE day < ?').bind(inCuba(at - 7 * 86_400_000).toISOString().slice(0, 10)).run()],
+	]
+	for (const [name, run] of cleanups)
+		try {
+			await run()
+		} catch (err) {
+			console.error(`limpieza (${name}): ${(err as Error).message}`)
+		}
 	// El repaso, a tu grupo de avisos (solo con Pro encendido: apagado no hay nada que vigilar)
 	try {
 		if (await proEnabled(env.DB, at)) await dailyDigest(env, r, at)
@@ -709,7 +718,11 @@ async function peerStatsRoute(req: Request, url: URL, env: Env, ctx: ExecutionCo
 		.first<{ n: number }>()
 	if ((used?.n ?? 0) > PEER_STATS_PER_DAY) return jsonError(429, `Por hoy ya viste la actividad de ${PEER_STATS_PER_DAY} usuarios: mañana se renueva`)
 	const stats = await peerStats(env, id).catch(() => null)
-	if (!stats) return jsonError(503, 'No se puede ver ahora mismo')
+	if (!stats) {
+		// Si QvaPay no la dio, no cuenta (se apunta antes para que dos peticiones a la vez no pasen las dos del tope)
+		await env.DB.prepare('UPDATE peer_stats_use SET n = n - 1 WHERE license = ? AND day = ? AND n > 0').bind(lic.u, day).run().catch(() => {})
+		return jsonError(503, 'No se puede ver ahora mismo')
+	}
 	const res = new Response(JSON.stringify(stats), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${PEER_STATS_TTL_S}` } })
 	ctx.waitUntil(caches.default.put(key, res.clone()))
 	return new Response(res.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `private, max-age=${PEER_STATS_TTL_S}` } })

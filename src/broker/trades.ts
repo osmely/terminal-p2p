@@ -94,7 +94,9 @@ export function actionsFor(status: string, payer: boolean, role: 'owner' | 'take
 	return []
 }
 
-export function toTrades(offers: P2POffer[], meUuid: string): { trades: Trade[]; openOffers: Trade[] } {
+// withCancelled: también las canceladas que tuvieron contraparte (para las estadísticas de «Mi cuenta»; en la lista de
+// operaciones no salen)
+export function toTrades(offers: P2POffer[], meUuid: string, withCancelled = false): { trades: Trade[]; openOffers: Trade[] } {
 	const trades: Trade[] = []
 	const openOffers: Trade[] = []
 	for (const o of offers) {
@@ -103,6 +105,8 @@ export function toTrades(offers: P2POffer[], meUuid: string): { trades: Trade[];
 
 		// Parte tomada de una oferta por rango ajena
 		if (!isOwner && o.my_order) {
+			// Una parte cancelada ya no está «En curso»
+			if (o.my_order.status === 'cancelled' && !withCancelled) continue
 			const side = o.type === 'sell' ? 'buy' : 'sell'
 			const usd = num(o.my_order.amount)
 			const coinAmount = num(o.my_order.receive)
@@ -163,7 +167,7 @@ export function toTrades(offers: P2POffer[], meUuid: string): { trades: Trade[];
 			t.isPrivate = !!o.private
 			openOffers.push(t)
 		}
-		else if (!FINAL.has(o.status) || o.status === 'completed') trades.push(t)
+		else if (!FINAL.has(o.status) || o.status === 'completed' || (withCancelled && o.status === 'cancelled' && t.counterparty)) trades.push(t)
 	}
 	return { trades, openOffers }
 }

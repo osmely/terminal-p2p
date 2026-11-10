@@ -46,3 +46,9 @@ test('estadísticas: completadas y canceladas, volumen por mes y mercado, precio
 	assert.deepEqual(s.peers, [{ username: 'leo', ops: 2, usd: 80 }, { username: 'ana', ops: 2, usd: 30 }])
 	assert.equal(s.since, '2026-09-02T10:00:00Z')
 })
+
+test('estadísticas: el mes de cada operación es el de Cuba', () => {
+	// 31 oct a las 21:00 de Cuba (1 nov 01:00 UTC): es de octubre
+	const s = tradeStats([t({ updatedAt: '2026-11-01T01:00:00Z' }), t({ updatedAt: '2026-11-01T05:00:00Z' })])
+	assert.deepEqual(s.months.map((m) => [m.month, m.ops]), [['2026-11', 1], ['2026-10', 1]])
+})

@@ -133,6 +133,8 @@ export interface Trade {
 const TRADE_CHANGES = new Set(['taken', 'returned', 'paused', 'resumed'])
 // Cuánto se recuerda lo tomado de cada oferta y las fijas ya contadas: más que cualquier ventana de pago
 export const TRADES_KEEP_MS = 3 * 86_400_000
+// Un dueño que no sale en ninguna lectura en este tiempo y no tiene ofertas en el libro se olvida
+export const OWNER_KEEP_DAYS = 30
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
@@ -155,6 +157,8 @@ export interface Owner {
 	kyc: boolean
 	vip: boolean
 	gold: boolean
+	// Último día (UTC, AAAA-MM-DD) en que salió en una lectura, para olvidar a quien ya no opera
+	seen?: string
 }
 
 const ts = (v?: string | null) => (v ? Date.parse(v) || 0 : 0)
@@ -262,6 +266,7 @@ export class Book {
 			this.offers.delete(d.uuid)
 			this.changed.add(d.uuid)
 		}
+		this.missed.delete(d.uuid)
 		const converted = e.event === 'p2p.cancelled' && d.offer_kind === 'flexible' && d.status === 'open'
 		const taken = e.event === 'p2p.applied' || (e.event === 'p2p.range_closed' && d.change === 'taken')
 		const rest = had?.usd ?? (flexible ? num(d.available_amount ?? 0) || amount : amount)
@@ -302,6 +307,21 @@ export class Book {
 		const out: string[] = []
 		for (const [id, f] of this.filled) if (now - f.at > TRADES_KEEP_MS) this.filled.delete(id), out.push(`f:${id}`)
 		for (const [id, t] of this.completed) if (now - t > TRADES_KEEP_MS) this.completed.delete(id), out.push(`d:${id}`)
+		// Los dueños que no se ven hace OWNER_KEEP_DAYS y no tienen ofertas en el libro. Los guardados antes de apuntar el
+		// día cuentan desde hoy
+		const today = new Date(now).toISOString().slice(0, 10)
+		const oldest = new Date(now - OWNER_KEEP_DAYS * 86_400_000).toISOString().slice(0, 10)
+		const active = new Set([...this.offers.values()].map((o) => o.owner))
+		for (const [id, w] of this.owners) {
+			if (!w.seen) {
+				w.seen = today
+				this.changedOwners.add(id)
+			} else if (w.seen < oldest && !active.has(id)) {
+				this.owners.delete(id)
+				this.changedOwners.delete(id)
+				out.push(`u:${id}`)
+			}
+		}
 		return out
 	}
 
@@ -333,6 +353,7 @@ export class Book {
 					kyc: !!u.kyc,
 					vip: !!u.vip,
 					gold: !!u.golden_check,
+					seen: new Date(now).toISOString().slice(0, 10),
 				}
 				// Solo se apunta (y se guarda) si cambió algo
 				if (JSON.stringify(this.owners.get(u.uuid)) !== JSON.stringify(w)) {
@@ -408,6 +429,7 @@ export class Book {
 
 	private drop(o: LiveOffer, now: number) {
 		this.offers.delete(o.uuid)
+		this.missed.delete(o.uuid)
 		this.changed.add(o.uuid)
 		this.gone.set(o.uuid, now)
 		this.left.set(o.uuid, { coin: o.coin, side: o.side })

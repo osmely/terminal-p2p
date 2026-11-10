@@ -172,10 +172,14 @@ let historyPro = false
 async function loadHistory() {
 	const pro = window.TPPro
 	historyPro = !!(pro?.enabled && pro?.active && pro?.license)
+	const { coin, range } = state
 	try {
-		const r = await fetch(`/data/rates?coin=${state.coin}&days=${state.range}${historyPro ? `&l=${encodeURIComponent(pro.license)}` : ''}`, { cache: 'no-cache' })
+		const r = await fetch(`/data/rates?coin=${coin}&days=${range}${historyPro ? `&l=${encodeURIComponent(pro.license)}` : ''}`, { cache: 'no-cache' })
 		if (!r.ok) throw new Error(String(r.status))
-		state.history = await r.json()
+		const d = await r.json()
+		// Una respuesta que llega tarde, de otro mercado o rango, no pisa la de ahora
+		if (coin !== state.coin || range !== state.range) return
+		state.history = d
 		if (state.chart === 'history') drawHistory()
 	} catch {}
 }
@@ -1547,7 +1551,13 @@ async function loadRanking() {
 		if (state.rank.side) q.set('side', state.rank.side)
 		const r = await TPApi.fetch(`/api/ranking?${q}`)
 		if (!r.ok) throw new Error(String(r.status))
-		state.ranking = await r.json()
+		const d = await r.json()
+		// Si mientras tanto cambió el mercado, el alcance o el lado, esta ya no vale
+		const now = new URLSearchParams()
+		if (state.rank.scope === 'coin') now.set('coin', state.coin)
+		if (state.rank.side) now.set('side', state.rank.side)
+		if (now.toString() !== q.toString()) return
+		state.ranking = d
 		renderRanking()
 	} catch {}
 }

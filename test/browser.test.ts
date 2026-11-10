@@ -81,6 +81,20 @@ test('sin almacenamiento (bloqueado) la cuenta sigue conectada en memoria', asyn
 	const acc = new BrowserAccounts({ storage: { session: broken, local: broken }, baseUrl: 'https://x/qp' })
 	await acc.connect('browser', 'tok')
 	assert.ok(await acc.get())
+	// Como en el navegador con las cookies bloqueadas: hasta nombrar sessionStorage lanza (main.ts lo pasa con getters)
+	const throwing = {
+		get session(): typeof broken {
+			throw new Error('SecurityError')
+		},
+		get local(): typeof broken {
+			throw new Error('SecurityError')
+		},
+	}
+	const acc2 = new BrowserAccounts({ storage: throwing, baseUrl: 'https://x/qp' })
+	assert.equal(await acc2.get(), null)
+	await acc2.connect('browser', 'tok')
+	assert.ok(await acc2.get())
+	await acc2.disconnect()
 })
 
 test('cuenta bloqueada en Terminal P2P: /me lo dice, el token se queda guardado, un minuto sin preguntar y al levantarlo vuelve sola', async (t) => {
