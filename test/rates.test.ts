@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { bucketFor, cubaOffset, dailyFrom, inCuba, rowsFrom, slot, summer, volumeBars } from '../worker/rates.ts'
+import { readdirSync, readFileSync } from 'node:fs'
+import { DatabaseSync } from 'node:sqlite'
+import { bucketFor, cubaOffset, dailyFrom, inCuba, query, rowsFrom, slot, summer, volumeBars } from '../worker/rates.ts'
 import { cacheable } from '../worker/relay.ts'
 import type { Averages } from '../src/qvapay/types.ts'
 
@@ -103,4 +105,24 @@ test('volumen: por hora tal cual y cada 6 h desde las 0, 6, 12 y 18 de Cuba; nun
 		{ t: h('2026-10-27T04:00:00Z'), ops: 2, usd: null, buy: 0, sell: 2, buyUsd: null, sellUsd: null },
 		{ t: h('2026-10-27T10:00:00Z'), ops: 3, usd: 0, buy: 0, sell: 3, buyUsd: 0, sellUsd: 0 },
 	])
+})
+
+test('operaciones por día en enero de 2027 (Cuba sigue en UTC-4 desde el verano de 2026): un valor por día, sin repetir hoy', async () => {
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5, variableNumber: 100 } })
+	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
+	const stmt = (sql: string, args: unknown[] = []) => ({
+		bind: (...a: unknown[]) => stmt(sql, a),
+		all: async () => ({ results: db.prepare(sql).all(...(args as never[])) as never[] }),
+		first: async () => (db.prepare(sql).get(...(args as never[])) ?? null) as never,
+		run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...(args as never[])).changes) } }),
+	})
+	const d1 = { prepare: (sql: string) => stmt(sql), batch: async () => [] }
+	const now = Date.parse('2027-01-10T19:00:00Z') // las 15:00 en Cuba
+	const ins = db.prepare('INSERT INTO rates (coin, t, average, count, window_h) VALUES (?, ?, 500, 100, 24)')
+	for (let t = now - 8 * 86_400_000; t <= now; t += 600_000) ins.run('BANK_CUP', t)
+	const r = await query(d1 as never, 'BANK_CUP', 7, now)
+	const days = r.daily.map((d: { day: string }) => d.day)
+	assert.equal(new Set(days).size, days.length)
+	assert.equal(days.at(-1), '2027-01-10')
+	assert.equal(days.at(-2), '2027-01-09')
 })

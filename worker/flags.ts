@@ -6,15 +6,25 @@ import type { D1 } from './rates.ts'
 const TTL_MS = 30_000
 const cache = new WeakMap<object, Map<string, { at: number; on: boolean }>>()
 
-async function flag(db: D1, key: string, now: number) {
+// Si D1 falla (un corte), vale lo último que se supo o, sin nada, `fallback`: un corte de la base no tumba las páginas
+// ni el relé. Se vuelve a probar a los pocos segundos, no en cada petición
+const RETRY_MS = 5_000
+async function flag(db: D1, key: string, now: number, fallback: boolean) {
 	const mine = cache.get(db) ?? new Map()
 	cache.set(db, mine)
 	const hit = mine.get(key)
 	if (hit && now - hit.at < TTL_MS) return hit.on
-	const row = await db.prepare('SELECT value FROM app_flags WHERE key = ?').bind(key).first<{ value: string }>()
-	const on = row?.value === '1'
-	mine.set(key, { at: now, on })
-	return on
+	try {
+		const row = await db.prepare('SELECT value FROM app_flags WHERE key = ?').bind(key).first<{ value: string }>()
+		const on = row?.value === '1'
+		mine.set(key, { at: now, on })
+		return on
+	} catch (e) {
+		console.error(`interruptor ${key}: ${(e as Error).message}`)
+		const on = hit?.on ?? fallback
+		mine.set(key, { at: now - TTL_MS + RETRY_MS, on })
+		return on
+	}
 }
 
 async function setFlag(db: D1, key: string, on: boolean, now: number) {
@@ -28,11 +38,11 @@ async function setFlag(db: D1, key: string, on: boolean, now: number) {
 }
 
 // ¿Está Pro encendido? Apagado: ni la web lo anuncia, ni el terminal lo ofrece, ni el simulador pasa de BTC y ETH
-export const proEnabled = (db: D1, now = Date.now()) => flag(db, 'pro', now)
+export const proEnabled = (db: D1, now = Date.now()) => flag(db, 'pro', now, true)
 export const setProEnabled = (db: D1, on: boolean, now = Date.now()) => setFlag(db, 'pro', on, now)
 
 // Publicar ofertas desde el terminal, en pausa (p. ej. mientras se arregla un fallo). Tomar ofertas y cerrar
 // las órdenes en curso siguen funcionando
 export const ORDERS_PAUSED_MSG = 'Estamos haciendo ajustes en la plataforma: por ahora no se pueden publicar ofertas desde el terminal. Pronto se va a restablecer.'
-export const ordersPaused = (db: D1, now = Date.now()) => flag(db, 'orders_paused', now)
+export const ordersPaused = (db: D1, now = Date.now()) => flag(db, 'orders_paused', now, false)
 export const setOrdersPaused = (db: D1, on: boolean, now = Date.now()) => setFlag(db, 'orders_paused', on, now)

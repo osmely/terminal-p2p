@@ -109,11 +109,12 @@ export async function query(db: D1, coin: string, days: number, now = Date.now()
 			   FROM rates
 			  WHERE coin = ?1 AND t IN (
 			        SELECT MAX(t) FROM rates WHERE coin = ?1 AND t >= ?2
-			         GROUP BY CAST((t + CASE WHEN (t >= ?3 AND t < ?4) OR (t >= ?5 AND t < ?6) THEN ${CDT} ELSE ${CST} END) / 86400000 AS INTEGER))
+			         GROUP BY CAST((t + CASE WHEN (t >= ?3 AND t < ?4) OR (t >= ?5 AND t < ?6) OR (t >= ?7 AND t < ?8) THEN ${CDT} ELSE ${CST} END) / 86400000 AS INTEGER))
 			  ORDER BY t`,
 		)
-		// El rango (hasta un año) toca como mucho dos veranos: el del año de inicio y el del actual
-		.bind(coin, since, ...summer(new Date(since).getUTCFullYear()), ...summer(new Date(now).getUTCFullYear()))
+		// Los veranos que puede tocar el rango (hasta un año): también el del año anterior al de inicio, que en Cuba puede
+		// seguir hasta el año siguiente (el de 2026 dura hasta 2027: ver KEPT). Como en analysis.ts
+		.bind(coin, since, ...summer(new Date(since).getUTCFullYear() - 1), ...summer(new Date(since).getUTCFullYear()), ...summer(new Date(now).getUTCFullYear()))
 		.all<DayRow>()
 	return { coin, days, bucketMs: bucket, firstPoint: first?.t ?? null, points: results, daily: dailyFrom(last, now), volume: await volumeFor(db, coin, days, now) }
 }

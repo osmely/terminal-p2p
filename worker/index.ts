@@ -289,15 +289,33 @@ function staged(res: Response) {
 		.transform(out)
 }
 
+// Último recurso: un fallo que nadie esperaba (un corte de D1, un servicio que no responde) da un error claro y queda en
+// los registros, en vez de la página de error de Cloudflare
+async function safeHandle(req: Request, env: Env, ctx: ExecutionContext) {
+	try {
+		return await handle(req, env, ctx)
+	} catch (e) {
+		console.error(`${req.method} ${new URL(req.url).pathname}: ${(e as Error)?.stack ?? e}`)
+		if (req.method === 'GET' && req.headers.get('accept')?.includes('text/html'))
+			return secure(
+				new Response(
+					'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Terminal P2P</title><body style="font:16px system-ui,sans-serif;background:#0b0f17;color:#e8ecf4;display:grid;place-items:center;min-height:90vh;margin:0;text-align:center"><div><h1 style="font-size:20px">Algo falló de nuestro lado</h1><p>Vuelve a cargar la página en unos segundos.</p></div>',
+					{ status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': '10' } },
+				),
+			)
+		return secure(jsonError(503, 'Algo falló de nuestro lado: prueba otra vez en unos segundos'))
+	}
+}
+
 export default {
 	async fetch(req, env, ctx) {
-		if (!env.STAGING) return handle(req, env, ctx)
+		if (!env.STAGING) return safeHandle(req, env, ctx)
 		const path = new URL(req.url).pathname
 		if (path === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: { 'Content-Type': 'text/plain' } })
 		// Staging pide la contraseña del panel en todo (la misma de /admin, así basta con escribirla una vez);
 		// solo queda abierto el aviso de pago de QvaPay. Sin contraseña configurada, no entra nadie
 		if (!stagingOpen(path) && !(await authorized(req, env.METRICS_KEY))) return askKey()
-		return staged(await handle(req, env, ctx))
+		return staged(await safeHandle(req, env, ctx))
 	},
 
 	// Cada minuto: las órdenes pendientes del simulador y las facturas Pro sin confirmar. Cada 10: los agregados públicos de QvaPay

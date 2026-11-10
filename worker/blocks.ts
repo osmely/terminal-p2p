@@ -43,6 +43,18 @@ const cache = new WeakMap<object, Snapshot>()
 async function snapshot(db: D1, now: number): Promise<Snapshot> {
 	const hit = cache.get(db)
 	if (hit && now - hit.at < TTL_MS) return hit
+	try {
+		return await readSnapshot(db, now)
+	} catch (e) {
+		// Un corte de D1 no tumba el relé: vale la última lista que se leyó (o ninguna) y se reintenta a los pocos segundos
+		console.error(`bloqueos: ${(e as Error).message}`)
+		const s: Snapshot = { at: now - TTL_MS + 5_000, users: hit?.users ?? new Map(), prints: hit?.prints ?? new Map() }
+		cache.set(db, s)
+		return s
+	}
+}
+
+async function readSnapshot(db: D1, now: number): Promise<Snapshot> {
 	const active = 'b.lifted_at IS NULL AND (b.until IS NULL OR b.until > ?)'
 	const users = (await db.prepare(`SELECT b.username, b.level, b.until FROM user_blocks b WHERE ${active}`).bind(now).all<{ username: string; level: AccessLevel; until: number | null }>()).results
 	const prints = users.length

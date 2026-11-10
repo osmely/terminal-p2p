@@ -97,7 +97,9 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 		if (hit) return new Response(hit.body, { status: hit.status, headers: { 'Content-Type': hit.headers.get('Content-Type') ?? 'application/json', 'Cache-Control': `public, max-age=${PUBLIC_TTL_S}` } })
 	}
 
-	const upstream = await fetch(UPSTREAM + path + url.search, { method: req.method, headers, body })
+	// QvaPay no responde (caído, sin red): un error claro en vez de que el Worker falle entero
+	const upstream = await fetch(UPSTREAM + path + url.search, { method: req.method, headers, body }).catch((e: Error) => e)
+	if (upstream instanceof Error) return text(502, 'QvaPay no responde ahora mismo: prueba en unos segundos')
 	// Solo el cuerpo y el estado: ni cookies ni otras cabeceras de QvaPay
 	const out = new Headers({
 		'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
