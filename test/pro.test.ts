@@ -24,7 +24,8 @@ async function whoHeader(body: unknown, now = Date.now()): Promise<Record<string
 
 // D1 sobre SQLite en memoria, con las migraciones del proyecto
 function memD1() {
-	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5 } }) // como D1: no más de 5 términos por UNION
+	// Como D1: no más de 5 términos por UNION ni más de 100 valores por consulta
+	const db = new DatabaseSync(':memory:', { limits: { compoundSelect: 5, variableNumber: 100 } })
 	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
 	// Pro encendido en el panel (las pruebas de Pro apagado lo apagan)
 	db.exec("INSERT INTO app_flags (key, value, updated_at) VALUES ('pro', '1', 0)")
@@ -1762,6 +1763,24 @@ test('buzón: cada uno borra de su buzón (uno o todos) sin tocar el de los dem�
 	// Leer y luego borrar también vale; borrar todos deja el buzón vacío
 	await s.post('/pro/inbox/read', { print: P1, username: 'ana', ids: [forAna] })
 	assert.deepEqual((await s.post('/pro/inbox/hide', { print: P1, username: 'ana', ids: [forAna] })).body, { items: [], unread: 0 })
+})
+
+test('buzón: con aviso al móvil a más de 100 cuentas (D1 no deja más de 100 valores por consulta), llega a todos sus móviles', async () => {
+	const { newVapidJwk, b64u } = await import('../worker/webpush.ts')
+	const { sendInbox } = await import('../worker/inbox.ts')
+	const s = setup({ VAPID_PRIVATE_JWK: JSON.stringify(await newVapidJwk()) } as Partial<ProEnv>)
+	const to = Array.from({ length: 130 }, (_, i) => `u${i}`)
+	// Móviles de u5 y de u120 (en el segundo trozo); el de u120 con dos cuentas que también reciben: un solo aviso
+	for (const [endpoint, owner, username] of [['https://fcm.googleapis.com/fcm/send/a', 'uuid-5', 'U5'], ['https://fcm.googleapis.com/fcm/send/b', 'uuid-120', 'u120'], ['https://fcm.googleapis.com/fcm/send/c', 'uuid-120', 'u7']]) {
+		const ua = (await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])) as CryptoKeyPair
+		const p256dh = b64u(new Uint8Array(await crypto.subtle.exportKey('raw', ua.publicKey)))
+		s.db.prepare('INSERT INTO push_subs (endpoint, p256dh, auth, owner, username, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(endpoint, p256dh, b64u(crypto.getRandomValues(new Uint8Array(16))), owner, username, s.now())
+	}
+	const pushes: string[] = []
+	const f = (async (url: string, init?: RequestInit) => (url.startsWith('https://fcm.googleapis.com/') ? (pushes.push(url), new Response(null, { status: 201 })) : s.q.fetcher(url, init))) as typeof fetch
+	const r = await sendInbox(s.env as never, { to, title: 'Novedad', body: 'x', push: true }, s.now(), f)
+	assert.deepEqual([r.recipients, r.pushed], [130, 3])
+	assert.deepEqual(pushes.sort(), ['https://fcm.googleapis.com/fcm/send/a', 'https://fcm.googleapis.com/fcm/send/b', 'https://fcm.googleapis.com/fcm/send/c'])
 })
 
 test('tiempo a la vista: una pestaña en segundo plano (sin mercados) cuenta como conectada pero no como uso', async () => {

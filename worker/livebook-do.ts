@@ -138,7 +138,7 @@ export class LiveBook {
 		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
 		if (url.pathname === '/offer') return Response.json(this.book.find(url.searchParams.get('id') ?? ''))
 		if (url.pathname === '/status') return Response.json(this.state())
-		if (url.pathname === '/online' && req.method === 'POST') return Response.json(this.watchOnline(await req.json().catch(() => null)))
+		if (url.pathname === '/online' && req.method === 'POST') return Response.json(this.watchOnline(await req.json().catch(() => null), req.headers.get('x-ip') ?? ''))
 		if (url.pathname === '/snapshot' && req.method === 'POST') return Response.json(this.snapshot(((await req.json().catch(() => ({}))) as { refs?: BookRefs }).refs ?? {}))
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
 		return new Response('no encontrado', { status: 404 })
@@ -853,13 +853,20 @@ export class LiveBook {
 
 	// El terminal pide seguir a quien no tiene ofertas abiertas (su contraparte en una operación, una ficha abierta):
 	// entra en la siguiente consulta. Devuelve los de la lista que ya se saben en línea
-	private watchOnline(body: unknown) {
+	private watchOnline(body: unknown, ip = '') {
 		const list = Array.isArray((body as { users?: unknown } | null)?.users) ? ((body as { users: unknown[] }).users as { id?: unknown; u?: unknown }[]) : []
 		const asked: string[] = []
+		// Los nombres de los dueños del libro son los de QvaPay: nadie puede seguir con ese nombre otro uuid
+		const owned = new Map<string, string>()
+		for (const [id, o] of this.book.owners) if (o?.username) owned.set(o.username.toLowerCase(), id)
 		for (const x of list.slice(0, 20)) {
-			const id = String(x?.id ?? '')
+			const id = String(x?.id ?? '').toLowerCase()
 			const user = String(x?.u ?? '').slice(0, 40)
-			if (this.presence.watch(id, user)) asked.push(id)
+			// Un dueño del libro ya se sigue solo, con su nombre
+			if (this.book.owners.has(id)) continue
+			const other = owned.get(user.toLowerCase())
+			if (other && other !== id) continue
+			if (this.presence.watch(id, user, Date.now(), ip)) asked.push(id)
 		}
 		const terminal = this.terminalUsers()
 		const term: string[] = []

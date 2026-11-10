@@ -109,9 +109,15 @@ export async function sendInbox(env: InboxEnv, m: NewMessage, now: number, fetch
 	let pushed = 0
 	if (m.push && env.VAPID_PRIVATE_JWK) {
 		const msg: PushMsg = { title, body: body.slice(0, 160), tag: `tp:inbox-${id}`, url: '/?buzon=open', urgent: false, kind: 'inbox' }
-		const owners = users
-			? (await db.prepare(`SELECT DISTINCT owner FROM push_subs WHERE lower(username) IN (${users.map(() => '?').join(',')})`).bind(...users).all<{ owner: string }>()).results
-			: (await db.prepare('SELECT DISTINCT owner FROM push_subs').all<{ owner: string }>()).results
+		// D1 admite como mucho 100 valores por consulta: la lista va de 50 en 50 (un mismo móvil puede salir en dos)
+		let owners: { owner: string }[] = []
+		if (users)
+			for (let i = 0; i < users.length; i += 50) {
+				const part = users.slice(i, i + 50)
+				owners.push(...(await db.prepare(`SELECT DISTINCT owner FROM push_subs WHERE lower(username) IN (${part.map(() => '?').join(',')})`).bind(...part).all<{ owner: string }>()).results)
+			}
+		else owners = (await db.prepare('SELECT DISTINCT owner FROM push_subs').all<{ owner: string }>()).results
+		owners = [...new Map(owners.map((o) => [o.owner, o])).values()]
 		for (const o of owners) pushed += await deliverPush(env as PushEnv, { owner: o.owner, key: `inbox-${id}`, msg }, now, undefined, fetcher)
 		await db.prepare('UPDATE inbox SET pushed = ? WHERE id = ?').bind(pushed, id).run()
 	}

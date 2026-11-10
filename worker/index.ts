@@ -659,10 +659,13 @@ async function book(url: URL, env: Env, ctx: ExecutionContext) {
 // QvaPay y usuario) y desde entonces entran en lo que mira el libro en vivo; responde los que ya se
 // saben en línea: term, con el terminal abierto, y qp, solo con QvaPay. Lo de los dueños del libro llega por el WebSocket
 async function online(req: Request, env: Env) {
+	// Solo desde el propio terminal: otra web no puede usar el navegador de sus visitantes para llenar la lista
+	const url = new URL(req.url)
+	if ((req.headers.get('origin') ?? (req.headers.get('sec-fetch-site') === 'same-origin' ? url.origin : null)) !== url.origin) return jsonError(403, 'Origen no permitido')
 	if (!(await underLimit(env.STATUS_LIMIT, req))) return jsonError(429, 'Demasiadas consultas seguidas: espera un minuto')
 	const body = (await req.json().catch(() => null)) as { users?: unknown } | null
 	const users = (Array.isArray(body?.users) ? body.users : []).slice(0, 20).map((x) => ({ id: String((x as { id?: unknown })?.id ?? '').toLowerCase(), u: String((x as { u?: unknown })?.u ?? '') }))
-	const r = await liveOnline(env as unknown as LiveEnv, users).catch(() => null)
+	const r = await liveOnline(env as unknown as LiveEnv, users, req.headers.get('cf-connecting-ip') ?? '').catch(() => null)
 	if (!r) return jsonError(503, 'No se puede saber ahora mismo')
 	return Response.json(r, { headers: { 'Cache-Control': 'no-store' } })
 }

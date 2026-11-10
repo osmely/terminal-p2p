@@ -626,9 +626,9 @@ export async function liveOfferOf(env: LiveEnv, uuid: string): Promise<ReturnTyp
 }
 
 // Seguir quién está en línea aparte de los dueños del libro (la contraparte de una operación, una ficha abierta)
-export async function liveOnline(env: LiveEnv, users: { id: string; u: string }[]): Promise<{ on: boolean; term: string[]; qp: string[]; at: number | null } | null> {
+export async function liveOnline(env: LiveEnv, users: { id: string; u: string }[], ip = ''): Promise<{ on: boolean; term: string[]; qp: string[]; at: number | null } | null> {
 	if (!env.LIVE) return null
-	const r = await liveStub(env).fetch('https://live/online', { method: 'POST', body: JSON.stringify({ users }) })
+	const r = await liveStub(env).fetch('https://live/online', { method: 'POST', headers: { 'x-ip': ip }, body: JSON.stringify({ users }) })
 	return r.ok ? r.json() : null
 }
 
