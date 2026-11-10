@@ -121,3 +121,34 @@ test('un día rechazado no frena el relleno del resto', async () => {
 		globalThis.fetch = real
 	}
 })
+
+test('lo que falta del histórico se busca una vez al día; en las demás pasadas, solo los últimos 40 días', async () => {
+	const asked: (string | null)[] = []
+	const real = globalThis.fetch
+	globalThis.fetch = (async (input: string | URL) => {
+		const from = new URL(String(input)).searchParams.get('date_from')
+		asked.push(from ? from.slice(0, 10) : null)
+		return new Response(JSON.stringify({ tasas: { USD: 830 } }))
+	}) as typeof fetch
+	try {
+		const closed: string[] = []
+		for (let t = Date.parse('2020-12-01T00:00:00Z'); t <= Date.parse('2026-10-22T00:00:00Z'); t += 86_400_000) closed.push(new Date(t).toISOString().slice(0, 10))
+		const { db } = fakeDb(closed.filter((d) => d !== '2023-05-01'))
+		const since: unknown[] = []
+		const prepare = db.prepare.bind(db)
+		db.prepare = ((sql: string) => {
+			const s = prepare(sql) as unknown as { bind: (...v: unknown[]) => unknown }
+			const bind = s.bind
+			return { ...s, bind: (...v: unknown[]) => (sql.includes('GROUP BY day') && since.push(v[0]), bind(...v)) } as never
+		}) as typeof db.prepare
+		// A las 10:00 de Cuba: solo desde hace 40 días, y no falta ninguno
+		assert.equal(await syncInformal(db, 'token', Date.parse('2026-10-23T14:00:00Z'), 0), 0)
+		assert.deepEqual([since, asked], [['2026-09-13'], [null]])
+		// A las 4:05 de Cuba: todo el histórico, y aparece el día que faltaba
+		since.length = asked.length = 0
+		assert.equal(await syncInformal(db, 'token', Date.parse('2026-10-23T08:05:00Z'), 0), 1)
+		assert.deepEqual([since, asked], [['2020-12-01'], [null, '2023-05-01']])
+	} finally {
+		globalThis.fetch = real
+	}
+})

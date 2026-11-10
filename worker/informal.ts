@@ -70,17 +70,27 @@ function save(db: D1, rows: InformalRow[], final: boolean, now: number) {
 	return rows.length ? db.batch(rows.map((r) => stmt.bind(r.day, r.cur, r.rate, final ? 1 : 0, now))) : Promise.resolve()
 }
 
+const RECENT_DAYS = 40
+// El repaso de todo el histórico: la primera pasada de las 4:00 de Cuba (el cron llama cada 10 min)
+const FULL_HOUR = 4
+const isFullCheck = (now: number) => {
+	const c = new Date(now + cubaOffset(now))
+	return c.getUTCHours() === FULL_HOUR && c.getUTCMinutes() < 10
+}
+
 // Lo llama el cron: la tasa de hoy (últimas 24 h, se va actualizando), los días cerrados
 // que faltan en el último mes y, poco a poco, el histórico hasta el primer día de elTOQUE
 export async function syncInformal(db: D1, token: string, now = Date.now(), gapMs = GAP_MS) {
 	const today = cubaDate(now)
 	await save(db, rowsFromTasas(await fetchTasas(token), today), false, now)
 
-	const { results } = await db.prepare('SELECT day FROM informal WHERE final = 1 AND day >= ? GROUP BY day').bind(FIRST_DAY).all<{ day: string }>()
+	// Lo que falta se busca en los últimos RECENT_DAYS días; en todo el histórico (miles de filas), solo una vez al día
+	const from = isFullCheck(now) ? FIRST_DAY : addDays(today, -RECENT_DAYS)
+	const { results } = await db.prepare('SELECT day FROM informal WHERE final = 1 AND day >= ? GROUP BY day').bind(from).all<{ day: string }>()
 	const done = new Set(results.map((r) => r.day))
 	const missing: string[] = []
 	// Primero lo reciente (de ayer hacia atrás), luego lo más antiguo que falte
-	for (let d = addDays(today, -1); d >= FIRST_DAY && missing.length < BACKFILL_PER_RUN; d = addDays(d, -1)) if (!done.has(d)) missing.push(d)
+	for (let d = addDays(today, -1); d >= from && missing.length < BACKFILL_PER_RUN; d = addDays(d, -1)) if (!done.has(d)) missing.push(d)
 	let saved = 0
 	for (const day of missing) {
 		await pause(gapMs)

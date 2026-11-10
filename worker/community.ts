@@ -51,12 +51,24 @@ async function medianAt(db: D1, t: number) {
 	return (await db.prepare("SELECT median FROM rates WHERE coin = 'BANK_CUP' AND t <= ? AND median IS NOT NULL ORDER BY t DESC LIMIT 1").bind(t).first<{ median: number }>())?.median ?? null
 }
 
+// Otros mercados con movimiento que salen en el texto: por cada USD de saldo
+const OTHER = [
+	['ETECSA', '📱 Saldo ETECSA', (v: number) => `${fmt(v)} CUP`],
+	['CLASICA', '💳 Clásica', (v: number) => `${fmt(v, 2)} USD`],
+	['BANK_MLC', '🏦 MLC', (v: number) => `${fmt(v, 2)} MLC`],
+	['BANDECPREPAGO', '💳 Bandec Prepago (USD Tropical)', (v: number) => `${fmt(v, 2)} USD`],
+] as const
+
 // El texto del día, o null si no hay datos recientes (mejor no publicar que publicar una tasa vieja)
 export async function buildDailyPost(env: CommunityEnv, now: number) {
 	const db = env.DB
 	const last = await db.prepare("SELECT MAX(t) AS t FROM rates WHERE coin = 'BANK_CUP'").first<{ t: number | null }>()
 	if (!last?.t || now - last.t > FRESH_MS) return null
-	const { results } = await db.prepare('SELECT coin, t, median, median_buy, median_sell, count, window_h FROM rates WHERE t = ?').bind(last.t).all<Row>()
+	// Solo los mercados del texto: sin el mercado, la clave (coin, t) no sirve y se recorría toda la tabla
+	const { results } = await db
+		.prepare(`SELECT coin, t, median, median_buy, median_sell, count, window_h FROM rates WHERE coin IN ('BANK_CUP', ${OTHER.map(() => '?').join(', ')}) AND t = ?`)
+		.bind(...OTHER.map(([tick]) => tick), last.t)
+		.all<Row>()
 	const by = new Map(results.map((r) => [r.coin, r]))
 	const cup = by.get('BANK_CUP')
 	if (!cup?.median) return null
@@ -70,14 +82,7 @@ export async function buildDailyPost(env: CommunityEnv, now: number) {
 	if (cup.median_buy && cup.median_sell) lines.push(`🟢 Compra ${fmt(cup.median_buy)} · 🔴 Venta ${fmt(cup.median_sell)}`)
 	if (cup.count && (cup.window_h ?? 24) === 24) lines.push(`🔁 ${fmt(cup.count)} operaciones en 24 h`)
 
-	// Otros mercados con movimiento: por cada USD de saldo
-	const other = [
-		['ETECSA', '📱 Saldo ETECSA', (v: number) => `${fmt(v)} CUP`],
-		['CLASICA', '💳 Clásica', (v: number) => `${fmt(v, 2)} USD`],
-		['BANK_MLC', '🏦 MLC', (v: number) => `${fmt(v, 2)} MLC`],
-		['BANDECPREPAGO', '💳 Bandec Prepago (USD Tropical)', (v: number) => `${fmt(v, 2)} USD`],
-	] as const
-	const others = other.map(([tick, label, f]) => (by.get(tick)?.median ? `${label}: ${f(by.get(tick)!.median!)}` : '')).filter(Boolean)
+	const others = OTHER.map(([tick, label, f]) => (by.get(tick)?.median ? `${label}: ${f(by.get(tick)!.median!)}` : '')).filter(Boolean)
 	if (others.length) lines.push('', 'Por cada USD de saldo:', ...others)
 
 	if (inf?.usd) {
