@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>Bitcoin P2P en Nostr · Terminal P2P</title>
+	<meta name="description" content="Las órdenes abiertas de compra y venta de bitcoin P2P de Mostro, RoboSats, Hodl Hodl y otros, en un solo libro: el mejor precio en cada moneda." />
+	<meta name="robots" content="noindex" />
+	<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)" />
+	<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)" />
+	<script src="/theme.js"></script>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	<link rel="stylesheet" href="/vendor/fonts.css" />
+	<link rel="stylesheet" href="/site.css" />
+	<link rel="stylesheet" href="/nostr/nostr.css" />
+	<script src="/site.js" defer></script>
+	<script src="/nostr/nostr.js" defer></script>
+</head>
+<body>
+	<header class="nav">
+		<div class="wrap nav-in">
+			<a class="brand" href="/" aria-label="Terminal P2P">
+				<span class="brand-mark" aria-hidden="true">
+					<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16l4.5-5 3.5 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</span>
+				<span>Terminal P2P</span>
+			</a>
+			<nav class="nav-links" aria-label="Secciones">
+				<a href="/#tasas">Tasas</a>
+				<a href="/#operar">Operar</a>
+				<a href="/#funciones">Funciones</a>
+				<a href="/#privacidad">Privacidad</a>
+				<a href="/#preguntas">Preguntas</a>
+				<a href="/blog/">Blog</a>
+			</nav>
+			<div class="nav-actions">
+				<details class="help">
+					<summary class="help-btn" title="Ayuda" aria-label="Ayuda"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></g></svg><span class="help-label">Ayuda</span></summary>
+					<div class="help-menu">
+						<a href="/blog/guia-primeros-pasos/"><b>Primeros pasos</b><span>Guía para nuevos usuarios: la pantalla, comprar, vender y operar seguro</span></a>
+						<a href="/blog/conectar-qvapay-token/"><b>Conectar tu cuenta</b><span>Crear el token de QvaPay paso a paso</span></a>
+						<a href="/blog/modo-pro/" data-pro><b>Modo Pro</b><span>Qué incluye, cuánto cuesta y cómo funciona</span></a>
+						<a class="help-tg" href="https://t.me/terminalp2p" target="_blank" rel="noopener">¿Otra duda? Pregunta en @terminalp2p</a>
+					</div>
+				</details>
+				<a class="icon-btn tg-icon" href="https://t.me/terminalp2p" target="_blank" rel="noopener" title="Grupo de Telegram @terminalp2p" aria-label="Grupo de Telegram @terminalp2p">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+				</a>
+				<a class="icon-btn hide-sm" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener" title="Código fuente en GitHub" aria-label="Código fuente en GitHub">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.38-3.37-1.38-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 015 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.26 10.26 0 0022 12.25C22 6.58 17.52 2 12 2z"/></svg>
+				</a>
+				<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+					<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+					<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+				</button>
+				<a class="btn primary" href="https://app.terminalp2p.com">Abrir<span class="hide-xs"> terminal</span></a>
+			</div>
+		</div>
+	</header>
+
+	<main>
+		<header class="article">
+			<div class="wrap">
+				<p class="crumbs"><span class="nx-beta">Experimental</span></p>
+				<h1>Bitcoin P2P en Nostr</h1>
+				<p class="post-meta">Las órdenes abiertas de Mostro, RoboSats, Hodl Hodl y otros, en un solo libro · se actualiza cada minuto</p>
+			</div>
+		</header>
+
+		<div class="wrap nx">
+			<div class="nx-bar">
+				<div class="nx-fiats" id="nxFiats" role="tablist" aria-label="Moneda"></div>
+				<p class="nx-at" id="nxAt" aria-live="polite">Cargando…</p>
+			</div>
+
+			<section class="nx-stats" aria-label="Resumen de la moneda">
+				<div class="nx-stat">
+					<span title="El precio del bitcoin según Yadio, el que usa Mostro para las órdenes a precio de mercado">Mercado</span>
+					<b id="nxMarket">—</b>
+					<small id="nxMarketNote">Yadio</small>
+				</div>
+				<div class="nx-stat">
+					<span>Mejor para comprar</span>
+					<b class="ask" id="nxBestAsk">—</b>
+					<small id="nxBestAskNote">—</small>
+				</div>
+				<div class="nx-stat">
+					<span>Mejor para vender</span>
+					<b class="bid" id="nxBestBid">—</b>
+					<small id="nxBestBidNote">—</small>
+				</div>
+				<div class="nx-stat">
+					<span>Órdenes</span>
+					<b id="nxCount">—</b>
+					<small>venden / compran</small>
+				</div>
+			</section>
+
+			<div class="nx-filters">
+				<div class="nx-plats" id="nxPlats" aria-label="Plataformas"></div>
+				<input class="nx-search" id="nxPay" type="search" placeholder="Método de pago (Zelle, Transfermóvil…)" aria-label="Filtrar por método de pago" autocomplete="off" />
+			</div>
+
+			<div class="nx-book">
+				<section class="nx-side" aria-labelledby="nxAskH">
+					<h2 id="nxAskH">Venden bitcoin <small>· compras aquí</small></h2>
+					<div class="nx-head"><span>Precio</span><span>Prima</span><span>Monto</span><span>Pago · plataforma</span></div>
+					<ol class="nx-list" id="nxAsks"></ol>
+				</section>
+				<section class="nx-side" aria-labelledby="nxBidH">
+					<h2 id="nxBidH">Compran bitcoin <small>· vendes aquí</small></h2>
+					<div class="nx-head"><span>Precio</span><span>Prima</span><span>Monto</span><span>Pago · plataforma</span></div>
+					<ol class="nx-list" id="nxBids"></ol>
+				</section>
+			</div>
+			<p class="nx-legend">Precio en <span data-nx="fiat">USD</span> por bitcoin. Prima: cuánto por encima (+) o por debajo (−) del mercado. ⚡ Lightning · ⛓ en cadena.</p>
+
+			<p class="note nx-note">Órdenes públicas del protocolo Nostr (NIP-69) que cualquiera puede leer, sin cuenta. Para operar se abre la orden en su plataforma (la app de Mostro, RoboSats, Hodl Hodl…): Terminal P2P no custodia fondos ni intermedia. Cada plataforma tiene sus reglas y sus comisiones; algunas no admiten usuarios de ciertos países.</p>
+		</div>
+	</main>
+
+	<footer class="foot">
+		<div class="wrap foot-in">
+			<span>© 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a> · <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener">Licencia Apache 2.0</a> · <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a> · <a href="/blog/">Blog</a> · <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">Telegram</a></span>
+			<span>Proyecto independiente, no afiliado a QvaPay.</span>
+		</div>
+	</footer>
+</body>
+</html>

@@ -16,6 +16,8 @@ import { cleanupLog, hourKey, logUser } from './userlog.ts'
 import { accessOf, profileAccess, relayAccess } from './blocks.ts'
 import { cleanupIncidents, relayIncident } from './incidents.ts'
 import { sha256, verify } from './crypto.ts'
+import { crossBook, isCrossFiat } from './cross.ts'
+import { nostrBook } from './nostr.ts'
 import { adminPage, askKey, panel } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
@@ -61,6 +63,8 @@ interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'>, Om
 	RELAY_LIMIT?: RateLimiter
 	// «1» en el entorno de staging (wrangler deploy --env staging)
 	STAGING?: string
+	// «1» enciende lo experimental fuera de staging: el comparador entre exchanges y el libro de Nostr (en staging va siempre)
+	CROSS_ON?: string
 	// Avisos al grupo privado de Telegram (ver alerts.ts): el token es secreto, el chat una variable
 	TELEGRAM_BOT_TOKEN?: string
 	ALERT_CHAT?: string
@@ -213,6 +217,16 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/offer' && req.method === 'GET') return secure(await offer(req, url, env, ctx))
 	if (url.pathname === '/data/online' && req.method === 'POST') return secure(await online(req, env))
 	if (url.pathname === '/data/peer-stats' && req.method === 'GET') return secure(await peerStatsRoute(req, url, env, ctx))
+	// El comparador entre exchanges (experimental): ni su página ni sus datos existen donde no está encendido
+	if (url.pathname === '/data/cross' || url.pathname === CROSS_PATH || url.pathname.startsWith(`${CROSS_PATH}/`)) {
+		if (!crossOn(env)) return secure(jsonError(404, 'no encontrado'))
+		if (url.pathname === '/data/cross') return secure(req.method === 'GET' ? await cross(req, url, env, ctx) : jsonError(405, 'Método no permitido'))
+	}
+	// El libro P2P de bitcoin en Nostr (experimental): igual, solo donde está encendido
+	if (url.pathname === '/data/nostr' || url.pathname === NOSTR_PATH || url.pathname.startsWith(`${NOSTR_PATH}/`)) {
+		if (!crossOn(env)) return secure(jsonError(404, 'no encontrado'))
+		if (url.pathname === '/data/nostr') return secure(req.method === 'GET' ? await nostr(req, url, env, ctx) : jsonError(405, 'Método no permitido'))
+	}
 	// El enlace corto de una oferta compartida (terminalp2p.com/o/<uuid>): abre el terminal con ella delante
 	const shared = SHARED_OFFER.exec(url.pathname)
 	if (shared && folderFor(url.hostname) !== 'sim') {
@@ -262,10 +276,12 @@ const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook', '/pro/telegram
 // La mini app de Telegram se abre en un visor del propio Telegram, que no sabe pedir la contraseña: en staging quedan
 // abiertas su página y lo público que lee (el libro, el histórico y la librería del gráfico, lo mismo que en producción)
 const MINI_OPEN = new Set(['/mini', '/mini/', '/mini/mini.js', '/data/book', '/data/rates', '/favicon.svg', '/vendor/lightweight-charts.js'])
+// Los datos del comparador entre exchanges (/data/cross) y del libro de Nostr (/data/nostr) también van sin contraseña:
+// son anuncios públicos, con caché y tope, y así se puede comprobar desde fuera que cada exchange o relay responde a Cloudflare.
 // El relé a QvaPay lleva el token del usuario en Authorization, la misma cabecera que la contraseña de
 // staging: pidiéndola ahí, el navegador volvía a sacar el diálogo al conectar la cuenta. No expone nada de
 // staging (solo reenvía a QvaPay con el token del usuario, como en producción)
-const stagingOpen = (path: string) => STAGING_OPEN.has(path) || MINI_OPEN.has(path) || path === RELAY_PREFIX || path.startsWith(`${RELAY_PREFIX}/`)
+const stagingOpen = (path: string) => STAGING_OPEN.has(path) || MINI_OPEN.has(path) || path === '/data/cross' || path === '/data/nostr' || path === RELAY_PREFIX || path.startsWith(`${RELAY_PREFIX}/`)
 
 // Staging: que ningún buscador lo indexe y que se vea a simple vista que no es producción
 const STAGING_BADGE =
@@ -765,6 +781,43 @@ async function offer(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 // el navegador guardaría el histórico o la tasa durante horas. Se rehace la respuesta con nuestra cabecera
 function fromCache(hit: Response, cacheControl: string) {
 	return new Response(hit.body, { status: hit.status, headers: { 'Content-Type': hit.headers.get('Content-Type') ?? 'application/json; charset=utf-8', 'Cache-Control': cacheControl } })
+}
+
+// Comparador entre exchanges (cross.ts): los anuncios P2P de USDT de cada exchange para una moneda. Un minuto en la
+// caché del borde por moneda: cada lectura son diez peticiones a otros exchanges y sus precios no cambian más deprisa
+const CROSS_PATH = '/comparador'
+const CROSS_TTL_S = 60
+const crossOn = (env: Env) => env.STAGING === '1' || env.CROSS_ON === '1'
+async function cross(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
+	const fiat = (url.searchParams.get('fiat') ?? '').toUpperCase()
+	if (!isCrossFiat(fiat)) return jsonError(400, 'Moneda desconocida')
+	const key = new Request(`${url.origin}/data/cross?fiat=${fiat}`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, `public, max-age=${CROSS_TTL_S}`)
+	if (!(await underLimit(env.STATUS_LIMIT, req))) return jsonError(429, 'Demasiadas consultas seguidas: espera un minuto')
+	const data = await crossBook(fiat)
+	// Si no respondió ninguno no se guarda: el siguiente lo intenta otra vez
+	const ok = data.exchanges.some((e) => e.ok)
+	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': ok ? `public, max-age=${CROSS_TTL_S}` : 'no-store' } })
+	if (ok) ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
+}
+
+// Libro P2P de bitcoin en Nostr (nostr.ts): todas las monedas en una sola respuesta, un minuto en la caché del borde.
+// Cada lectura abre un WebSocket a cinco relays y pide el precio a Yadio
+const NOSTR_PATH = '/nostr'
+const NOSTR_TTL_S = 60
+async function nostr(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
+	const key = new Request(`${url.origin}/data/nostr`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, `public, max-age=${NOSTR_TTL_S}`)
+	if (!(await underLimit(env.STATUS_LIMIT, req))) return jsonError(429, 'Demasiadas consultas seguidas: espera un minuto')
+	const data = await nostrBook()
+	// Si no respondió ningún relay no se guarda: el siguiente lo intenta otra vez
+	const ok = data.relays.some((r) => r.ok)
+	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': ok ? `public, max-age=${NOSTR_TTL_S}` : 'no-store' } })
+	if (ok) ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
 }
 
 // La hora de verdad para clock.js. En Cloudflare, la del servidor. En desarrollo el servidor corre en el mismo equipo
