@@ -10,4 +10,3 @@ data/
 .env.*
 /pro/
 config.json
-public/app/nostr/mostro.js
