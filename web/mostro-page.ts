@@ -9,8 +9,10 @@ import {
 	MAX_POW,
 	STEP_OF,
 	FINAL,
-	CANT_DO,
 	cantDoReason,
+	cantDoText,
+	deadlineS,
+	nodeHealth,
 	chatKeys,
 	fiatAmountOk,
 	invoiceOk,
@@ -27,6 +29,7 @@ import {
 	wrapChat,
 	wrapToMostro,
 	type ChatKeys,
+	type Health,
 	type Incoming,
 	type Keyring,
 	type NostrEvent,
@@ -59,6 +62,10 @@ interface NodeInfo {
 	maxSats: number | null
 	bonds: boolean
 	stepS: number | null
+	cltv?: number | null
+	marginBlocks?: number | null
+	maintenance?: boolean
+	health?: unknown
 }
 
 // ---------------------------------------------------------------- estado guardado
@@ -96,6 +103,13 @@ interface Trade {
 	rated: boolean
 	peerCancel: boolean
 	retries: number
+	// Cuándo bloqueó el vendedor los sats (de ahí sale el plazo para pagar)
+	activeAt?: number
+	// El mediador de la disputa (su clave, y la hora del aviso que lo asignó) y su chat con él
+	admin?: string | null
+	adminAt?: number
+	adminChat?: ChatLine[]
+	adminSince?: number
 }
 interface Saved {
 	words: string | null
@@ -261,12 +275,14 @@ class Pool {
 const pool = new Pool(onEvent)
 const nodes = new Map<string, NodeInfo>()
 const chats = new Map<string, ChatKeys>()
+const adminChats = new Map<string, ChatKeys>()
 // Las que esperan respuesta del nodo al tomarlas: si no contesta en un minuto se dice
 const timers = new Map<string, number>()
 
 const tradeOf = (id: string) => state.trades.find((t) => t.id === id)
 const subId = (t: Trade) => `m${t.id.slice(0, 8)}${t.idx}`
 const chatSubId = (t: Trade) => `c${t.id.slice(0, 8)}${t.idx}`
+const adminSubId = (t: Trade) => `a${t.id.slice(0, 8)}${t.idx}`
 const reqId = () => Math.floor(Math.random() * 2 ** 31)
 
 function watch(t: Trade) {
@@ -274,6 +290,7 @@ function watch(t: Trade) {
 	const me = pubOf(keys().at(t.idx))
 	pool.sub(subId(t), t.relays, [{ kinds: [14], authors: [t.node], '#p': [me], since: t.startedAt - 120 }])
 	if (t.seller) watchChat(t)
+	if (t.admin) watchAdmin(t)
 }
 function watchChat(t: Trade) {
 	if (!t.seller || !isHex64(t.seller)) return
@@ -283,6 +300,17 @@ function watchChat(t: Trade) {
 		chats.set(t.id, ck)
 	}
 	pool.sub(chatSubId(t), t.relays, [{ kinds: [14], authors: [ck.signPub], since: Math.max(0, t.chatSince - 5), limit: 200 }])
+}
+// El chat con el mediador: el mismo esquema que el del vendedor, con la clave del mediador (dispute_chat en la
+// especificación). Ahí escriben solo tú y él
+function watchAdmin(t: Trade) {
+	if (!t.admin || !isHex64(t.admin)) return
+	let ck = adminChats.get(t.id)
+	if (!ck) {
+		ck = chatKeys(keys().at(t.idx), t.admin)
+		adminChats.set(t.id, ck)
+	}
+	pool.sub(adminSubId(t), t.relays, [{ kinds: [14], authors: [ck.signPub], since: Math.max(0, (t.adminSince ?? t.adminAt ?? nowS()) - 5), limit: 200 }])
 }
 
 async function send(t: Trade, m: Outgoing, first = false) {
@@ -307,9 +335,28 @@ function onMostro(t: Trade, msg: Incoming) {
 	const order = p.order && typeof p.order === 'object' ? p.order : null
 	if (order && typeof order.amount === 'number' && order.amount > 0) t.sats = order.amount
 	if (order && isHex64(order.seller_trade_pubkey)) t.seller = order.seller_trade_pubkey
-	if (isHex64(p.peer?.pubkey)) t.seller = p.peer.pubkey
+	// El aviso del mediador trae SU clave en el mismo sitio que la del vendedor: no la pisa
+	if (isHex64(p.peer?.pubkey) && msg.action !== 'admin-took-dispute') t.seller = p.peer.pubkey
 	clearTimeout(timers.get(t.id))
 	switch (msg.action) {
+		case 'admin-took-dispute': {
+			setStep(t, 'dispute', msg.at, '')
+			// Si cambia de mediador (Serbero pasa el caso a una persona) vale el aviso más nuevo; a la misma hora, el que había
+			const admin = p.peer?.pubkey
+			if (isHex64(admin) && admin !== t.admin && msg.at > (t.adminAt ?? 0)) {
+				if (t.admin) pool.unsub(adminSubId(t))
+				adminChats.delete(t.id)
+				t.admin = admin
+				t.adminAt = msg.at
+				t.adminSince = msg.at
+				t.note = 'Ya tienes mediador: escríbele abajo, en «Chat con el mediador»'
+			}
+			break
+		}
+		case 'hold-invoice-payment-accepted':
+			setStep(t, 'active', msg.at, '')
+			if (!t.activeAt || msg.at < t.activeAt) t.activeAt = msg.at
+			break
 		case 'cant-do': {
 			const why = cantDoReason(msg.payload)
 			// Con unas palabras que ya se usaron (en la app de Mostro u otro navegador), el nodo pide un número mayor
@@ -318,7 +365,7 @@ function onMostro(t: Trade, msg: Incoming) {
 				resync(t)
 				return
 			}
-			const text = CANT_DO[why] ?? why.replace(/_/g, ' ')
+			const text = cantDoText(why)
 			if (t.step === 'taking') setStep(t, 'failed', msg.at, `El nodo no aceptó: ${text}`)
 			else t.note = `El nodo dice: ${text}`
 			break
@@ -350,6 +397,7 @@ function onMostro(t: Trade, msg: Incoming) {
 		}
 	}
 	if (t.step === 'active' || t.step === 'fiat-sent' || t.step === 'dispute') watchChat(t)
+	if (t.admin && !FINAL.includes(t.step)) watchAdmin(t)
 }
 
 function onEvent(sub: string, ev: NostrEvent) {
@@ -372,6 +420,19 @@ function onEvent(sub: string, ev: NostrEvent) {
 			t.chat.push({ id: inner.id, mine: inner.pubkey === me, text: inner.content.slice(0, 2000), at: inner.created_at })
 			t.chat.sort((a, b) => a.at - b.at)
 			t.chatSince = Math.min(Math.max(t.chatSince, inner.created_at), nowS())
+			save()
+			return render()
+		}
+		if (sub === adminSubId(t)) {
+			const ck = adminChats.get(t.id)
+			const lines = (t.adminChat ??= [])
+			if (!ck || !t.admin || lines.length >= 500) return
+			const me = pubOf(keys().at(t.idx))
+			const inner = openChat(ev, ck, [me, t.admin], nowS())
+			if (!inner || lines.some((c) => c.id === inner.id)) return
+			lines.push({ id: inner.id, mine: inner.pubkey === me, text: inner.content.slice(0, 2000), at: inner.created_at })
+			lines.sort((a, b) => a.at - b.at)
+			t.adminSince = Math.min(Math.max(t.adminSince ?? 0, inner.created_at), nowS())
 			save()
 			return render()
 		}
@@ -439,6 +500,14 @@ function button(text: string, cls: string, fn: () => void) {
 }
 const n0 = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 0 })
 const clock = (s: number) => new Date(s * 1000).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })
+// «unas 19 h» / «unos 40 min»
+const left = (s: number) => (s >= 5400 ? `unas ${Math.round(s / 3600)} h` : `unos ${Math.max(1, Math.round(s / 60))} min`)
+// Lo que queda hasta que el nodo actúe solo (cancelar, o abrir él la disputa si marcaste «Ya pagué»)
+function timeLeft(t: Trade) {
+	if (!t.activeAt) return null
+	const n = nodes.get(t.node)
+	return t.activeAt + deadlineS(n?.cltv, n?.marginBlocks) - nowS()
+}
 
 const STEP_TEXT: Record<Step, string> = {
 	taking: 'Tomando la orden…',
@@ -466,6 +535,7 @@ function render() {
 
 function card(t: Trade) {
 	const c = el('article', `mx-card mx-${t.step}`)
+	const rest = t.step === 'active' || t.step === 'fiat-sent' ? timeLeft(t) : null
 	const head = el('div', 'mx-head')
 	head.append(el('b', null, `${n0(t.amount)} ${t.fiat}`), el('span', 'mx-step', STEP_TEXT[t.step]))
 	const meta = el('p', 'mx-meta', [t.nodeName, t.sats ? `${n0(t.sats)} sats` : null, t.pays.join(', '), `a ${t.ln}`].filter(Boolean).join(' · '))
@@ -474,10 +544,12 @@ function card(t: Trade) {
 		taking: 'Se mandó la orden al nodo; contesta en segundos.',
 		invoice: '',
 		'waiting-seller': 'El vendedor tiene unos minutos para bloquear los sats en Mostro. Aún no pagues nada.',
-		active: `Los sats están bloqueados en Mostro. Pide al vendedor en el chat a dónde pagar, paga ${n0(t.amount)} ${t.fiat} y pulsa «Ya pagué».`,
+		active: `Los sats están bloqueados en Mostro. Pide al vendedor en el chat a dónde pagar, paga ${n0(t.amount)} ${t.fiat} y pulsa «Ya pagué».${rest !== null ? (rest > 0 ? ` Tienes ${left(rest)}: si para entonces no lo marcaste, Mostro cancela y los sats vuelven al vendedor.` : ' Se acabó el plazo: Mostro cancela la compra si no marcaste «Ya pagué».') : ''}`,
 		canceling: '',
-		'fiat-sent': 'Avisaste que pagaste. Cuando el vendedor lo confirme, libera y los sats llegan a tu dirección.',
-		dispute: 'Un mediador del nodo revisará el caso. Para hablar con él usa la app de Mostro con tus 12 palabras.',
+		'fiat-sent': `Avisaste que pagaste. Cuando el vendedor lo confirme, libera y los sats llegan a tu dirección. Si no contesta, abre una disputa pronto${rest !== null && rest > 0 ? ` (quedan ${left(rest)} de plazo)` : ''}: la que abre Mostro solo al final deja muy poco tiempo al mediador.`,
+		dispute: t.admin
+			? 'El mediador está con tu caso: escríbele en su chat y mándale el comprobante del pago. Él no lee el chat con el vendedor salvo que le compartas su clave (eso hoy solo se hace en la app de Mostro, con tus 12 palabras).'
+			: 'Abriste una disputa: el nodo te asigna un mediador y aquí aparece su chat. Ten a mano el comprobante del pago.',
 		released: 'El vendedor liberó los sats. Mostro los está mandando a tu dirección Lightning.',
 		done: 'Los sats se mandaron a tu dirección Lightning.',
 		canceled: 'La compra se cerró sin pagos. Si bloqueaste algo, vuelve solo.',
@@ -498,15 +570,19 @@ function card(t: Trade) {
 	if (t.step === 'done' && t.canRate && !t.rated) acts.append(rateForm(t))
 	if (FINAL.includes(t.step) && !(t.canRate && !t.rated)) acts.append(button('Quitar', 'btn', () => remove(t)))
 	if (acts.childElementCount) c.append(acts)
-	if (t.seller && (t.step === 'active' || t.step === 'fiat-sent' || t.step === 'dispute' || t.step === 'canceling' || t.chat.length)) c.append(chatBox(t))
+	if (t.seller && (t.step === 'active' || t.step === 'fiat-sent' || t.step === 'dispute' || t.step === 'canceling' || t.chat.length)) c.append(chatBox(t, 'peer'))
+	if (t.admin) c.append(chatBox(t, 'admin'))
 	return c
 }
 
-function chatBox(t: Trade) {
-	const box = el('div', 'mx-chat')
+function chatBox(t: Trade, room: 'peer' | 'admin') {
+	const admin = room === 'admin'
+	const lines = admin ? (t.adminChat ?? []) : t.chat
+	const box = el('div', `mx-chat${admin ? ' mx-admin' : ''}`)
+	if (admin || t.admin) box.append(el('h3', 'mx-room', admin ? 'Chat con el mediador' : 'Chat con el vendedor'))
 	const list = el('ol', 'mx-lines')
-	if (!t.chat.length) list.append(el('li', 'mx-empty', 'Escribe al vendedor: pídele los datos de pago'))
-	for (const m of t.chat.slice(-80)) {
+	if (!lines.length) list.append(el('li', 'mx-empty', admin ? 'Cuéntale al mediador qué pasó y mándale el comprobante del pago' : 'Escribe al vendedor: pídele los datos de pago'))
+	for (const m of lines.slice(-80)) {
 		const li = el('li', m.mine ? 'mx-mine' : 'mx-peer')
 		li.append(el('span', null, m.text), el('time', null, clock(m.at)))
 		list.append(li)
@@ -518,22 +594,24 @@ function chatBox(t: Trade) {
 	const form = el('form', 'mx-say')
 	const input = el('input')
 	input.maxLength = 1000
-	input.placeholder = 'Mensaje al vendedor'
+	input.placeholder = admin ? 'Mensaje al mediador' : 'Mensaje al vendedor'
 	input.autocomplete = 'off'
 	// Lo que se está escribiendo sobrevive a que llegue un mensaje (la tarjeta se vuelve a pintar)
-	input.dataset.draft = t.id
-	input.value = drafts.get(t.id) ?? ''
-	input.addEventListener('input', () => drafts.set(t.id, input.value))
+	const draft = `${t.id}:${room}`
+	input.dataset.draft = draft
+	input.value = drafts.get(draft) ?? ''
+	input.addEventListener('input', () => drafts.set(draft, input.value))
 	form.append(input, el('button', 'btn', 'Enviar'))
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault()
 		const text = input.value.trim()
-		const ck = chats.get(t.id)
+		const ck = (admin ? adminChats : chats).get(t.id)
 		if (!text || !ck) return
 		input.value = ''
-		drafts.delete(t.id)
+		drafts.delete(draft)
 		const { outer, inner } = wrapChat(text, keys().at(t.idx), ck, nowS())
-		t.chat.push({ id: inner.id, mine: true, text, at: inner.created_at })
+		if (admin) (t.adminChat ??= []).push({ id: inner.id, mine: true, text, at: inner.created_at })
+		else t.chat.push({ id: inner.id, mine: true, text, at: inner.created_at })
 		save()
 		render()
 		const oks = await pool.publish(t.relays, outer)
@@ -594,6 +672,7 @@ async function act(t: Trade, action: 'cancel' | 'fiat-sent' | 'dispute', ask: st
 function remove(t: Trade) {
 	pool.unsub(subId(t))
 	pool.unsub(chatSubId(t))
+	pool.unsub(adminSubId(t))
 	state.trades = state.trades.filter((x) => x !== t)
 	save()
 	render()
@@ -648,7 +727,12 @@ function openTake(o: BookOrder, nodeName: string) {
 	fact('Pago', o.pays.join(', ') || '—')
 	fact('Monto', fixed ? `${n0(o.min)} ${o.fiat}` : `${n0(o.min)} – ${n0(o.max)} ${o.fiat}`)
 	if (o.score !== null) fact('Vendedor', `★${o.score.toFixed(2)}${o.reviews ? ` (${n0(o.reviews)} valoraciones)` : ''}`)
-	if (node.fee !== null) fact('Comisión del nodo', `${(node.fee * 100).toLocaleString('en-US', { maximumFractionDigits: 2 })} %`)
+	// La comisión del nodo se reparte a medias entre comprador y vendedor
+	const pct = (x: number) => `${(x * 100).toLocaleString('en-US', { maximumFractionDigits: 2 })} %`
+	const half = node.fee !== null && node.fee > 0 ? node.fee / 2 : 0
+	if (node.fee !== null) fact('Tu comisión', half ? `${pct(half)} (el nodo cobra ${pct(node.fee)} entre los dos)` : 'ninguna')
+	const h = healthOf(take.node)
+	fact('Estado del nodo', h.status === 'ok' ? 'funciona ✓' : h.status === 'degraded' ? 'con problemas (puede ir lento)' : h.status === 'down' ? 'caído' : 'sin informe reciente')
 
 	const amount = el('input')
 	amount.inputMode = 'numeric'
@@ -659,7 +743,7 @@ function openTake(o: BookOrder, nodeName: string) {
 	const est = el('small', 'mx-est')
 	const upd = () => {
 		const v = Number(amount.value.replace(/[,\s]/g, ''))
-		est.textContent = o.price && v > 0 ? `≈ ${n0((v / o.price) * 1e8)} sats` : ''
+		est.textContent = o.price && v > 0 ? `≈ ${n0((v / o.price) * 1e8 * (1 - half))} sats para ti${half ? ', ya sin tu parte de la comisión' : ''}` : ''
 	}
 	amount.addEventListener('input', upd)
 	upd()
@@ -676,7 +760,7 @@ function openTake(o: BookOrder, nodeName: string) {
 	let lnFor = ''
 	const sats = () => {
 		const v = Number(amount.value.replace(/[,\s]/g, ''))
-		return o.price && v > 0 ? Math.round((v / o.price) * 1e8) : null
+		return o.price && v > 0 ? Math.round((v / o.price) * 1e8 * (1 - half)) : null
 	}
 	const showLn = () => {
 		lnSays.className = 'mx-ln'
@@ -842,6 +926,19 @@ function openTake(o: BookOrder, nodeName: string) {
 
 // Lo que se puede comprar desde aquí: venta de Mostro en un nodo con el protocolo 2, sin fianza, con poca prueba de
 // trabajo y que escucha en alguno de los relays que la página puede abrir (si no, el mensaje no le llegaría nunca)
+// La salud del nodo según su último informe (si falta o es viejo, «unknown»: no impide comprar, pero lo dice)
+const healthOf = (node: string): Health => nodeHealth(nodes.get(node)?.health, node, nowS())
+// Por qué no se puede comprar ahora en ese nodo aunque la orden se pueda tomar (null: se puede)
+function blocked(o: BookOrder): string | null {
+	const node = o.take?.node
+	if (!node) return null
+	const h = healthOf(node)
+	if (nodes.get(node)?.maintenance || h.maintenance) return 'Nodo en mantenimiento'
+	if (h.status === 'down') return 'Nodo caído'
+	if (h.payouts === 'fail') return 'El nodo no está pagando'
+	return null
+}
+
 function canTake(o: BookOrder) {
 	if (o.side !== 'ask' || !o.take || !o.take.relays.some((r) => MOSTRO_RELAYS.includes(r))) return false
 	const n = nodes.get(o.take.node)
@@ -850,16 +947,18 @@ function canTake(o: BookOrder) {
 
 declare global {
 	interface Window {
-		TPMostro?: { setNodes(n: Record<string, NodeInfo>): void; canTake(o: BookOrder): boolean; take(o: BookOrder): void }
+		TPMostro?: { setNodes(n: Record<string, NodeInfo>): void; canTake(o: BookOrder): boolean; blocked(o: BookOrder): string | null; take(o: BookOrder): void }
 	}
 }
 window.TPMostro = {
 	setNodes(n) {
 		for (const [k, v] of Object.entries(n ?? {})) if (isHex64(k)) nodes.set(k, v)
 	},
-	canTake,
+	canTake: (o) => canTake(o) && !blocked(o),
+	// Se podría tomar, pero el nodo ahora no está para operar: el porqué, para enseñarlo en vez de «Comprar»
+	blocked: (o) => (canTake(o) ? blocked(o) : null),
 	take(o) {
-		if (canTake(o)) openTake(o, o.node ?? 'Mostro')
+		if (canTake(o) && !blocked(o)) openTake(o, o.node ?? 'Mostro')
 	},
 }
 

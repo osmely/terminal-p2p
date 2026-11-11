@@ -268,7 +268,7 @@ export const CANT_DO: Record<string, string> = {
 	pending_order_exists: 'ya tienes una operación abierta con esta orden',
 	invalid_order_status: 'la orden ya no está disponible',
 	not_allowed_by_status: 'no se puede hacer en este paso',
-	out_of_range_sats_amount: 'el monto está fuera del rango de la orden',
+	out_of_range_sats_amount: 'en sats queda fuera de lo mínimo o máximo que acepta el nodo',
 	out_of_range_fiat_amount: 'el monto está fuera del rango de la orden',
 	invalid_amount: 'el monto no vale',
 	invalid_invoice: 'la dirección Lightning o la factura no vale',
@@ -285,10 +285,59 @@ export const CANT_DO: Record<string, string> = {
 	maintenance_mode: 'el nodo está en mantenimiento y no acepta operaciones nuevas',
 	payer_not_declared: 'este nodo pide declarar la cuenta desde la que pagas: sigue la operación en la app de Mostro con tus 12 palabras',
 	invalid_fiat_currency: 'el nodo no acepta esa moneda',
+	invalid_parameters: 'algún dato del mensaje no vale',
+	invalid_payload: 'el mensaje llegó incompleto o mal formado',
+	invalid_action: 'este nodo no admite esa acción',
+	reputation_identity_required: 'hace falta tu identidad de Mostro para esto',
+	is_not_your_dispute: 'esa disputa no es tuya',
+	unknown: 'el nodo lo rechazó por un motivo que esta página aún no conoce',
 }
 export function cantDoReason(payload: unknown): string {
 	const r = payload && typeof payload === 'object' ? (payload as { cant_do?: unknown }).cant_do : null
-	return typeof r === 'string' ? r : 'unknown'
+	return typeof r === 'string' && /^[a-z_]{1,60}$/.test(r) ? r : 'unknown'
+}
+export const cantDoText = (why: string) => CANT_DO[why] ?? CANT_DO.unknown
+
+// Cuánto después de bloquear los sats actúa el nodo si el comprador no marcó «Ya pagué» (cancela) o sí lo marcó y el
+// vendedor no liberó (abre él la disputa): los bloques de la factura retenida menos su margen, a unos 10 min por bloque.
+// Con lo que publica casi todo nodo (144 y 24) son 20 h
+export function deadlineS(cltv: number | null | undefined, margin: number | null | undefined) {
+	const c = cltv && cltv > 0 ? cltv : 144
+	const m = margin !== null && margin !== undefined && margin >= 0 && margin < c ? margin : 24
+	return (c - m) * 600
+}
+
+// El informe de salud de un nodo (kind 38389), como pide la especificación: firma buena, de ese nodo, z = health,
+// d = su clave, intervalo de 30 a 3600 s, caducidad = creado + 3 × intervalo, no del futuro (5 min de margen) y no
+// caducado. Si falta o no cumple, «unknown», nunca «ok»
+export interface Health {
+	status: 'ok' | 'degraded' | 'down' | 'unknown'
+	payouts: string | null
+	maintenance: boolean
+}
+export function nodeHealth(ev: unknown, node: string, nowS: number): Health {
+	const unknown: Health = { status: 'unknown', payouts: null, maintenance: false }
+	if (!ev || typeof ev !== 'object') return unknown
+	const e = ev as NostrEvent
+	if (e.kind !== 38389 || e.pubkey !== node || !Array.isArray(e.tags)) return unknown
+	const all = (n: string) => e.tags.filter((t) => Array.isArray(t) && t[0] === n)
+	const one = (n: string) => {
+		const ts = all(n)
+		return ts.length === 1 && typeof ts[0][1] === 'string' ? ts[0][1] : null
+	}
+	// Una etiqueta repetida (o un chequeo repetido) invalida el informe
+	const checks = all('check')
+	if (new Set(checks.map((c) => c[1])).size !== checks.length) return unknown
+	for (const n of ['d', 'y', 'z', 'status', 'maintenance_mode', 'interval', 'seq', 'expiration']) if (one(n) === null) return unknown
+	const interval = Number(one('interval'))
+	if (one('z') !== 'health' || one('d') !== node || !Number.isInteger(interval) || interval < 30 || interval > 3600) return unknown
+	if (Number(one('expiration')) !== e.created_at + 3 * interval) return unknown
+	if (e.created_at > nowS + 300 || nowS >= e.created_at + 3 * interval) return unknown
+	const status = one('status')
+	if (status !== 'ok' && status !== 'degraded' && status !== 'down') return unknown
+	if (!verifyEvent(e as Parameters<typeof verifyEvent>[0])) return unknown
+	const pay = checks.find((c) => c[1] === 'payouts')
+	return { status, payouts: typeof pay?.[2] === 'string' ? pay[2] : null, maintenance: one('maintenance_mode') === 'true' }
 }
 
 // La moneda de la orden en Mostro va en entero (i64): CUP, USD… sin decimales

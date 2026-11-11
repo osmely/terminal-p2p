@@ -73,6 +73,7 @@
 .nx-side.nx-takeable .nx-head, .nx-side.nx-takeable .nx-row { grid-template-columns: 11ch 8ch 11ch minmax(0, 1fr) 68px; }
 .nx-buy { padding: 4px 0; border-radius: 7px; border: 1px solid var(--ask); background: transparent; color: var(--ask); font: 650 12px var(--sans); cursor: pointer; }
 .nx-buy:hover { background: var(--ask); color: #fff; }
+.nx-buy:disabled, .nx-buy:disabled:hover { border-color: var(--line-strong); background: transparent; color: var(--muted); cursor: help; text-decoration: line-through; }
 
 .mx { display: flex; flex-direction: column; gap: 10px; margin-top: 28px; }
 .mx-title { font-size: 18px; font-weight: 700; color: var(--text); }
@@ -134,3 +135,5 @@
 	.nx-buy { grid-row: 2; grid-column: 4; align-self: center; }
 	.mx-form { padding: 16px; }
 }
+.mx-room { font-size: 13px; font-weight: 700; color: var(--text-2); margin: 0 0 6px; }
+.mx-chat.mx-admin { border-color: var(--accent); }

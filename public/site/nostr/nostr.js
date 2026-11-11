@@ -122,6 +122,13 @@
 			b.title = `Comprar en ${o.node ?? 'Mostro'} desde aquí`
 			b.addEventListener('click', () => window.TPMostro.take(o))
 			li.append(b)
+		} else if (window.TPMostro?.blocked?.(o)) {
+			// El nodo publica que ahora no puede operar (caído, sin pagar o en mantenimiento)
+			const b = el('button', 'nx-buy', 'Comprar')
+			b.type = 'button'
+			b.disabled = true
+			b.title = window.TPMostro.blocked(o)
+			li.append(b)
 		} else if (o.link) {
 			const a = el('a', 'nx-open', '↗')
 			a.href = o.link
@@ -141,7 +148,7 @@
 			return
 		}
 		// Con algún «Comprar», la última columna es más ancha en ese lado
-		box.closest('.nx-side')?.classList.toggle('nx-takeable', orders.slice(0, SHOWN).some((o) => window.TPMostro?.canTake(o)))
+		box.closest('.nx-side')?.classList.toggle('nx-takeable', orders.slice(0, SHOWN).some((o) => window.TPMostro?.canTake(o) || window.TPMostro?.blocked?.(o)))
 		const rows = orders.slice(0, SHOWN).map(row)
 		if (orders.length > SHOWN) rows.push(el('li', 'nx-more', `y ${orders.length - SHOWN} más`))
 		box.replaceChildren(...rows)

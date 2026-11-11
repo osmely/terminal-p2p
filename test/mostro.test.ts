@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import { decrypt, encrypt, getConversationKey } from 'nostr-tools/nip44'
 import { hexToBytes } from '@noble/hashes/utils.js'
-import { chatKeys, contentFor, fiatAmountOk, identityPayload, keyring, lnAddressOf, lnAddressOk, messageJson, openChat, openFromMostro, pubOf, verifyText, wordsOk, wrapChat, wrapToMostro, type NostrEvent } from '../web/mostro.ts'
-import { bookOf, lnAddress, parseNode, parseOrder, relaysOf, type NostrEvent as BookEvent } from '../worker/nostr.ts'
+import { cantDoReason, cantDoText, chatKeys, contentFor, deadlineS, fiatAmountOk, nodeHealth, identityPayload, keyring, lnAddressOf, lnAddressOk, messageJson, openChat, openFromMostro, pubOf, verifyText, wordsOk, wrapChat, wrapToMostro, type NostrEvent } from '../web/mostro.ts'
+import { bookOf, healthOf, lnAddress, parseNode, parseOrder, relaysOf, type NostrEvent as BookEvent } from '../worker/nostr.ts'
 
 const WORDS = 'leader monkey parrot ring guide accident before fence cannon height naive bean'
 const ORDER = '6848f26e-bed1-47c3-8a6a-db8688e871e9'
@@ -193,7 +193,58 @@ test('nostr: las órdenes de Mostro traen lo que hace falta para tomarlas, y el 
 	const now = info(S - 60, [['mostro_version', '0.20.0'], ['protocol_version', '2'], ['pow', '0'], ['pow_first_contact', '0'], ['fee', '0.005'], ['min_order_amount', '100'], ['max_order_amount', '1000000'], ['bond_enabled', 'false'], ['expiration_seconds', '900']])
 	const book = bookOf([order, now, old, info(S, [['protocol_version', '2']]).pubkey === node ? { ...info(S, []), pubkey: 'b'.repeat(64) } : old], { CUP: 90_000_000 }, [], S * 1000)
 	assert.deepEqual(Object.keys(book.nodes), [node])
-	assert.deepEqual(book.nodes[node], { version: '0.20.0', protocol: 2, pow: 0, powFirst: 0, fee: 0.005, minSats: 100, maxSats: 1_000_000, bonds: false, stepS: 900, at: (S - 60) * 1000 })
+	assert.deepEqual(book.nodes[node], { version: '0.20.0', protocol: 2, pow: 0, powFirst: 0, fee: 0.005, minSats: 100, maxSats: 1_000_000, bonds: false, stepS: 900, cltv: null, marginBlocks: null, maintenance: false, health: null, at: (S - 60) * 1000 })
 	// Sin la etiqueta es un nodo viejo: protocolo 1
 	assert.equal(parseNode(info(S, []))!.protocol, 1)
+})
+
+// Un informe de salud como los que publica cada nodo cada minuto (kind 38389), firmado por el nodo
+function health(at: number, over: Record<string, string> = {}, extra: string[][] = []) {
+	const base: Record<string, string> = { d: NODE, z: 'health', status: 'ok', escrow_mode: 'lightning', maintenance_mode: 'false', mostro_version: '0.20.0', interval: '60', seq: '7', expiration: String(at + 180), ...over }
+	const tags = [...Object.entries(base).map(([k, v]) => [k, v]), ['y', 'mostro', 'Kmbalache'], ['check', 'lnd_sync', 'ok', '1'], ['check', 'payouts', over.payouts ?? 'ok', '1'], ...extra].filter((t) => t[0] !== 'payouts')
+	return JSON.parse(JSON.stringify(finalizeEvent({ kind: 38389, created_at: at, tags, content: '' }, nodeSk))) as NostrEvent
+}
+
+test('mostro: la salud del nodo vale solo firmada, suya, bien formada y reciente; si no, «unknown»', () => {
+	const T = 1_794_412_250
+	assert.deepEqual(nodeHealth(health(T), NODE, T + 30), { status: 'ok', payouts: 'ok', maintenance: false })
+	assert.deepEqual(nodeHealth(health(T, { status: 'down', payouts: 'fail', maintenance_mode: 'true' }), NODE, T), { status: 'down', payouts: 'fail', maintenance: true })
+	const unknown = { status: 'unknown', payouts: null, maintenance: false }
+	// Pasados tres intervalos, del futuro, de otro nodo, con la caducidad mal o un intervalo imposible
+	assert.deepEqual(nodeHealth(health(T), NODE, T + 180), unknown)
+	assert.deepEqual(nodeHealth(health(T + 400), NODE, T), unknown)
+	assert.deepEqual(nodeHealth(health(T), 'b'.repeat(64), T), unknown)
+	assert.deepEqual(nodeHealth(health(T, { expiration: String(T + 999) }), NODE, T), unknown)
+	assert.deepEqual(nodeHealth(health(T, { interval: '5', expiration: String(T + 15) }), NODE, T), unknown)
+	// Una etiqueta o un chequeo repetido, o el estado tocado después de firmar
+	assert.deepEqual(nodeHealth(health(T, {}, [['status', 'ok']]), NODE, T), unknown)
+	assert.deepEqual(nodeHealth(health(T, {}, [['check', 'payouts', 'fail', '1']]), NODE, T), unknown)
+	const forged = health(T, { status: 'down' })
+	forged.tags = forged.tags.map((t) => (t[0] === 'status' ? ['status', 'ok'] : t))
+	assert.deepEqual(nodeHealth(forged, NODE, T), unknown)
+	assert.deepEqual(nodeHealth(null, NODE, T), unknown)
+
+	// El libro lo trae tal cual junto al nodo (el más reciente) y descarta los de vigilantes (z = watcher)
+	const info: BookEvent = { pubkey: NODE, created_at: T - 60, kind: 38385, tags: [['protocol_version', '2'], ['hold_invoice_cltv_delta', '144'], ['escrow_deadline_margin_blocks', '24'], ['maintenance_mode', 'false']] }
+	const order: BookEvent = { pubkey: NODE, created_at: T - 60, kind: 38383, tags: [['d', ORDER], ['k', 'sell'], ['f', 'CUP'], ['s', 'pending'], ['amt', '0'], ['fa', '5000'], ['y', 'mostro', 'Kmbalache'], ['source', `mostro:${ORDER}?relays=wss://relay.mostro.network&mostro=${NODE}`]] }
+	const older = health(T - 60)
+	const newer = health(T)
+	const watcher = { ...health(T + 10), tags: health(T + 10).tags.map((t) => (t[0] === 'z' ? ['z', 'watcher'] : t)) }
+	const book = bookOf([order, info, newer, older, watcher], { CUP: 90_000_000 }, [], T * 1000)
+	assert.equal(book.nodes[NODE].health?.id, newer.id)
+	assert.equal(book.nodes[NODE].cltv, 144)
+	assert.equal(book.nodes[NODE].marginBlocks, 24)
+	assert.equal(healthOf({ ...newer, content: 'x'.repeat(7000) }), null)
+	assert.deepEqual(nodeHealth(book.nodes[NODE].health, NODE, T), { status: 'ok', payouts: 'ok', maintenance: false })
+})
+
+test('mostro: el plazo para pagar sale de la factura retenida del nodo, y los rechazos tienen texto', () => {
+	assert.equal(deadlineS(144, 24), 20 * 3600)
+	assert.equal(deadlineS(288, 12), 46 * 3600)
+	assert.equal(deadlineS(null, null), 20 * 3600)
+	assert.equal(deadlineS(144, 500), 20 * 3600)
+	assert.equal(cantDoReason({ cant_do: 'invalid_payload' }), 'invalid_payload')
+	assert.equal(cantDoReason({ cant_do: '<b>raro</b>' }), 'unknown')
+	assert.equal(cantDoText('invalid_action'), 'este nodo no admite esa acción')
+	assert.equal(cantDoText('motivo_nuevo_de_2027'), cantDoText('unknown'))
 })

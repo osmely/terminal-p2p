@@ -26,6 +26,7 @@ export interface NostrEvent {
 	kind: number
 	tags: string[][]
 	content?: string
+	sig?: string
 }
 
 export interface NostrOrder {
@@ -72,6 +73,12 @@ export interface MostroNode {
 	bonds: boolean
 	// Segundos que tiene cada parte para dar su paso (pagar la factura retenida, mandar la suya)
 	stepS: number | null
+	// Bloques de la factura retenida y el margen con que el nodo actúa antes de que caduque (144 − 24 ≈ 20 h)
+	cltv: number | null
+	marginBlocks: number | null
+	maintenance: boolean
+	// Su último informe de salud (kind 38389) tal cual, firmado: lo comprueba el navegador (web/mostro.ts nodeHealth)
+	health: NostrEvent | null
 	at: number
 }
 
@@ -232,8 +239,20 @@ export function parseNode(e: NostrEvent): MostroNode | null {
 		maxSats: n('max_order_amount'),
 		bonds: one(e, 'bond_enabled') === 'true',
 		stepS: n('expiration_seconds'),
+		cltv: n('hold_invoice_cltv_delta'),
+		marginBlocks: n('escrow_deadline_margin_blocks'),
+		maintenance: one(e, 'maintenance_mode') === 'true',
+		health: null,
 		at: e.created_at * 1000,
 	}
+}
+
+// El informe de salud de un nodo (kind 38389, z = health, d = su clave) se pasa entero si es pequeño: lleva la firma
+const HEALTH_MAX = 6000
+export function healthOf(e: NostrEvent): NostrEvent | null {
+	if (e.kind !== 38389 || !HEX64.test(e.pubkey) || !Array.isArray(e.tags) || one(e, 'z') !== 'health' || one(e, 'd') !== e.pubkey) return null
+	if (typeof e.id !== 'string' || typeof e.sig !== 'string' || JSON.stringify(e).length > HEALTH_MAX) return null
+	return { id: e.id, pubkey: e.pubkey, created_at: e.created_at, kind: e.kind, tags: e.tags, content: typeof e.content === 'string' ? e.content : '', sig: e.sig }
 }
 
 // Los eventos 38383 se reemplazan: de cada orden (autor + «d») vale el más reciente que mandó cualquier relay. Uno que
@@ -268,7 +287,13 @@ export function bookOf(events: NostrEvent[], market: Record<string, number>, rel
 	for (const e of events) {
 		if (e?.kind !== 38385 || !wanted.has(e.pubkey)) continue
 		const n = parseNode(e)
-		if (n && (!nodes[e.pubkey] || nodes[e.pubkey].at < n.at)) nodes[e.pubkey] = n
+		if (n && (!nodes[e.pubkey] || nodes[e.pubkey].at < n.at)) nodes[e.pubkey] = { ...n, health: nodes[e.pubkey]?.health ?? null }
+	}
+	for (const e of events) {
+		if (e?.kind !== 38389 || !nodes[e.pubkey]) continue
+		const h = healthOf(e)
+		const had = nodes[e.pubkey].health
+		if (h && (!had || had.created_at < h.created_at)) nodes[e.pubkey].health = h
 	}
 	return { at: nowMs, market: used, relays, orders, nodes }
 }
@@ -298,6 +323,8 @@ export const filtersFor = (nowS: number) => [
 	{ kinds: [KIND], '#s': ['pending'], since: nowS - WINDOW_S, limit: 2000 },
 	{ kinds: [KIND], since: nowS - WINDOW_S, limit: 3000 },
 	{ kinds: [38385], since: nowS - WINDOW_S, limit: 300 },
+	// La salud se publica cada minuto y caduca a los tres: con la última hora basta
+	{ kinds: [38389], since: nowS - 3600, limit: 300 },
 ]
 
 export async function readRelay(url: string, connect: Connect, nowS: number, timeoutMs = RELAY_TIMEOUT_MS): Promise<{ state: RelayState; events: NostrEvent[] }> {
