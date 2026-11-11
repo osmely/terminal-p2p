@@ -14,7 +14,6 @@
 	<link rel="stylesheet" href="/site.css" />
 	<link rel="stylesheet" href="/nostr/nostr.css" />
 	<script src="/site.js" defer></script>
-	<script src="/nostr/mostro.js" defer></script>
 	<script src="/nostr/nostr.js" defer></script>
 </head>
 <body>
@@ -68,8 +67,7 @@
 			</div>
 		</header>
 
-		<div class="wrap nx">
-			<section class="mx" id="mxTrades" aria-live="polite" hidden></section>
+		<div class="wrap nx" id="nxRoot" data-nx-url="1" data-nx-buy="1">
 
 			<div class="nx-bar">
 				<div class="nx-fiats" id="nxFiats" role="tablist" aria-label="Moneda"></div>
@@ -118,8 +116,7 @@
 			</div>
 			<p class="nx-legend">Precio en <span data-nx="fiat">USD</span> por bitcoin. Prima: cuánto por encima (+) o por debajo (−) del mercado. ⚡ Lightning · ⛓ en cadena.</p>
 
-			<p class="note nx-note">Órdenes públicas del protocolo Nostr (NIP-69) que cualquiera puede leer, sin cuenta. Las ventas de Mostro se pueden comprar desde aquí («Comprar»): tu cuenta de Mostro (12 palabras) vive en este navegador, los mensajes van cifrados al nodo y los sats llegan a tu dirección Lightning. Las demás se abren en su plataforma (RoboSats, Hodl Hodl…). Terminal P2P no custodia fondos ni intermedia: la garantía es la de cada plataforma, con sus reglas y comisiones; algunas no admiten usuarios de ciertos países.</p>
-			<dialog class="mx-dialog" id="mxDialog" aria-label="Comprar bitcoin"></dialog>
+			<p class="note nx-note">Órdenes públicas del protocolo Nostr (NIP-69) que cualquiera puede leer, sin cuenta. Las ventas de Mostro se compran desde el terminal, en el mercado «Bitcoin · Mostro» (modo Pro): tu cuenta de Mostro (12 palabras) vive en tu navegador, los mensajes van cifrados al nodo y los sats llegan a tu cuenta de QvaPay o a tu dirección Lightning. Las demás se abren en su plataforma (RoboSats, Hodl Hodl…). Terminal P2P no custodia fondos ni intermedia: la garantía es la de cada plataforma, con sus reglas y comisiones; algunas no admiten usuarios de ciertos países.</p>
 		</div>
 	</main>
 

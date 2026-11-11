@@ -1,5 +1,5 @@
-// Comprar bitcoin en Mostro desde /nostr/ (experimental): el botón «Comprar» de una orden de venta de Mostro abre la
-// compra; las compras en curso se ven arriba del libro, con su chat. Todo pasa en el navegador: las 12 palabras, las
+// Comprar bitcoin en Mostro desde el terminal (experimental, mercado «Bitcoin · Mostro», btc.js): el botón «Comprar» de
+// una orden de venta de Mostro abre la compra; las compras en curso se ven arriba del libro, con su chat. Todo pasa en el navegador: las 12 palabras, las
 // claves y el estado se guardan en este navegador (localStorage) y los mensajes van cifrados a los relays de Mostro.
 // Terminal P2P no custodia nada: los sats los retiene Mostro (factura retenida) y los paga a la dirección Lightning de
 // quien compra. Lo que viene de fuera se pinta como texto, nunca como HTML.
@@ -118,7 +118,16 @@ interface Saved {
 	ln: string
 	trades: Trade[]
 }
-const KEY = 'tp.mostro.v1'
+// El terminal dice qué cuenta de QvaPay está conectada antes de cargar esto (btc.js): con ella la dirección Lightning
+// sale sola (usuario@qvpay.me) y cada cuenta del navegador tiene su cuenta de Mostro y sus compras
+declare global {
+	interface Window {
+		TPMostroConfig?: { user?: string }
+	}
+}
+const QV_USER = /^[a-z0-9._-]{2,40}$/i.test(window.TPMostroConfig?.user ?? '') ? window.TPMostroConfig!.user!.toLowerCase() : null
+const KEY = QV_USER ? `tp.mostro.v1:${QV_USER}` : 'tp.mostro.v1'
+const qvAddress = QV_USER ? `${QV_USER}@${QVAPAY_LN_DOMAIN}` : ''
 function load(): Saved {
 	const empty: Saved = { words: null, saved: false, next: 1, ln: '', trades: [] }
 	try {
@@ -749,7 +758,7 @@ function openTake(o: BookOrder, nodeName: string) {
 	upd()
 	const ln = el('input')
 	ln.required = true
-	ln.value = state.ln
+	ln.value = state.ln || qvAddress
 	ln.placeholder = 'tu usuario de QvaPay o usuario@dominio'
 	ln.autocomplete = 'off'
 	ln.autocapitalize = 'none'
@@ -808,7 +817,7 @@ function openTake(o: BookOrder, nodeName: string) {
 		if (ln.value.trim()) verify(true)
 	})
 	amount.addEventListener('input', showLn)
-	if (state.ln) verify(false)
+	if (ln.value) verify(false)
 
 	const field = (label: string, input: HTMLElement, hint?: string, extra?: HTMLElement) => {
 		const l = el('label', 'mx-field')
@@ -822,7 +831,14 @@ function openTake(o: BookOrder, nodeName: string) {
 		facts,
 		field(`¿Cuánto vas a pagar? (${o.fiat})`, amount),
 		est,
-		field('Tu dirección Lightning', ln, `Ahí manda Mostro los sats cuando el vendedor libere. Con QvaPay basta tu usuario (es usuario@${QVAPAY_LN_DOMAIN} y caen en tu saldo); sirve también la de cualquier cartera Lightning.`, lnSays),
+		field(
+			'Tu dirección Lightning',
+			ln,
+			qvAddress
+				? `Ahí manda Mostro los sats cuando el vendedor libere. Viene puesta la de tu cuenta de QvaPay (${qvAddress}): caen en tu saldo. Puedes poner la de otra cartera Lightning.`
+				: `Ahí manda Mostro los sats cuando el vendedor libere. Con QvaPay basta tu usuario (es usuario@${QVAPAY_LN_DOMAIN} y caen en tu saldo); sirve también la de cualquier cartera Lightning.`,
+			lnSays,
+		),
 	)
 
 	// La cuenta: 12 palabras nuevas (o las de la app de Mostro), que hay que guardar antes de la primera compra

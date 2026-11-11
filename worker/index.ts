@@ -103,7 +103,8 @@ const RATES_TTL_S = 300
 const INFORMAL_TTL_S = 600
 const STATS_TTL_S = 600
 // La landing y el simulador reutilizan estos archivos del terminal en vez de duplicarlos
-const SHARED = ['/vendor/', '/favicon.svg', '/theme.js', '/resize.js', '/hit.js', '/numfield.js']
+// El libro de Nostr (nostr.js y nostr.css) es del terminal y lo usa también la página /nostr/ de la web
+const SHARED = ['/vendor/', '/favicon.svg', '/theme.js', '/resize.js', '/hit.js', '/numfield.js', '/nostr/nostr.js', '/nostr/nostr.css']
 
 // app.terminalp2p.com (app.localhost en desarrollo) → terminal; sim.* → simulador; el resto → landing
 const folderFor = (host: string) => (host.startsWith('app.') ? 'app' : host.startsWith('sim.') ? 'sim' : 'site')
@@ -120,9 +121,8 @@ function miniApp(url: URL, res: Response) {
 	out.headers.delete('X-Frame-Options')
 	return out
 }
-// La página de Bitcoin P2P en Nostr (/nostr/) compra en Mostro desde el navegador: puede abrir WebSocket a los relays de
-// Mostro (src/nostr-relays.ts) y a nada más. El resto, como la web
-const NOSTR_CSP = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' ${MOSTRO_RELAYS.join(' ')}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
+// La página de Bitcoin P2P en Nostr de la web (/nostr/) solo enseña el libro: compra el terminal (APP_CSP)
+const NOSTR_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 function nostrPage(url: URL, res: Response) {
 	if (folderFor(url.hostname) !== 'site' || !url.pathname.startsWith('/nostr') || !res.headers.get('Content-Type')?.includes('text/html')) return res
 	const out = new Response(res.body, res)
@@ -270,7 +270,19 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	}
 	// Las páginas enseñan u ocultan lo de Pro según el interruptor del panel
 	const res = folderFor(url.hostname) === 'site' && url.pathname === TASA_PATH && req.method === 'GET' ? await tasa(req, url, env, ctx) : nostrPage(url, miniApp(url, await assets(req, url, env)))
-	return res.headers.get('Content-Type')?.includes('text/html') ? proMarkup(res, await proEnabled(env.DB)) : res
+	return res.headers.get('Content-Type')?.includes('text/html') ? crossMarkup(url, proMarkup(res, await proEnabled(env.DB)), crossOn(env)) : res
+}
+
+// El mercado «Bitcoin · Mostro» del terminal (public/app/btc.js, experimental): donde no está encendido, su vista y su
+// entrada (lo marcado data-cross) ni llegan. Encendido, el terminal compra en Mostro desde el navegador: su página puede
+// abrir WebSocket a los relays de Mostro (src/nostr-relays.ts) y a nada más. El resto, como public/_headers
+const APP_CSP = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://media.qvapay.com; connect-src 'self' ${MOSTRO_RELAYS.join(' ')}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
+function crossMarkup(url: URL, res: Response, on: boolean) {
+	if (!on) return new HTMLRewriter().on('[data-cross]', { element: (el) => void el.remove() }).transform(res)
+	if (folderFor(url.hostname) !== 'app' || url.pathname.startsWith('/admin')) return res
+	const out = new Response(res.body, res)
+	out.headers.set('Content-Security-Policy', APP_CSP)
+	return out
 }
 
 // En las páginas, lo marcado data-pro solo se ve con Pro encendido (en el panel) y lo marcado data-nopro solo con Pro apagado.

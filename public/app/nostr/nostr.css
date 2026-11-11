@@ -1,4 +1,4 @@
-/* Bitcoin P2P en Nostr (experimental) */
+/* Bitcoin P2P en Nostr (experimental): la página de la web (/nostr/) y el mercado «Bitcoin · Mostro» del terminal */
 .nx { padding-bottom: 72px; }
 .nx-beta { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--accent-bg); color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 
@@ -15,7 +15,7 @@
 
 .nx-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
 .nx-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 16px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); }
-.nx-stat:first-child { background: radial-gradient(70% 90% at 0% 0%, var(--glow), transparent 70%), var(--surface); border-color: var(--line-strong); }
+.nx-stat:first-child { background: radial-gradient(70% 90% at 0% 0%, var(--glow, var(--accent-bg)), transparent 70%), var(--surface); border-color: var(--line-strong); }
 .nx-stat span { font-size: 13px; font-weight: 600; color: var(--text-2); }
 .nx-stat b { font: 750 20px var(--mono); font-variant-numeric: tabular-nums; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nx-stat b.ask, .nx-px.ask { color: var(--ask); }
@@ -73,6 +73,7 @@
 .nx-side.nx-takeable .nx-head, .nx-side.nx-takeable .nx-row { grid-template-columns: 11ch 8ch 11ch minmax(0, 1fr) 68px; }
 .nx-buy { padding: 4px 0; border-radius: 7px; border: 1px solid var(--ask); background: transparent; color: var(--ask); font: 650 12px var(--sans); cursor: pointer; }
 .nx-buy:hover { background: var(--ask); color: #fff; }
+.nx-buy-link { display: block; text-align: center; text-decoration: none; }
 .nx-buy:disabled, .nx-buy:disabled:hover { border-color: var(--line-strong); background: transparent; color: var(--muted); cursor: help; text-decoration: line-through; }
 
 .mx { display: flex; flex-direction: column; gap: 10px; margin-top: 28px; }

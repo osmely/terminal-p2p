@@ -1,5 +1,8 @@
 // Bitcoin P2P en Nostr (experimental): las órdenes abiertas de Mostro, RoboSats, Hodl Hodl y otros desde /data/nostr,
-// en un libro por moneda. Todo lo que viene de fuera (nombres, métodos de pago, nodos) se pinta como texto, nunca como HTML
+// en un libro por moneda. Todo lo que viene de fuera (nombres, métodos de pago, nodos) se pinta como texto, nunca como HTML.
+// Lo usan dos páginas: la de la web (/nostr/, solo para ver; las ventas de Mostro llevan al terminal) y el mercado
+// «Bitcoin · Mostro» del terminal (btc.js), que compra con mostro.js. Lo que cambia entre ellas va en #nxRoot:
+// data-nx-url (la moneda en la dirección, ?m=), data-nx-fiat (la moneda de entrada) y data-nx-buy (enlace al terminal)
 ;(() => {
 	const REFRESH_MS = 60_000
 	const SHOWN = 25
@@ -17,7 +20,11 @@
 	const amt = (n) => n.toLocaleString('en-US', { maximumFractionDigits: n >= 100 ? 0 : 2 })
 	// Lo que redondea a cero sale «0 %» (no «−0.0 %»)
 	const pct = (x) => (x === null ? '—' : Math.abs(x) < 0.05 ? '0 %' : `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x).toFixed(x % 1 === 0 ? 0 : Math.abs(x) >= 10 ? 0 : 1)} %`)
-	const clock = (t) => new Date(t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+	// En el terminal, en hora de Cuba (cubaFmt de app.js); en la web, la del navegador
+	const clock = (t) => {
+		const opts = { hour: '2-digit', minute: '2-digit', second: '2-digit' }
+		return typeof cubaFmt === 'function' ? cubaFmt(t, opts) : new Date(t).toLocaleTimeString('es', opts)
+	}
 	const left = (t) => {
 		const m = Math.round((t - Date.now()) / 60_000)
 		if (m < 60) return `${Math.max(m, 1)} min`
@@ -27,8 +34,25 @@
 	// Las mayúsculas y los acentos no cuentan al buscar un método de pago (Transfermóvil = transfermovil)
 	const fold = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
-	const params = new URLSearchParams(location.search)
-	let fiat = params.get('m')?.toUpperCase() || null
+	const root = $('nxRoot')?.dataset ?? {}
+	const inUrl = root.nxUrl === '1'
+	const FIAT_KEY = 'tp.nx.fiat'
+	const saved = () => {
+		try {
+			return localStorage.getItem(FIAT_KEY)
+		} catch {
+			return null
+		}
+	}
+	let fiat = (inUrl ? new URLSearchParams(location.search).get('m') : saved())?.toUpperCase() || null
+	// La web no compra: las ventas de Mostro llevan al mercado «Bitcoin · Mostro» del terminal del mismo entorno
+	const appUrl = /(^|\.)terminalp2p\.com$/.test(location.hostname)
+		? `${location.protocol}//app.${location.host.replace(/^www\./, '')}`
+		: location.hostname.endsWith('localhost')
+			? `${location.protocol}//app.localhost:5177`
+			: 'https://app.terminalp2p.com'
+	const buyHref = root.nxBuy === '1' ? `${appUrl}/#bitcoin` : null
+	let active = true
 	let data = null
 	// Hodl Hodl va oculto de entrada: llena el libro con ofertas de pocos usuarios y no admite usuarios de Cuba.
 	// Se ve con su botón
@@ -45,9 +69,14 @@
 
 	function setFiat(f) {
 		fiat = f
-		const q = new URLSearchParams(location.search)
-		q.set('m', f)
-		history.replaceState(null, '', `${location.pathname}?${q.toString()}`)
+		if (inUrl) {
+			const q = new URLSearchParams(location.search)
+			q.set('m', f)
+			history.replaceState(null, '', `${location.pathname}?${q.toString()}`)
+		} else
+			try {
+				localStorage.setItem(FIAT_KEY, f)
+			} catch {}
 		render()
 	}
 
@@ -129,6 +158,11 @@
 			b.disabled = true
 			b.title = window.TPMostro.blocked(o)
 			li.append(b)
+		} else if (buyHref && o.side === 'ask' && o.take) {
+			const a = el('a', 'nx-buy nx-buy-link', 'Comprar')
+			a.href = buyHref
+			a.title = 'Se compra desde el terminal, en el mercado «Bitcoin · Mostro» (modo Pro)'
+			li.append(a)
 		} else if (o.link) {
 			const a = el('a', 'nx-open', '↗')
 			a.href = o.link
@@ -148,7 +182,7 @@
 			return
 		}
 		// Con algún «Comprar», la última columna es más ancha en ese lado
-		box.closest('.nx-side')?.classList.toggle('nx-takeable', orders.slice(0, SHOWN).some((o) => window.TPMostro?.canTake(o) || window.TPMostro?.blocked?.(o)))
+		box.closest('.nx-side')?.classList.toggle('nx-takeable', orders.slice(0, SHOWN).some((o) => window.TPMostro?.canTake(o) || window.TPMostro?.blocked?.(o) || (buyHref && o.side === 'ask' && o.take)))
 		const rows = orders.slice(0, SHOWN).map(row)
 		if (orders.length > SHOWN) rows.push(el('li', 'nx-more', `y ${orders.length - SHOWN} más`))
 		box.replaceChildren(...rows)
@@ -163,7 +197,8 @@
 			list('nxBids', [])
 			return
 		}
-		if (!fiat || !list0.some(([f]) => f === fiat)) fiat = list0.find(([f]) => f === 'USD')?.[0] ?? list0[0][0]
+		const first = root.nxFiat || 'USD'
+		if (!fiat || !list0.some(([f]) => f === fiat)) fiat = list0.find(([f]) => f === first)?.[0] ?? list0[0][0]
 		chips(list0)
 		document.querySelectorAll('[data-nx="fiat"]').forEach((n) => (n.textContent = fiat))
 
@@ -190,6 +225,7 @@
 
 	async function load() {
 		clearTimeout(timer)
+		if (!active) return
 		try {
 			const r = await fetch('/data/nostr', { headers: { Accept: 'application/json' } })
 			if (!r.ok) throw new Error(String(r.status))
@@ -203,7 +239,19 @@
 		} catch {
 			$('nxAt').textContent = 'No se pudo cargar: se reintenta en un minuto'
 		}
-		timer = setTimeout(load, REFRESH_MS)
+		if (active) timer = setTimeout(load, REFRESH_MS)
+	}
+	// El terminal lo para al salir del mercado «Bitcoin · Mostro» y lo vuelve a poner al entrar
+	window.TPNostr = {
+		pause() {
+			active = false
+			clearTimeout(timer)
+		},
+		resume() {
+			if (active) return
+			active = true
+			load()
+		},
 	}
 
 	let typing = 0
@@ -215,7 +263,7 @@
 		}, 150)
 	})
 	document.addEventListener('visibilitychange', () => {
-		if (document.visibilityState === 'visible') load()
+		if (document.visibilityState === 'visible' && active) load()
 		else clearTimeout(timer)
 	})
 	load()
