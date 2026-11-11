@@ -17,7 +17,8 @@ import { accessOf, profileAccess, relayAccess } from './blocks.ts'
 import { cleanupIncidents, relayIncident } from './incidents.ts'
 import { sha256, verify } from './crypto.ts'
 import { crossBook, isCrossFiat } from './cross.ts'
-import { nostrBook } from './nostr.ts'
+import { lnAddress, nostrBook } from './nostr.ts'
+import { MOSTRO_RELAYS } from '../src/nostr-relays.ts'
 import { adminPage, askKey, panel } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
@@ -117,6 +118,15 @@ function miniApp(url: URL, res: Response) {
 	const out = new Response(res.body, res)
 	out.headers.set('Content-Security-Policy', MINI_CSP)
 	out.headers.delete('X-Frame-Options')
+	return out
+}
+// La página de Bitcoin P2P en Nostr (/nostr/) compra en Mostro desde el navegador: puede abrir WebSocket a los relays de
+// Mostro (src/nostr-relays.ts) y a nada más. El resto, como la web
+const NOSTR_CSP = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' ${MOSTRO_RELAYS.join(' ')}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
+function nostrPage(url: URL, res: Response) {
+	if (folderFor(url.hostname) !== 'site' || !url.pathname.startsWith('/nostr') || !res.headers.get('Content-Type')?.includes('text/html')) return res
+	const out = new Response(res.body, res)
+	out.headers.set('Content-Security-Policy', NOSTR_CSP)
 	return out
 }
 // El simulador está desconectado: sim.* solo enseña el aviso de mantenimiento (public/sim/mantenimiento.html), su API
@@ -227,6 +237,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		if (!crossOn(env)) return secure(jsonError(404, 'no encontrado'))
 		if (url.pathname === '/data/nostr') return secure(req.method === 'GET' ? await nostr(req, url, env, ctx) : jsonError(405, 'Método no permitido'))
 	}
+	// Comprobar una dirección Lightning antes de comprar en Mostro (la página de Nostr no sale a otros dominios)
+	if (url.pathname === '/data/lnaddr') {
+		if (!crossOn(env)) return secure(jsonError(404, 'no encontrado'))
+		if (req.method !== 'GET') return secure(jsonError(405, 'Método no permitido'))
+		if (!(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiadas consultas seguidas: espera un minuto'))
+		return secure(Response.json(await lnAddress(url.searchParams.get('a') ?? ''), { headers: { 'Cache-Control': 'no-store' } }))
+	}
 	// El enlace corto de una oferta compartida (terminalp2p.com/o/<uuid>): abre el terminal con ella delante
 	const shared = SHARED_OFFER.exec(url.pathname)
 	if (shared && folderFor(url.hostname) !== 'sim') {
@@ -252,7 +269,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		return secure(await simApi(req, url, env as unknown as SimEnv))
 	}
 	// Las páginas enseñan u ocultan lo de Pro según el interruptor del panel
-	const res = folderFor(url.hostname) === 'site' && url.pathname === TASA_PATH && req.method === 'GET' ? await tasa(req, url, env, ctx) : miniApp(url, await assets(req, url, env))
+	const res = folderFor(url.hostname) === 'site' && url.pathname === TASA_PATH && req.method === 'GET' ? await tasa(req, url, env, ctx) : nostrPage(url, miniApp(url, await assets(req, url, env)))
 	return res.headers.get('Content-Type')?.includes('text/html') ? proMarkup(res, await proEnabled(env.DB)) : res
 }
 

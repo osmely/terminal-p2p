@@ -115,7 +115,14 @@
 		else tip.push('A precio de mercado: los sats se calculan al tomarla')
 		who.title = tip.filter(Boolean).join(' · ')
 		li.append(price, prem, size, who)
-		if (o.link) {
+		// Las ventas de Mostro en un nodo que lo permite se compran desde aquí (mostro.js)
+		if (window.TPMostro?.canTake(o)) {
+			const b = el('button', 'nx-buy', 'Comprar')
+			b.type = 'button'
+			b.title = `Comprar en ${o.node ?? 'Mostro'} desde aquí`
+			b.addEventListener('click', () => window.TPMostro.take(o))
+			li.append(b)
+		} else if (o.link) {
 			const a = el('a', 'nx-open', '↗')
 			a.href = o.link
 			a.target = '_blank'
@@ -133,6 +140,8 @@
 			box.replaceChildren(el('li', 'nx-empty', 'Sin órdenes con estos filtros'))
 			return
 		}
+		// Con algún «Comprar», la última columna es más ancha en ese lado
+		box.closest('.nx-side')?.classList.toggle('nx-takeable', orders.slice(0, SHOWN).some((o) => window.TPMostro?.canTake(o)))
 		const rows = orders.slice(0, SHOWN).map(row)
 		if (orders.length > SHOWN) rows.push(el('li', 'nx-more', `y ${orders.length - SHOWN} más`))
 		box.replaceChildren(...rows)
@@ -178,6 +187,7 @@
 			const r = await fetch('/data/nostr', { headers: { Accept: 'application/json' } })
 			if (!r.ok) throw new Error(String(r.status))
 			data = await r.json()
+			window.TPMostro?.setNodes(data.nodes)
 			render()
 			const ok = data.relays.filter((x) => x.ok).length
 			const at = $('nxAt')

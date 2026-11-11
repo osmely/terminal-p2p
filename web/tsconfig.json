@@ -11,5 +11,5 @@
 		"skipLibCheck": true,
 		"types": []
 	},
-	"include": ["./*.ts", "../src/broker/*.ts", "../src/terminal/*.ts", "../src/qvapay/*.ts", "../src/ratelimit.ts", "../src/log.ts"]
+	"include": ["./*.ts", "../src/nostr-relays.ts", "../src/broker/*.ts", "../src/terminal/*.ts", "../src/qvapay/*.ts", "../src/ratelimit.ts", "../src/log.ts"]
 }

@@ -16,7 +16,8 @@
     "deploy": "wrangler deploy",
     "deploy:staging": "wrangler deploy --env staging",
     "vendor": "node scripts/vendor.mjs",
-    "build:web": "esbuild web/main.ts --bundle --format=iife --target=es2022 --minify --sourcemap --outfile=public/app/data.js"
+    "build:web": "esbuild web/main.ts --bundle --format=iife --target=es2022 --minify --sourcemap --outfile=public/app/data.js && npm run build:mostro",
+    "build:mostro": "esbuild web/mostro-page.ts --bundle --format=iife --target=es2022 --minify --legal-comments=eof --outfile=public/site/nostr/mostro.js"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261022.1",
@@ -25,6 +26,7 @@
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
     "lightweight-charts": "^4.2.0",
+    "nostr-tools": "2.25.2",
     "typescript": "^7.0.2",
     "wrangler": "^4.152.0"
   },

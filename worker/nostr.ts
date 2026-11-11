@@ -8,12 +8,14 @@
 // El precio de mercado es el de Yadio, el mismo que usa Mostro para las órdenes «a precio de mercado» (amt 0): el
 // precio que sale aquí es el que se pagaría al tomarla (mercado × (1 + prima)).
 
+import { LN_ADDRESS, QVAPAY_LN_DOMAIN } from '../src/nostr-relays.ts'
+
 export const NOSTR_RELAYS = ['wss://relay.mostro.network', 'wss://nos.lol', 'wss://relay.damus.io', 'wss://nostr.mom', 'wss://relay.primal.net']
 const KIND = 38383
 // Las órdenes caducan en horas o días (Mostro 24 h, Hodl Hodl una semana): más atrás no hay ninguna abierta
 const WINDOW_S = 8 * 86400
 // Lo más que se lee de un relay, para que uno que mande de todo no se coma la memoria
-const MAX_EVENTS = 5000
+const MAX_EVENTS = 5400
 const RELAY_TIMEOUT_MS = 6000
 const PRICE_URL = 'https://api.yadio.io/exrates/BTC'
 
@@ -53,6 +55,24 @@ export interface NostrOrder {
 	// Milisegundos
 	at: number
 	exp: number | null
+	// Solo en las de Mostro: lo que hace falta para tomarla desde el navegador (el id, la clave del nodo y sus relays)
+	take: { id: string; node: string; relays: string[] } | null
+}
+
+// Lo que anuncia cada nodo de Mostro de sí mismo (kind 38385): el navegador solo ofrece comprar en los que hablan el
+// protocolo 2 y no piden fianza ni más prueba de trabajo de la que puede minar
+export interface MostroNode {
+	version: string | null
+	protocol: number
+	pow: number
+	powFirst: number | null
+	fee: number | null
+	minSats: number | null
+	maxSats: number | null
+	bonds: boolean
+	// Segundos que tiene cada parte para dar su paso (pagar la factura retenida, mandar la suya)
+	stepS: number | null
+	at: number
 }
 
 export interface RelayState {
@@ -68,6 +88,8 @@ export interface NostrBook {
 	market: Record<string, number>
 	relays: RelayState[]
 	orders: NostrOrder[]
+	// Los nodos de Mostro con órdenes en el libro, por su clave
+	nodes: Record<string, MostroNode>
 }
 
 const num = (x: unknown): number | null => {
@@ -159,6 +181,8 @@ export function parseOrder(e: NostrEvent, market: Record<string, number>, nowMs:
 	const source = one(e, 'source') ?? ''
 	const link = /^https:\/\/[^\s]{4,300}$/.test(source) ? source : null
 	const layer = text(one(e, 'layer'), 12) || null
+	const d = one(e, 'd') ?? ''
+	const take = platform === 'mostro' && UUID.test(d) && HEX64.test(e.pubkey) ? { id: d, node: e.pubkey, relays: relaysOf(source) } : null
 	return {
 		side: k === 'sell' ? 'ask' : 'bid',
 		fiat,
@@ -177,6 +201,38 @@ export function parseOrder(e: NostrEvent, market: Record<string, number>, nowMs:
 		link,
 		at: e.created_at * 1000,
 		exp: expS !== null ? expS * 1000 : null,
+		take,
+	}
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const HEX64 = /^[0-9a-f]{64}$/
+// Los relays del enlace de Mostro («mostro:<id>?relays=wss://a,wss://b&mostro=<clave>»): solo wss:// sin ruta
+export function relaysOf(source: string): string[] {
+	const m = /[?&]relays=([^&]*)/.exec(source)
+	if (!m) return []
+	const out = decodeURIComponent(m[1])
+		.split(',')
+		.map((r) => r.trim().replace(/\/+$/, '').toLowerCase())
+		.filter((r) => /^wss:\/\/[a-z0-9.-]{3,80}$/.test(r))
+	return [...new Set(out)].slice(0, 8)
+}
+
+// El anuncio de un nodo de Mostro (kind 38385). Sin «protocol_version» es un nodo viejo, que habla el protocolo 1
+export function parseNode(e: NostrEvent): MostroNode | null {
+	if (e.kind !== 38385 || !HEX64.test(e.pubkey) || !Array.isArray(e.tags)) return null
+	const n = (name: string) => num(one(e, name))
+	return {
+		version: text(one(e, 'mostro_version'), 20) || null,
+		protocol: n('protocol_version') ?? 1,
+		pow: n('pow') ?? 0,
+		powFirst: n('pow_first_contact'),
+		fee: n('fee'),
+		minSats: n('min_order_amount'),
+		maxSats: n('max_order_amount'),
+		bonds: one(e, 'bond_enabled') === 'true',
+		stepS: n('expiration_seconds'),
+		at: e.created_at * 1000,
 	}
 }
 
@@ -206,7 +262,15 @@ export function bookOf(events: NostrEvent[], market: Record<string, number>, rel
 		const f = marketFiat(o.fiat)
 		if (market[f]) used[f] = market[f]
 	}
-	return { at: nowMs, market: used, relays, orders }
+	// De cada nodo, su anuncio más reciente; solo los que tienen órdenes en el libro
+	const wanted = new Set(orders.map((o) => o.take?.node).filter(Boolean))
+	const nodes: Record<string, MostroNode> = {}
+	for (const e of events) {
+		if (e?.kind !== 38385 || !wanted.has(e.pubkey)) continue
+		const n = parseNode(e)
+		if (n && (!nodes[e.pubkey] || nodes[e.pubkey].at < n.at)) nodes[e.pubkey] = n
+	}
+	return { at: nowMs, market: used, relays, orders, nodes }
 }
 
 // Lo mínimo de un WebSocket que hace falta (así las pruebas pueden pasar uno falso)
@@ -221,17 +285,19 @@ export type Connect = (url: string) => Promise<SocketLike>
 // En un Worker, el WebSocket de salida se abre con un fetch con «Upgrade: websocket»
 const connectWorker: Connect = async (url) => {
 	const res = await fetch(url.replace(/^wss:/, 'https:'), { headers: { Upgrade: 'websocket' }, signal: AbortSignal.timeout(RELAY_TIMEOUT_MS) })
-	const ws = (res as Response & { webSocket?: WebSocket | null }).webSocket
+	// accept() es de los Workers (la comprobación de las pruebas usa los tipos del navegador, que no lo tienen)
+	const ws = (res as Response & { webSocket?: (WebSocket & { accept(): void }) | null }).webSocket
 	if (!ws) throw new Error(`HTTP ${res.status}`)
 	ws.accept()
 	return ws as unknown as SocketLike
 }
 
 // Las órdenes abiertas, y además todo lo reciente: así llega también la versión nueva (tomada, cancelada) de una orden
-// que otro relay aún tiene como abierta
+// que otro relay aún tiene como abierta. Y los anuncios de los nodos de Mostro (se renuevan cada pocos minutos)
 export const filtersFor = (nowS: number) => [
 	{ kinds: [KIND], '#s': ['pending'], since: nowS - WINDOW_S, limit: 2000 },
 	{ kinds: [KIND], since: nowS - WINDOW_S, limit: 3000 },
+	{ kinds: [38385], since: nowS - WINDOW_S, limit: 300 },
 ]
 
 export async function readRelay(url: string, connect: Connect, nowS: number, timeoutMs = RELAY_TIMEOUT_MS): Promise<{ state: RelayState; events: NostrEvent[] }> {
@@ -300,6 +366,45 @@ export async function marketPrices(fetcher: typeof fetch = fetch): Promise<Recor
 	} catch {
 		return {}
 	}
+}
+
+// ¿Existe esa dirección Lightning? Lo que contesta su dominio en /.well-known/lnurlp/<usuario> (LUD-16), antes de
+// tomar una orden: si no existe, Mostro no podría pagar. Solo https al dominio de la dirección, 5 s y 16 KB como mucho
+export interface LnAddressInfo {
+	ok: boolean
+	reason?: string
+	min?: number // sats
+	max?: number
+	text?: string
+	qvapay?: boolean
+}
+export async function lnAddress(addr: string, fetcher: typeof fetch = fetch): Promise<LnAddressInfo> {
+	const a = addr.trim().toLowerCase()
+	if (a.length > 120 || !LN_ADDRESS.test(a)) return { ok: false, reason: 'No tiene la forma usuario@dominio' }
+	const [user, domain] = a.split('@')
+	let res: Response
+	try {
+		res = await fetcher(`https://${domain}/.well-known/lnurlp/${encodeURIComponent(user)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(5000) })
+	} catch {
+		return { ok: false, reason: `${domain} no responde` }
+	}
+	const raw = await res.text().catch(() => '')
+	let data: Record<string, unknown> | null = null
+	try {
+		data = raw.length <= 16_384 ? (JSON.parse(raw) as Record<string, unknown>) : null
+	} catch {}
+	if (res.status === 404 || (data && data.status === 'ERROR')) return { ok: false, reason: 'Esa dirección no existe' }
+	const min = num(data?.minSendable)
+	const max = num(data?.maxSendable)
+	if (!res.ok || !data || data.tag !== 'payRequest' || typeof data.callback !== 'string' || !data.callback.startsWith('https://') || min === null || max === null)
+		return { ok: false, reason: `${domain} no da una dirección Lightning válida` }
+	let text = ''
+	try {
+		const meta = JSON.parse(String(data.metadata ?? '[]')) as unknown[]
+		const plain = meta.find((m) => Array.isArray(m) && m[0] === 'text/plain') as [string, unknown] | undefined
+		text = typeof plain?.[1] === 'string' ? plain[1].slice(0, 80) : ''
+	} catch {}
+	return { ok: true, min: Math.ceil(min / 1000), max: Math.floor(max / 1000), text, qvapay: domain === QVAPAY_LN_DOMAIN }
 }
 
 export async function nostrBook(connect: Connect = connectWorker, fetcher: typeof fetch = fetch, now = Date.now()): Promise<NostrBook> {
