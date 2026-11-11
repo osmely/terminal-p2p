@@ -5,3 +5,8 @@ public/app/data.js.map
 wrangler.jsonc
 .dev.vars
 data/
+# Secretos y el código privado: también aquí (no solo en .git/info/exclude), para que un clon nuevo no los suba
+.env
+.env.*
+/pro/
+config.json

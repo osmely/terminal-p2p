@@ -8,13 +8,13 @@
 // Todo lo que depende de la cuenta del usuario corre en su navegador.
 
 import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
-import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relayEvent, saveEvent } from './metrics.ts'
+import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relayEvent, saveEvent, stagingGate, startedHere } from './metrics.ts'
 import { collect, inCuba, isCoin, query, RANGES, withoutPro, type RatesData } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { readWho, tokenPrint, whoCookie } from './session.ts'
 import { cleanupLog, hourKey, logUser } from './userlog.ts'
 import { accessOf, profileAccess, relayAccess } from './blocks.ts'
-import { relayIncident } from './incidents.ts'
+import { cleanupIncidents, relayIncident } from './incidents.ts'
 import { sha256, verify } from './crypto.ts'
 import { adminPage, askKey, panel } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
@@ -35,8 +35,8 @@ import { FRAMES, frameStart, isFrame, loadCandles } from './candles.ts'
 import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './analysis.ts'
 import { checkAlerts } from './ratealerts.ts'
 import { LiveBook } from './livebook-do.ts'
-import { cleanupPush, pushApi, type PushEnv } from './push.ts'
-import { licenseOfPrint, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
+import { cleanupPush, pushApi, refreshLive, relayTaken, type PushEnv } from './push.ts'
+import { licenseOfPrint, ownedBy, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 import { TASA_KEY, TASA_PATH, tasaData, tasaPage, type TasaData } from './tasa.ts'
 
 // El libro en tiempo real de Pro (un Durable Object)
@@ -173,6 +173,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 				}
 			}
 		}
+		// Tomó una oferta: sus navegadores con avisos la vigilan (antes de responder: el terminal pide vigilarla al momento)
+		if (req.method === 'POST' && res.ok && (await relayTaken(env as unknown as PushEnv, req, url.pathname.slice(RELAY_PREFIX.length), res.ok).catch(() => 0))) ctx.waitUntil(refreshLive(env as unknown as PushEnv).then(() => {}))
 		return secure(res)
 	}
 	// Feed del mercado de QvaPay (webhook firmado) y el libro en vivo para los terminales Pro (WebSocket)
@@ -182,7 +184,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 			// Una cuenta de QvaPay conectada de verdad en este navegador (la cookie que firma el relé con el perfil de QvaPay)
 			const who = env.PRO_KEY ? await readWho(req.headers.get('cookie'), print, env.PRO_KEY, Date.now()) : null
 			const ok = !!who && (await accessOf(env.DB, { username: who.username, print }))?.level !== 'blocked'
-			return { ok, pro: ok && (await proEnabled(env.DB)) && !!(await licenseOfPrint(env.DB, print, Date.now())), username: who?.username }
+			return { ok, pro: ok && (await proEnabled(env.DB)) && !!(await ownedBy(env.DB, await licenseOfPrint(env.DB, print, Date.now()), who)), username: who?.username }
 		})
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
 	if (url.pathname === '/data/hit' && req.method === 'POST') return secure(await hit(req, url, env))
@@ -220,7 +222,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		const guarded = url.pathname === '/pro/checkout' || url.pathname === '/pro/refund' || url.pathname === '/pro/telegram/link' || url.pathname === '/pro/trial' || url.pathname === '/pro/alerts/add'
 			if (req.method === 'POST' && guarded && !(await underLimit(env.PRO_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 			// La consulta de estado da los días gratis y la sesión del simulador: con tope por IP (amplio)
-			if (url.pathname === '/pro/status' && !(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiadas consultas seguidas: espera un minuto'))
+			if ((url.pathname === '/pro/status' || url.pathname === '/pro/module.js') && !(await underLimit(env.STATUS_LIMIT, req))) return secure(jsonError(429, 'Demasiadas consultas seguidas: espera un minuto'))
 		const r = await proApi(req, url, env as unknown as ProEnv)
 		if (r) return secure(r)
 	}
@@ -314,7 +316,10 @@ export default {
 		if (path === '/robots.txt') return new Response('User-agent: *\nDisallow: /\n', { headers: { 'Content-Type': 'text/plain' } })
 		// Staging pide la contraseña del panel en todo (la misma de /admin, así basta con escribirla una vez);
 		// solo queda abierto el aviso de pago de QvaPay. Sin contraseña configurada, no entra nadie
-		if (!stagingOpen(path) && !(await authorized(req, env.METRICS_KEY))) return askKey()
+		if (!stagingOpen(path)) {
+			const denied = await stagingGate(req, env.METRICS_KEY, env.PANEL_LIMIT)
+			if (denied) return denied
+		}
 		return staged(await safeHandle(req, env, ctx))
 	},
 
@@ -426,6 +431,7 @@ async function dailyPro(env: ProEnv, at: number) {
 		['libro en vivo', () => cleanupLive(env.DB, at)],
 		['avisos al móvil', () => cleanupPush(env.DB, at)],
 		['buzón', () => cleanupInbox(env.DB, at)],
+		['incidencias', () => cleanupIncidents(env.DB, at)],
 		['fichas', () => env.DB.prepare('DELETE FROM peer_stats_use WHERE day < ?').bind(inCuba(at - 7 * 86_400_000).toISOString().slice(0, 10)).run()],
 	]
 	for (const [name, run] of cleanups)
@@ -512,7 +518,9 @@ async function event(req: Request, url: URL, env: Env) {
 		e = null
 	}
 	if (!e) return jsonError(400, 'Evento no válido')
-	await saveEvent(env.DB, e)
+	// Solo si la operación empezó aquí (ver startedHere); si no, se ignora sin decir nada
+	const real = await startedHere(env.DB, e)
+	if (real) await saveEvent(env.DB, real)
 	return new Response(null, { status: 204 })
 }
 

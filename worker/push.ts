@@ -10,7 +10,7 @@ import { num } from '../src/qvapay/types.ts'
 import { accessOf } from './blocks.ts'
 import type { FeedEvent, LiveNamespace, Trade } from './livebook.ts'
 import type { D1 } from './rates.ts'
-import { readWho, type Who } from './session.ts'
+import { readWho, tokenPrint, type Who } from './session.ts'
 import { sendPush, vapidPublic, type PushSub, type Vapid } from './webpush.ts'
 
 export interface PushEnv {
@@ -203,6 +203,20 @@ export async function addWatch(db: D1, endpoint: string, offer: string, now: num
 		.run()
 }
 
+// Tomaste una oferta desde el terminal (lo ve el relé, con tu cuenta confirmada por QvaPay): tus navegadores con
+// avisos la vigilan. Es lo único que deja vigilar una oferta: así nadie recibe los avisos de una que no tomó
+export async function relayTaken(env: PushEnv, req: Request, path: string, ok: boolean, now = Date.now()) {
+	const m = /^\/p2p\/([0-9a-f-]{36})\/apply$/i.exec(path)
+	if (!m || req.method !== 'POST' || !ok || !env.PRO_KEY) return 0
+	const token = req.headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
+	const who = token ? await readWho(req.headers.get('cookie'), await tokenPrint(token), env.PRO_KEY, now) : null
+	if (!who) return 0
+	const subs = (await env.DB.prepare('SELECT DISTINCT endpoint FROM push_subs WHERE owner = ?').bind(who.uuid.toLowerCase()).all<{ endpoint: string }>()).results
+	for (const s of subs) await addWatch(env.DB, s.endpoint, m[1].toLowerCase(), now)
+	return subs.length
+}
+export const refreshLive = (env: PushEnv) => live(env, '/push-refresh')
+
 // Quién puede recibir algo: las cuentas con avisos activados y las ofertas vigiladas
 export async function pushTargets(db: D1, now: number) {
 	const [owners, offers] = await Promise.all([
@@ -309,6 +323,8 @@ export async function pushApi(req: Request, url: URL, env: PushEnv, ctx: { waitU
 	if (url.pathname === '/push/watch') {
 		const offer = typeof body?.offer === 'string' && UUID.test(body.offer) ? body.offer.toLowerCase() : ''
 		if (!offer) return json(400, { error: 'Oferta no válida' })
+		// Solo una que tomaste desde el terminal: el relé la apuntó al tomarla (relayTaken). Aquí solo se renueva
+		if (!(await env.DB.prepare('SELECT 1 FROM push_watch WHERE offer = ? AND endpoint = ?').bind(offer, endpoint).first())) return json(404, { error: 'Esa oferta no la tomaste desde el terminal' })
 		await addWatch(env.DB, endpoint, offer, now)
 		ctx.waitUntil(live(env, '/push-refresh'))
 		return json(200, { ok: true })

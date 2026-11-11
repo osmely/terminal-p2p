@@ -76,6 +76,9 @@ const HOUR_MS = 3_600_000
 const RADAR_TG_PER_HOUR = 30
 const LICENSE_MS = DAY_MS // la licencia firmada vale un día y el terminal la renueva sola
 const CHECKOUT_MS = 60 * 60_000
+// Avisos de pago de QvaPay: cada factura se consulta como mucho una vez cada tanto por instancia
+const WEBHOOK_GAP_MS = 15_000
+const webhookSeen = new Map<string, number>()
 // Con días de Pro (pagados o regalados) solo se compran más cuando quedan pocos; con los días gratis, siempre
 export const RENEW_DAYS = 5
 // Una factura pendiente se reutiliza si aún le queda margen para pagarla
@@ -91,6 +94,7 @@ export interface License {
 	expires_at: number
 	backup_hash: string | null
 	revoked: number
+	qp_uuid?: string | null
 }
 
 interface Checkout {
@@ -126,10 +130,24 @@ const json = (status: number, body: unknown) =>
 
 export async function licenseOfPrint(db: D1, print: string, now: number): Promise<License | null> {
 	const l = await db
-		.prepare('SELECT l.uuid, l.username, l.plan, l.expires_at, l.backup_hash, l.revoked FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?')
+		.prepare('SELECT l.uuid, l.username, l.plan, l.expires_at, l.backup_hash, l.revoked, l.qp_uuid FROM pro_prints p JOIN pro_licenses l ON l.uuid = p.license WHERE p.print = ?')
 		.bind(print)
 		.first<License>()
 	return l && !l.revoked && l.expires_at > now ? l : null
+}
+
+// La licencia va por usuario de QvaPay: la primera cuenta confirmada que la usa la ata a su uuid. Si ese usuario llega a
+// ser de otra cuenta (otro uuid), esa otra no la usa: ni hereda los días ni ve las compras
+export async function ownedBy(db: D1, l: License | null, who: { uuid: string; username: string } | null): Promise<License | null> {
+	if (!l || !who) return l
+	// Solo la ata su propio usuario: una licencia de otro nombre (un dispositivo que se le añadió) se queda como estaba
+	if (l.uuid !== accountOf(who.username)) return l
+	const id = who.uuid.toLowerCase()
+	if (!l.qp_uuid) {
+		await db.prepare('UPDATE pro_licenses SET qp_uuid = ? WHERE uuid = ? AND qp_uuid IS NULL').bind(id, l.uuid).run()
+		return { ...l, qp_uuid: id }
+	}
+	return l.qp_uuid === id ? l : null
 }
 
 // Añade un dispositivo a una licencia. Sin tope: solo se añaden los de la propia cuenta (o el que pagó)
@@ -719,7 +737,7 @@ export async function backupPro(env: ProEnv, now: number, fetcher: typeof fetch 
 
 export async function activeLicense(db: D1, uuid: string | null | undefined, now: number): Promise<License | null> {
 	if (!uuid) return null
-	const l = await db.prepare('SELECT uuid, username, plan, expires_at, backup_hash, revoked FROM pro_licenses WHERE uuid = ?').bind(uuid).first<License>()
+	const l = await db.prepare('SELECT uuid, username, plan, expires_at, backup_hash, revoked, qp_uuid FROM pro_licenses WHERE uuid = ?').bind(uuid).first<License>()
 	return l && !l.revoked && l.expires_at > now ? l : null
 }
 
@@ -832,17 +850,24 @@ export async function checkoutStatus(env: ProEnv, id: string, owner: { print: st
 		.first<Checkout>())!
 	if (fresh.status !== 'paid') return { checkout: fresh, body: { status: now - c.created_at < CHECKOUT_MS ? 'pending' : 'expired' } }
 	const l = await licenseOfPrint(db, fresh.print, now)
+	// Pagó, pero la cuenta está bloqueada: no se le da licencia (como en /pro/status)
+	if (l && (await accessOf(db, { username: l.username, print: fresh.print }, now))?.level === 'blocked')
+		return { checkout: fresh, body: { status: 'paid', pro: false, enabled: true, blocked: true } }
 	return { checkout: fresh, body: { status: 'paid', ...(await statusOf(env, l, now)) } }
 }
 
 // ── «Mi cuenta» en el terminal ───────────────────────────────────────
 
-// La cuenta de este dispositivo: la que confirmó QvaPay o, si no, la de su huella (aunque esté suspendida o vencida)
+// La cuenta de este dispositivo: solo la que confirmó QvaPay (cookie del relé atada a esta huella). La huella sola no
+// basta: se queda en el navegador al desconectar, y con ella otro podría ver la cuenta o llevarse sus avisos de Telegram
 async function deviceAccount(req: Request, db: D1, print: string, key: string, now: number) {
 	const who = await readWho(req.headers.get('cookie'), print, key, now)
-	if (who) return accountOf(who.username)
-	return (await db.prepare('SELECT license FROM pro_prints WHERE print = ?').bind(print).first<{ license: string }>())?.license ?? null
+	if (!who) return null
+	// Si la licencia de ese usuario es de otra cuenta de QvaPay (ver ownedBy), no es la suya
+	const bound = await db.prepare('SELECT qp_uuid FROM pro_licenses WHERE uuid = ?').bind(accountOf(who.username)).first<{ qp_uuid: string | null }>()
+	return bound?.qp_uuid && bound.qp_uuid !== who.uuid.toLowerCase() ? null : accountOf(who.username)
 }
+const needWho = (what: string) => json(403, { error: `Conecta tu cuenta de QvaPay para ${what}`, code: 'TP_WHO' })
 
 // Lo que el usuario ve de su cuenta: días, su historial (sin tus notas internas) y sus compras, con la devolución si
 // le hiciste una
@@ -969,9 +994,10 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 				return off
 			}
 			await settlePending(env, now, { print }, fetcher)
-			let l = await licenseOfPrint(db, print, now)
-			// La cuenta de QvaPay de este token, confirmada por QvaPay (no por lo que diga el navegador)
+			// La cuenta de QvaPay de este token, confirmada por QvaPay (no por lo que diga el navegador). Sin ella no hay
+			// licencia: la huella sola no basta (el terminal pide el perfil a QvaPay y vuelve a preguntar)
 			const who = await readWho(req.headers.get('cookie'), print, env.PRO_KEY, now)
+			let l = who ? await ownedBy(db, await licenseOfPrint(db, print, now), who) : null
 			const username = who?.username
 			// Una cuenta bloqueada no es Pro ni entra en el simulador (se le cierra la sesión compartida)
 			t.account = username ?? l?.username
@@ -983,7 +1009,7 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			}
 			// Un dispositivo nuevo con tu cuenta entra solo en tu Pro (comprado o de los días gratis)
 			if (!l && username) {
-				l = await activeLicense(db, accountOf(username), now)
+				l = await ownedBy(db, await activeLicense(db, accountOf(username), now), who)
 				if (l) {
 					await attachPrint(db, l.uuid, print, now)
 					await logUser(db, { account: username, print, kind: 'device', detail: 'Dispositivo nuevo: entró en su Pro' }, now)
@@ -1068,7 +1094,9 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 		if (route === 'POST /pro/account') {
 			const print = printOf((await readBody(req)).print)
 			t.print = print
-			return json(200, await accountView(db, await deviceAccount(req, db, print, env.PRO_KEY, now), now))
+			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			if (!license) return needWho('ver tu cuenta')
+			return json(200, await accountView(db, license, now))
 		}
 
 		// Ya no se piden devoluciones desde el terminal (los terminales viejos aún tienen el botón)
@@ -1081,7 +1109,8 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			const print = printOf((await readBody(req)).print)
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
 			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Pidió el enlace para conectar los avisos de Telegram' })
-			if (!license || !(await db.prepare('SELECT 1 FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first())) return json(403, { error: 'Conecta tu cuenta para recibir avisos' })
+			if (!license) return needWho('recibir avisos')
+			if (!(await db.prepare('SELECT 1 FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first())) return json(403, { error: 'Conecta tu cuenta para recibir avisos' })
 			const url = await linkUrl(env, license, now, fetcher)
 			if (!url) return json(503, { error: 'Los avisos por Telegram no están disponibles ahora mismo' })
 			return json(200, { url })
@@ -1090,7 +1119,8 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			const print = printOf((await readBody(req)).print)
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
 			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Desconectó los avisos de Telegram' })
-			if (license) await unlink(db, license)
+			if (!license) return needWho('cambiar tus avisos')
+			await unlink(db, license)
 			return json(200, await accountView(db, license, now))
 		}
 		// Avisos de tasa por Telegram (ratealerts.ts): los suyos, poner uno y quitar uno. Y los de sus ofertas
@@ -1100,6 +1130,7 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			const print = printOf(b.print)
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
 			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Avisos de tasa' })
+			if (!license) return needWho('ver tus avisos')
 			const l = license ? await db.prepare('SELECT expires_at, revoked FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first<{ expires_at: number; revoked: number }>() : null
 			if (!license || !l || l.revoked || l.expires_at <= now) return json(403, { error: 'Los avisos de tasa son parte de Pro' })
 			if (route === 'POST /pro/alerts/add') {
@@ -1127,8 +1158,11 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 		// oferta (aunque el radar corra en varias pestañas) y con tope por hora
 		if (route === 'POST /pro/radar/alert') {
 			const b = await readBody(req)
-			const l = await licenseOfPrint(db, printOf(b.print), now)
-			Object.assign(t, { kind: 'radar', print: printOf(b.print), account: l?.username, detail: 'Aviso del radar' })
+			// Va al chat de Telegram de la cuenta: solo desde un navegador con esa cuenta confirmada por QvaPay
+			const who = await readWho(req.headers.get('cookie'), printOf(b.print), env.PRO_KEY, now)
+			if (!who) return needWho('recibir los avisos del radar')
+			const l = await ownedBy(db, await licenseOfPrint(db, printOf(b.print), now), who)
+			Object.assign(t, { kind: 'radar', print: printOf(b.print), account: l?.username ?? who.username, detail: 'Aviso del radar' })
 			if (!l) {
 				// Sin Pro: si esta huella tuvo Pro y se le acabó hace más del margen, el radar sigue corriendo donde no debe
 				const was = await db
@@ -1178,7 +1212,14 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			let c: Checkout | null = null
 			for (const id of ids) c ??= await db.prepare('SELECT * FROM pro_checkouts WHERE id = ?').bind(id).first<Checkout>()
 			for (const inv of invoices) c ??= await db.prepare('SELECT * FROM pro_checkouts WHERE invoice = ?').bind(inv).first<Checkout>()
-			if (c) await settle(env, c, now, fetcher)
+			// El aviso no va firmado: solo se consulta a QvaPay una factura pendiente de las últimas 24 h, y cada una como
+			// mucho cada WEBHOOK_GAP_MS por instancia (si no, cada llamada repetida era una consulta a QvaPay). Las que se
+			// quedan sin mirar las confirma el repaso de cada minuto
+			if (c && c.status === 'pending' && now - c.created_at < DAY_MS && now - (webhookSeen.get(c.id) ?? 0) >= WEBHOOK_GAP_MS) {
+				webhookSeen.set(c.id, now)
+				if (webhookSeen.size > 1000) for (const [k, at] of webhookSeen) if (now - at >= WEBHOOK_GAP_MS) webhookSeen.delete(k)
+				await settle(env, c, now, fetcher)
+			}
 			return json(200, { ok: true })
 		}
 
@@ -1206,8 +1247,11 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			})
 			if (same) await db.prepare('UPDATE sim_ids SET key = ? WHERE key = ? AND NOT EXISTS (SELECT 1 FROM sim_ids WHERE key = ?)').bind(`print:${to}`, `print:${from}`, `print:${to}`).run()
 			if (!(await proEnabled(db, now))) return json(200, { pro: false, enabled: false })
+			// Una cuenta bloqueada no recibe licencia por aquí tampoco (como en /pro/status)
+			if ((await accessOf(db, { username: who?.username, print: to }, now))?.level === 'blocked') return json(200, { pro: false, enabled: true, blocked: true })
 			const l = same ? await licenseOfPrint(db, from, now) : null
-			if (!l) return json(200, await statusOf(env, await licenseOfPrint(db, to, now), now))
+			// Sin pasar nada: lo que ya tiene el token nuevo, y solo con su cuenta confirmada por QvaPay
+			if (!l) return json(200, await statusOf(env, who ? await ownedBy(db, await licenseOfPrint(db, to, now), who) : null, now))
 			const owner = await db.prepare('SELECT license FROM pro_prints WHERE print = ?').bind(to).first<{ license: string }>()
 			if (owner && owner.license !== l.uuid) return json(409, { error: 'Ese dispositivo ya pertenece a otra licencia' })
 			await db.prepare('DELETE FROM pro_prints WHERE print = ?').bind(from).run()
@@ -1270,6 +1314,10 @@ function claimOf(raw: string): { n: string; e: number | null } | null {
 // ── Panel (/admin/pro, con la clave del panel de métricas) ───────────
 
 const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+// Un texto de fuera (usuario de QvaPay) dentro de una cadena '…' de JS en un atributo onclick/onsubmit: el navegador
+// deshace las entidades HTML antes de correr el JS, así que escHtml ahí no basta. Todo lo que no sea letra, número,
+// espacio, punto, guion o guion bajo va como \uXXXX (no cierra la cadena ni el atributo)
+export const jsAttr = (s: string) => String(s).replace(/[^\w .-]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 
 // ── Panel: piezas compartidas ────────────────────────────────────────
 // Horas de Cuba, como el resto del proyecto
@@ -1287,7 +1335,7 @@ const REFUND_STATUS: Record<RefundStatus, string> = { requested: 'Pedida', appro
 // Devolver una compra desde el panel: lo que se devolvería hoy (los días que no usó); sin días por usar, nada
 const refundButton = (checkout: string, q: Quote, payer: string, back = '') =>
 	q.usd > 0
-		? `<form method="post" style="display:inline" onsubmit="var m=prompt('¿Devolver ${q.usd} USD a @${escHtml(payer)} (lo pagado menos ${q.used} días usados a precio de semana; le quedan ${q.unused} de ${q.days})? Se le quitan los días que no usó y luego le pagas desde la devolución.\\n\\nMotivo (puede verlo el usuario en «Mi cuenta»):','');if(m===null)return false;this.note.value=m">${back}<input type="hidden" name="checkout" value="${escHtml(checkout)}"><input type="hidden" name="note"><button class="ghost" name="action" value="refund">Devolver ${q.usd} USD</button></form>`
+		? `<form method="post" style="display:inline" onsubmit="var m=prompt('¿Devolver ${q.usd} USD a @${jsAttr(payer)} (lo pagado menos ${q.used} días usados a precio de semana; le quedan ${q.unused} de ${q.days})? Se le quitan los días que no usó y luego le pagas desde la devolución.\\n\\nMotivo (puede verlo el usuario en «Mi cuenta»):','');if(m===null)return false;this.note.value=m">${back}<input type="hidden" name="checkout" value="${escHtml(checkout)}"><input type="hidden" name="note"><button class="ghost" name="action" value="refund">Devolver ${q.usd} USD</button></form>`
 		: '<span class="note">ya usó todos sus días</span>'
 
 // La referencia de una devolución: si es el uuid de la transferencia, enlaza a su detalle en QvaPay
@@ -1304,10 +1352,10 @@ function refundHtml(r: Refund & { username?: string }, u?: string) {
 	let act = ''
 	if (r.status === 'requested')
 		act = `<form method="post" class="row">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><input name="note" placeholder="nota (al rechazar, el motivo: lo ve el usuario)" style="flex:1 1 240px">
-			<button name="action" value="refund-approve" onclick="return confirm('¿Aprobar? Se le quitan los días de esa compra. Luego le transfieres ${hUsd(r.amount)} a @${escHtml(r.payee)}.')">Aprobar</button>
+			<button name="action" value="refund-approve" onclick="return confirm('¿Aprobar? Se le quitan los días de esa compra. Luego le transfieres ${hUsd(r.amount)} a @${jsAttr(r.payee)}.')">Aprobar</button>
 			<button class="ghost" name="action" value="refund-reject">Rechazar</button></form>`
 	else if (r.status === 'approved')
-		act = `<form method="post" class="row" onsubmit="return confirm('¿Pagar ${hUsd(r.amount)} a @${escHtml(r.payee)} desde la cuenta de la app? Sale al momento y no se puede deshacer.')">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><button name="action" value="refund-pay">Pagar ${hUsd(r.amount)} a @${escHtml(r.payee)} con QvaPay</button><span class="note">a la cuenta que pagó la compra, desde la de la app</span></form>
+		act = `<form method="post" class="row" onsubmit="return confirm('¿Pagar ${hUsd(r.amount)} a @${jsAttr(r.payee)} desde la cuenta de la app? Sale al momento y no se puede deshacer.')">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><button name="action" value="refund-pay">Pagar ${hUsd(r.amount)} a @${escHtml(r.payee)} con QvaPay</button><span class="note">a la cuenta que pagó la compra, desde la de la app</span></form>
 			<details class="note" style="margin-top:8px"><summary>¿La transferiste tú a mano?</summary><p>${copyBtn(r.payee, 'Copiar usuario')} ${copyBtn(String(r.amount), 'Copiar monto')}</p>
 			<form method="post" class="row">${back}<input type="hidden" name="id" value="${escHtml(r.id)}"><input name="ref" placeholder="referencia de la transferencia en QvaPay" style="flex:1 1 240px"><button class="ghost" name="action" value="refund-transfer">Marcar transferida</button></form></details>`
 	else if (r.status === 'transferred') act = `<p class="note">Transferida el ${hWhen(r.transferred_at ?? r.decided_at ?? r.requested_at)}${r.transfer_ref ? ` · ref. ${refLink(r.transfer_ref)}` : ''}</p>`
@@ -1477,7 +1525,7 @@ async function clientPage(env: ProEnv, username: string, notice: string, now: nu
 		)
 		.join('')
 	const deviceRows = devices.map((d) => `<tr><td class="mono">${hShort(d.print)}</td><td>${hDay(d.added_at)}</td><td>${hWhen(d.seen_at)}</td></tr>`).join('')
-	const suspend = `<form method="post" class="row">${back}<input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="${l.revoked ? '' : 'danger'}" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${u}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form>`
+	const suspend = `<form method="post" class="row">${back}<input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="${l.revoked ? '' : 'danger'}" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${jsAttr(name)}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form>`
 	const table = (head: string, rows: string, cols: number, empty: string) =>
 		`<div class="wrap"><table class="left"><thead><tr>${head}</tr></thead><tbody>${rows || `<tr><td colspan="${cols}" class="empty">${empty}</td></tr>`}</tbody></table></div>`
 	return proPage(
@@ -1773,7 +1821,7 @@ async function incidentsPage(env: ProEnv, notice: string, now: number, url?: URL
 		if (limit) return `<span class="pill rejected">${ACCESS_NAME[limit]}</span> ${done}`
 		const reason = escHtml(`Incidencia: ${INCIDENT_NAME[i.kind]}`)
 		const set = (level: AccessLevel, days: number, label: string, cls: string) =>
-			`<form method="post" style="display:inline" onsubmit="return confirm('¿${label} a @${escHtml(i.username!)}${days ? ` ${days} días` : ' hasta que lo levantes'}?')"><input type="hidden" name="action" value="access-set"><input type="hidden" name="username" value="${escHtml(i.username!)}"><input type="hidden" name="level" value="${level}"><input type="hidden" name="days" value="${days}"><input type="hidden" name="reason" value="${reason}"><button class="${cls}">${label}</button></form>`
+			`<form method="post" style="display:inline" onsubmit="return confirm('¿${label} a @${jsAttr(i.username!)}${days ? ` ${days} días` : ' hasta que lo levantes'}?')"><input type="hidden" name="action" value="access-set"><input type="hidden" name="username" value="${escHtml(i.username!)}"><input type="hidden" name="level" value="${level}"><input type="hidden" name="days" value="${days}"><input type="hidden" name="reason" value="${reason}"><button class="${cls}">${label}</button></form>`
 		return `${set('restricted', 7, 'Restringir', 'ghost')} ${set('blocked', 0, 'Bloquear', 'danger')} ${done}`
 	}
 	const rows = list
@@ -2400,7 +2448,7 @@ async function accountsPanel(env: ProEnv, now: number, q = '', url?: URL) {
 			const state = l.revoked ? '<span class="pill rejected">Suspendida</span>' : left <= 0 ? '<span class="pill">Vencida</span>' : `<span class="pill approved-ok">${left} días</span>`
 			const limit = limits.get(l.username.toLowerCase())
 			return `<tr><td>${userLink(l.username)}</td><td>${state}${limit ? ` <span class="pill rejected">${ACCESS_NAME[limit]} en el terminal</span>` : ''}</td><td>${planName(l.plan)}</td><td>${hDay(l.expires_at)}</td><td>${hDay(l.created_at)}</td><td>${l.devices}${l.seen ? ` <span class="note">· usado ${hDay(l.seen)}</span>` : ''}</td><td class="num">${!l.pays ? '<span class="note">sin pagos</span>' : l.paid ? `${proUsd(l.paid)} <span class="note">· ${l.pays}</span>` : '<span class="note">devuelto</span>'}</td>
-			<td class="num"><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${escHtml(l.username)}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></td></tr>`
+			<td class="num"><form method="post"><input type="hidden" name="uuid" value="${escHtml(l.uuid)}"><button class="ghost" name="action" value="${l.revoked ? 'restore' : 'revoke'}"${l.revoked ? '' : ` onclick="return confirm('¿Suspender a @${jsAttr(l.username)}? Deja de ser Pro hasta que la reactives; sus días no se pierden.')"`}>${l.revoked ? 'Reactivar' : 'Suspender'}</button></form></td></tr>`
 		})
 		.join('')
 	return panel(
@@ -2466,7 +2514,7 @@ async function blocksPanel(env: ProEnv, now: number) {
 		.map(
 			(b) =>
 				`<tr><td>${userLink(b.username)}</td><td><span class="pill rejected">${ACCESS_NAME[b.level]}</span></td><td>${b.until ? hWhen(b.until) : 'hasta que la levantes'}</td><td style="white-space:normal">${escHtml(b.reason)}</td><td>${hWhen(b.created_at)}</td>
-				<td class="num"><form method="post"><input type="hidden" name="username" value="${escHtml(b.username)}"><button class="ghost" name="action" value="access-lift" onclick="return confirm('¿Levantar el límite a @${escHtml(b.username)}?')">Levantar</button></form></td></tr>`,
+				<td class="num"><form method="post"><input type="hidden" name="username" value="${escHtml(b.username)}"><button class="ghost" name="action" value="access-lift" onclick="return confirm('¿Levantar el límite a @${jsAttr(b.username)}?')">Levantar</button></form></td></tr>`,
 		)
 		.join('')
 	return panel(

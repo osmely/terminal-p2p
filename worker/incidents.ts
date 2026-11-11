@@ -23,6 +23,10 @@ export const INCIDENT_NAME: Record<IncidentKind, string> = {
 }
 
 const DAY_MS = 86_400_000
+const HOUR_MS = 3_600_000
+const NOTIFY_PER_HOUR = 10
+// Una incidencia abierta que no se repite en tanto tiempo se da por descartada (no se acumulan para siempre)
+const STALE_MS = 30 * DAY_MS
 // Margen tras vencer: quien tenía el terminal abierto cuando se le acabaron los días no es un infractor
 export const GRACE_MS = DAY_MS
 
@@ -52,14 +56,25 @@ export async function recordIncident(
 ) {
 	const username = i.username?.toLowerCase() ?? null
 	const license = i.license ?? null
+	// Una licencia falsa dice ser de quien quiera: se separa por ese nombre solo si es una cuenta con Pro de verdad. Con
+	// nombres inventados todas van a la misma incidencia (si no, cada nombre nuevo abría otra y avisaba otra vez)
+	let tag = i.tag ?? null
+	if (tag && !username && !license && !(await env.DB.prepare('SELECT 1 FROM pro_licenses WHERE uuid = ?').bind(`qp:${tag.toLowerCase()}`).first())) tag = null
 	const r = await env.DB.prepare(
 		`INSERT INTO pro_incidents (key, kind, username, license, detail, count, first_at, last_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
 		ON CONFLICT (key) WHERE resolved_at IS NULL DO UPDATE SET count = count + 1, last_at = excluded.last_at, detail = COALESCE(excluded.detail, detail)
 		RETURNING count`,
 	)
-		.bind(`${i.kind}:${username ?? ''}:${license ?? ''}${i.tag ? `:${i.tag}` : ''}`, i.kind, username, license, i.detail ?? null, now, now)
+		.bind(`${i.kind}:${username ?? ''}:${license ?? ''}${tag ? `:${tag}` : ''}`, i.kind, username, license, i.detail ?? null, now, now)
 		.first<{ count: number }>()
 	if (r?.count !== 1) return false
+	// Tope de avisos por hora: una ráfaga de incidencias no llena el grupo (las demás quedan en el panel)
+	const recent = (await env.DB.prepare('SELECT COUNT(*) AS n FROM pro_incidents WHERE first_at > ?').bind(now - HOUR_MS).first<{ n: number }>())?.n ?? 0
+	if (recent > NOTIFY_PER_HOUR + 1) return false
+	if (recent === NOTIFY_PER_HOUR + 1) {
+		await notify(env, `🚩 <b>Incidencias de Pro</b>\nMás de ${NOTIFY_PER_HOUR} en la última hora: no aviso de las siguientes, están en el panel.`, '/admin/pro?view=incidencias', fetcher)
+		return true
+	}
 	const who = username ? `@${tgEsc(username)}` : 'Alguien sin identificar'
 	await notify(env, `🚩 <b>Incidencia de Pro</b>\n${who}: ${INCIDENT_NAME[i.kind].toLowerCase()}.${i.detail ? `\n${tgEsc(i.detail)}` : ''}`, '/admin/pro?view=incidencias', fetcher)
 	return true
@@ -100,3 +115,9 @@ export const openIncidents = (db: D1, limit = 50, offset = 0) =>
 		.then((r) => r.results)
 
 export const resolveIncident = (db: D1, id: number, now = Date.now()) => db.prepare('UPDATE pro_incidents SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL').bind(now, id).run()
+
+// Limpieza diaria: las abiertas que llevan STALE_MS sin repetirse quedan descartadas; las descartadas de hace un año, fuera
+export async function cleanupIncidents(db: D1, now = Date.now()) {
+	await db.prepare('UPDATE pro_incidents SET resolved_at = ? WHERE resolved_at IS NULL AND last_at < ?').bind(now, now - STALE_MS).run()
+	await db.prepare('DELETE FROM pro_incidents WHERE resolved_at IS NOT NULL AND resolved_at < ?').bind(now - 365 * DAY_MS).run()
+}

@@ -9,7 +9,7 @@
 
 import { p2pFee } from '../src/qvapay/fees.ts'
 import { COINS } from '../src/terminal/market.ts'
-import { pageHead, panel, periods } from './admin.ts'
+import { askKey, pageHead, panel, periods } from './admin.ts'
 import { cubaDate } from './informal.ts'
 import type { D1 } from './rates.ts'
 
@@ -183,6 +183,17 @@ export async function clientEvent(body: unknown, salt: string, now = Date.now())
 		source: 'client',
 		via: '',
 	}
+}
+
+// Un «completada» del navegador solo cuenta si la operación empezó aquí de verdad: el relé vio publicar o tomar esa
+// oferta. Y no por más USD que los que vio el relé. Si no, cualquiera podía inventar operaciones en las cifras públicas
+export async function startedHere(db: D1, e: MetricEvent) {
+	const r = await db
+		.prepare("SELECT COUNT(*) AS n, MAX(usd) AS usd FROM events WHERE offer = ? AND source = 'relay' AND status = 'ok' AND event IN ('create', 'take')")
+		.bind(e.offer)
+		.first<{ n: number; usd: number | null }>()
+	if (!r?.n) return null
+	return r.usd && e.usd ? { ...e, usd: Math.min(e.usd, r.usd) } : e
 }
 
 export async function saveEvent(db: D1, e: MetricEvent) {
@@ -375,6 +386,15 @@ export async function sameSecret(a: string, b: string) {
 	let diff = 0
 	for (let i = 0; i < u.length; i++) diff |= u[i] ^ v[i]
 	return diff === 0
+}
+
+// Staging pide la contraseña del panel en todo. Una equivocada cuenta para el tope del panel (10 por minuto e IP): sin
+// esto se podía probar sin fin. La primera visita, que aún no la manda, no cuenta. null: pasa
+export async function stagingGate(req: Request, key: string | undefined, limiter?: { limit(o: { key: string }): Promise<{ success: boolean }> }) {
+	if (await authorized(req, key)) return null
+	if (limiter && /^basic\s/i.test(req.headers.get('authorization') ?? '') && !(await limiter.limit({ key: req.headers.get('cf-connecting-ip') ?? 'sin-ip' })).success)
+		return Response.json({ error: 'Demasiados intentos: espera un minuto' }, { status: 429, headers: { 'Cache-Control': 'no-store' } })
+	return askKey()
 }
 
 export async function authorized(req: Request, key: string | undefined) {

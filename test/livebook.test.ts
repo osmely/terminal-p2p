@@ -145,7 +145,11 @@ test('webhook: responde enseguida y le pasa al libro el evento (o por qué se re
 	assert.deepEqual(JSON.parse(sent[0]), { raw, rejected: null })
 	assert.match(JSON.parse(sent[1]).rejected, /firma que no coincide/)
 	// Sin secreto configurado: 503 (QvaPay reintenta), pero lo que llegó se guarda para verlo en el panel
-	assert.equal((await feedWebhook(new Request('https://x/api/p2p/feed', { method: 'POST', body: raw }), { ...env, QVAPAY_FEED_SECRET: undefined }, ctx, T)).status, 503)
+	// Otro rechazo enseguida no se le pasa al libro (uno cada 10 s)
+	assert.equal((await post(raw, 'e'.repeat(64))).status, 401)
+	await Promise.all(waits)
+	assert.equal(sent.length, 2)
+	assert.equal((await feedWebhook(new Request('https://x/api/p2p/feed', { method: 'POST', body: raw }), { ...env, QVAPAY_FEED_SECRET: undefined }, ctx, T + 10_000)).status, 503)
 	await Promise.all(waits)
 	assert.deepEqual(JSON.parse(sent[2]), { raw, rejected: 'falta el secreto del feed (QVAPAY_FEED_SECRET)' })
 })

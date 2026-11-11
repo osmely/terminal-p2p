@@ -3,7 +3,8 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { readWho, tokenPrint, whoCookie, whoToken } from '../worker/session.ts'
-import { proAdmin as proAdminRaw, proApi, requestRefund, type ProEnv } from '../worker/pro.ts'
+import { jsAttr, proAdmin as proAdminRaw, proApi, requestRefund, type ProEnv } from '../worker/pro.ts'
+import { setBlock } from '../worker/blocks.ts'
 
 // El panel responde a cada acción con una redirección (303) y lo que dijo en una cookie: se sigue como el navegador
 async function proAdmin(req: Request, env: ProEnv, now?: number, fetcher?: typeof fetch) {
@@ -114,9 +115,15 @@ function setup(extra: Partial<ProEnv> = {}) {
 	const q = fakeQvaPay()
 	const env: ProEnv = { DB: d1, QVAPAY_APP_ID: 'app', QVAPAY_APP_SECRET: 'secreto', PRO_KEY: 'clave', METRICS_KEY: 'panel', ...extra }
 	let now = T0
-	// `username` en el cuerpo hace de la cuenta que QvaPay confirmó al pasar el perfil por el relé (cookie tpw)
+	// `username` en el cuerpo hace de la cuenta que QvaPay confirmó al pasar el perfil por el relé (cookie tpw). El
+	// navegador la guarda: las siguientes peticiones con esa huella la llevan aunque no digan `username` (s.forget la
+	// quita, como un navegador sin la cookie)
+	const kept = new Map<string, string>()
 	const call = async (method: string, path: string, body?: unknown) => {
-		const req = new Request(`https://app.terminalp2p.com${path}`, { method, headers: { 'Content-Type': 'application/json', ...(await whoHeader(body, now)) }, body: body === undefined ? undefined : JSON.stringify(body) })
+		const b = (body ?? {}) as { print?: string; username?: string }
+		if (b.print && b.username) kept.set(b.print, b.username)
+		const as = b.print && !b.username && kept.has(b.print) ? { ...b, username: kept.get(b.print) } : body
+		const req = new Request(`https://app.terminalp2p.com${path}`, { method, headers: { 'Content-Type': 'application/json', ...(await whoHeader(as, now)) }, body: body === undefined ? undefined : JSON.stringify(body) })
 		const res = (await proApi(req, new URL(req.url), env, now, q.fetcher))!
 		return { status: res.status, body: res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text() }
 	}
@@ -126,6 +133,7 @@ function setup(extra: Partial<ProEnv> = {}) {
 		q,
 		call,
 		tick: (ms: number) => (now += ms),
+		forget: (print: string) => kept.delete(print),
 		now: () => now,
 		post: (p: string, b: unknown) => call('POST', p, b),
 		// Conecta la cuenta en el terminal y activa sus días gratis (no empiezan solos)
@@ -235,6 +243,8 @@ test('cambiar de token: la huella vieja pasa a la nueva solo si QvaPay confirma 
 	const r = await s.post('/pro/rotate', { from: P1, to: P3, print: P3, username: 'ana' })
 	assert.equal(r.body.pro, true)
 	assert.equal((await s.post('/pro/status', { print: P3 })).body.pro, true)
+	// La huella vieja sola (sin la cuenta confirmada en ese navegador) ya no da nada
+	s.forget(P1)
 	assert.equal((await s.post('/pro/status', { print: P1 })).body.pro, false)
 	// Una huella que no es Pro no autoriza nada
 	assert.equal((await s.post('/pro/rotate', { from: P2, to: P4, print: P4, username: 'leo' })).body.pro, false)
@@ -333,6 +343,7 @@ test('7 días gratis cuando el usuario los activa: nunca solos, una vez por usua
 	assert.deepEqual([st.pro, st.canTrial, st.started], [false, true, undefined])
 	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM pro_licenses').get() as { n: number }).n, 0)
 	// Activarlos pide la cuenta confirmada por QvaPay
+	s.forget(P1)
 	const noWho = await s.post('/pro/trial', { print: P1 })
 	// …y dice por qué, para que el terminal pida el perfil otra vez y reintente
 	assert.deepEqual([noWho.status, noWho.body.code], [403, 'TP_WHO'])
@@ -1359,6 +1370,7 @@ test('traceo: lo que el servidor hace con cada cuenta queda en su línea de tiem
 	// Lo que hace sí, y también cuando el servidor dice que no (con el motivo)
 	await s.post('/pro/trial', { print: P1, username: 'Ana' })
 	await s.post('/pro/trial', { print: P1, username: 'Ana' })
+	s.forget(P1)
 	await s.post('/pro/checkout', { print: P1, plan: 'month' })
 	const rows = log().slice(1)
 	assert.deepEqual(rows.map((r) => [r.kind, r.ok]), [['trial', 1], ['trial', 0], ['checkout', 0]])
@@ -1489,7 +1501,7 @@ test('avisos de tus ofertas por Telegram: se activan con Pro y la cuenta confirm
 	// Sin la cookie del relé (no se sabe su uuid de QvaPay), no se activan
 	const req = new Request('https://app.terminalp2p.com/pro/alerts/offers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ print: P1, on: true }) })
 	const bare = (await proApi(req, new URL(req.url), s.env, s.now(), s.q.fetcher))!
-	assert.equal(bare.status, 409)
+	assert.equal(bare.status, 403)
 	const on = await s.post('/pro/alerts/offers', { print: P1, username: 'ana', on: true })
 	assert.deepEqual([on.status, on.body.offers, on.body.telegram], [200, true, false])
 	// Sin el bot de Telegram conectado, nadie a quien avisar
@@ -1817,4 +1829,82 @@ test('el mes del panel empieza a las 00:00 de Cuba, no de UTC', async () => {
 	assert.equal(new Date(cubaMonthStart(Date.parse('2026-12-01T04:30:00Z'))).toISOString(), '2026-12-01T04:00:00.000Z')
 	// En invierno (desde nov 2027), UTC-5
 	assert.equal(new Date(cubaMonthStart(Date.parse('2027-12-15T12:00:00Z'))).toISOString(), '2027-12-01T05:00:00.000Z')
+})
+
+// Lo que pide una huella sin la cuenta confirmada por QvaPay en ese navegador (cookie tpw)
+async function bare(s: ReturnType<typeof setup>, path: string, body: Record<string, unknown>, cookie?: string) {
+	const req = new Request(`https://app.terminalp2p.com${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body) })
+	const res = (await proApi(req, new URL(req.url), s.env, s.now(), s.q.fetcher))!
+	return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+}
+
+test('la huella sola no basta: sin la cuenta confirmada no da licencia, ni la cuenta, ni sus avisos ni su Telegram', async () => {
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot' })
+	await buy(s)
+	// Quien se queda con la huella (p. ej. el siguiente en ese navegador tras desconectar), sin la cookie
+	const st = await bare(s, '/pro/status', { print: P1 })
+	assert.equal(st.body.pro, false)
+	assert.equal('license' in st.body, false)
+	for (const path of ['/pro/account', '/pro/telegram/link', '/pro/telegram/unlink', '/pro/alerts', '/pro/alerts/add', '/pro/alerts/delete', '/pro/alerts/offers', '/pro/radar/alert']) {
+		const r = await bare(s, path, { print: P1, coin: 'BANK_CUP', dir: 'up', price: 1, id: 1, on: false })
+		assert.deepEqual([path, r.status, r.body.code], [path, 403, 'TP_WHO'])
+	}
+	// Ni pasando la huella a otra suya con /pro/rotate
+	assert.equal('license' in (await bare(s, '/pro/rotate', { from: P2, to: P1 })).body, false)
+	// Con su cuenta confirmada, todo sigue igual
+	assert.equal((await s.post('/pro/status', { print: P1, username: 'ana' })).body.pro, true)
+	assert.equal(((await s.post('/pro/account', { print: P1 })).body.account as { username: string }).username, 'ana')
+})
+
+test('una cuenta bloqueada no saca licencias por /pro/rotate ni al mirar una factura pagada', async () => {
+	const s = setup()
+	const { checkout } = await buy(s)
+	assert.equal((await s.status(checkout.id)).body.pro, true)
+	await setBlock(s.env.DB, 'ana', 'blocked', 'estafa', null, s.now())
+	const paid = (await s.status(checkout.id)).body
+	assert.deepEqual([paid.status, paid.pro, paid.blocked, 'license' in paid], ['paid', false, true, false])
+	const rot = (await s.post('/pro/rotate', { from: P2, to: P1, print: P1, username: 'ana' })).body
+	assert.deepEqual([rot.pro, rot.blocked, 'license' in rot], [false, true, false])
+	assert.equal((await s.post('/pro/status', { print: P1, username: 'ana' })).body.blocked, true)
+})
+
+test('la licencia queda atada al uuid de QvaPay: otra cuenta con el mismo usuario no la usa', async () => {
+	const s = setup()
+	await buy(s)
+	assert.equal((await s.post('/pro/status', { print: P1, username: 'ana' })).body.pro, true)
+	assert.equal(s.db.prepare("SELECT qp_uuid FROM pro_licenses WHERE uuid = 'qp:ana'").get()?.qp_uuid, 'u-ana')
+	// Otra cuenta de QvaPay (otro uuid) que un día tiene el usuario «ana»
+	const other = `tpw=${await whoToken(P2, 'u-otra-cuenta', 'ana', 'clave', s.now())}`
+	assert.equal((await bare(s, '/pro/status', { print: P2 }, other)).body.pro, false)
+	assert.equal((await bare(s, '/pro/account', { print: P2 }, other)).body.code, 'TP_WHO')
+	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM pro_prints WHERE print = ?').get(P2)?.n, 0)
+	// La de verdad sigue con su Pro
+	assert.equal((await s.post('/pro/status', { print: P3, username: 'ana' })).body.pro, true)
+})
+
+test('panel: un usuario de QvaPay dentro de un confirm(…) no puede cerrar la cadena de JS', () => {
+	const evil = "x');alert(1);//\\"
+	const out = jsAttr(evil)
+	// Ni comillas ni lo que cierra el atributo; la barra solo como inicio de \\uXXXX
+	assert.doesNotMatch(out, /['"<>&]/)
+	assert.doesNotMatch(out.replace(/\\u[0-9a-f]{4}/g, ''), /\\/)
+	// Lo que ve el operador al confirmar es el mismo texto
+	assert.equal(JSON.parse(`"${out}"`), evil)
+	assert.equal(jsAttr('ana_99.x-y'), 'ana_99.x-y')
+})
+
+test('aviso de pago sin firma: una factura pendiente se consulta a QvaPay como mucho cada 15 s, y una vieja o pagada no', async () => {
+	const s = setup()
+	const c = await s.post('/pro/checkout', { print: P1, plan: 'month', username: 'ana' })
+	const asks = () => s.q.calls.filter((u) => u.startsWith('/v2/transactions/')).length
+	const before = asks()
+	for (let i = 0; i < 5; i++) await s.post('/api/pro/webhook', { remote_id: c.body.id })
+	assert.equal(asks(), before + 1)
+	s.tick(15_000)
+	await s.post('/api/pro/webhook', { remote_id: c.body.id })
+	assert.equal(asks(), before + 2)
+	// Pasado un día ya no se mira desde aquí
+	s.tick(86_400_000)
+	await s.post('/api/pro/webhook', { remote_id: c.body.id })
+	assert.equal(asks(), before + 2)
 })

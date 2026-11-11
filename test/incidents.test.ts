@@ -96,13 +96,32 @@ test('el módulo con una licencia vencida (pasado el margen), de una cuenta susp
 	assert.equal(row.username, null)
 	assert.equal(row.license, null)
 	assert.match(row.detail, /^La firma no es nuestra\. Dice ser @leo \(sin verificar\), con Pro hasta el /)
-	// Otra que dice ser otra cuenta va en su propia fila; algo que ni se lee, con el texto de siempre
+	// Otra que dice ser una cuenta con Pro de verdad va en su propia fila. Las de nombres inventados y lo que ni se lee
+	// van todas a la misma (si no, cada nombre nuevo abría otra fila y otro aviso)
+	await s.pro('GET', `/pro/module.js?l=${encodeURIComponent(await sign({ u: 'qp:ana', n: 'Ana', e: s.now() + DAY, x: s.now() + DAY }, 'otra-clave'))}`)
 	await s.pro('GET', `/pro/module.js?l=${encodeURIComponent(await sign({ u: 'qp:eva', n: 'Eva', e: s.now() + DAY, x: s.now() + DAY }, 'otra-clave'))}`)
 	await s.pro('GET', '/pro/module.js?l=basura.sinfirma')
-	const forgedRows = s.db.prepare("SELECT detail FROM pro_incidents WHERE kind = 'module_forged' ORDER BY id").all() as { detail: string }[]
-	assert.equal(forgedRows.length, 3)
-	assert.match(forgedRows[1].detail, /Dice ser @eva/)
-	assert.equal(forgedRows[2].detail, 'La firma de la licencia no es nuestra')
+	const forgedRows = s.db.prepare("SELECT detail, count FROM pro_incidents WHERE kind = 'module_forged' ORDER BY id").all() as { detail: string; count: number }[]
+	assert.equal(forgedRows.length, 2)
+	assert.deepEqual([forgedRows[0].count, forgedRows[0].detail], [3, 'La firma de la licencia no es nuestra'])
+	assert.match(forgedRows[1].detail, /Dice ser @ana/)
+})
+
+test('incidencias: con muchas seguidas, avisa de las 10 primeras y una vez más para decir que hay más; las viejas se descartan solas', async () => {
+	const { recordIncident, cleanupIncidents } = await import('../worker/incidents.ts')
+	const s = setup()
+	for (let i = 0; i < 30; i++) await recordIncident(s.env, { kind: 'module_shared', username: `u${i}`, license: `qp:u${i}` }, s.now(), s.fetcher)
+	assert.equal(s.incidents().length, 30)
+	assert.equal(s.sent.length, 11)
+	assert.match(s.sent[10], /Más de 10 en la última hora/)
+	// Una hora después vuelve a avisar
+	s.tick(3600_000 + 1)
+	await recordIncident(s.env, { kind: 'module_shared', username: 'otra', license: 'qp:otra' }, s.now(), s.fetcher)
+	assert.equal(s.sent.length, 12)
+	// A los 30 días sin repetirse quedan descartadas
+	s.tick(30 * DAY + 1)
+	await cleanupIncidents(s.env.DB, s.now())
+	assert.equal(s.incidents().length, 0)
 })
 
 test('una copia del módulo en uso: de otra cuenta o con los días vencidos se apunta; si renovó, no', async () => {
@@ -133,10 +152,12 @@ test('avisos del radar sin Pro desde un dispositivo que lo tuvo (pasado el marge
 	await s.pro('POST', '/pro/trial', { print: P1 }, 'ana')
 	const hit = { print: P1, offer: '0b0e1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d', kind: 'found', coin: 'BANK_CUP', side: 'ask', price: 500, usd: 10 }
 	s.tick(7 * DAY + 3600_000)
-	assert.equal((await s.pro('POST', '/pro/radar/alert', hit)).status, 403)
+	// Sin la cuenta confirmada en el navegador ni se mira (403 TP_WHO, sin incidencia)
+	assert.equal((await s.pro('POST', '/pro/radar/alert', hit)).body.code, 'TP_WHO')
+	assert.equal((await s.pro('POST', '/pro/radar/alert', hit, 'ana')).status, 403)
 	assert.deepEqual(s.incidents(), [])
 	s.tick(DAY)
-	assert.equal((await s.pro('POST', '/pro/radar/alert', hit)).status, 403)
+	assert.equal((await s.pro('POST', '/pro/radar/alert', hit, 'ana')).status, 403)
 	assert.deepEqual(s.incidents(), [{ kind: 'radar_no_pro', username: 'ana', license: 'qp:ana', count: 1 }])
 })
 

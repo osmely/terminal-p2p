@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { actionOf, authorized, clientEvent, feeMismatch, fingerprint, parseMeta, publicStats, relayEvent, sameSecret, summarize, type MetricEvent } from '../worker/metrics.ts'
+import { actionOf, authorized, clientEvent, feeMismatch, fingerprint, parseMeta, publicStats, relayEvent, sameSecret, saveEvent, stagingGate, startedHere, summarize, type MetricEvent } from '../worker/metrics.ts'
+import { readdirSync, readFileSync } from 'node:fs'
+import { DatabaseSync } from 'node:sqlite'
 import { netUsd, p2pFee } from '../src/qvapay/fees.ts'
 
 const OFFER = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d'
@@ -221,4 +223,45 @@ test('«Por día» en los rangos largos: por semana en 90 días y por mes en un 
 	// 20 y 22 de octubre, la misma semana (desde el lunes 19)
 	assert.match(quarter, /semana del 19 oct<\/td><td>2</)
 	assert.match(panelHtml(summarize(rows, 30)), /Por día[\s\S]*2026-10-28/)
+})
+
+test('staging: una contraseña equivocada cuenta para el tope del panel; la primera visita sin ella y la buena, no', async () => {
+	const limiter = { calls: 0, async limit() {
+		this.calls++
+		return { success: this.calls <= 3 }
+	} }
+	const req = (auth?: string) => new Request('https://staging.example.test/admin/pro', { headers: auth ? { authorization: auth } : {} })
+	// Sin nada: pide la clave y no gasta intentos
+	assert.equal((await stagingGate(req(), 'clave-staging', limiter))?.status, 401)
+	assert.equal(limiter.calls, 0)
+	// La buena pasa sin gastar intentos
+	assert.equal(await stagingGate(req(`Basic ${btoa('x:clave-staging')}`), 'clave-staging', limiter), null)
+	assert.equal(limiter.calls, 0)
+	// Equivocadas: 3 con 401 y luego 429
+	const codes = []
+	for (let i = 0; i < 6; i++) codes.push((await stagingGate(req(`Basic ${btoa(`x:mala-${i}`)}`), 'clave-staging', limiter))?.status)
+	assert.deepEqual(codes, [401, 401, 401, 429, 429, 429])
+})
+
+test('cifras públicas: un «completada» del navegador solo cuenta si el relé vio publicar o tomar la oferta, y no por más USD', async () => {
+	const db = new DatabaseSync(':memory:')
+	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
+	const stmt = (sql: string, args: unknown[] = []) => ({
+		bind: (...a: unknown[]) => stmt(sql, a),
+		all: async () => ({ results: db.prepare(sql).all(...(args as never[])) as never[] }),
+		first: async () => (db.prepare(sql).get(...(args as never[])) ?? null) as never,
+		run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...(args as never[])).changes) } }),
+	})
+	const d1 = { prepare: (sql: string) => stmt(sql), batch: async () => [] } as never
+	const offer = '7f1c2d3e-aaaa-4bbb-8ccc-0123456789ab'
+	const done = (await clientEvent({ event: 'completed', offer, usd: 100_000 }, 'sal'))!
+	// Inventada: nadie la publicó ni la tomó aquí
+	assert.equal(await startedHere(d1, done), null)
+	// La tomó alguien desde el terminal por 25 USD: cuenta, pero por 25
+	await saveEvent(d1, { t: 1, event: 'take', status: 'ok', offer: await fingerprint(offer, 'sal'), ord: '', coin: 'BANK_CUP', side: 'buy', usd: 25, source: 'relay', via: '' })
+	assert.equal((await startedHere(d1, done))?.usd, 25)
+	// Un intento fallido de tomarla no cuenta
+	const other = '7f1c2d3e-aaaa-4bbb-8ccc-0123456789ac'
+	await saveEvent(d1, { t: 1, event: 'take', status: 'error', offer: await fingerprint(other, 'sal'), ord: '', coin: 'BANK_CUP', side: 'buy', usd: 25, source: 'relay', via: '', err: 'x' })
+	assert.equal(await startedHere(d1, (await clientEvent({ event: 'completed', offer: other, usd: 5 }, 'sal'))!), null)
 })

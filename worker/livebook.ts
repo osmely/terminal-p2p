@@ -596,6 +596,9 @@ function timingSafe(a: string, b: string) {
 
 // ── En el Worker: el webhook de QvaPay y la conexión de los terminales ─
 
+const REJECTED_GAP_MS = 10_000
+let lastRejected = -Infinity
+
 export const liveStub = (env: LiveEnv) => env.LIVE!.get(env.LIVE!.idFromName('book') as never)
 
 export async function feedWebhook(req: Request, env: LiveEnv, ctx: { waitUntil(p: Promise<unknown>): void }, now = Date.now()) {
@@ -609,8 +612,13 @@ export async function feedWebhook(req: Request, env: LiveEnv, ctx: { waitUntil(p
 		for (const h of ['x-qvapay-signature', 'x-qvapay-timestamp']) if (req.headers.get(h)) headers[h] = req.headers.get(h)!
 		ctx.waitUntil(fetch(env.FEED_FORWARD, { method: 'POST', body: raw, headers, signal: AbortSignal.timeout(8000) }).catch(() => {}))
 	}
-	// Se responde enseguida (QvaPay corta a los 5 s) y el libro se actualiza después
-	ctx.waitUntil(liveStub(env).fetch('https://live/event', { method: 'POST', body: JSON.stringify({ raw, rejected: bad }) }).catch(() => {}))
+	// Se responde enseguida (QvaPay corta a los 5 s) y el libro se actualiza después. Lo rechazado solo se pasa para
+	// verlo en el panel: uno cada REJECTED_GAP_MS por instancia y recortado (sin firma, cualquiera puede mandar cuerpos y
+	// cada uno despertaba al libro en vivo, que es uno para todos)
+	if (!bad || now - lastRejected >= REJECTED_GAP_MS) {
+		if (bad) lastRejected = now
+		ctx.waitUntil(liveStub(env).fetch('https://live/event', { method: 'POST', body: JSON.stringify({ raw: bad ? raw.slice(0, 2048) : raw, rejected: bad }) }).catch(() => {}))
+	}
 	if (!env.QVAPAY_FEED_SECRET) return Response.json({ error: 'El feed aún no está configurado' }, { status: 503 })
 	return bad ? Response.json({ error: bad }, { status: 401 }) : Response.json({ ok: true })
 }

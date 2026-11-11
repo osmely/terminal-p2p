@@ -3,8 +3,8 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import type { FeedEvent } from '../worker/livebook.ts'
-import { deliverPush, ownerPush, pushApi, pushTargets, simEvent, takerPush, type PushEnv } from '../worker/push.ts'
-import { whoToken } from '../worker/session.ts'
+import { deliverPush, ownerPush, pushApi, pushTargets, relayTaken, simEvent, takerPush, type PushEnv } from '../worker/push.ts'
+import { tokenPrint, whoToken } from '../worker/session.ts'
 import { b64u, newVapidJwk } from '../worker/webpush.ts'
 
 function memD1() {
@@ -76,7 +76,8 @@ async function setup() {
 		VAPID_PRIVATE_JWK: JSON.stringify(jwk),
 		LIVE: { idFromName: () => 'id', get: () => ({ fetch: async (u: string) => (refreshed.push(u), Response.json({ notices: 1, sent: 1 })) }) },
 	}
-	const print = 'a'.repeat(64)
+	const token = '12|tokenAna'
+	const print = await tokenPrint(token)
 	const cookie = `tpw=${await whoToken(print, OWNER, 'ana', 'clave', T)}`
 	const sent: { url: string; headers: Record<string, string> }[] = []
 	let status = 201
@@ -91,7 +92,10 @@ async function setup() {
 		const res = await pushApi(req, new URL(req.url), env, ctx, T, fetcher)
 		return { status: res.status, body: (await res.json()) as Record<string, unknown> }
 	}
-	return { db, env, print, call, subOf, sent, refreshed, fetcher, setStatus: (s: number) => (status = s) }
+	// Tomar una oferta desde el terminal: el relé la ve (con el token y la cookie de la cuenta) y la vigila
+	const take = (offer: string, tok = token, ck = cookie, ok = true) =>
+		relayTaken(env, new Request(`https://app.terminalp2p.com/qp/p2p/${offer}/apply`, { method: 'POST', headers: { authorization: `Bearer ${tok}`, cookie: ck } }), `/p2p/${offer}/apply`, ok, T)
+	return { db, env, print, call, take, subOf, sent, refreshed, fetcher, setStatus: (s: number) => (status = s) }
 }
 
 test('push: activar los avisos pide tu cuenta confirmada en ese navegador; luego se vigila, se prueba y se desactiva', async () => {
@@ -110,6 +114,13 @@ test('push: activar los avisos pide tu cuenta confirmada en ese navegador; luego
 	const offer = '7f1c2d3e-aaaa-4bbb-8ccc-0123456789ab'
 	assert.equal((await s.call('/push/watch', { print: s.print, endpoint: s.subOf(2).endpoint, offer })).status, 404)
 	assert.equal((await s.call('/push/watch', { print: s.print, endpoint: s.subOf(1).endpoint, offer: 'no' })).status, 400)
+	// Una oferta que no tomó desde el terminal, no (si no, cualquiera vigilaba las de otros y veía cuándo les pagan)
+	assert.equal((await s.call('/push/watch', { print: s.print, endpoint: s.subOf(1).endpoint, offer })).status, 404)
+	// Tomarla sin éxito, o sin la cuenta confirmada en ese navegador, tampoco la vigila
+	assert.equal(await s.take(offer, undefined, undefined, false), 0)
+	assert.equal(await s.take(offer, '99|otroToken'), 0)
+	// La tomó: el relé la vigila en sus navegadores, y el terminal puede renovarla
+	assert.equal(await s.take(offer.toUpperCase()), 1)
 	assert.equal((await s.call('/push/watch', { print: s.print, endpoint: s.subOf(1).endpoint, offer: offer.toUpperCase() })).status, 200)
 	const t = await pushTargets(s.env.DB, T)
 	assert.deepEqual([[...t.owners], [...t.offers]], [[OWNER], [offer]])
@@ -151,7 +162,7 @@ test('push: el aviso llega a todos los navegadores de la cuenta; uno que ya no e
 
 	// Quien tomó la oferta: al terminar la operación se deja de vigilar
 	const offer = '7f1c2d3e-aaaa-4bbb-8ccc-0123456789ab'
-	await s.call('/push/watch', { print: s.print, endpoint: s.subOf(3).endpoint, offer })
+	assert.equal(await s.take(offer), 1)
 	const end = takerPush(ev('p2p.completed', { uuid: offer, status: 'completed' }), T)!
 	assert.equal(await deliverPush(s.env, end, T, new Map(), s.fetcher), 1)
 	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM push_watch').get()!.n, 0)
@@ -167,7 +178,8 @@ test('push: el evento inventado de las pruebas lleva tu cuenta de dueño y pasa 
 test('push: dos cuentas en el mismo navegador reciben las dos, y el aviso dice de cuál es', async () => {
 	const s = await setup()
 	const OWNER2 = '22222222-2222-4222-8222-222222222222'
-	const print2 = 'c'.repeat(64)
+	const token2 = '13|tokenLeo'
+	const print2 = await tokenPrint(token2)
 	const cookie2 = `tpw=${await whoToken(print2, OWNER2, 'leo', 'clave', T)}`
 	await s.call('/push/subscribe', { print: s.print, sub: s.subOf(1) })
 	await s.call('/push/subscribe', { print: print2, sub: s.subOf(1) }, cookie2)
@@ -175,8 +187,10 @@ test('push: dos cuentas en el mismo navegador reciben las dos, y el aviso dice d
 	// La de ana sigue recibiendo lo suyo, aunque leo se conectó después
 	assert.equal(await deliverPush(s.env, ownerPush(ev('p2p.paid'), null, T)!, T, new Map(), s.fetcher), 1)
 	assert.equal(await deliverPush(s.env, ownerPush(ev('p2p.paid', { owner_uuid: OWNER2 }), null, T)!, T, new Map(), s.fetcher), 1)
-	// Las dos cuentas pueden vigilar desde ese navegador
+	// Las dos cuentas pueden vigilar desde ese navegador lo que tomaron
 	const offer = '7f1c2d3e-aaaa-4bbb-8ccc-0123456789ab'
+	assert.equal((await s.call('/push/watch', { print: print2, endpoint: s.subOf(1).endpoint, offer }, cookie2)).status, 404)
+	assert.equal(await s.take(offer, token2, cookie2), 1)
 	assert.equal((await s.call('/push/watch', { print: print2, endpoint: s.subOf(1).endpoint, offer }, cookie2)).status, 200)
 	assert.equal(await deliverPush(s.env, takerPush(ev('p2p.paid', { uuid: offer, type: 'buy' }), T)!, T, new Map(), s.fetcher), 1)
 	// Desactivar los avisos en el navegador los quita para todas sus cuentas
