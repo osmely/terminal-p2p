@@ -1,5 +1,5 @@
-// Comprar bitcoin en Mostro desde el terminal (experimental, mercado «Bitcoin · Mostro», btc.js): el botón «Comprar» de
-// una orden de venta de Mostro abre la compra; las compras en curso se ven arriba del libro, con su chat. Todo pasa en el navegador: las 12 palabras, las
+// Comprar bitcoin en Mostro desde el terminal (experimental, mercados de bitcoin, btc.js): una venta de Mostro del libro
+// abre la compra; las compras en curso se ven en «Mis operaciones», con su chat. Todo pasa en el navegador: las 12 palabras, las
 // claves y el estado se guardan en este navegador (localStorage) y los mensajes van cifrados a los relays de Mostro.
 // Terminal P2P no custodia nada: los sats los retiene Mostro (factura retenida) y los paga a la dirección Lightning de
 // quien compra. Lo que viene de fuera se pinta como texto, nunca como HTML.
@@ -934,7 +934,8 @@ function openTake(o: BookOrder, nodeName: string) {
 		save()
 		dlg.close()
 		takeNow(t)
-		$('mxTrades').scrollIntoView({ behavior: 'smooth', block: 'start' })
+		// El terminal (btc.js) lleva a «Mis operaciones», donde se ven las compras
+		document.dispatchEvent(new CustomEvent('tp:mostro', { detail: { taken: true } }))
 	})
 	dlg.replaceChildren(body)
 	dlg.showModal()
@@ -963,7 +964,7 @@ function canTake(o: BookOrder) {
 
 declare global {
 	interface Window {
-		TPMostro?: { setNodes(n: Record<string, NodeInfo>): void; canTake(o: BookOrder): boolean; blocked(o: BookOrder): string | null; take(o: BookOrder): void }
+		TPMostro?: { setNodes(n: Record<string, NodeInfo>): void; canTake(o: BookOrder): boolean; blocked(o: BookOrder): string | null; take(o: BookOrder): void; health(node: string): Health['status'] }
 	}
 }
 window.TPMostro = {
@@ -976,6 +977,8 @@ window.TPMostro = {
 	take(o) {
 		if (canTake(o) && !blocked(o)) openTake(o, o.node ?? 'Mostro')
 	},
+	// Para la lectura del mercado en el terminal: cómo está el nodo según su último informe
+	health: (node) => healthOf(node).status,
 }
 
 // Al cargar: las compras abiertas siguen escuchando al nodo y a su chat

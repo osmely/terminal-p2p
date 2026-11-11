@@ -1129,34 +1129,31 @@ a.icon-btn { text-decoration: none; }
 .an-dot { fill: var(--accent); }
 .an-pdf .an-heattabs { display: none; }
 
-/* ══ Mercado «Bitcoin · Mostro» (btc.js, experimental) ════════════════ */
-/* Elegido, ocupa el sitio del gráfico, el libro, la lectura y las operaciones de QvaPay */
-.area-btc { grid-area: btc; display: none; }
-body.btc-on .layout { grid-template-areas: 'markets btc btc'; grid-template-rows: auto; }
-body.btc-on .layout > .area-chart, body.btc-on .layout > .area-book, body.btc-on .layout > .area-insights, body.btc-on .layout > .area-orders { display: none; }
-body.btc-on .layout > .area-btc { display: flex; }
-body.btc-on .ticker-stats, body.btc-on .intent, body.btc-on .pulse { display: none; }
-.area-btc.nx { padding-bottom: 0; }
-.area-btc .panel-head h2 { display: flex; align-items: center; gap: 8px; }
-.area-btc .panel-head .nx-at { margin: 0; font-size: 11.5px; text-align: right; }
-.btc-beta { padding: 1px 6px; border-radius: 5px; background: var(--accent-bg); color: var(--accent); font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
-.btc-body { padding: 14px 16px 18px; }
-.area-btc .nx-bar { margin-top: 0; }
-.area-btc .mx { margin: 0 0 18px; }
-.area-btc .nx-note { margin-top: 20px; font-size: 13px; }
+/* ══ Mercados de bitcoin en Nostr (btc.js, experimental) ══════════════ */
+/* Se ven como los demás: el mismo libro, gráfico y paneles. Lo que es solo de QvaPay se esconde y lo suyo aparece */
+.btc-only { display: none; }
+body.btc-on .btc-only { display: revert; }
+body.btc-on .area-orders .panel-head > h2.btc-only { display: block; }
+body.btc-on .btc-trades { display: block; overflow-y: auto; padding: 12px 14px 16px; }
+body.btc-on .qp-only,
+body.btc-on #radarBtn, body.btc-on .area-book [data-new-offer], body.btc-on #groupBtn, body.btc-on .filter-wrap,
+body.btc-on [data-chart]:not([data-chart='depth']), body.btc-on #chartTools,
+body.btc-on [data-pane='activityPane'], body.btc-on [data-pane='rankingPane'],
+body.btc-on #ordersTabs, body.btc-on .area-orders .head-btns, body.btc-on #myTrades,
+body.btc-on .intent, body.btc-on .pulse { display: none !important; }
+.btc-pay { width: 150px; padding: 4px 8px; font-size: 12px; }
+.btc-trades .mx { margin: 0; }
+.btc-trades .mx-title { display: none; }
+.btc-trades .mx:not([hidden]) + .btc-none { display: none; }
+/* Las ventas de Mostro que se compran desde aquí, y las que se abren fuera */
+.lvl .btc-take { color: var(--accent); font-weight: 700; }
+.lvl.btc-off .p { text-decoration: line-through; }
+.mrow-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 12px 12px 4px; border: 0; background: none; font: 600 11px var(--sans, inherit); color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; text-align: left; cursor: pointer; }
+.mrow-more { margin-left: auto; color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 600; }
 .btc-ic { background: #f7931a; color: #fff; font-size: 13px; }
 .btc-ic::before { content: none; }
+.btc-ic i { font-size: 6px; }
 .btc-star { color: var(--warn); font-size: 11px; }
-@media (max-width: 1280px) {
-	body.btc-on .layout { grid-template-areas: 'btc btc'; }
-}
 @media (max-width: 900px) {
-	body.btc-on .view-tabs { display: none; }
-	body.btc-on .layout { grid-template-areas: none; }
-	.btc-body { padding: 12px; }
-	.area-btc .panel-head { flex-wrap: wrap; }
-	/* Las monedas, en una fila que se desliza */
-	.area-btc .nx-fiats { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -12px; padding-inline: 12px; }
-	.area-btc .nx-fiat { flex: none; }
-	.area-btc .nx-bar { display: block; }
+	.btc-pay { width: 120px; }
 }

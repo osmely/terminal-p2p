@@ -153,6 +153,7 @@ async function loadBook() {
 		state.book = await getJSON(`/api/book?coin=${state.coin}`)
 		render()
 	} catch (e) {
+		if (window.TPBtc?.on) return
 		setStatus('Sin conexión')
 		$('dot').className = 'dot stale'
 	}
@@ -272,7 +273,7 @@ async function loadInformal() {
 }
 
 function selectCoin(tick) {
-	// Desde el mercado «Bitcoin · Mostro» (btc.js) se vuelve a los de QvaPay
+	// Desde un mercado de bitcoin (btc.js) se vuelve a los de QvaPay
 	window.TPBtc?.leave()
 	state.coin = tick
 	store.set('coin', tick)
@@ -307,8 +308,8 @@ document.addEventListener('error', (e) => e.target?.matches?.('.coin-ic img') &&
 function marketRows(query) {
 	const q = (query ?? '').trim().toLowerCase()
 	const rows = state.overview.filter((c) => !q || c.name.toLowerCase().includes(q) || c.tick.toLowerCase().includes(q) || c.unit.toLowerCase().includes(q))
-	// El mercado «Bitcoin · Mostro» (btc.js, solo donde está encendido) va al final, como uno más
-	const btc = window.TPBtc?.row(query) ?? ''
+	// Los mercados de bitcoin en Nostr (btc.js, solo donde está encendido) van al final, como unos más
+	const btc = window.TPBtc?.rows(query) ?? ''
 	const here = (c) => c.tick === state.coin && !window.TPBtc?.on
 	if (!rows.length && !btc) return '<div class="empty">Sin resultados</div>'
 	return (
@@ -376,6 +377,8 @@ function showView(name) {
 }
 
 function render() {
+	// En un mercado de bitcoin (btc.js) lo pinta él, con sus órdenes de Nostr
+	if (window.TPBtc?.on) return window.TPBtc.draw()
 	const b = state.book
 	const meta = b?.coin ?? state.overview.find((c) => c.tick === state.coin) ?? { name: state.coin, unit: '' }
 	$('pairName').textContent = `QUSD / ${meta.name}`
@@ -386,7 +389,6 @@ function render() {
 		$('pairIcon').innerHTML = coinIcon(iconOf)
 	}
 	$('pairSub').textContent = `Precio en ${meta.unit} por cada USD de saldo QvaPay`
-	if (window.TPBtc?.on) window.TPBtc.pair()
 	if (!b) {
 		$('asks').innerHTML = $('bids').innerHTML = '<div class="empty">Cargando…</div>'
 		return
@@ -929,13 +931,16 @@ function emptyChart(ctx, width, height, text) {
 
 function drawDepth() {
 	const { ctx, width, height } = setupCanvas($('depth'))
+	// En un mercado de bitcoin (btc.js), sus órdenes: precio por BTC, monto en la moneda y un rango más ancho
+	const btc = window.TPBtc?.on ? window.TPBtc.depth() : null
 	const b = state.book
-	if (!b) return
-	const asks = filtered(b.ask.levels, 'ask')
-	const bids = filtered(b.bid.levels, 'bid')
+	if (!b && !btc) return
+	const asks = btc ? btc.asks : filtered(b.ask.levels, 'ask')
+	const bids = btc ? btc.bids : filtered(b.bid.levels, 'bid')
 	if (!asks.length && !bids.length) return emptyChart(ctx, width, height, 'Sin ofertas')
 	const mid = asks[0] && bids[0] ? (asks[0].price + bids[0].price) / 2 : (asks[0] ?? bids[0]).price
-	const range = 0.06
+	const range = btc ? btc.range : 0.06
+	const fmtX = btc ? btc.fmt : fmtP
 	const lo = mid * (1 - range)
 	const hi = mid * (1 + range)
 	const cum = (levels) => {
@@ -967,7 +972,7 @@ function drawDepth() {
 	const ticks = Math.max(2, Math.min(6, Math.floor((width - pad.l - pad.r) / 90)))
 	for (let i = 0; i <= ticks; i++) {
 		const p = lo + ((hi - lo) / ticks) * i
-		ctx.fillText(fmtP(p), x(p), height - 8)
+		ctx.fillText(fmtX(p), x(p), height - 8)
 	}
 
 	const area = (pts, color, fill, dir) => {
@@ -1000,8 +1005,8 @@ function drawDepth() {
 	ctx.stroke()
 	ctx.setLineDash([])
 	ctx.fillStyle = css('--text')
-	ctx.fillText(`medio ${fmtP(mid)}`, x(mid), pad.t - 2)
-	$('chartNote').textContent = `USD acumulados a ±${range * 100}% del precio medio`
+	ctx.fillText(`medio ${fmtX(mid)}`, x(mid), pad.t - 2)
+	$('chartNote').textContent = `${btc ? btc.unit : 'USD'} acumulados a ±${Math.round(range * 100)}% del precio medio`
 	$('chartNote').title = $('chartNote').textContent
 }
 
@@ -1735,13 +1740,15 @@ function bind() {
 	})
 	$('marketList').addEventListener('click', (e) => {
 		const row = e.target.closest('[data-tick]')
+		const btc = e.target.closest('[data-btc]')
 		if (row) selectCoin(row.dataset.tick)
-		else if (e.target.closest('[data-btc]')) window.TPBtc?.open()
+		else if (btc) window.TPBtc?.open(btc.dataset.btc)
 	})
 	$('marketRail').addEventListener('click', (e) => {
 		const btn = e.target.closest('[data-tick]')
+		const btc = e.target.closest('[data-btc]')
 		if (btn) selectCoin(btn.dataset.tick)
-		else if (e.target.closest('[data-btc]')) window.TPBtc?.open()
+		else if (btc) window.TPBtc?.open(btc.dataset.btc)
 	})
 	// El par: en escritorio abre la columna si estaba colapsada y va al buscador; sin columna, abre la hoja
 	$('pairBtn').addEventListener('click', () => {
@@ -1875,6 +1882,7 @@ function bind() {
 	for (const id of ['asks', 'bids']) {
 		const el = $(id)
 		el.addEventListener('mousemove', (e) => {
+			if (window.TPBtc?.on) return window.TPBtc.hover(e, tip)
 			const row = e.target.closest('.lvl')
 			const g = row?.dataset.group != null && groups[row.dataset.side].get(Number(row.dataset.group))
 			const l = row && findLevel(row.dataset.uuid, row.dataset.side)
@@ -1891,6 +1899,7 @@ function bind() {
 			const row = e.target.closest('.lvl')
 			if (!row) return
 			tip.hidden = true
+			if (window.TPBtc?.on) return window.TPBtc.click(e)
 			// El nombre abre su ficha; el resto de la fila, la oferta
 			// Sin dueño aún («—»: QvaPay todavía no dijo quién la publicó), abre la oferta, que sí lo dice
 			const who = e.target.closest('.who em')

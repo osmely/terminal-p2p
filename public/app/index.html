@@ -145,6 +145,7 @@
 			<div class="panel-head">
 				<h2>Libro de órdenes</h2>
 				<div class="head-btns">
+				<input class="input btc-only btc-pay" id="btcPay" type="search" placeholder="Método de pago…" aria-label="Filtrar por método de pago" autocomplete="off" data-cross />
 				<button class="chip-btn radar-btn" id="radarBtn" hidden title="Radar: te avisa (o la toma sola) cuando aparece una oferta con tus reglas"><span class="radar-dot" aria-hidden="true"></span>Radar</button>
 				<button class="chip-btn" data-new-offer title="Publicar una oferta de compra o venta">+ Publicar</button>
 				<button class="chip-btn group-btn" id="groupBtn" aria-pressed="false" aria-label="Agrupar por rangos de precio" title="Agrupar el libro por rangos de precio">
@@ -234,6 +235,7 @@
 
 		<section class="panel area-orders">
 			<div class="panel-head">
+				<h2 class="btc-only" data-cross>Tus compras de bitcoin en Mostro</h2>
 				<div class="seg-tabs" role="tablist" id="ordersTabs">
 					<button class="seg-tab active" data-tab="active" role="tab">En curso <span class="count" id="cntActive" hidden></span></button>
 					<button class="seg-tab" data-tab="offers" role="tab">Ofertas<span class="hide-sm">publicadas</span> <span class="count" id="cntOffers" hidden></span></button>
@@ -253,60 +255,11 @@
 				</div>
 			</div>
 			<div id="myTrades" class="orders"></div>
-		</section>
-
-		<!-- Mercado «Bitcoin · Mostro» (btc.js, modo Pro, experimental): el libro de Nostr y las compras en Mostro. El
-		     libro (nostr.js) y la compra (mostro.js) se cargan al entrar -->
-		<section class="panel area-btc nx" id="nxRoot" data-nx-fiat="CUP" data-cross>
-			<div class="panel-head">
-				<h2>Bitcoin P2P en Nostr <span class="btc-beta">Experimental</span></h2>
-				<p class="nx-at" id="nxAt" aria-live="polite">Cargando…</p>
-			</div>
-			<div class="btc-body">
+			<!-- En los mercados de bitcoin (btc.js): tus compras en Mostro (las pinta nostr/mostro.js) -->
+			<div class="btc-only btc-trades" data-cross>
 				<section class="mx" id="mxTrades" aria-live="polite" hidden></section>
-				<div class="nx-bar"><div class="nx-fiats" id="nxFiats" role="tablist" aria-label="Moneda"></div></div>
-				<section class="nx-stats" aria-label="Resumen de la moneda">
-					<div class="nx-stat">
-						<span title="El precio del bitcoin según Yadio, el que usa Mostro para las órdenes a precio de mercado">Mercado</span>
-						<b id="nxMarket">—</b>
-						<small id="nxMarketNote">Yadio</small>
-					</div>
-					<div class="nx-stat">
-						<span>Mejor para comprar</span>
-						<b class="ask" id="nxBestAsk">—</b>
-						<small id="nxBestAskNote">—</small>
-					</div>
-					<div class="nx-stat">
-						<span>Mejor para vender</span>
-						<b class="bid" id="nxBestBid">—</b>
-						<small id="nxBestBidNote">—</small>
-					</div>
-					<div class="nx-stat">
-						<span>Órdenes</span>
-						<b id="nxCount">—</b>
-						<small>venden / compran</small>
-					</div>
-				</section>
-				<div class="nx-filters">
-					<div class="nx-plats" id="nxPlats" aria-label="Plataformas"></div>
-					<input class="nx-search" id="nxPay" type="search" placeholder="Método de pago (Zelle, Transfermóvil…)" aria-label="Filtrar por método de pago" autocomplete="off" />
-				</div>
-				<div class="nx-book">
-					<section class="nx-side" aria-labelledby="nxAskH">
-						<h2 id="nxAskH">Venden bitcoin <small>· compras aquí</small></h2>
-						<div class="nx-head"><span>Precio</span><span>Prima</span><span>Monto</span><span>Pago · plataforma</span></div>
-						<ol class="nx-list" id="nxAsks"></ol>
-					</section>
-					<section class="nx-side" aria-labelledby="nxBidH">
-						<h2 id="nxBidH">Compran bitcoin <small>· vendes aquí</small></h2>
-						<div class="nx-head"><span>Precio</span><span>Prima</span><span>Monto</span><span>Pago · plataforma</span></div>
-						<ol class="nx-list" id="nxBids"></ol>
-					</section>
-				</div>
-				<p class="nx-legend">Precio en <span data-nx="fiat">CUP</span> por bitcoin. Prima: cuánto por encima (+) o por debajo (−) del mercado. ⚡ Lightning · ⛓ en cadena.</p>
-				<p class="nx-note">Órdenes públicas de Nostr (NIP-69) de Mostro, RoboSats, Hodl Hodl y otros. Las ventas de Mostro se compran aquí («Comprar»): tu cuenta de Mostro (12 palabras) vive en este navegador, los mensajes van cifrados al nodo y los sats llegan a tu cuenta de QvaPay (o a la dirección Lightning que pongas). Las demás se abren en su plataforma. Terminal P2P no custodia fondos ni intermedia: la garantía es la de Mostro (o la de cada plataforma), con sus reglas y comisiones.</p>
+				<div class="empty btc-none">Aún no tienes compras de bitcoin en Mostro. Elige una venta de Mostro en el libro para comprar.</div>
 			</div>
-			<dialog class="mx-dialog" id="mxDialog" aria-label="Comprar bitcoin"></dialog>
 		</section>
 	</main>
 	<div class="sheet-backdrop" id="marketsBackdrop" hidden></div>
@@ -321,6 +274,7 @@
 	</footer>
 
 	<div id="tip" class="tip" hidden></div>
+	<dialog class="mx-dialog" id="mxDialog" aria-label="Comprar bitcoin" data-cross></dialog>
 	<div id="modal" class="modal" hidden>
 		<div class="modal-card" role="dialog" aria-modal="true">
 			<button class="icon-btn modal-x" id="modalX" aria-label="Cerrar">
