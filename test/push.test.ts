@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import type { FeedEvent } from '../worker/livebook.ts'
-import { deliverPush, ownerPush, pushApi, pushTargets, relayTaken, simEvent, takerPush, type PushEnv } from '../worker/push.ts'
+import { deliverPush, ownerPush, parseSub, pushApi, pushTargets, relayTaken, simEvent, takerPush, type PushEnv } from '../worker/push.ts'
 import { tokenPrint, whoToken } from '../worker/session.ts'
 import { b64u, newVapidJwk } from '../worker/webpush.ts'
 
@@ -196,4 +196,13 @@ test('push: dos cuentas en el mismo navegador reciben las dos, y el aviso dice d
 	// Desactivar los avisos en el navegador los quita para todas sus cuentas
 	await s.call('/push/unsubscribe', { endpoint: s.subOf(1).endpoint }, false)
 	assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM push_subs').get()!.n, 0)
+})
+
+test('push: solo se aceptan los servicios de push de los navegadores (el servidor llama a esa dirección)', () => {
+	const keys = { p256dh: 'B'.repeat(40), auth: 'a'.repeat(16) }
+	const ok = (endpoint: string) => !!parseSub({ endpoint, keys })
+	for (const e of ['https://fcm.googleapis.com/fcm/send/abc', 'https://updates.push.services.mozilla.com/wpush/v2/abc', 'https://web.push.apple.com/QabC', 'https://wns2-bl2p.notify.windows.com/w/?token=abc'])
+		assert.equal(ok(e), true, e)
+	for (const e of ['https://example.com/push', 'https://fcm.googleapis.com.evil.example/x', 'https://evil.example/fcm.googleapis.com/x', 'http://fcm.googleapis.com/fcm/send/abc', 'https://127.0.0.1/x', 'https://fcm.googleapis.com@evil.example/x'])
+		assert.equal(ok(e), false, e)
 })

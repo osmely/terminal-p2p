@@ -3,7 +3,7 @@
 // (t.me/bot?start=código) y desde entonces recibe la confirmación de cada pago, el aviso de que se le acaban los
 // días y cada paso de sus devoluciones. De él solo se guarda el chat; /stop lo borra
 
-import { hex, hmac } from './crypto.ts'
+import { hex, hmac, sameSecret } from './crypto.ts'
 import { tgEsc, type AlertEnv } from './alerts.ts'
 import { sendInbox, type InboxEnv } from './inbox.ts'
 import { deliverPush, vapidOf, type PushEnv, type PushMsg } from './push.ts'
@@ -287,7 +287,7 @@ ${status}`
 // Telegram manda aquí cada mensaje privado al bot, los comandos de los grupos y cuándo lo meten o lo sacan de uno
 // (POST /pro/telegram/webhook). Se responde en la misma respuesta, sin otra llamada
 export async function botWebhook(req: Request, env: BotEnv, now: number, fetcher: typeof fetch = fetch): Promise<Response> {
-	if (!env.PRO_KEY || req.headers.get('x-telegram-bot-api-secret-token') !== (await webhookSecret(env))) return new Response('no', { status: 401 })
+	if (!env.PRO_KEY || !(await sameSecret(req.headers.get('x-telegram-bot-api-secret-token') ?? '', await webhookSecret(env)))) return new Response('no', { status: 401 })
 	const u = (await req.json().catch(() => ({}))) as Update
 	const db = env.DB
 	const staging = env.STAGING === '1'

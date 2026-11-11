@@ -11,7 +11,7 @@ import { cubaDate, informalSince, latestInformal, syncInformal } from './informa
 import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relayEvent, saveEvent, stagingGate, startedHere } from './metrics.ts'
 import { collect, inCuba, isCoin, query, RANGES, withoutPro, type RatesData } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
-import { readWho, tokenPrint, whoCookie } from './session.ts'
+import { clientIp, readWho, tokenPrint, whoCookie } from './session.ts'
 import { cleanupLog, hourKey, logUser } from './userlog.ts'
 import { accessOf, profileAccess, relayAccess } from './blocks.ts'
 import { cleanupIncidents, relayIncident } from './incidents.ts'
@@ -73,8 +73,8 @@ interface RateLimiter {
 }
 
 // true si la petición pasa el tope; sin limitador configurado no se limita
-async function underLimit(limiter: RateLimiter | undefined, req: Request, key = req.headers.get('cf-connecting-ip') ?? 'sin-ip') {
-	if (!limiter) return true
+async function underLimit(limiter: RateLimiter | undefined, req: Request, key = clientIp(req)) {
+	if (!limiter) return missingLimiter()
 	const { success } = await limiter.limit({ key })
 	return success
 }
@@ -83,13 +83,15 @@ async function underLimit(limiter: RateLimiter | undefined, req: Request, key = 
 // (lo público, que además va en caché), por IP
 const relayKey = async (req: Request) => {
 	const auth = req.headers.get('authorization')
-	return auth ? `tok:${(await sha256(auth)).slice(0, 24)}` : `ip:${req.headers.get('cf-connecting-ip') ?? 'sin-ip'}`
+	return auth ? `tok:${(await sha256(auth)).slice(0, 24)}` : `ip:${clientIp(req)}`
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
 	'X-Content-Type-Options': 'nosniff',
 	'Referrer-Policy': 'strict-origin-when-cross-origin',
 	'X-Frame-Options': 'DENY',
+	// Solo https, también en los subdominios, durante un año (todo terminalp2p.com va por Cloudflare con https)
+	'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
 }
 // Los datos cambian cada 10 minutos: 5 de caché en el borde bastan y ahorran lecturas de D1
 const RATES_TTL_S = 300
@@ -188,15 +190,15 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 		})
 	if (url.pathname === '/data/event' && req.method === 'POST') return secure(await event(req, url, env))
 	if (url.pathname === '/data/hit' && req.method === 'POST') return secure(await hit(req, url, env))
-	// Panel único en el dominio del terminal
-	if (folderFor(url.hostname) === 'sim' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/')))
-		return Response.redirect(`${url.origin.replace('://sim.', '://app.')}/admin`, 301)
+	// Panel único en el dominio del terminal: desde la web o el simulador, allí
+	if (folderFor(url.hostname) !== 'app' && (url.pathname === '/admin' || url.pathname.startsWith('/admin/')))
+		return Response.redirect(`${url.protocol}//app.${url.host.replace(/^(?:www|sim)\./, '')}/admin`, 301)
 	if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
 		if (!(await underLimit(env.PANEL_LIMIT, req))) return secure(jsonError(429, 'Demasiados intentos: espera un minuto'))
 		if (url.pathname === '/admin') return Response.redirect(`${url.origin}/admin/metrics`, 302)
-		if (url.pathname === '/admin/metrics' && req.method === 'GET') return secure(await metrics(req, url, env))
-		if (url.pathname === '/admin/pro') return secure(await proAdmin(req, env as unknown as ProEnv))
-			if (url.pathname === '/admin/sim' && req.method === 'GET') return secure(await simAdmin(req, env as unknown as SimEnv))
+		if (url.pathname === '/admin/metrics' && req.method === 'GET') return adminSecure(await metrics(req, url, env))
+		if (url.pathname === '/admin/pro') return adminSecure(await proAdmin(req, env as unknown as ProEnv))
+		if (url.pathname === '/admin/sim' && req.method === 'GET') return adminSecure(await simAdmin(req, env as unknown as SimEnv))
 		
 		return secure(jsonError(404, 'no encontrado'))
 	}
@@ -700,7 +702,7 @@ async function online(req: Request, env: Env) {
 	if (!(await underLimit(env.STATUS_LIMIT, req))) return jsonError(429, 'Demasiadas consultas seguidas: espera un minuto')
 	const body = (await req.json().catch(() => null)) as { users?: unknown } | null
 	const users = (Array.isArray(body?.users) ? body.users : []).slice(0, 20).map((x) => ({ id: String((x as { id?: unknown })?.id ?? '').toLowerCase(), u: String((x as { u?: unknown })?.u ?? '') }))
-	const r = await liveOnline(env as unknown as LiveEnv, users, req.headers.get('cf-connecting-ip') ?? '').catch(() => null)
+	const r = await liveOnline(env as unknown as LiveEnv, users, clientIp(req, '')).catch(() => null)
 	if (!r) return jsonError(503, 'No se puede saber ahora mismo')
 	return Response.json(r, { headers: { 'Cache-Control': 'no-store' } })
 }
@@ -777,9 +779,30 @@ async function serverNow(url: URL) {
 }
 
 function secure(res: Response) {
+	if (res.status === 101) return res
 	const out = new Response(res.body, res)
 	for (const [k, v] of Object.entries(SECURITY_HEADERS)) out.headers.set(k, v)
 	return out
+}
+
+// El panel no carga scripts de fuera ni manda nada a otra web: sus botones usan onclick (de ahí 'unsafe-inline') y la
+// letra viene de Google Fonts
+const ADMIN_CSP =
+	"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+function adminSecure(res: Response) {
+	const out = secure(res)
+	if (out.headers.get('Content-Type')?.includes('text/html')) out.headers.set('Content-Security-Policy', ADMIN_CSP)
+	return out
+}
+
+// Un tope sin su binding en wrangler.jsonc deja pasar todo: que se vea en los registros (una vez por instancia)
+let limiterWarned = false
+function missingLimiter() {
+	if (!limiterWarned) {
+		limiterWarned = true
+		console.error('Falta un binding de ratelimits en wrangler.jsonc: ese tope no se aplica')
+	}
+	return true
 }
 
 function jsonError(status: number, error: string) {

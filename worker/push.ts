@@ -154,7 +154,10 @@ interface SubRow {
 	shared?: number
 }
 
-const ENDPOINT = /^https:\/\/[^\s]{10,1000}$/
+// Solo los servicios de push de los navegadores (Chrome/Android y casi todos los demás: Google; Firefox: Mozilla; Safari:
+// Apple; Edge: Microsoft). El servidor manda peticiones a esa dirección: con cualquier https, podía usarse para que el
+// servidor llamara a donde quisiera quien se suscribe
+const ENDPOINT = /^https:\/\/(?:fcm\.googleapis\.com|android\.googleapis\.com|(?:[a-z0-9-]+\.)*push\.services\.mozilla\.com|(?:[a-z0-9-]+\.)*push\.apple\.com|[a-z0-9-]+\.notify\.windows\.com)\/[^\s]{1,1000}$/
 const KEY = /^[A-Za-z0-9_-]{16,200}$/
 
 export function parseSub(v: unknown): PushSub | null {
@@ -247,6 +250,7 @@ export async function deliverPush(env: PushEnv, n: PushNotice, now: number, sent
 	if (!n.msg) return 0
 	let ok = 0
 	for (const s of subs) {
+		if (!ENDPOINT.test(s.endpoint)) continue
 		const times = (sentTimes.get(s.endpoint) ?? []).filter((t) => now - t < 3_600_000)
 		if (times.length >= PUSH_PER_HOUR) continue
 		times.push(now)

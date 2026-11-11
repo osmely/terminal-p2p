@@ -10,7 +10,7 @@
 // En una base nueva y vacía, antes: npx wrangler d1 migrations apply <base> --remote (crea las tablas)
 
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -48,17 +48,20 @@ if (!Object.keys(tables).length) throw new Error('El archivo no parece una copia
 console.log(`Copia del ${copy.at ?? '?'}:`)
 for (const [t, rows] of Object.entries(tables)) console.log(`  ${t.padEnd(18)} ${rows.length}`)
 const sql = join(tmpdir(), `restaurar-pro-${Date.now()}.sql`)
-writeFileSync(sql, restoreSql(tables))
+// Lleva los datos de las cuentas: solo lo lee tu usuario, y se borra al terminar (en la prueba sin --aplicar queda para mirarlo)
+writeFileSync(sql, restoreSql(tables), { mode: 0o600 })
 console.log(`SQL listo en ${sql}`)
 
 if (!apply) {
-	console.log(`Nada cambiado. Para restaurarla en ${db}, repite con --aplicar.`)
+	console.log(`Nada cambiado. Para restaurarla en ${db}, repite con --aplicar. Cuando lo hayas mirado, borra ${sql}: lleva datos de las cuentas.`)
 	process.exit(0)
 }
 console.log(`\nVas a dejar las tablas de arriba en ${db} exactamente como en la copia: lo de después se pierde.`)
 if ((await ask(`Escribe ${db} para seguir: `)) !== db) {
+	rmSync(sql, { force: true })
 	console.log('Cancelado. No se tocó nada.')
 	process.exit(1)
 }
 const r = spawnSync('npx', ['wrangler', 'd1', 'execute', db, '--remote', '--file', sql, ...(env === 'staging' ? ['--env', 'staging'] : [])], { stdio: 'inherit' })
+rmSync(sql, { force: true })
 process.exit(r.status ?? 1)

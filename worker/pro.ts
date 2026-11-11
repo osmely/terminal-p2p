@@ -10,7 +10,7 @@ import { hex, hmac, sign, unb64url, verify } from './crypto.ts'
 import { adminPage, askKey, pageHead, panel, searchIcon, type AdminTab } from './admin.ts'
 import { authorized } from './metrics.ts'
 import { cubaOffset, inCuba, type D1 } from './rates.ts'
-import { clearWho, readWho, sessionCookie, sessionToken } from './session.ts'
+import { clearWho, clientIp, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, panelUrl, tgEsc, type AlertEnv } from './alerts.ts'
 import { seal, sendBackup, snapshot } from './backup.ts'
 import { GRACE_MS, INCIDENT_NAME, openIncidents, recordIncident, resolveIncident, type Incident } from './incidents.ts'
@@ -773,7 +773,7 @@ async function trialAvailable(db: D1, username: string, print: string) {
 }
 
 // Huella de la IP para los topes: con la clave de Pro, así no se puede volver a la IP
-export const ipPrint = async (req: Request, key: string) => hex(await hmac(key, `ip:${req.headers.get('cf-connecting-ip') ?? 'local'}`)).slice(0, 32)
+export const ipPrint = async (req: Request, key: string) => hex(await hmac(key, `ip:${clientIp(req, 'local')}`)).slice(0, 32)
 
 // Limpieza diaria: las huellas de IP solo valen para el tope del día
 export async function cleanupPro(db: D1, now: number) {
@@ -1894,8 +1894,11 @@ async function proExport(env: ProEnv, kind: string, now: number) {
 			headers: { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="terminalp2p-pro-${day}.json"`, 'Cache-Control': 'no-store' },
 		})
 	const cell = (v: unknown) => {
-		const t = v == null ? '' : String(v)
-		return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
+		let t = v == null ? '' : String(v)
+		// Un texto de fuera (usuario, motivo) que empieza por = + - @ lo abriría la hoja de cálculo como fórmula: con ' delante
+		// es texto. Los números (también los negativos) quedan igual
+		if (typeof v === 'string' && /^[=+\-@\t\r]/.test(t) && !/^[+-]?\d[\d.,]*$/.test(t)) t = `'${t}`
+		return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
 	}
 	const csv = (rows: unknown[][], name: string) =>
 		new Response(rows.map((r) => r.map(cell).join(',')).join('\n') + '\n', {
@@ -2212,7 +2215,7 @@ async function proPage(env: ProEnv, active: AdminTab, title: string, body: strin
 const count = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 
 // Las listas largas van por páginas (?<key>=N, desde 1): nunca se cortan sin avisar
-const pageOf = (url: URL | undefined, key: string) => Math.max(1, Math.trunc(Number(url?.searchParams.get(key) ?? 1)) || 1)
+const pageOf = (url: URL | undefined, key: string) => Math.min(10_000, Math.max(1, Math.trunc(Number(url?.searchParams.get(key) ?? 1)) || 1))
 function pager(url: URL | undefined, key: string, page: number, size: number, total: number) {
 	if (!url || total <= size) return ''
 	const link = (p: number) => {

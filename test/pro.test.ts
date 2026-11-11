@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
-import { readWho, tokenPrint, whoCookie, whoToken } from '../worker/session.ts'
+import { clientIp, readWho, tokenPrint, whoCookie, whoToken } from '../worker/session.ts'
 import { jsAttr, proAdmin as proAdminRaw, proApi, requestRefund, type ProEnv } from '../worker/pro.ts'
 import { setBlock } from '../worker/blocks.ts'
 
@@ -1907,4 +1907,25 @@ test('aviso de pago sin firma: una factura pendiente se consulta a QvaPay como m
 	s.tick(86_400_000)
 	await s.post('/api/pro/webhook', { remote_id: c.body.id })
 	assert.equal(asks(), before + 2)
+})
+
+test('panel: el CSV no deja que un texto de fuera se abra como fórmula; los números quedan igual', async () => {
+	const s = setup()
+	await buy(s)
+	s.db.prepare("UPDATE pro_checkouts SET payer = '=HYPERLINK(\"https://x\",\"y\")'").run()
+	const csv = await (await proAdmin(new Request('https://app.terminalp2p.com/admin/pro?export=pagos', { headers: { Authorization: `Basic ${btoa('x:panel')}` } }), s.env, s.now())).text()
+	const row = csv.split('\n')[1]
+	assert.match(row, /,"'=HYPERLINK\(""https:\/\/x"",""y""\)",/)
+	assert.match(row, /,3\.99,/)
+})
+
+test('topes por IP: IPv4 tal cual, IPv6 por su red /64', () => {
+	const ip = (v?: string) => clientIp(new Request('https://x/', { headers: v ? { 'cf-connecting-ip': v } : {} }))
+	assert.equal(ip('152.206.1.2'), '152.206.1.2')
+	assert.equal(ip('2001:0db8:0a0b:12f0:0000:0000:0000:0001'), '2001:db8:a0b:12f0::/64')
+	// Toda la /64 cuenta como una
+	assert.equal(ip('2001:db8:a0b:12f0::1'), ip('2001:db8:a0b:12f0:ffff:1:2:3'))
+	assert.equal(ip('2001:db8::1'), '2001:db8:0:0::/64')
+	assert.equal(ip('::1'), '0:0:0:0::/64')
+	assert.equal(ip(), 'sin-ip')
 })

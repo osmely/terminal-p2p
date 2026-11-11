@@ -10,8 +10,13 @@
 import { p2pFee } from '../src/qvapay/fees.ts'
 import { COINS } from '../src/terminal/market.ts'
 import { askKey, pageHead, panel, periods } from './admin.ts'
+import { sameSecret } from './crypto.ts'
+import { clientIp } from './session.ts'
 import { cubaDate } from './informal.ts'
 import type { D1 } from './rates.ts'
+
+// sameSecret vive en crypto.ts (también la usa el webhook de Telegram)
+export { sameSecret }
 
 export type EventKind = 'create' | 'take' | 'paid' | 'release' | 'cancel' | 'rate' | 'completed'
 
@@ -376,23 +381,12 @@ export async function loadPublicStats(db: D1, now = Date.now()) {
 
 // ── Panel privado (HTTP Basic con la clave METRICS_KEY) ───────────────
 
-// Igualdad en tiempo constante: se comparan los SHA-256 de las dos cadenas byte a byte, sin
-// cortar en la primera diferencia, para que el tiempo de respuesta no dé pistas de la clave
-export async function sameSecret(a: string, b: string) {
-	const enc = new TextEncoder()
-	const [x, y] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(a)), crypto.subtle.digest('SHA-256', enc.encode(b))])
-	const u = new Uint8Array(x)
-	const v = new Uint8Array(y)
-	let diff = 0
-	for (let i = 0; i < u.length; i++) diff |= u[i] ^ v[i]
-	return diff === 0
-}
 
 // Staging pide la contraseña del panel en todo. Una equivocada cuenta para el tope del panel (10 por minuto e IP): sin
 // esto se podía probar sin fin. La primera visita, que aún no la manda, no cuenta. null: pasa
 export async function stagingGate(req: Request, key: string | undefined, limiter?: { limit(o: { key: string }): Promise<{ success: boolean }> }) {
 	if (await authorized(req, key)) return null
-	if (limiter && /^basic\s/i.test(req.headers.get('authorization') ?? '') && !(await limiter.limit({ key: req.headers.get('cf-connecting-ip') ?? 'sin-ip' })).success)
+	if (limiter && /^basic\s/i.test(req.headers.get('authorization') ?? '') && !(await limiter.limit({ key: clientIp(req) })).success)
 		return Response.json({ error: 'Demasiados intentos: espera un minuto' }, { status: 429, headers: { 'Cache-Control': 'no-store' } })
 	return askKey()
 }

@@ -75,3 +75,16 @@ export async function readWho(cookieHeader: string | null, print: string, key: s
 }
 
 export const clearWho = (url: URL) => cookie(url, WHO_COOKIE, '', 0)
+
+// La IP para los topes: IPv4 tal cual; IPv6 por su red /64 (las 4 primeras partes). Un usuario o un proveedor da a cada
+// conexión una /64 entera, así que contar cada dirección aparte era como no tener tope
+export function clientIp(req: Request, none = 'sin-ip') {
+	const ip = req.headers.get('cf-connecting-ip')
+	if (!ip) return none
+	if (!ip.includes(':')) return ip
+	const [head, tail = ''] = ip.toLowerCase().split('::')
+	const h = head ? head.split(':') : []
+	const t = ip.includes('::') && tail ? tail.split(':') : []
+	const all = ip.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h
+	return `${all.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':')}::/64`
+}
