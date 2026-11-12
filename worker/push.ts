@@ -8,7 +8,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import { num } from '../src/qvapay/types.ts'
 import { accessOf } from './blocks.ts'
-import type { FeedEvent, LiveNamespace, Trade } from './livebook.ts'
+import { autoPauseNote, type FeedEvent, type LiveNamespace, type Trade } from './livebook.ts'
 import type { D1 } from './rates.ts'
 import { readWho, tokenPrint, type Who } from './session.ts'
 import { sendPush, vapidPublic, type PushSub, type Vapid } from './webpush.ts'
@@ -110,7 +110,7 @@ export function ownerPush(e: FeedEvent, trade: Trade | null, now = Date.now()): 
 			const rest = e.event === 'p2p.range_closed' ? 'Era lo que quedaba.' : `Quedan ${usdOf(left)} USD publicados.`
 			return say('taken', `Te tomaron ${usdOf(trade.usd)} USD de tu ${what}`, `${c.name} a ${rate}. ${rest} ${next}`, !sell)
 		}
-		return say('left', `Volvieron ${usdOf(trade.usd)} USD a tu ${what}`, `${c.name}: quien los tomó no completó la operación. Siguen publicados a ${rate}.`)
+		return say('left', `Volvieron ${usdOf(trade.usd)} USD a tu ${what}`, `${c.name}: quien los tomó no completó la operación. ${autoPauseNote(d.pause)}`)
 	}
 	const usd = usdOf(amount)
 	if (e.event === 'p2p.applied') return say('taken', `Tomaron tu ${what} de ${usd} USD`, `${c.name} a ${rate}. ${next}`, !sell)
@@ -118,7 +118,7 @@ export function ownerPush(e: FeedEvent, trade: Trade | null, now = Date.now()): 
 	if (e.event === 'p2p.paid' && sell) return say('paid', 'Te pagaron: comprueba y libera', `${usd} USD · ${c.name} a ${rate}. Mira tu cuenta antes de liberar.`, true)
 	// Al completarse una venta, liberaste tú: solo se avisa en tus compras
 	if (e.event === 'p2p.completed' && !sell && d.status === 'completed') return say('released', `Te liberaron ${usd} USD`, `Se completó tu compra · ${c.name} a ${rate}.`)
-	if (e.event === 'p2p.reopened') return say('left', `Tu ${what} volvió al libro`, `${c.name}: quien la tomó la canceló o se le acabó el plazo. Sigue publicada: ${usd} USD a ${rate}.`)
+	if (e.event === 'p2p.reopened') return say('left', `Tu ${what} quedó libre otra vez`, `${c.name}: quien la tomó la canceló o se le acabó el plazo. ${autoPauseNote(d.pause)} ${usd} USD a ${rate}.`)
 	return null
 }
 

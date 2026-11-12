@@ -1527,6 +1527,7 @@ async function showTakeOfferById(uuid, amount) {
 		return
 	}
 	if (o.isOwner) return renderManage(o)
+	if (o.status === 'open' && o.pause && window.showPaused) return showPaused(o.coin, o.type === 'sell' ? 'ask' : 'bid', o.offer, o.pause)
 	if (o.status !== 'open' || o.pause) return showGone(o.coin, o.type === 'sell' ? 'ask' : 'bid', o.offer, `Está ${(STATUS[o.status] ?? o.status).toLowerCase()}${o.pause ? ' y pausada' : ''}.`)
 	const flex = o.kind === 'flexible'
 	const level = {

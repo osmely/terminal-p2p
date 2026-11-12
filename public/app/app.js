@@ -857,6 +857,7 @@ const ACT_PATH = {
 	back: 'M19 12H9M13 8l-4 4 4 4',
 	edit: 'M4 20h4L19 9l-4-4L4 16v4z',
 	done: 'M5 12.5l4.5 4.5L19 7',
+	pause: 'M9 6v12M15 6v12',
 }
 const actIcon = (d) => `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 // [icono, texto («una venta» o «una compra» va en {s}), explicación al pasar el ratón]
@@ -869,9 +870,12 @@ const ACT = {
 	cancelled: ['out', 'Retiran {s}', 'Su dueño la retiró del libro'],
 	edited: ['edit', 'Cambia {s}', 'Su dueño cambió el precio o el monto'],
 	done: ['done', 'Se completa {s}', 'Operación terminada a este precio'],
+	paused: ['pause', 'Pausan {s}', 'Su dueño la sacó del libro sin cancelarla: nadie la puede tomar hasta que la vuelva a publicar'],
+	autopaused: ['pause', 'Pausa automática a {s}', 'Quien la tomó se fue: QvaPay la pausa unos minutos para que su dueño revise la tasa y luego vuelve sola'],
+	resumed: ['plus', 'Vuelve {s}', 'Terminó la pausa: la oferta vuelve al libro'],
 	gone: ['out', 'Sale {s}', 'La tomó alguien o la retiró su dueño; QvaPay no indica cuál'],
 }
-const ACT_OUT = new Set(['gone', 'taken', 'partial', 'cancelled'])
+const ACT_OUT = new Set(['gone', 'taken', 'partial', 'cancelled', 'paused', 'autopaused'])
 function renderActivity(b) {
 	const items = b.activity.slice(0, 40)
 	// Solo se repinta si cambió algo: repintar con cada lectura del libro haría perder el clic en un nombre
@@ -880,7 +884,7 @@ function renderActivity(b) {
 	$('activity').dataset.key = key
 	const note =
 		b.activitySource === 'feed'
-			? '<li class="act-note">Lo que pasa en el libro según QvaPay: ofertas nuevas, tomadas (enteras o en parte), retiradas y operaciones completadas.</li>'
+			? '<li class="act-note">Lo que pasa en el libro según QvaPay: ofertas nuevas, tomadas (enteras o en parte), retiradas, pausadas y operaciones completadas.</li>'
 			: '<li class="act-note">Ofertas que entran y salen del libro. Las que salen las tomó alguien o las retiró su dueño: QvaPay no indica cuál.</li>'
 	$('activity').innerHTML = items.length
 		? note +

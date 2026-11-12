@@ -6,7 +6,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import { num } from '../src/qvapay/types.ts'
 import { tgEsc } from './alerts.ts'
-import type { FeedEvent, Trade } from './livebook.ts'
+import { autoPauseNote, type FeedEvent, type Trade } from './livebook.ts'
 import type { D1 } from './rates.ts'
 import { appUrl, tellUser, type BotEnv } from './userbot.ts'
 
@@ -57,7 +57,7 @@ export function offerNotice(e: FeedEvent, trade: Trade | null, now = Date.now())
 					e.event === 'p2p.range_closed' ? 'Era lo que quedaba: la oferta salió del libro.' : `Quedan ${usdOf(left)} USD publicados.`
 				}\n\n${next}`,
 			)
-		return say('returned', `↩️ <b>Volvieron ${usdOf(trade.usd)} USD a tu ${what} por rango</b> · ${market}\nQuien los tomó no completó la operación: siguen publicados ${at_}.`)
+		return say('returned', `↩️ <b>Volvieron ${usdOf(trade.usd)} USD a tu ${what} por rango</b> · ${market}\nQuien los tomó no completó la operación. ${tgEsc(autoPauseNote(d.pause))} Precio: ${at_}.`)
 	}
 	const usd = usdOf(amount)
 	if (e.event === 'p2p.applied')
@@ -69,7 +69,7 @@ export function offerNotice(e: FeedEvent, trade: Trade | null, now = Date.now())
 	if (e.event === 'p2p.completed' && !sell && d.status === 'completed')
 		return say('completed', `✅ <b>Te liberaron ${usd} USD</b> · ${market}\nSe completó tu compra ${at_}.`)
 	if (e.event === 'p2p.reopened')
-		return say('reopened', `↩️ <b>Tu ${sell ? 'venta' : 'compra'} volvió al libro</b> · ${market}\nQuien la tomó la canceló o se le acabó el plazo. Sigue publicada: ${usd} USD ${at_}.`)
+		return say('reopened', `↩️ <b>Tu ${sell ? 'venta' : 'compra'} quedó libre otra vez</b> · ${market}\nQuien la tomó la canceló o se le acabó el plazo. ${tgEsc(autoPauseNote(d.pause))} Sigue publicada: ${usd} USD ${at_}.`)
 	return null
 }
 

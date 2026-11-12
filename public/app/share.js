@@ -26,6 +26,7 @@ async function showPublicOffer(uuid, amount) {
 		return renderTake(uuid, o.side, level, o.coin, amount)
 	}
 	if (o?.state === 'gone') return showGone(o.coin, o.side, uuid)
+	if (o?.state === 'paused') return showPaused(o.coin, o.side, uuid, o)
 	// Una privada (no sale en el libro) o una que el libro en vivo no conoce: con la cuenta conectada se lee de QvaPay
 	$('modalBody').innerHTML = `<div class="stack">
 		<h3>Te compartieron una oferta del P2P de QvaPay</h3>
@@ -40,6 +41,23 @@ function showGone(coin, side, exclude, why = 'La tomaron o la retiró su dueño.
 	$('modalBody').innerHTML = `<div class="stack">
 		<h3>Esta oferta ya no está</h3>
 		<p class="muted">${esc(why)}</p>
+		<div id="similar"></div>
+	</div>`
+	fillSimilar(coin, side, exclude)
+}
+
+// Sigue publicada pero en pausa (nadie la puede tomar ahora): por qué y, si es la automática, a qué hora vuelve sola
+function pausedWhy(p) {
+	if (p?.reason === 'taker_left') {
+		const until = p.until ? cubaFmt(p.until, { hour: '2-digit', minute: '2-digit' }) : null
+		return `Quien la tomó se fue y QvaPay la pausa unos minutos para que su dueño revise la tasa. ${until ? `Vuelve sola al mercado a las ${until} (hora de Cuba).` : 'Vuelve sola al mercado en unos minutos.'}`
+	}
+	return 'Su dueño la sacó del mercado un momento, sin cancelarla. Podrás tomarla cuando la vuelva a publicar.'
+}
+function showPaused(coin, side, exclude, pause) {
+	$('modalBody').innerHTML = `<div class="stack">
+		<h3>Esta oferta está en pausa</h3>
+		<p class="muted">${esc(pausedWhy(pause))}</p>
 		<div id="similar"></div>
 	</div>`
 	fillSimilar(coin, side, exclude)

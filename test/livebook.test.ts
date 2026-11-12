@@ -330,3 +330,51 @@ test('libro: se olvida al dueño que no sale en 30 días y no tiene ofertas; lo 
 	assert.equal(b.owners.get('u-old')?.seen, new Date(later + 2 * 3600_000).toISOString().slice(0, 10))
 	assert.ok(b.changedOwners.has('u-old'))
 })
+
+test('feed: pausas. La oferta sale del libro al pausarse (sin contarse como retirada) y vuelve al reanudarse', () => {
+	const b = new Book()
+	b.owners.set('u-ana', { username: 'ana', ops: 40, rating: 4.9, kyc: true, vip: false, gold: false })
+	const kinds = (e: FeedEvent) => {
+		const r = b.apply(e, T)
+		return r ? [r.changed, r.act?.kind ?? null, b.count('BANK_CUP', 'ask')] : null
+	}
+	b.apply(ev('p2p.created', {}, 1), T)
+	// Su dueño la pausa: sale, y en la actividad es una pausa (no «Retiran»)
+	const owner = { reason: 'owner', until: null }
+	assert.deepEqual(kinds(ev('p2p.paused', { pause: owner }, 2)), [true, 'paused', 0])
+	// El mismo aviso por el stream: nada nuevo
+	assert.equal(b.apply(ev('p2p.paused', { pause: owner }, 2), T), null)
+	// El enlace compartido sabe que sigue publicada pero en pausa
+	assert.deepEqual(b.find('o1'), { state: 'paused', coin: 'BANK_CUP', side: 'ask', reason: 'owner', until: null })
+	// La reactiva: vuelve
+	assert.deepEqual(kinds(ev('p2p.resumed', { pause: null }, 3)), [true, 'resumed', 1])
+	assert.equal(b.find('o1').state, 'open')
+	// Se la toman y quien la tomó se va: reabierta y enseguida la pausa automática hasta una hora
+	b.apply(ev('p2p.applied', { status: 'processing' }, 4), T)
+	assert.deepEqual(kinds(ev('p2p.reopened', { pause: null }, 5)), [true, 'reopened', 1])
+	const auto = { reason: 'taker_left', until: at(605) }
+	assert.deepEqual(kinds(ev('p2p.paused', { pause: auto }, 5)), [true, 'autopaused', 0])
+	assert.deepEqual(b.find('o1'), { state: 'paused', coin: 'BANK_CUP', side: 'ask', reason: 'taker_left', until: at(605) })
+	// Un reopened viejo que llega tarde no la mete con la pausa puesta
+	assert.equal(b.apply(ev('p2p.reopened', { pause: null }, 4.5), T), null)
+	assert.equal(b.count('BANK_CUP', 'ask'), 0)
+	// Cualquier evento que traiga una pausa vigente la deja fuera
+	assert.equal(kinds(ev('p2p.reopened', { pause: auto }, 6)), null)
+	assert.equal(b.count('BANK_CUP', 'ask'), 0)
+	// Vence la pausa: vuelve sola
+	assert.deepEqual(kinds(ev('p2p.resumed', { pause: null }, 606)), [true, 'resumed', 1])
+})
+
+test('feed: pausas en una oferta por rango. range_closed paused la saca (y lo que volvió resta) y range_updated resumed la mete', () => {
+	const b = new Book()
+	const r = { uuid: 'r', amount: '100', receive: '105000', offer_kind: 'flexible' as const }
+	b.apply(ev('p2p.range_created', { ...r, available_amount: '100' }, 1), T)
+	b.apply(ev('p2p.range_updated', { ...r, available_amount: '70', change: 'taken' }, 2), T)
+	// La parte vuelve con la pausa automática: sale del libro como pausa y la parte resta del volumen
+	const closed = b.apply(ev('p2p.range_closed', { ...r, available_amount: '100', change: 'paused', pause: { reason: 'taker_left', until: at(600) } }, 3), T)!
+	assert.deepEqual([closed.changed, closed.act?.kind, closed.trade?.ops, closed.trade?.usd], [true, 'autopaused', -1, 30])
+	assert.equal(b.count('BANK_CUP', 'ask'), 0)
+	const back = b.apply(ev('p2p.range_updated', { ...r, available_amount: '100', change: 'resumed', pause: null }, 601), T)!
+	assert.deepEqual([back.changed, back.act?.kind, back.trade], [true, 'resumed', null])
+	assert.equal(b.levels('BANK_CUP', 'ask')[0].usd, 100)
+})

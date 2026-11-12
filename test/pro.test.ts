@@ -1524,7 +1524,10 @@ test('avisos de tus ofertas por Telegram: se activan con Pro y la cuenta confirm
 	assert.equal(text('p2p.paid', { type: 'buy' }), null)
 	assert.equal(text('p2p.completed', { status: 'completed' }), null)
 	assert.match(text('p2p.completed', { type: 'buy', status: 'completed' })!, /Te liberaron 100.00 USD/)
-	assert.match(text('p2p.reopened')!, /Tu venta volvió al libro/)
+	assert.match(text('p2p.reopened')!, /Tu venta quedó libre otra vez[\s\S]*unos minutos en pausa para que revises la tasa[\s\S]*Sigue publicada/)
+	// La pausa y la vuelta al libro no se avisan (la automática ya va en el aviso de arriba; la suya la hizo él)
+	assert.equal(text('p2p.paused', { pause: { reason: 'taker_left', until: '2026-10-27T20:10:00.000Z' } }), null)
+	assert.equal(text('p2p.resumed'), null)
 	assert.equal(text('p2p.created'), null)
 	assert.equal(text('p2p.cancelled'), null)
 	// Rango: lo que te tomaron y lo que queda; lo que vuelve; sin cambio de lo tomado, nada

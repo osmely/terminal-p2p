@@ -9,6 +9,7 @@ import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
 import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2POrder, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
 import { COINS, type Market } from '../terminal/market.ts'
 import { pendingCount, tradeAlerts } from './alerts.ts'
+import { inCuba } from '../../worker/rates.ts'
 import { tradeStats } from './stats.ts'
 import { orderTrades, paymentDetails, peerProfile, toTrades, type Trade } from './trades.ts'
 
@@ -635,7 +636,8 @@ export class Broker {
 		// Estado fresco antes de comprometer nada
 		const o = await acc.client.getOffer(String(b.offer ?? ''))
 		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
-		if (o.status !== 'open' || o.pause) return json(409, { error: 'Esta oferta ya no está disponible' })
+		if (o.status === 'open' && o.pause) return json(409, { error: pausedError(o.pause) })
+		if (o.status !== 'open') return json(409, { error: 'Esta oferta ya no está disponible' })
 		// Lo que viste en la ventana: si su dueño cambió el precio (o el monto de una fija) mientras decidías, no se toma
 		// a ciegas. Solo frena si te perjudica: comprando, que suba; vendiendo, que baje
 		const cur = swapOffer(o)
@@ -724,7 +726,8 @@ export class Broker {
 		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
 		if (o.type !== 'sell') return json(400, { error: 'Comprar ya solo compra a ofertas de venta' })
 		if (o.only_vip) return json(400, { error: 'Esa oferta es solo para cuentas VIP' })
-		if (o.status !== 'open' || o.pause) return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
+		if (o.status === 'open' && o.pause) return json(409, { error: `${pausedError(o.pause)}. Actualizo el precio.` })
+		if (o.status !== 'open') return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
 		const q = swapOffer(o)
 		const maxPrice = Number(b.maxPrice)
 		if (maxPrice > 0 && q.price > maxPrice * (1 + 1e-9)) return json(409, { error: `El precio subió a ${q.price.toLocaleString('en-US')} mientras decidías. Revisa el nuevo precio.` })
@@ -744,7 +747,8 @@ export class Broker {
 		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
 		if (o.type !== 'buy') return json(400, { error: 'Vender ya solo vende a ofertas de compra' })
 		if (o.only_vip) return json(400, { error: 'Esa oferta es solo para cuentas VIP' })
-		if (o.status !== 'open' || o.pause) return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
+		if (o.status === 'open' && o.pause) return json(409, { error: `${pausedError(o.pause)}. Actualizo el precio.` })
+		if (o.status !== 'open') return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
 		const q = swapOffer(o)
 		const minPrice = Number(b.minPrice)
 		if (minPrice > 0 && q.price < minPrice * (1 - 1e-9)) return json(409, { error: `El precio bajó a ${q.price.toLocaleString('en-US')} mientras decidías. Revisa el nuevo precio.` })
@@ -1003,7 +1007,8 @@ export function takeProblem(o: P2POffer | null, amount: number, side: 'buy' | 's
 	if (!o) return 'ya no existe'
 	if (o.coin !== coin || o.type !== (side === 'buy' ? 'sell' : 'buy')) return 'no corresponde a esta orden'
 	if (o.User?.uuid === me) return 'es tuya'
-	if (o.status !== 'open' || o.pause) return 'ya no está disponible'
+	if (o.status === 'open' && o.pause) return o.pause.reason === 'taker_left' ? 'está en pausa unos minutos (se fue quien la tomó)' : 'su dueño la pausó'
+	if (o.status !== 'open') return 'ya no está disponible'
 	if (o.only_vip) return 'es solo para cuentas VIP'
 	if (o.requirements_met === false) return 'pide requisitos que no cumples'
 	// El detalle de una oferta no trae el historial de su dueño (solo el listado del mercado lo trae): si no
@@ -1148,13 +1153,23 @@ async function readJson(req: Request): Promise<Record<string, any>> {
 	return text ? JSON.parse(text) : {}
 }
 
+// Una oferta abierta pero pausada: nadie la puede tomar. La automática (se fue quien la tomó) dice a qué hora vuelve sola
+export function pausedError(p: { reason?: string; until?: string | null }) {
+	if (p.reason === 'taker_left') {
+		const at = p.until ? Date.parse(p.until) : NaN
+		const hhmm = Number.isFinite(at) ? inCuba(at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) : null
+		return `La oferta está en pausa unos minutos porque se fue quien la tomó${hhmm ? `: vuelve al mercado a las ${hhmm}` : ''}`
+	}
+	return 'Su dueño pausó la oferta: no se puede tomar hasta que la vuelva a publicar'
+}
+
 // Errores de QvaPay en lenguaje claro
 function friendly(err: unknown): string {
 	if (!(err instanceof QvaPayError)) return (err as Error).message
 	const map: Record<string, string> = {
 		INSUFFICIENT_SCOPE: 'Tu token no tiene permiso para esto (revisa p2p:buy / p2p:sell en qvapay.com/dev/tokens)',
 		PEER_REQUIREMENTS_NOT_MET: 'No cumples los requisitos del anunciante',
-		OFFER_PAUSED: 'La oferta está pausada',
+		OFFER_PAUSED: 'La oferta está en pausa: su dueño la sacó del mercado o se fue quien la tomó y vuelve en unos minutos',
 		FLEXIBLE_NOT_ENABLED: 'Tu cuenta todavía no puede tomar ofertas por rango',
 		ORDER_ALREADY_ACTIVE: 'Ya tienes una orden activa en esa oferta',
 		ORDER_IN_DISPUTE: 'La orden está en disputa: la resuelve un moderador',

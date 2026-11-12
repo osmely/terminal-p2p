@@ -263,3 +263,13 @@ test('detalle de una operación: con chat=0 trae el estado sin leer el chat', as
 	// No se pidió el chat a QvaPay otra vez
 	assert.equal(fake.chats.filter((c) => c === 'a1').length, 1)
 })
+
+test('tomar una oferta pausada: dice por qué y, si es la pausa automática, a qué hora vuelve (hora de Cuba)', async () => {
+	const { fake, post } = await setup()
+	fake.offers.p1 = { uuid: 'p1', type: 'sell', coin: 'BANK_CUP', amount: '20', receive: '20100', status: 'open', User: { uuid: 's1', username: 'otro' }, pause: { reason: 'taker_left', until: '2026-10-27T20:10:00.000Z' } } as P2POffer
+	const auto = await post('/offer/apply', { offer: 'p1' })
+	assert.equal(auto.status, 409)
+	assert.match(auto.body.error, /en pausa unos minutos porque se fue quien la tomó: vuelve al mercado a las 16:10/)
+	fake.offers.p1.pause = { reason: 'owner', until: null }
+	assert.match((await post('/offer/apply', { offer: 'p1' })).body.error, /Su dueño pausó la oferta/)
+})

@@ -76,7 +76,7 @@ export interface Level {
 // del servidor: new, reopened, taken, partial (una parte de una de rango), returned, cancelled, edited y done (completada)
 export interface BookActivity {
 	t: number
-	kind: 'new' | 'gone' | 'reopened' | 'taken' | 'partial' | 'returned' | 'cancelled' | 'edited' | 'done'
+	kind: 'new' | 'gone' | 'reopened' | 'taken' | 'partial' | 'returned' | 'cancelled' | 'edited' | 'done' | 'paused' | 'autopaused' | 'resumed'
 	side: 'ask' | 'bid'
 	price: number
 	usd: number

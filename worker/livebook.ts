@@ -8,7 +8,7 @@
 import { COINS, isOutlier, toLevel, type Level } from '../src/terminal/market.ts'
 import { num, type P2POffer } from '../src/qvapay/types.ts'
 import { hex, hmac } from './crypto.ts'
-import type { D1 } from './rates.ts'
+import { inCuba, type D1 } from './rates.ts'
 
 // Lo que se usa del espacio del Durable Object (así este archivo no depende de los tipos de Cloudflare)
 export interface LiveNamespace {
@@ -84,7 +84,25 @@ export interface FeedEvent {
 		owner_vip?: boolean
 		requirements?: Record<string, number> | null
 		change?: string | null
+		// La pausa vigente (va en todos los eventos): la puso su dueño (sin fin) o es la automática tras irse quien la tomó
+		// (taker_left, vuelve sola en until). Una oferta open con pausa no se puede tomar: está fuera del libro
+		pause?: Pause | null
 	}
+}
+
+export interface Pause {
+	reason: 'owner' | 'taker_left' | string
+	until: string | null
+}
+
+// Para los avisos al dueño cuando se le va quien tomó su oferta: QvaPay la deja unos minutos en pausa (10 por defecto)
+// para que revise la tasa y luego vuelve sola. Con la hora si el evento ya la trae (las de rango); si no, en general
+export function autoPauseNote(pause: Pause | null | undefined) {
+	const at = pause?.reason === 'taker_left' && pause.until ? Date.parse(pause.until) : NaN
+	const hhmm = Number.isFinite(at) ? inCuba(at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) : null
+	return hhmm
+		? `QvaPay la tiene en pausa para que revises la tasa: vuelve sola al libro a las ${hhmm}.`
+		: 'QvaPay la deja unos minutos en pausa para que revises la tasa y después vuelve sola al libro.'
 }
 
 export interface LiveOffer {
@@ -105,7 +123,8 @@ export interface LiveOffer {
 }
 
 // Lo que pasó en el libro, para la actividad del terminal
-export type ActKind = 'new' | 'reopened' | 'taken' | 'partial' | 'returned' | 'cancelled' | 'edited' | 'done'
+// paused: su dueño la sacó sin cancelarla; autopaused: QvaPay la pausa unos minutos tras irse quien la tomó; resumed: vuelve
+export type ActKind = 'new' | 'reopened' | 'taken' | 'partial' | 'returned' | 'cancelled' | 'edited' | 'done' | 'paused' | 'autopaused' | 'resumed'
 export interface Act {
 	t: number
 	kind: ActKind
@@ -138,7 +157,7 @@ export const OWNER_KEEP_DAYS = 30
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 26
+export const LIVE_VERSION = 27
 
 export interface Applied {
 	coin: string
@@ -187,7 +206,7 @@ export class Book {
 	owners = new Map<string, Owner>()
 	gone = new Map<string, number>()
 	// De qué mercado y lado era cada oferta que salió (para el enlace compartido de una oferta que ya no está)
-	left = new Map<string, { coin: string; side: Side }>()
+	left = new Map<string, { coin: string; side: Side; pause?: Pause }>()
 	// Lo que cambió desde la última vez que se guardó
 	changed = new Set<string>()
 	changedOwners = new Set<string>()
@@ -227,7 +246,14 @@ export class Book {
 		if (e.event === 'p2p.completed') return out(false, act('done', amount))
 		if (e.event === 'p2p.paid') return null
 
-		const put = (e.event === 'p2p.created' || e.event === 'p2p.reopened' || e.event === 'p2p.range_created' || e.event === 'p2p.range_updated') && d.status === 'open' && usd > 0
+		// Pausada (p2p.paused, o range_closed con change paused): sigue open pero nadie la puede tomar, así que sale del libro
+		// hasta su p2p.resumed (o range_updated con change resumed). Cualquier evento que traiga una pausa vigente, igual
+		const paused = !!d.pause || e.event === 'p2p.paused' || (e.event === 'p2p.range_closed' && d.change === 'paused')
+		const put =
+			!paused &&
+			(e.event === 'p2p.created' || e.event === 'p2p.reopened' || e.event === 'p2p.resumed' || e.event === 'p2p.range_created' || e.event === 'p2p.range_updated') &&
+			d.status === 'open' &&
+			usd > 0
 		if (put) {
 			const o: LiveOffer = {
 				uuid: d.uuid,
@@ -252,16 +278,17 @@ export class Book {
 			this.left.delete(o.uuid)
 			// Qué pasó: nueva, reabierta, o en una de rango, una parte tomada, una parte que volvió o editada
 			let a: Act | null
-			if (!had) a = act(e.event === 'p2p.reopened' ? 'reopened' : 'new', usd)
+			if (!had) a = act(e.event === 'p2p.reopened' ? 'reopened' : e.event === 'p2p.resumed' || d.change === 'resumed' ? 'resumed' : 'new', usd)
 			else if (d.change === 'taken' || (d.change == null && usd < had.usd && price === had.price)) a = act('partial', had.usd - usd)
 			else if (d.change === 'returned') a = act('returned', usd - had.usd)
 			else if (price !== had.price || usd !== had.usd) a = act('edited', usd)
 			else a = null
 			return out(true, a, !!o.owner && !this.owners.has(o.owner))
 		}
-		// Sale del libro: tomada entera, cancelada por su dueño o cerrada. Pasar de fija a por rango no es salir
+		// Sale del libro: tomada entera, cancelada por su dueño, cerrada o pausada. Pasar de fija a por rango no es salir
 		this.gone.set(d.uuid, at)
-		this.left.set(d.uuid, { coin: d.coin, side })
+		const pause: Pause | undefined = paused ? { reason: d.pause?.reason ?? 'owner', until: d.pause?.until ?? null } : undefined
+		this.left.set(d.uuid, pause ? { coin: d.coin, side, pause } : { coin: d.coin, side })
 		if (had) {
 			this.offers.delete(d.uuid)
 			this.changed.add(d.uuid)
@@ -270,6 +297,8 @@ export class Book {
 		const converted = e.event === 'p2p.cancelled' && d.offer_kind === 'flexible' && d.status === 'open'
 		const taken = e.event === 'p2p.applied' || (e.event === 'p2p.range_closed' && d.change === 'taken')
 		const rest = had?.usd ?? (flexible ? num(d.available_amount ?? 0) || amount : amount)
+		// Una pausa de algo que no estaba en el libro (otra pausa encima, o ya fuera) no es noticia
+		if (pause) return out(!!had, had ? act(pause.reason === 'taker_left' ? 'autopaused' : 'paused', rest, had.price) : null)
 		return out(!!had, converted ? null : act(taken ? 'taken' : 'cancelled', rest, had?.price ?? price))
 	}
 
@@ -444,11 +473,16 @@ export class Book {
 
 	// Una oferta por su uuid (el enlace que comparte su dueño): abierta, ya fuera del libro (con su mercado y lado) o
 	// desconocida (las privadas no salen en el feed)
-	find(uuid: string): { state: 'open'; coin: string; side: Side; level: Level } | { state: 'gone'; coin: string; side: Side } | { state: 'unknown' } {
+	// paused: sigue publicada pero pausada (por su dueño, o la automática hasta until): aún no se puede tomar
+	find(
+		uuid: string,
+	): { state: 'open'; coin: string; side: Side; level: Level } | { state: 'gone'; coin: string; side: Side } | { state: 'paused'; coin: string; side: Side; reason: string; until: string | null } | { state: 'unknown' } {
 		const o = this.offers.get(uuid)
 		if (o) return { state: 'open', coin: o.coin, side: o.side, level: this.levelOf(o) }
 		const l = this.left.get(uuid)
-		return l ? { state: 'gone', ...l } : { state: 'unknown' }
+		if (!l) return { state: 'unknown' }
+		if (l.pause) return { state: 'paused', coin: l.coin, side: l.side, reason: l.pause.reason, until: l.pause.until }
+		return { state: 'gone', coin: l.coin, side: l.side }
 	}
 
 	private levelOf(o: LiveOffer): Level {
