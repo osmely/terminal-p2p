@@ -272,6 +272,8 @@ async function loadInformal() {
 }
 
 function selectCoin(tick) {
+	// Desde el mercado «Acciones · QvaPay» (stocks.js) se vuelve a los del P2P
+	window.TPStocks?.leave()
 	state.coin = tick
 	store.set('coin', tick)
 	state.book = null
@@ -305,14 +307,19 @@ document.addEventListener('error', (e) => e.target?.matches?.('.coin-ic img') &&
 function marketRows(query) {
 	const q = (query ?? '').trim().toLowerCase()
 	const rows = state.overview.filter((c) => !q || c.name.toLowerCase().includes(q) || c.tick.toLowerCase().includes(q) || c.unit.toLowerCase().includes(q))
-	if (!rows.length) return '<div class="empty">Sin resultados</div>'
-	return rows
-		.map(
-			(c) => `<button class="mrow ${c.tick === state.coin ? 'active' : ''}" data-tick="${c.tick}" role="option" aria-selected="${c.tick === state.coin}">
+	// El mercado «Acciones · QvaPay» (stocks.js) va al final, como uno más
+	const stocks = window.TPStocks?.row(query) ?? ''
+	const here = (c) => c.tick === state.coin && !window.TPStocks?.on
+	if (!rows.length && !stocks) return '<div class="empty">Sin resultados</div>'
+	return (
+		rows
+			.map(
+				(c) => `<button class="mrow ${here(c) ? 'active' : ''}" data-tick="${c.tick}" role="option" aria-selected="${here(c)}">
 				<span class="mmeta">${coinIcon(c)}<span class="mname"><b>${esc(c.name)}</b><span>QUSD/${esc(c.unit)}${c.count24h ? ` · ${c.count24h} ops 24 h` : ''}</span></span></span>
 				${price(c.bid, c.avgBuy, 'bid')}${price(c.ask, c.avgSell, 'ask')}</button>`,
-		)
-		.join('')
+			)
+			.join('') + stocks
+	)
 }
 
 // Tira horizontal de mercados (pantallas sin la columna de mercados)
@@ -325,15 +332,18 @@ function renderMarkets() {
 // rehace si cambian los mercados o el activo, para no recargar los iconos en cada refresco del libro
 let railKey = ''
 function renderRail() {
-	const key = `${state.coin}|${state.overview.map((c) => `${c.tick}:${c.bid}:${c.ask}`).join(',')}`
+	const stocks = window.TPStocks?.rail() ?? ''
+	const key = `${state.coin}|${stocks}|${state.overview.map((c) => `${c.tick}:${c.bid}:${c.ask}`).join(',')}`
 	if (key === railKey) return
 	railKey = key
-	$('marketRail').innerHTML = state.overview
-		.map((c) => {
-			const tip = `${c.name}${c.bid ? ` · compra ${fmtP(c.bid)}` : ''}${c.ask ? ` · venta ${fmtP(c.ask)}` : ''}`
-			return `<button class="rail-btn ${c.tick === state.coin ? 'active' : ''}" data-tick="${c.tick}" title="${esc(tip)}" aria-label="${esc(c.name)}" aria-pressed="${c.tick === state.coin}">${coinIcon(c)}</button>`
-		})
-		.join('')
+	const here = (c) => c.tick === state.coin && !window.TPStocks?.on
+	$('marketRail').innerHTML =
+		state.overview
+			.map((c) => {
+				const tip = `${c.name}${c.bid ? ` · compra ${fmtP(c.bid)}` : ''}${c.ask ? ` · venta ${fmtP(c.ask)}` : ''}`
+				return `<button class="rail-btn ${here(c) ? 'active' : ''}" data-tick="${c.tick}" title="${esc(tip)}" aria-label="${esc(c.name)}" aria-pressed="${here(c)}">${coinIcon(c)}</button>`
+			})
+			.join('') + stocks
 }
 
 // Sin la columna de mercados (móvil y pantallas medianas), la misma lista se abre como una hoja desde abajo
@@ -376,6 +386,7 @@ function render() {
 		$('pairIcon').innerHTML = coinIcon(iconOf)
 	}
 	$('pairSub').textContent = `Precio en ${meta.unit} por cada USD de saldo QvaPay`
+	if (window.TPStocks?.on) window.TPStocks.pair()
 	if (!b) {
 		$('asks').innerHTML = $('bids').innerHTML = '<div class="empty">Cargando…</div>'
 		return
@@ -1729,10 +1740,12 @@ function bind() {
 	$('marketList').addEventListener('click', (e) => {
 		const row = e.target.closest('[data-tick]')
 		if (row) selectCoin(row.dataset.tick)
+		else if (e.target.closest('[data-stocks]')) window.TPStocks?.open()
 	})
 	$('marketRail').addEventListener('click', (e) => {
 		const btn = e.target.closest('[data-tick]')
 		if (btn) selectCoin(btn.dataset.tick)
+		else if (e.target.closest('[data-stocks]')) window.TPStocks?.open()
 	})
 	// El par: en escritorio abre la columna si estaba colapsada y va al buscador; sin columna, abre la hoja
 	$('pairBtn').addEventListener('click', () => {
@@ -1823,6 +1836,7 @@ function bind() {
 		store.set('theme', next)
 		themeHistory()
 		themeCandles()
+		window.TPStocks?.theme()
 		drawActive()
 	})
 

@@ -2637,9 +2637,11 @@ document.addEventListener('paste', (e) => {
 })
 
 // Al llegar sin token guardado se pide, una vez por pestaña: cerrándola se sigue viendo el libro. No si al entrar ya
-// se abrió otra cosa (una oferta por su enlace, la invitación a Pro) ni con la cuenta bloqueada
+// se abrió otra cosa (una oferta por su enlace, la invitación a Pro) ni con la cuenta bloqueada. Tampoco entrando a
+// las acciones de QvaPay, que se miran sin cuenta (stocks.js carga después: se mira el enlace y lo guardado)
 function askToken() {
 	if (bk.acct.connected || bk.acct.blocked || !$('modal').hidden) return
+	if (window.TPStocks?.on || /^#acciones/.test(location.hash) || store.get('stk.on', false)) return
 	try {
 		if (sessionStorage.getItem('tp-asked-token')) return
 		sessionStorage.setItem('tp-asked-token', '1')

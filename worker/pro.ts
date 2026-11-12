@@ -20,7 +20,7 @@ import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from '
 import { COINS } from '../src/terminal/market.ts'
 import { liveClients, liveSimulate, liveStatus, type LagStats, type LiveClient, type LiveEnv, type LiveState } from './livebook.ts'
 import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
-import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS } from './ratealerts.ts'
+import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS, stockOf } from './ratealerts.ts'
 import { offerAlertsOn, setOfferAlerts } from './offeralerts.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
 import { BODY_MAX, ctaOf, hideMessages, isSegment, listInbox, markRead, retireMessage, SEGMENTS, segmentAccounts, sendInbox, sentMessages, TITLE_MAX, type InboxEnv } from './inbox.ts'
@@ -1147,7 +1147,10 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 				await setOfferAlerts(db, license, who?.uuid ?? '', !!b.on, now)
 				t.detail = b.on ? 'Activó los avisos de sus ofertas' : 'Quitó los avisos de sus ofertas'
 			} else t.skip = true
-			return json(200, { alerts: await listAlerts(db, license), offers: await offerAlertsOn(db, license), telegram: await linked(db, license), rates: await latestRates(db, COINS.map((c) => c.tick), now), max: MAX_ALERTS })
+			// Con la tasa de cada mercado y el precio de las acciones de sus avisos
+			const alerts = await listAlerts(db, license)
+			const stockKeys = [...new Set(alerts.map((x) => x.coin).filter((c) => stockOf(c)))]
+			return json(200, { alerts, offers: await offerAlertsOn(db, license), telegram: await linked(db, license), rates: await latestRates(db, [...COINS.map((c) => c.tick), ...stockKeys], now, fetcher), max: MAX_ALERTS })
 		}
 		if (route === 'POST /pro/telegram/webhook') {
 			t.skip = true

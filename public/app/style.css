@@ -1128,3 +1128,69 @@ a.icon-btn { text-decoration: none; }
 .an-heattabs .seg-tab { font-size: 12.5px; }
 .an-dot { fill: var(--accent); }
 .an-pdf .an-heattabs { display: none; }
+
+/* ══ Mercado «Acciones · QvaPay» (stocks.js, experimental, solo mirar) ═ */
+/* Elegido, ocupa el sitio del gráfico, el libro, la lectura y las operaciones del P2P */
+.area-stk { grid-area: stk; display: none; }
+body.stk-on .layout { grid-template-areas: 'markets stk stk'; grid-template-rows: auto; }
+body.stk-on .layout > .area-chart, body.stk-on .layout > .area-book, body.stk-on .layout > .area-insights, body.stk-on .layout > .area-orders { display: none; }
+body.stk-on .layout > .area-stk { display: flex; }
+body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: none; }
+.area-stk .panel-head h2 { display: flex; align-items: center; gap: 8px; }
+.area-stk .panel-head .panel-note { margin: 0; }
+.stk-beta { padding: 1px 6px; border-radius: 5px; background: var(--accent-bg); color: var(--accent); font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.stk-mic { background: var(--accent-bg); color: var(--accent); }
+.stk-mic::before { content: none; }
+.stk-body { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: min(640px, calc(100dvh - 190px)); }
+.stk-list { border-right: 1px solid var(--line); overflow-y: auto; padding: 6px 0; }
+.stk-row { width: 100%; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px 12px; border: 0; border-left: 2px solid transparent; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.stk-row:hover { background: var(--surface-2); }
+.stk-row.active { background: var(--accent-bg); border-left-color: var(--accent); }
+.stk-name { display: flex; flex-direction: column; min-width: 0; }
+.stk-name b { font-size: 12.5px; font-weight: 600; }
+.stk-name span { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stk-px { display: flex; flex-direction: column; align-items: flex-end; font-size: 12px; }
+.stk-px small { font-size: 11px; }
+.stk-main { display: flex; flex-direction: column; min-width: 0; padding: 14px 16px 16px; gap: 12px; }
+.stk-head { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; }
+.stk-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.stk-title .coin-ic { width: 32px; height: 32px; font-size: 14px; }
+.stk-title h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.stk-title p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.stk-price { display: flex; align-items: baseline; gap: 10px; }
+.stk-price b { font-size: 24px; font-weight: 600; }
+.stk-price span { font-size: 13px; }
+.stk-price small { font-size: 11.5px; color: var(--muted); }
+.stk-stats { display: grid; grid-template-columns: repeat(6, auto); gap: 4px 22px; margin: 0; flex-basis: 100%; }
+.stk-stats dt { font-size: 11px; color: var(--muted); }
+.stk-stats dd { margin: 2px 0 0; font-size: 12.5px; white-space: nowrap; }
+.stk-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.stk-range { font-size: 12.5px; color: var(--muted); }
+.stk-range .bid, .stk-head .bid, .stk-px .bid { color: var(--bid); }
+.stk-range .ask, .stk-head .ask, .stk-px .ask { color: var(--ask); }
+.stk-alert { margin-left: auto; }
+.stk-star { color: var(--warn); font-size: 11px; }
+.stk-chart-wrap { position: relative; flex: 1; min-height: 300px; }
+.stk-chart { position: absolute; inset: 0; }
+.stk-chart-msg { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--muted); font-size: 12.5px; }
+.stk-note { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.stk-note a { color: var(--accent); }
+@media (max-width: 1280px) {
+	body.stk-on .layout { grid-template-areas: 'stk stk'; }
+}
+@media (max-width: 900px) {
+	body.stk-on .view-tabs { display: none; }
+	body.stk-on .layout { grid-template-areas: none; }
+	.area-stk .panel-head { flex-wrap: wrap; }
+	.area-stk .panel-head .panel-note { text-align: left; }
+	/* Las acciones, en una fila que se desliza */
+	.stk-body { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+	.stk-list { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 12px; }
+	.stk-row { flex: none; width: auto; grid-template-columns: auto auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+	.stk-row.active { border-color: var(--accent); }
+	.stk-row .coin-ic, .stk-name span { display: none; }
+	.stk-main { padding: 12px; }
+	.stk-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
+	.stk-chart-wrap { min-height: 260px; }
+	.stk-alert { margin-left: 0; }
+}

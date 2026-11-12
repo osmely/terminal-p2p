@@ -130,14 +130,20 @@ async function acctAlerts(d) {
 		}
 	if (!$('acctAlerts')) return
 	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin), unit: unitOf(state.coin) }]
-	const now = (coin) => (d.rates[coin] ? `ahora ${fmtP(d.rates[coin])}` : 'sin tasa ahora')
+	// Las acciones de QvaPay (stocks.js): su «mercado» es stock:NVDA y avisan por su precio en USD
+	const stockOf = (c) => (String(c).startsWith('stock:') ? String(c).slice(6) : null)
+	const stockList = window.TPStocks?.names() ?? [['SPY', 'S&P 500'], ['NVDA', 'NVIDIA'], ['TSLA', 'Tesla'], ['QQQ', 'Nasdaq 100'], ['CRCL', 'Circle'], ['MSTR', 'Strategy'], ['MSFT', 'Microsoft'], ['AAPL', 'Apple'], ['META', 'Meta'], ['GOOGL', 'Alphabet'], ['AMZN', 'Amazon']]
+	const alertName = (c) => (stockOf(c) ? `${stockOf(c)} (acción)` : nameOf(c))
+	const rateOf = (c) => d.rates[c] ?? (stockOf(c) ? window.TPStocks?.price(stockOf(c)) : null)
+	const now = (coin) => (rateOf(coin) ? `ahora ${fmtP(rateOf(coin))}` : stockOf(coin) ? 'sin precio ahora' : 'sin tasa ahora')
 	const list = d.alerts
 		.map(
 			(x) =>
-				`<li><span>${esc(nameOf(x.coin))} · cuando ${x.dir === 'up' ? 'suba de' : 'baje de'} <b class="mono">${fmtP(x.price)}</b><small class="muted"> · ${now(x.coin)}${x.armed ? '' : ` · avisó el ${acctDay(x.fired_at)} (${fmtP(x.fired_rate)})`}</small></span><button class="link small" data-alert-del="${x.id}">Quitar</button></li>`,
+				`<li><span>${esc(alertName(x.coin))} · cuando ${x.dir === 'up' ? 'suba de' : 'baje de'} <b class="mono">${fmtP(x.price)}</b><small class="muted"> · ${now(x.coin)}${x.armed ? '' : ` · avisó el ${acctDay(x.fired_at)} (${fmtP(x.fired_rate)})`}</small></span><button class="link small" data-alert-del="${x.id}">Quitar</button></li>`,
 		)
 		.join('')
-	const coin = d.alerts.at(-1)?.coin ?? state.coin
+	const picked = window.TPStocks?.takePick() ?? null
+	const coin = picked ?? (window.TPStocks?.on ? null : d.alerts.at(-1)?.coin) ?? (window.TPStocks?.on ? `stock:${window.TPStocks.current()}` : state.coin)
 	$('acctAlerts').innerHTML = `<div class="stack">
 		<section class="sec-box">
 			<p class="sec-box-t">Telegram</p>
@@ -154,15 +160,15 @@ async function acctAlerts(d) {
 			<p class="hint">Solo tus ofertas públicas: QvaPay no avisa de las privadas. En las de rango, de lo que te toman y lo que vuelve (QvaPay no avisa del pago de cada parte).</p>
 		</section>
 		<section class="sec-box">
-			<p class="sec-box-t">Tasa QvaPay</p>
-		${list ? `<ul class="acct-list">${list}</ul>` : '<p class="muted small">Te escribimos cuando la Tasa QvaPay de un mercado suba o baje del valor que pongas.</p>'}
+			<p class="sec-box-t">Tasa QvaPay y acciones</p>
+		${list ? `<ul class="acct-list">${list}</ul>` : '<p class="muted small">Te escribimos cuando la Tasa QvaPay de un mercado, o el precio de una acción de QvaPay, suba o baje del valor que pongas.</p>'}
 		${
 			d.alerts.length < d.max
 				? `<div class="grid2">
-				<label class="field">Mercado<select class="input" id="alCoin">${markets.map((m) => `<option value="${m.tick}" ${m.tick === coin ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+				<label class="field">Mercado<select class="input" id="alCoin"><optgroup label="Tasa QvaPay">${markets.map((m) => `<option value="${m.tick}" ${m.tick === coin ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</optgroup><optgroup label="Acciones de QvaPay">${stockList.map(([s, n]) => `<option value="stock:${esc(s)}" ${`stock:${s}` === coin ? 'selected' : ''}>${esc(s)} · ${esc(n)}</option>`).join('')}</optgroup></select></label>
 				<label class="field">Avisarme cuando<select class="input" id="alDir"><option value="up">suba de</option><option value="down">baje de</option></select></label>
 			</div>
-			<label class="field">Tasa por USD<input class="input" id="alPrice" inputmode="decimal" data-num autocomplete="off" /></label>
+			<label class="field"><span id="alPriceLabel">Tasa por USD</span><input class="input" id="alPrice" inputmode="decimal" data-num autocomplete="off" /></label>
 			<p class="hint" id="alNow"></p>
 			<button class="btn block" id="alAdd">Añadir aviso</button>`
 				: `<p class="hint">Tienes ${d.max} avisos, el máximo: quita alguno para poner otro.</p>`
@@ -171,8 +177,11 @@ async function acctAlerts(d) {
 	</div>`
 	const sync = () => {
 		const c = $('alCoin').value
-		$('alNow').textContent = d.rates[c] ? `La Tasa QvaPay de ${nameOf(c)} ahora: ${fmtP(d.rates[c])} ${unitOf(c)}` : ''
-		$('alPrice').placeholder = d.rates[c] ? fmtP(d.rates[c]) : ''
+		const s = stockOf(c)
+		const r = rateOf(c)
+		$('alPriceLabel').textContent = s ? 'Precio en USD' : 'Tasa por USD'
+		$('alNow').textContent = r ? (s ? `${s} en QvaPay ahora: ${fmtP(r)} USD` : `La Tasa QvaPay de ${nameOf(c)} ahora: ${fmtP(r)} ${unitOf(c)}`) : ''
+		$('alPrice').placeholder = r ? fmtP(r) : ''
 	}
 	$('alTg')?.addEventListener('click', acctTelegram)
 	$('tgOff')?.addEventListener('click', async () => {

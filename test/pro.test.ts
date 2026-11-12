@@ -48,6 +48,8 @@ function fakeQvaPay() {
 	const transferMode = { value: 'ok' as 'ok' | 'noperm' | 'busy' }
 	// Avisos a Telegram: se apuntan aquí
 	const telegram: { chat_id: string; text: string; url: string }[] = []
+	// Precio de cada acción en QvaPay (worker/stocks.ts)
+	const stocks = new Map<string, number>()
 	const fetcher = (async (input: string | URL, init?: RequestInit) => {
 		const url = String(input)
 		if (url.startsWith('https://api.telegram.org/')) {
@@ -68,6 +70,9 @@ function fakeQvaPay() {
 			telegram.push({ chat_id: b.chat_id, text: b.text, url: b.reply_markup?.inline_keyboard?.[0]?.[0]?.url })
 			return Response.json({ ok: true })
 		}
+		// Cotización pública de una acción (sin cuenta): la que diga stocks
+		const sq = url.match(/\/stocks\/([A-Z]+)\?type=quote$/)
+		if (sq) return stocks.has(sq[1]) ? Response.json({ symbol: sq[1], name: sq[1], price: stocks.get(sq[1]) }) : new Response('{}', { status: 404 })
 		const h = new Headers(init?.headers)
 		calls.push(url.replace('https://api.qvapay.com', ''))
 		if (h.get('app-id') !== 'app' || h.get('app-secret') !== 'secreto') return new Response('{"error":"credenciales"}', { status: 401 })
@@ -98,7 +103,7 @@ function fakeQvaPay() {
 		return new Response('{}', { status: 404 })
 	}) as typeof fetch
 	const pay = (uuid: string, username = 'ana', amount?: number) => Object.assign(invoices.get(uuid)!, { status: 'paid', PaidBy: { uuid: `u-${username}`, username }, ...(amount ? { amount } : {}) })
-	return { fetcher, pay, calls, invoices, telegram, transfers, transferMode }
+	return { fetcher, pay, calls, invoices, telegram, transfers, transferMode, stocks }
 }
 
 const T0 = Date.parse('2026-10-25T12:00:00Z')
@@ -1490,6 +1495,35 @@ test('avisos de tasa por Telegram: solo con Pro, hasta 5; avisan una vez al cruz
 	rate(1300)
 	s.db.prepare('UPDATE pro_rate_alerts SET armed = 1').run()
 	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+})
+
+test('avisos de acciones por Telegram (stock:NVDA): con su precio en QvaPay, el mismo cupo de 5 y un enlace a la acción en el terminal', async () => {
+	const s = setup({ TELEGRAM_BOT_TOKEN: 'bot' })
+	const { checkAlerts } = await import('../worker/ratealerts.ts')
+	await s.trial(P1, 'ana')
+	s.db.prepare('INSERT INTO pro_telegram (license, chat_id, linked_at) VALUES (?, ?, ?)').run('qp:ana', 555, s.now())
+	s.q.stocks.set('NVDA', 165.11)
+	const add = (b: Record<string, unknown>) => s.post('/pro/alerts/add', { print: P1, username: 'ana', ...b })
+	// Una que QvaPay no vende, no
+	assert.equal((await add({ coin: 'stock:XYZ', dir: 'up', price: 1 })).body.error, 'Elige un mercado')
+	assert.equal((await add({ coin: 'stock:NVDA', dir: 'down', price: 0 })).body.error, 'Pon el precio al que quieres el aviso')
+	const r = await add({ coin: 'stock:NVDA', dir: 'down', price: 160 })
+	assert.deepEqual([r.body.alerts.length, r.body.rates['stock:NVDA']], [1, 165.11])
+	// Por encima de 160 no avisa; al bajar de 160, una vez, con el enlace a NVDA
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+	s.q.stocks.set('NVDA', 158.4)
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 1)
+	const msg = s.q.telegram.at(-1)!
+	assert.match(msg.text, /NVDA · NVIDIA[\s\S]*bajó a <b>158.40 USD<\/b> en QvaPay[\s\S]*cuando baje de 160.00/)
+	assert.equal(msg.url, 'https://app.terminalp2p.com/#acciones/NVDA')
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+	// Sin cotización (QvaPay no responde), ni avisa ni se rearma
+	s.q.stocks.delete('NVDA')
+	assert.equal(await checkAlerts(s.env, s.now(), s.q.fetcher), 0)
+	assert.equal((await s.post('/pro/alerts', { print: P1, username: 'ana' })).body.rates['stock:NVDA'], undefined)
+	// Comparten el cupo con los de tasa
+	for (let i = 0; i < 4; i++) await add({ coin: 'ETECSA', dir: 'down', price: 500 + i })
+	assert.match((await add({ coin: 'stock:TSLA', dir: 'up', price: 400 })).body.error, /hasta 5 avisos/)
 })
 
 test('avisos de tus ofertas por Telegram: se activan con Pro y la cuenta confirmada; cada evento del feed, con su texto, solo a quien los activó', async () => {
