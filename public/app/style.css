@@ -296,6 +296,8 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 
 /* ══ Mercados ═════════════════════════════════════════════════════════ */
 .markets-search { padding: 10px 12px 6px; }
+/* Mercados del P2P o acciones de QvaPay (stocks.js) */
+.mk-kind .seg-tab { padding: 4px 10px; font-size: 12.5px; }
 .markets-cols, .mrow { display: grid; grid-template-columns: minmax(0, 1fr) 66px 66px; gap: 6px; padding: 0 12px; align-items: center; }
 .markets-cols { font-size: 11px; color: var(--muted); padding-top: 6px; padding-bottom: 6px; }
 .markets-cols span:not(:first-child), .mrow .num { text-align: right; }
@@ -324,14 +326,15 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 	.layout.mk-closed { grid-template-columns: 44px minmax(0, 1fr) var(--c-book, 390px); }
 	.mk-closed .area-markets > :not(.panel-head):not(.markets-rail) { display: none; }
 	.mk-closed .area-markets .panel-head { flex: none; flex-direction: column-reverse; justify-content: flex-end; gap: 14px; padding: 8px 0; border-bottom: 0; cursor: pointer; }
-	.mk-closed .area-markets h2 { display: none; }
+	.mk-closed .area-markets .mk-kind { display: none; }
+	.rail-kind { margin-top: 6px; position: relative; }
+	.rail-kind::before { content: ''; position: absolute; top: -5px; left: 8px; right: 8px; border-top: 1px solid var(--line); }
 	.mk-closed .markets-rail { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0 10px; overflow-y: auto; scrollbar-width: none; }
 	.rail-btn { flex: none; width: 34px; height: 34px; border: 0; border-radius: 10px; background: none; display: grid; place-items: center; cursor: pointer; }
 	.rail-btn:hover { background: var(--surface-2); }
 	.rail-btn.active { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent); }
 	.rail-btn .coin-ic { width: 24px; height: 24px; }
 	.mk-closed .area-markets .panel-head:hover { background: var(--surface-2); }
-	.mk-closed .area-markets h2 { writing-mode: vertical-rl; rotate: 180deg; color: var(--muted); letter-spacing: 0.04em; }
 	.mk-closed .markets-toggle svg { rotate: 180deg; }
 }
 @media (max-width: 1280px) { .markets-toggle { display: none; } }
@@ -1129,7 +1132,7 @@ a.icon-btn { text-decoration: none; }
 .an-dot { fill: var(--accent); }
 .an-pdf .an-heattabs { display: none; }
 
-/* ══ Mercado «Acciones · QvaPay» (stocks.js, experimental, solo mirar) ═ */
+/* ══ Acciones de QvaPay (stocks.js, experimental) ════════════════════ */
 /* Elegido, ocupa el sitio del gráfico, el libro, la lectura y las operaciones del P2P */
 .area-stk { grid-area: stk; display: none; }
 body.stk-on .layout { grid-template-areas: 'markets stk stk'; grid-template-rows: auto; }
@@ -1138,19 +1141,14 @@ body.stk-on .layout > .area-stk { display: flex; }
 body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: none; }
 .area-stk .panel-head h2 { display: flex; align-items: center; gap: 8px; }
 .area-stk .panel-head .panel-note { margin: 0; }
-.stk-beta { padding: 1px 6px; border-radius: 5px; background: var(--accent-bg); color: var(--accent); font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .stk-mic { background: var(--accent-bg); color: var(--accent); }
 .stk-mic::before { content: none; }
-.stk-body { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: min(640px, calc(100dvh - 190px)); }
-.stk-list { border-right: 1px solid var(--line); overflow-y: auto; padding: 6px 0; }
-.stk-row { width: 100%; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px 12px; border: 0; border-left: 2px solid transparent; background: none; color: var(--text); text-align: left; cursor: pointer; }
-.stk-row:hover { background: var(--surface-2); }
-.stk-row.active { background: var(--accent-bg); border-left-color: var(--accent); }
-.stk-name { display: flex; flex-direction: column; min-width: 0; }
-.stk-name b { font-size: 12.5px; font-weight: 600; }
-.stk-name span { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stk-px { display: flex; flex-direction: column; align-items: flex-end; font-size: 12px; }
-.stk-px small { font-size: 11px; }
+/* En la columna colapsada, cada acción con su símbolo (las iniciales se repiten) */
+.coin-ic.stk-sym { font: 700 7px/1 var(--mono); letter-spacing: -0.03em; }
+.coin-ic.stk-sym::before { content: none; }
+/* Los iconos de QvaPay son siluetas: van con margen dentro del círculo */
+.coin-ic.stk-ic img { inset: 14%; width: 72%; height: 72%; border-radius: 0; object-fit: contain; }
+.stk-body { display: flex; flex-direction: column; min-height: min(640px, calc(100dvh - 190px)); }
 .stk-main { display: flex; flex-direction: column; min-width: 0; padding: 14px 16px 16px; gap: 12px; }
 .stk-head { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; }
 .stk-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -1166,8 +1164,8 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 .stk-stats dd { margin: 2px 0 0; font-size: 12.5px; white-space: nowrap; }
 .stk-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .stk-range { font-size: 12.5px; color: var(--muted); }
-.stk-range .bid, .stk-head .bid, .stk-px .bid { color: var(--bid); }
-.stk-range .ask, .stk-head .ask, .stk-px .ask { color: var(--ask); }
+.stk-range .bid, .stk-head .bid { color: var(--bid); }
+.stk-range .ask, .stk-head .ask { color: var(--ask); }
 .stk-alert { margin-left: auto; }
 .stk-star { color: var(--warn); font-size: 11px; }
 .stk-chart-wrap { position: relative; flex: 1; min-height: 300px; }
@@ -1183,12 +1181,7 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 	body.stk-on .layout { grid-template-areas: none; }
 	.area-stk .panel-head { flex-wrap: wrap; }
 	.area-stk .panel-head .panel-note { text-align: left; }
-	/* Las acciones, en una fila que se desliza */
-	.stk-body { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-	.stk-list { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 12px; }
-	.stk-row { flex: none; width: auto; grid-template-columns: auto auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
-	.stk-row.active { border-color: var(--accent); }
-	.stk-row .coin-ic, .stk-name span { display: none; }
+	.stk-body { min-height: 0; }
 	.stk-main { padding: 12px; }
 	.stk-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
 	.stk-chart-wrap { min-height: 260px; }

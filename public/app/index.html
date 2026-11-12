@@ -89,9 +89,13 @@
 	</nav>
 
 	<main class="layout" id="layout">
-		<aside class="panel area-markets">
+		<aside class="panel area-markets" aria-label="Mercados">
 			<div class="panel-head" id="marketsHead">
-				<h2>Mercados</h2>
+				<!-- La misma lista para los mercados del P2P y las acciones de QvaPay (stocks.js) -->
+				<div class="seg-tabs mk-kind" id="marketKind" role="tablist" aria-label="Qué lista">
+					<button class="seg-tab" data-kind="p2p" role="tab">Mercados</button>
+					<button class="seg-tab" data-kind="stocks" role="tab">Acciones</button>
+				</div>
 				<button class="icon-btn small markets-close" id="marketsClose" aria-label="Cerrar la lista de mercados" title="Cerrar">
 					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
 				</button>
@@ -100,7 +104,7 @@
 				</button>
 			</div>
 			<div class="markets-search"><input class="input" id="marketSearch" placeholder="Buscar…" autocomplete="off" /></div>
-			<div class="markets-cols"><span>Mercado</span><span>Compra</span><span>Venta</span></div>
+			<div class="markets-cols" id="marketCols"><span>Mercado</span><span>Compra</span><span>Venta</span></div>
 			<div class="markets-list" id="marketList"></div>
 			<!-- Con la columna colapsada: un icono por mercado, para cambiar sin abrirla -->
 			<div class="markets-rail" id="marketRail" aria-label="Mercados"></div>
@@ -258,11 +262,10 @@
 		<!-- Mercado «Acciones · QvaPay» (stocks.js, experimental): las acciones que vende QvaPay, solo para mirar -->
 		<section class="panel area-stk" id="stkRoot">
 			<div class="panel-head">
-				<h2>Acciones de QvaPay <span class="stk-beta">Solo mirar</span></h2>
+				<h2>Acciones de QvaPay</h2>
 				<p class="panel-note" id="stkAt" aria-live="polite">Cargando…</p>
 			</div>
 			<div class="stk-body">
-				<div class="stk-list" id="stkList" role="listbox" aria-label="Acciones"></div>
 				<div class="stk-main">
 					<div class="stk-head" id="stkHead"></div>
 					<div class="stk-tools">
@@ -274,7 +277,7 @@
 						<div class="stk-chart" id="stkChart"></div>
 						<p class="stk-chart-msg" id="stkChartMsg" hidden></p>
 					</div>
-					<p class="stk-note">Precios públicos de QvaPay: la cotización de mercado, cada 5 minutos. Comprar y vender se hace en QvaPay, con su diferencia de precio y su comisión (mayores con la bolsa cerrada); hoy no está disponible para las cuentas de Cuba. Terminal P2P no compra ni vende acciones. <a id="stkQvapay" target="_blank" rel="noopener">Ver en QvaPay ↗</a></p>
+					<p class="stk-note">Precios públicos de QvaPay: la cotización de mercado, cada 5 minutos. Comprar y vender se hace en QvaPay. Terminal P2P no compra ni vende acciones.</p>
 				</div>
 			</div>
 		</section>

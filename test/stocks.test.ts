@@ -1,18 +1,28 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cleanHistory, cleanQuote, isStock, isTimeframe, loadHistory, loadQuotes, marketStatus, STOCKS, trimHistory } from '../worker/stocks.ts'
+import { cleanHistory, cleanQuote, historySource, isStock, isTimeframe, loadHistory, loadQuotes, marketStatus, STOCKS, trimHistory } from '../worker/stocks.ts'
 
 test('acciones: solo las de la app de QvaPay y los intervalos que da su histórico', () => {
 	assert.equal(STOCKS.length, 11)
 	assert.ok(isStock('NVDA') && isStock('SPY'))
 	for (const bad of ['nvda', 'XYZ', '', null, 'NVDA;']) assert.equal(isStock(bad), false)
 	assert.ok(isTimeframe('1Y') && !isTimeframe('5Y') && !isTimeframe('toString'))
+	// 1 mes sale del histórico de 1 año (los mismos puntos diarios); los demás, del suyo
+	assert.equal(historySource('1M'), '1Y')
+	for (const tf of ['1H', '24H', '1W', '1Y'] as const) assert.equal(historySource(tf), tf)
 })
 
 test('acciones: la cotización toma solo números válidos y sin precio no vale', () => {
 	const q = cleanQuote('NVDA', { name: 'NVIDIA Corporation', price: '165.11', change: -4.96, changeDollar: -8.62, open: 150.99, high: 0, low: 'x', previousClose: 173.73, volume: 18067343, fiftyTwoWeekHigh: 243.37, fiftyTwoWeekLow: 148.8, ceo: '<script>' })
-	assert.deepEqual(q, { symbol: 'NVDA', name: 'NVIDIA', fullName: 'NVIDIA Corporation', price: 165.11, change: -4.96, changeDollar: -8.62, open: 150.99, high: null, low: null, previousClose: 173.73, volume: 18067343, high52: 243.37, low52: 148.8 })
+	assert.deepEqual(q, { symbol: 'NVDA', name: 'NVIDIA', fullName: 'NVIDIA Corporation', price: 165.11, change: -4.96, changeDollar: -8.62, open: 150.99, high: null, low: null, previousClose: 173.73, volume: 18067343, high52: 243.37, low52: 148.8, image: 'https://www.qvapay.com/img/stocks/NVDA.svg' })
 	assert.equal(cleanQuote('NVDA', { price: 0 }), null)
+	// El icono, solo si es de la carpeta de iconos de QvaPay
+	assert.equal(cleanQuote('SPY', { price: 1, image: 'https://www.qvapay.com/img/stocks/SPY.svg' })?.image, 'https://www.qvapay.com/img/stocks/SPY.svg')
+	for (const bad of ['https://evil.com/img/stocks/SPY.svg', 'http://www.qvapay.com/img/stocks/SPY.svg', 'https://www.qvapay.com/img/stocks/../x.svg', 'javascript:alert(1)', 42, undefined])
+		assert.equal(cleanQuote('SPY', { price: 1, image: bad })?.image, '/stocks-ic/SPY.svg')
+	// Las que tienen icono en QvaPay lo llevan aunque la respuesta no lo traiga (su cotización suelta no lo trae)
+	assert.equal(cleanQuote('NVDA', { price: 1 })?.image, 'https://www.qvapay.com/img/stocks/NVDA.svg')
+	assert.equal(cleanQuote('NVDA', { price: 1, image: 'https://evil.com/x.svg' })?.image, 'https://www.qvapay.com/img/stocks/NVDA.svg')
 	assert.equal(cleanQuote('NVDA', null), null)
 	assert.equal(cleanQuote('SPY', { price: 761.32 })?.fullName, 'S&P 500')
 })
@@ -60,6 +70,17 @@ test('acciones: lo intradía de QvaPay viene en hora de Nueva York escrita como 
 	assert.deepEqual(daily, [[s('2026-11-12T00:00:00Z'), 5]])
 })
 
+test('acciones: sin histórico de un intervalo (404 de QvaPay) es una lista vacía; si QvaPay no responde, null', async () => {
+	const status = (code: number) => (async () => Response.json({ error: 'No price history available' }, { status: code })) as unknown as typeof fetch
+	assert.deepEqual(await loadHistory('QQQ', '1M', status(404)), [])
+	assert.equal(await loadHistory('QQQ', '1M', status(429)), null)
+	assert.equal(await loadHistory('QQQ', '1M', status(500)), null)
+	const down = (async () => {
+		throw new Error('sin red')
+	}) as typeof fetch
+	assert.equal(await loadHistory('QQQ', '1M', down), null)
+})
+
 test('acciones: la lista sale de la lista pública de QvaPay y solo las que faltan van de una en una, hasta que QvaPay pide esperar; las que faltan, de la lectura anterior', async () => {
 	const asked: string[] = []
 	const fetcher = (async (input: string | URL) => {
@@ -85,6 +106,10 @@ test('acciones: la lista sale de la lista pública de QvaPay y solo las que falt
 		throw new Error('sin red')
 	}) as typeof fetch
 	assert.deepEqual(await loadQuotes(down), [])
+	// Sin la lista pública (QvaPay pide esperar) y con una lectura guardada de antes de los iconos: llevan su icono igual
+	const noList = (async (input: string | URL) => (String(input).endsWith('/stocks') ? new Response('{}', { status: 429 }) : Response.json({ price: 10 }))) as typeof fetch
+	const old = [{ ...list[1], image: null }]
+	assert.deepEqual((await loadQuotes(noList, old)).map((q) => [q.symbol, q.image]), [['NVDA', 'https://www.qvapay.com/img/stocks/NVDA.svg']])
 })
 
 test('bolsa de Nueva York: de 9:30 a 16:00 de allí, sin fines de semana ni festivos, y los días que cierra a las 13:00', () => {

@@ -62,6 +62,8 @@ const state = {
 	view: store.get('view', 'book'),
 	grouped: store.get('grouped', false),
 	marketsClosed: store.get('marketsClosed', false),
+	// Lo que enseña la columna de mercados: los del P2P ('p2p') o las acciones de QvaPay ('stocks', stocks.js)
+	marketKind: store.get('marketKind', 'p2p'),
 	filters: { vip: true, outlier: true, take: false, ops: 0, usd: 0, ageH: 0, ...store.get('filters', {}) },
 	book: null,
 	history: [],
@@ -271,15 +273,16 @@ async function loadInformal() {
 	} catch {}
 }
 
-function selectCoin(tick) {
-	// Desde el mercado «Acciones · QvaPay» (stocks.js) se vuelve a los del P2P
+function selectCoin(tick, keepSheet = false) {
+	// Desde las acciones de QvaPay (stocks.js) se vuelve a los mercados del P2P
 	window.TPStocks?.leave()
+	setMarketKind('p2p')
 	state.coin = tick
 	store.set('coin', tick)
 	state.book = null
 	state.history = null
 	closeMenus()
-	closeMarketSheet()
+	if (!keepSheet) closeMarketSheet()
 	renderMarkets()
 	render()
 	loadBook()
@@ -304,46 +307,72 @@ const coinIcon = (c) =>
 // La CSP no deja onerror en línea: un icono que no carga se quita aquí y queda la inicial
 document.addEventListener('error', (e) => e.target?.matches?.('.coin-ic img') && e.target.remove(), true)
 
+const showingStocks = () => state.marketKind === 'stocks' && !!window.TPStocks
+
 function marketRows(query) {
+	if (showingStocks()) return window.TPStocks.rows(query)
 	const q = (query ?? '').trim().toLowerCase()
 	const rows = state.overview.filter((c) => !q || c.name.toLowerCase().includes(q) || c.tick.toLowerCase().includes(q) || c.unit.toLowerCase().includes(q))
-	// El mercado «Acciones · QvaPay» (stocks.js) va al final, como uno más
-	const stocks = window.TPStocks?.row(query) ?? ''
+	if (!rows.length) return '<div class="empty">Sin resultados</div>'
 	const here = (c) => c.tick === state.coin && !window.TPStocks?.on
-	if (!rows.length && !stocks) return '<div class="empty">Sin resultados</div>'
-	return (
-		rows
-			.map(
-				(c) => `<button class="mrow ${here(c) ? 'active' : ''}" data-tick="${c.tick}" role="option" aria-selected="${here(c)}">
+	return rows
+		.map(
+			(c) => `<button class="mrow ${here(c) ? 'active' : ''}" data-tick="${c.tick}" role="option" aria-selected="${here(c)}">
 				<span class="mmeta">${coinIcon(c)}<span class="mname"><b>${esc(c.name)}</b><span>QUSD/${esc(c.unit)}${c.count24h ? ` · ${c.count24h} ops 24 h` : ''}</span></span></span>
 				${price(c.bid, c.avgBuy, 'bid')}${price(c.ask, c.avgSell, 'ask')}</button>`,
-			)
-			.join('') + stocks
-	)
+		)
+		.join('')
 }
 
 // Tira horizontal de mercados (pantallas sin la columna de mercados)
 function renderMarkets() {
+	const stocks = showingStocks()
+	for (const t of $('marketKind').querySelectorAll('[data-kind]')) {
+		const on = t.dataset.kind === (stocks ? 'stocks' : 'p2p')
+		t.classList.toggle('active', on)
+		t.setAttribute('aria-selected', String(on))
+	}
+	$('marketKind').hidden = !window.TPStocks
+	$('marketCols').innerHTML = stocks ? '<span>Acción</span><span>Precio</span><span>Hoy</span>' : '<span>Mercado</span><span>Compra</span><span>Venta</span>'
 	$('marketList').innerHTML = marketRows($('marketSearch').value)
 	renderRail()
 }
 
-// La columna colapsada: los mismos mercados, solo con su icono (el nombre y los precios, al pasar el ratón). Solo se
-// rehace si cambian los mercados o el activo, para no recargar los iconos en cada refresco del libro
+// El selector de arriba de la columna (y su botón en la columna colapsada): cambia la lista y lo de en medio, a la última
+// acción o al último mercado que se miró. La hoja del móvil sigue abierta para elegir otro
+function switchMarketKind(kind) {
+	if (kind === 'stocks' && window.TPStocks) window.TPStocks.open(null, true)
+	else if (kind === 'p2p' && window.TPStocks?.on) selectCoin(state.coin, true)
+	else setMarketKind(kind)
+}
+
+function setMarketKind(kind) {
+	if (kind === state.marketKind) return
+	state.marketKind = kind
+	store.set('marketKind', kind)
+	renderMarkets()
+	$('marketList').scrollTop = 0
+}
+
+// La columna colapsada: la misma lista, solo con su icono (el nombre y los precios, al pasar el ratón), y al final el
+// botón que cambia a la otra (el selector de arriba no se ve). Solo se rehace si cambia, para no recargar los iconos
+// en cada refresco del libro
 let railKey = ''
 function renderRail() {
-	const stocks = window.TPStocks?.rail() ?? ''
-	const key = `${state.coin}|${stocks}|${state.overview.map((c) => `${c.tick}:${c.bid}:${c.ask}`).join(',')}`
-	if (key === railKey) return
-	railKey = key
-	const here = (c) => c.tick === state.coin && !window.TPStocks?.on
-	$('marketRail').innerHTML =
-		state.overview
-			.map((c) => {
-				const tip = `${c.name}${c.bid ? ` · compra ${fmtP(c.bid)}` : ''}${c.ask ? ` · venta ${fmtP(c.ask)}` : ''}`
-				return `<button class="rail-btn ${here(c) ? 'active' : ''}" data-tick="${c.tick}" title="${esc(tip)}" aria-label="${esc(c.name)}" aria-pressed="${here(c)}">${coinIcon(c)}</button>`
-			})
-			.join('') + stocks
+	const stocks = showingStocks()
+	const coin = state.overview.find((c) => c.tick === state.coin)
+	const html = stocks
+		? `${window.TPStocks.rail()}<button class="rail-btn rail-kind" data-kind="p2p" title="Mercados del P2P" aria-label="Mercados del P2P">${coinIcon(coin)}</button>`
+		: state.overview
+				.map((c) => {
+					const here = c.tick === state.coin && !window.TPStocks?.on
+					const tip = `${c.name}${c.bid ? ` · compra ${fmtP(c.bid)}` : ''}${c.ask ? ` · venta ${fmtP(c.ask)}` : ''}`
+					return `<button class="rail-btn ${here ? 'active' : ''}" data-tick="${c.tick}" title="${esc(tip)}" aria-label="${esc(c.name)}" aria-pressed="${here}">${coinIcon(c)}</button>`
+				})
+				.join('') + (window.TPStocks?.railSwitch() ?? '')
+	if (html === railKey) return
+	railKey = html
+	$('marketRail').innerHTML = html
 }
 
 // Sin la columna de mercados (móvil y pantallas medianas), la misma lista se abre como una hoja desde abajo
@@ -1737,16 +1766,15 @@ function bind() {
 		store.set('marketsClosed', state.marketsClosed)
 		renderMarketsPanel()
 	})
-	$('marketList').addEventListener('click', (e) => {
-		const row = e.target.closest('[data-tick]')
-		if (row) selectCoin(row.dataset.tick)
-		else if (e.target.closest('[data-stocks]')) window.TPStocks?.open()
-	})
-	$('marketRail').addEventListener('click', (e) => {
-		const btn = e.target.closest('[data-tick]')
-		if (btn) selectCoin(btn.dataset.tick)
-		else if (e.target.closest('[data-stocks]')) window.TPStocks?.open()
-	})
+	const pickMarket = (e) => {
+		const el = e.target.closest('[data-tick], [data-stk], [data-kind]')
+		if (el?.dataset.tick) selectCoin(el.dataset.tick)
+		else if (el?.dataset.stk) window.TPStocks?.open(el.dataset.stk)
+		else if (el?.dataset.kind) switchMarketKind(el.dataset.kind)
+	}
+	$('marketList').addEventListener('click', pickMarket)
+	$('marketRail').addEventListener('click', pickMarket)
+	$('marketKind').addEventListener('click', pickMarket)
 	// El par: en escritorio abre la columna si estaba colapsada y va al buscador; sin columna, abre la hoja
 	$('pairBtn').addEventListener('click', () => {
 		if (!wideLayout()) return openMarketSheet()

@@ -34,7 +34,7 @@ import { recordBook } from './bookstats.ts'
 import { FRAMES, frameStart, isFrame, loadCandles } from './candles.ts'
 import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './analysis.ts'
 import { checkAlerts } from './ratealerts.ts'
-import { isStock, isTimeframe, loadHistory, loadQuote, loadQuotes, marketStatus, QUOTES_TTL_S, TIMEFRAMES } from './stocks.ts'
+import { historySource, isStock, isTimeframe, loadHistory, loadQuote, loadQuotes, marketStatus, QUOTES_TTL_S, TIMEFRAMES, trimHistory, withIcon, type Quote } from './stocks.ts'
 import { LiveBook } from './livebook-do.ts'
 import { cleanupPush, pushApi, refreshLive, relayTaken, type PushEnv } from './push.ts'
 import { licenseOfPrint, ownedBy, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
@@ -605,7 +605,8 @@ async function candles(url: URL, env: Env, ctx: ExecutionContext) {
 
 // Acciones de QvaPay (worker/stocks.ts), solo para mirar. QvaPay limita las peticiones seguidas: cada dato se guarda en
 // la caché del borde con la hora en que se leyó; pasado su tiempo se vuelve a pedir y, si QvaPay no responde, sirve el
-// último que se tuvo (hasta una hora). Si la bolsa de Nueva York está abierta se calcula en cada visita
+// último que se tuvo (hasta 12 veces su tiempo y al menos una hora: el de 1 año, un día). Si la bolsa de Nueva York
+// está abierta se calcula en cada visita
 const STOCKS_STALE_S = 3600
 async function stockCached(url: URL, path: string, ttlS: number, ctx: ExecutionContext, load: (prev: unknown) => Promise<unknown>) {
 	const key = new Request(`${url.origin}${path}`)
@@ -614,9 +615,11 @@ async function stockCached(url: URL, path: string, ttlS: number, ctx: ExecutionC
 	const had = raw && typeof raw.at === 'number' && raw.data != null ? raw : null
 	if (had && Date.now() - had.at < ttlS * 1000) return had
 	const data = await load(had?.data).catch(() => null)
-	if (data === null || (Array.isArray(data) && !data.length)) return had
+	// Vacío (QvaPay no tiene ese dato): vale lo último que se tuvo; si no hubo nada, vacío y sin guardar
+	if (data === null) return had
+	if (Array.isArray(data) && !data.length) return had ?? { at: Date.now(), data }
 	const fresh = { at: Date.now(), data }
-	ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify(fresh), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${Math.max(ttlS, STOCKS_STALE_S)}` } })))
+	ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify(fresh), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${Math.max(ttlS * 12, STOCKS_STALE_S)}` } })))
 	return fresh
 }
 const STOCK_HEADERS = { 'Cache-Control': 'public, max-age=60' }
@@ -625,8 +628,8 @@ const STOCK_HEADERS = { 'Cache-Control': 'public, max-age=60' }
 async function stocks(url: URL, ctx: ExecutionContext) {
 	// Las que QvaPay no dé esta vez (corta a las pocas peticiones) siguen con su precio anterior
 	const got = await stockCached(url, '/data/stocks', QUOTES_TTL_S, ctx, (prev) => loadQuotes(fetch, Array.isArray(prev) ? prev : []))
-	if (!got) return jsonError(503, 'QvaPay no da las cotizaciones ahora mismo')
-	return Response.json({ at: got.at, stocks: got.data, market: marketStatus(Date.now()) }, { headers: STOCK_HEADERS })
+	if (!got || !(got.data as unknown[]).length) return jsonError(503, 'QvaPay no da las cotizaciones ahora mismo')
+	return Response.json({ at: got.at, stocks: (got.data as Quote[]).map(withIcon), market: marketStatus(Date.now()) }, { headers: STOCK_HEADERS })
 }
 
 // La ficha de una (apertura, máximo, mínimo, 52 semanas…)
@@ -635,17 +638,20 @@ async function stockQuote(url: URL, ctx: ExecutionContext) {
 	if (!isStock(s)) return jsonError(400, 's inválido')
 	const got = await stockCached(url, `/data/stocks/quote?s=${s}`, QUOTES_TTL_S, ctx, () => loadQuote(s))
 	if (!got) return jsonError(503, 'QvaPay no da la cotización ahora mismo')
-	return Response.json({ at: got.at, quote: got.data }, { headers: STOCK_HEADERS })
+	return Response.json({ at: got.at, quote: withIcon(got.data as Quote) }, { headers: STOCK_HEADERS })
 }
 
-// El histórico de una en un intervalo (1H, 24H, 1W, 1M o 1Y), guardado lo que dure ese intervalo
+// El histórico de una en un intervalo (1H, 24H, 1W, 1M o 1Y), guardado lo que dure ese intervalo. Sin puntos: QvaPay
+// no tiene histórico de ese intervalo (el terminal no lo ofrece)
 async function stockHistory(url: URL, ctx: ExecutionContext) {
 	const s = url.searchParams.get('s')
 	const tf = url.searchParams.get('tf')
 	if (!isStock(s) || !isTimeframe(tf)) return jsonError(400, 's o tf inválidos')
-	const got = await stockCached(url, `/data/stocks/history?s=${s}&tf=${tf}`, TIMEFRAMES[tf], ctx, () => loadHistory(s, tf))
+	const from = historySource(tf)
+	const got = await stockCached(url, `/data/stocks/history?s=${s}&tf=${from}`, TIMEFRAMES[from], ctx, () => loadHistory(s, from))
 	if (!got) return jsonError(503, 'QvaPay no da el histórico ahora mismo')
-	return Response.json({ at: got.at, s, tf, points: got.data }, { headers: STOCK_HEADERS })
+	const points = from === tf ? got.data : trimHistory(got.data as [number, number][], tf)
+	return Response.json({ at: got.at, s, tf, points }, { headers: STOCK_HEADERS })
 }
 
 // La tasa informal más reciente (para la landing y la lectura del mercado), cacheada 10 minutos

@@ -25,10 +25,13 @@ export const isStock = (s: unknown): s is Stock => typeof s === 'string' && NAME
 export const stockName = (s: string) => NAMES.get(s) ?? s
 
 // Los intervalos del histórico que da QvaPay y cuánto se guarda cada uno en la caché del borde (s). QvaPay ya guarda
-// 2 min la última hora y hasta 2 h el año: más a menudo no traería nada nuevo
-export const TIMEFRAMES = { '1H': 120, '24H': 300, '1W': 900, '1M': 3600, '1Y': 7200 } as const
+// 2 min la última hora y más el resto: más a menudo no traería nada nuevo
+export const TIMEFRAMES = { '1H': 120, '24H': 300, '1W': 900, '1M': 3600, '1Y': 3600 } as const
 export type Timeframe = keyof typeof TIMEFRAMES
 export const isTimeframe = (t: unknown): t is Timeframe => typeof t === 'string' && Object.hasOwn(TIMEFRAMES, t)
+// De dónde sale cada intervalo: el de 1 mes son los mismos puntos diarios que el final del de 1 año, así que se recorta
+// de ese (una petición menos a QvaPay, que corta a las pocas seguidas)
+export const historySource = (tf: Timeframe): Timeframe => (tf === '1M' ? '1Y' : tf)
 // La cotización: QvaPay la guarda 5 minutos
 export const QUOTES_TTL_S = 300
 
@@ -46,7 +49,17 @@ export interface Quote {
 	volume: number | null
 	high52: number | null
 	low52: number | null
+	// El icono que usa QvaPay (solo de su carpeta de iconos)
+	image: string | null
 }
+const IMAGE = /^https:\/\/www\.qvapay\.com\/img\/stocks\/[A-Z]{1,5}\.svg$/
+// Las que tienen icono en esa carpeta van siempre con el suyo, aunque la lectura no traiga la lista pública de QvaPay
+// (la única que lo dice). SPY, QQQ, CRCL y MSTR no tienen: llevan uno del terminal con el mismo estilo
+// (public/app/stocks-ic)
+const ICONS = new Set(['NVDA', 'TSLA', 'MSFT', 'AAPL', 'META', 'GOOGL', 'AMZN'])
+const iconOf = (symbol: Stock, raw: unknown) => (typeof raw === 'string' && IMAGE.test(raw) ? raw : ICONS.has(symbol) ? `https://www.qvapay.com/img/stocks/${symbol}.svg` : `/stocks-ic/${symbol}.svg`)
+// Una cotización con su icono (las guardadas antes de que hubiera iconos no lo traen)
+export const withIcon = (q: Quote): Quote => (q.image ? q : { ...q, image: iconOf(q.symbol, null) })
 
 const num = (v: unknown) => {
 	const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v
@@ -77,6 +90,7 @@ export function cleanQuote(symbol: Stock, raw: unknown): Quote | null {
 		volume: pos(r.volume),
 		high52: pos(r.fiftyTwoWeekHigh),
 		low52: pos(r.fiftyTwoWeekLow),
+		image: iconOf(symbol, r.image),
 	}
 }
 
@@ -127,7 +141,7 @@ export async function loadQuotes(fetcher: typeof fetch = fetch, prev: Quote[] = 
 		const q = await loadQuote(s, watched)
 		if (q) out.set(s, q)
 	}
-	for (const q of prev) if (isStock(q?.symbol) && !out.has(q.symbol)) out.set(q.symbol, q)
+	for (const q of prev) if (isStock(q?.symbol) && !out.has(q.symbol)) out.set(q.symbol, withIcon(q))
 	return STOCKS.map(([s]) => out.get(s)).filter((q): q is Quote => !!q)
 }
 
@@ -144,10 +158,14 @@ export function trimHistory(points: [number, number][], tf: Timeframe) {
 }
 
 // En lo intradía QvaPay da la hora de Nueva York como si fuera UTC (sus barras van de 09:30 a 15:30): se pasa al
-// instante de verdad. Lo diario (1M, 1Y) es un día a las 00:00 y se deja tal cual
+// instante de verdad. Lo diario (1M, 1Y) es un día a las 00:00 y se deja tal cual. Sin histórico de ese intervalo
+// QvaPay responde 404 («No price history available», y a ratos para uno que sí tiene): lista vacía. Si no responde, null
 const INTRADAY = new Set<Timeframe>(['1H', '24H', '1W'])
 export async function loadHistory(symbol: Stock, tf: Timeframe, fetcher: typeof fetch = fetch) {
-	const points = cleanHistory(await getJson(`${QVAPAY}/stocks/${symbol}?timeframe=${tf}`, fetcher))
+	const res = await fetcher(`${QVAPAY}/stocks/${symbol}?timeframe=${tf}`, { headers: { Accept: 'application/json' } }).catch(() => null)
+	if (res?.status === 404) return []
+	if (!res?.ok) return null
+	const points = cleanHistory(await res.json().catch(() => null))
 	return trimHistory(INTRADAY.has(tf) ? points.map(([t, v]): [number, number] => [fromNyWall(t * 1000) / 1000, v]) : points, tf)
 }
 

@@ -1,7 +1,8 @@
-// Mercado «Acciones · QvaPay» (experimental, solo para mirar): sale al final de la lista de mercados y, al elegirlo, el
-// centro del terminal enseña las acciones que vende QvaPay (su cotización pública cada 5 minutos, el histórico de 1 hora
-// a 1 año y si la bolsa de Nueva York está abierta) en vez del libro del P2P. Comprar y vender se hace en QvaPay: aquí
-// no se compra ni se vende nada. Con Pro, los avisos de precio por Telegram (los mismos de la tasa, worker/ratealerts.ts)
+// Acciones de QvaPay (experimental, solo para mirar): con «Acciones» en el selector de la columna de mercados, la lista
+// enseña las que vende QvaPay y, al elegir una, el centro del terminal enseña su ficha y su gráfico (cotización pública
+// cada 5 minutos, histórico de los intervalos que QvaPay tenga y si la bolsa de Nueva York está abierta) en vez del
+// libro del P2P. Comprar y vender se hace en QvaPay: aquí no se compra ni se vende nada. Con Pro, los avisos de precio
+// por Telegram (los mismos de la tasa, worker/ratealerts.ts)
 'use strict'
 ;(() => {
 	const view = document.getElementById('stkRoot')
@@ -15,22 +16,37 @@
 		['1M', '1 mes'],
 		['1Y', '1 año'],
 	]
+	// Si QvaPay no tiene el intervalo elegido para una acción, el que se enseña en su lugar
+	const FALLBACK = ['24H', '1W', '1M', '1Y', '1H']
 	// Las de 1 mes y 1 año son de un punto por día: van con su fecha, sin pasarlas a la hora de Cuba
 	const DAILY = new Set(['1M', '1Y'])
-	const QVAPAY_STOCKS = 'https://www.qvapay.com/dashboard/stocks'
+	// Lo de hoy se mueve: se vuelve a pedir en cada vuelta (la caché del servidor decide si hay algo nuevo)
+	const LIVE = new Set(['1H', '24H'])
 	let on = false
 	let list = []
 	let market = null
 	let listAt = 0
+	let listTry = 0
+	let listErr = ''
+	let listing = null
 	let sel = store.get('stk.sel', 'SPY')
-	let tf = store.get('stk.tf', '24H')
-	if (!FRAMES.some(([f]) => f === tf)) tf = '24H'
+	// El intervalo elegido y el que se ve (otro si QvaPay no tiene el elegido para esta acción)
+	let want = store.get('stk.tf', '24H')
+	if (!FRAMES.some(([f]) => f === want)) want = '24H'
+	let tf = want
+	// El histórico de cada acción e intervalo (solo los que trajeron puntos) y los que QvaPay no dio la última vez: su
+	// 404 «sin histórico» sale también cuando corta por muchas peticiones, así que no se toma como que no lo tiene
 	const hist = new Map()
+	const failed = new Map()
+	const loading = new Map()
+	// Las acciones con sus intervalos pidiéndose o reintentándose (mientras, se ve «Cargando…» en vez del error)
+	const retrying = new Set()
 	// La ficha de cada una (apertura, máximo, 52 semanas…): se pide solo de la que se mira
 	const details = new Map()
 	let chart = null
 	let series = null
 	let drawnKey = ''
+	let framesHtml = ''
 	let timer = null
 	// Quien pide un aviso desde aquí: la pestaña de avisos lo trae elegido
 	let pick = null
@@ -58,26 +74,41 @@
 		if (q && (details.get(s).at ?? 0) < listAt) Object.assign(out, { price: q.price, change: q.change ?? out.change, changeDollar: q.changeDollar ?? out.changeDollar })
 		return out
 	}
-	const icon = (s) => `<span class="coin-ic stk-ic" data-i="${esc(s.charAt(0))}" aria-hidden="true"></span>`
+	// El icono que usa QvaPay (lo trae su lista; el servidor solo deja los de su carpeta) o la inicial. En la columna
+	// colapsada, sin icono, el símbolo (las iniciales se repiten)
+	const icon = (s, sym = false) => {
+		const img = quote(s)?.image
+		const cls = `coin-ic stk-ic${sym && !img ? ' stk-sym' : ''}`
+		return `<span class="${cls}" data-i="${esc(s.charAt(0))}" aria-hidden="true">${img ? `<img src="${esc(img)}" alt="" loading="lazy" />` : sym ? esc(s) : ''}</span>`
+	}
+	// Si de la que se mira ya se tiene el histórico de un intervalo
+	const has = (f, s = sel) => hist.has(`${s}|${f}`)
 
 	// ── Datos ────────────────────────────────────────────────────────────
-	async function loadList() {
-		try {
-			const r = await fetch('/data/stocks')
-			if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'No se pudieron leer las acciones')
-			const d = await r.json()
-			list = d.stocks ?? []
-			market = d.market ?? null
-			listAt = d.at ?? Date.now()
-			if (!quote(sel) && list.length) sel = list[0].symbol
-		} catch (e) {
-			if (!list.length) $s('stkAt').textContent = e.message
-		}
-		if (on) {
-			renderList()
-			renderHead()
-			window.render?.()
-		}
+	function loadList() {
+		listing ??= (async () => {
+			listTry = Date.now()
+			try {
+				const r = await fetch('/data/stocks')
+				if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'No se pudieron leer las acciones')
+				const d = await r.json()
+				list = d.stocks ?? []
+				market = d.market ?? null
+				listAt = d.at ?? Date.now()
+				listErr = ''
+				if (!quote(sel) && list.length) sel = list[0].symbol
+			} catch (e) {
+				listErr = e.message
+			}
+			listing = null
+			renderMarkets()
+			renderAt()
+			if (on) {
+				renderHead()
+				window.render?.()
+			}
+		})()
+		return listing
 	}
 
 	async function loadDetail(s) {
@@ -94,42 +125,94 @@
 		if (on && s === sel) renderHead()
 	}
 
-	async function loadHistory(s, f, force = false) {
+	// Un intervalo de una acción, que se vuelve a pedir pasado un minuto. Si QvaPay no lo da, queda el que se tenía
+	function loadHistory(s, f, force = false) {
 		const key = `${s}|${f}`
 		const had = hist.get(key)
-		if (had && !force && Date.now() - had.got < 60_000) return draw()
-		if (!had) {
-			$s('stkChartMsg').textContent = 'Cargando…'
-			$s('stkChartMsg').hidden = false
-		}
-		try {
-			const r = await fetch(`/data/stocks/history?s=${encodeURIComponent(s)}&tf=${f}`)
-			if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'No se pudo leer el histórico')
-			const d = await r.json()
-			hist.set(key, { points: d.points ?? [], got: Date.now() })
-		} catch (e) {
-			if (!hist.has(key) && s === sel && f === tf) {
-				$s('stkChartMsg').textContent = e.message
-				$s('stkChartMsg').hidden = false
+		if (had && !force && Date.now() - had.got < 60_000) return
+		if (loading.has(key)) return loading.get(key)
+		const run = (async () => {
+			try {
+				const r = await fetch(`/data/stocks/history?s=${encodeURIComponent(s)}&tf=${f}`)
+				if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'No se pudo leer el histórico')
+				const d = await r.json()
+				if ((d.points?.length ?? 0) < 2) throw new Error('QvaPay no da este intervalo ahora mismo')
+				hist.set(key, { points: d.points, got: Date.now() })
+				failed.delete(key)
+			} catch (e) {
+				failed.set(key, e.message)
 			}
-			return
+			loading.delete(key)
+		})()
+		loading.set(key, run)
+		return run
+	}
+
+	// Los intervalos de una acción, de uno en uno (QvaPay corta a las pocas peticiones seguidas), primero el que se mira.
+	// Solo salen los que traen histórico. Los que no se pudieron leer (QvaPay pidió esperar) se reintentan tres veces más,
+	// a los 4, 10 y 25 segundos
+	const RETRIES = [0, 4000, 10_000, 25_000]
+	async function loadFrames(s, refresh = false) {
+		const order = [tf, ...FRAMES.map(([f]) => f).filter((f) => f !== tf)]
+		retrying.add(s)
+		try {
+			for (const wait of RETRIES) {
+				if (wait) {
+					if (!order.some((f) => failed.has(`${s}|${f}`))) return
+					await new Promise((r) => setTimeout(r, wait))
+				}
+				for (const f of order) {
+					if (s !== sel || !on) return
+					if (wait && !failed.has(`${s}|${f}`)) continue
+					await loadHistory(s, f, !wait && refresh && f === tf && LIVE.has(f))
+					if (s === sel && on) {
+						settle()
+						draw()
+					}
+				}
+			}
+		} finally {
+			retrying.delete(s)
+			if (s === sel && on) draw()
 		}
-		if (s === sel && f === tf) draw()
+	}
+
+	// El intervalo que se ve: el elegido si ya está (o aún se está pidiendo); si no, el primero que esté. Sin ninguno,
+	// el elegido (con su aviso)
+	function settle() {
+		const order = [want, ...FALLBACK.filter((f) => f !== want)]
+		const pending = (f) => !has(f) && !failed.has(`${sel}|${f}`)
+		tf = order.find((f) => has(f) || (f === want && pending(f))) ?? order.find(pending) ?? want
 	}
 
 	// ── Pintar ───────────────────────────────────────────────────────────
-	function renderList() {
-		$s('stkList').innerHTML = list.length
-			? list
-					.map(
-						(q) => `<button class="stk-row ${q.symbol === sel ? 'active' : ''}" data-stk="${esc(q.symbol)}" role="option" aria-selected="${q.symbol === sel}">
-					${icon(q.symbol)}<span class="stk-name"><b>${esc(q.symbol)}</b><span>${esc(q.name)}</span></span>
-					<span class="stk-px"><span class="num">${money(q.price)}</span><small class="num ${tone(q.change)}">${signed(q.change)} %</small></span></button>`,
-					)
-					.join('')
-			: '<div class="empty">Cargando…</div>'
+	// Las filas de la columna de mercados (app.js) con «Acciones» en el selector
+	function rows(query) {
+		if (!list.length) {
+			if (!listing && Date.now() - listTry > 30_000) loadList()
+			return `<div class="empty">${esc(listErr || 'Cargando…')}</div>`
+		}
+		if (!on && Date.now() - listAt > 60_000 && Date.now() - listTry > 30_000) loadList()
+		const q = (query ?? '').trim().toLowerCase()
+		const shown = list.filter((x) => !q || x.symbol.toLowerCase().includes(q) || x.name.toLowerCase().includes(q) || (x.fullName ?? '').toLowerCase().includes(q))
+		if (!shown.length) return '<div class="empty">Sin resultados</div>'
+		return shown
+			.map((x) => {
+				const here = on && x.symbol === sel
+				return `<button class="mrow ${here ? 'active' : ''}" data-stk="${esc(x.symbol)}" role="option" aria-selected="${here}">
+				<span class="mmeta">${icon(x.symbol)}<span class="mname"><b>${esc(x.symbol)}</b><span>${esc(x.name)}</span></span></span>
+				<span class="num">${money(x.price)}</span><span class="num ${tone(x.change)}">${signed(x.change)} %</span></button>`
+			})
+			.join('')
+	}
+
+	function renderAt() {
+		if (!list.length) {
+			$s('stkAt').textContent = listErr || 'Cargando…'
+			return
+		}
 		const status = market ? (market.open ? `Bolsa de Nueva York abierta · cierra a las ${cubaTime(market.until)}` : `Bolsa cerrada · abre ${cubaFmt(market.until, { weekday: 'short', day: 'numeric', month: 'short' })}, ${cubaTime(market.until)}`) : ''
-		$s('stkAt').textContent = list.length ? `${status}${status ? ' · ' : ''}precios de las ${cubaTime(listAt)} (hora de Cuba)` : $s('stkAt').textContent
+		$s('stkAt').textContent = `${status}${status ? ' · ' : ''}precios de las ${cubaTime(listAt)} (hora de Cuba)`
 	}
 
 	function renderHead() {
@@ -164,12 +247,21 @@
 	}
 
 	function draw() {
-		const h = hist.get(`${sel}|${tf}`)
+		const key = `${sel}|${tf}`
+		const h = hist.get(key)
 		renderFrames(h)
-		if (!h || !window.LightweightCharts) return
 		const msg = $s('stkChartMsg')
-		msg.hidden = h.points.length > 1
-		if (h.points.length <= 1) msg.textContent = 'Sin histórico en este intervalo'
+		msg.hidden = !!h
+		if (!h) {
+			// Sin datos de este intervalo no se deja a la vista el gráfico de otra acción
+			if (series && !drawnKey.startsWith(`${key}|`)) {
+				series.setData([])
+				drawnKey = ''
+			}
+			msg.textContent = retrying.has(sel) ? 'Cargando…' : (failed.get(key) ?? 'Cargando…')
+			return
+		}
+		if (!window.LightweightCharts) return
 		if (!chart) {
 			chart = LightweightCharts.createChart($s('stkChart'), {
 				autoSize: true,
@@ -182,9 +274,9 @@
 			chart.applyOptions(chartColors())
 			series = chart.addAreaSeries({ lineWidth: 2, priceLineVisible: true, lastValueVisible: true })
 		}
-		const key = `${sel}|${tf}|${h.got}`
-		if (key === drawnKey) return
-		drawnKey = key
+		const drawKey = `${key}|${h.got}`
+		if (drawKey === drawnKey) return
+		drawnKey = drawKey
 		// Intradía en hora de Cuba (el eje no tiene zona: se le suma la diferencia); por días, la fecha tal cual
 		const shift = DAILY.has(tf) ? 0 : cubaOffset(Date.now()) / 1000
 		const data = h.points.map(([t, v]) => ({ time: t + shift, value: v }))
@@ -196,26 +288,19 @@
 		chart.timeScale().fitContent()
 	}
 
-	// Las pestañas del intervalo, con cuánto cambió en él
+	// Las pestañas de los intervalos que QvaPay tiene para esta acción (y la que se está cargando), con cuánto cambió
 	function renderFrames(h) {
+		const shown = FRAMES.filter(([f]) => has(f) || f === tf)
+		const html = shown.map(([f, label]) => `<button class="seg-tab ${f === tf ? 'active' : ''}" data-tf="${f}" role="tab" aria-selected="${f === tf}">${label}</button>`).join('')
+		if (html !== framesHtml) {
+			framesHtml = html
+			$s('stkFrames').innerHTML = html
+			$s('stkFrames').hidden = !shown.length
+		}
 		const p = h?.points ?? []
 		const change = p.length > 1 ? (p.at(-1)[1] - p[0][1]) / p[0][1] : null
-		for (const b of $s('stkFrames').querySelectorAll('[data-tf]')) {
-			b.classList.toggle('active', b.dataset.tf === tf)
-			b.setAttribute('aria-selected', String(b.dataset.tf === tf))
-		}
 		const label = FRAMES.find(([f]) => f === tf)?.[1] ?? ''
 		$s('stkRange').innerHTML = change == null ? '' : `En ${label}: <b class="num ${tone(change)}">${signed(change * 100)} %</b>`
-	}
-
-	function select(s) {
-		if (!s || s === sel) return
-		sel = s
-		store.set('stk.sel', s)
-		renderList()
-		renderHead()
-		loadDetail(sel)
-		loadHistory(sel, tf)
 	}
 
 	// ── Entrar y salir ───────────────────────────────────────────────────
@@ -223,31 +308,35 @@
 		if (!on || document.hidden) return
 		if (Date.now() - listAt > 60_000) loadList()
 		loadDetail(sel)
-		// Lo intradía se mueve: se vuelve a pedir (la caché del servidor decide si hay algo nuevo). Y el que no se pudo leer
-		if (tf === '1H' || tf === '24H' || !hist.has(`${sel}|${tf}`)) loadHistory(sel, tf, true)
+		loadFrames(sel, true)
 	}
 
-	function enter(s) {
-		if (s) {
+	// Elegir una acción (de la lista o de un enlace): el centro del terminal pasa a enseñarla
+	function enter(s, keepSheet = false) {
+		if (s && s !== sel) {
 			sel = s
 			store.set('stk.sel', s)
+			tf = want
 		}
 		if (!on) {
 			on = true
 			store.set(SAVED, true)
 			document.body.classList.add('stk-on')
 			closeMenus()
-			closeMarketSheet()
-			renderMarkets()
 			window.scrollTo({ top: 0 })
 			timer = setInterval(tick, 60_000)
+			setMarketKind('stocks')
 		}
-		renderList()
+		if (!keepSheet) closeMarketSheet()
+		settle()
+		renderMarkets()
+		renderAt()
 		renderHead()
+		draw()
 		window.render?.()
-		loadList()
+		if (!list.length || Date.now() - listAt > 60_000) loadList()
 		loadDetail(sel)
-		loadHistory(sel, tf)
+		loadFrames(sel)
 	}
 
 	function leave() {
@@ -275,17 +364,15 @@
 		showAccount('alerts')
 	}
 
-	$s('stkList').addEventListener('click', (e) => select(e.target.closest('[data-stk]')?.dataset.stk))
 	$s('stkFrames').addEventListener('click', (e) => {
 		const f = e.target.closest('[data-tf]')?.dataset.tf
 		if (!f || f === tf) return
-		tf = f
+		want = tf = f
 		store.set('stk.tf', f)
 		draw()
-		loadHistory(sel, tf)
+		loadHistory(sel, f)?.then(() => on && f === tf && draw())
 	})
 	$s('stkAlert').addEventListener('click', askAlert)
-	$s('stkQvapay').href = QVAPAY_STOCKS
 	document.addEventListener('visibilitychange', tick)
 	document.addEventListener('tp:pro', () => on && renderHead())
 	window.addEventListener('hashchange', fromHash)
@@ -295,7 +382,7 @@
 		get on() {
 			return on
 		},
-		open: () => enter(),
+		open: (s, keepSheet) => enter(s, keepSheet),
 		leave,
 		// El precio de ahora de una acción (para la pestaña de avisos), si ya se leyó
 		price: (s) => quote(s)?.price ?? null,
@@ -307,26 +394,28 @@
 			pick = null
 			return p
 		},
-		row(query) {
-			const q = (query ?? '').trim().toLowerCase()
-			if (q && !'acciones stocks bolsa nasdaq s&p spy nvidia tesla apple microsoft meta google amazon circle strategy'.includes(q) && !list.some((x) => x.symbol.toLowerCase().includes(q) || x.name.toLowerCase().includes(q))) return ''
-			return `<button class="mrow stk-mrow ${on ? 'active' : ''}" data-stocks role="option" aria-selected="${on}" title="Las acciones que vende QvaPay: precios e histórico (solo para mirar)">
-				<span class="mmeta">${MARKET_IC}<span class="mname"><b>Acciones · QvaPay</b><span>S&amp;P 500, NVIDIA, Tesla… · solo mirar</span></span></span>
-				<span class="num">—</span><span class="num">—</span></button>`
-		},
+		rows,
+		// La columna colapsada: una por acción, con su símbolo
 		rail() {
-			return `<button class="rail-btn ${on ? 'active' : ''}" data-stocks title="Acciones · QvaPay" aria-label="Acciones de QvaPay" aria-pressed="${on}">${MARKET_IC}</button>`
+			return list
+				.map((x) => {
+					const here = on && x.symbol === sel
+					return `<button class="rail-btn ${here ? 'active' : ''}" data-stk="${esc(x.symbol)}" title="${esc(`${x.symbol} · ${x.name} · ${money(x.price)} USD`)}" aria-label="${esc(x.name)}" aria-pressed="${here}">${icon(x.symbol, true)}</button>`
+				})
+				.join('')
 		},
-		// El par de arriba mientras se está en este mercado
+		// En la columna colapsada con los mercados del P2P, el botón que pasa a las acciones
+		railSwitch: () => `<button class="rail-btn rail-kind" data-kind="stocks" title="Acciones de QvaPay" aria-label="Acciones de QvaPay">${MARKET_IC}</button>`,
+		// El par de arriba mientras se mira una acción
 		pair() {
-			$s('pairName').textContent = 'Acciones · QvaPay'
-			const ic = $s('pairIcon')
-			if (ic.dataset.key !== 'stocks') {
-				ic.dataset.key = 'stocks'
-				ic.innerHTML = MARKET_IC
-			}
 			const q = quote(sel)
-			$s('pairSub').textContent = q ? `${q.symbol} ${money(q.price)} USD · ${signed(q.change)} % hoy` : 'Las acciones que vende QvaPay, solo para mirar'
+			$s('pairName').textContent = q ? `${q.symbol} · ${q.name}` : 'Acciones de QvaPay'
+			const ic = $s('pairIcon')
+			if (ic.dataset.key !== `stk:${sel}:${q?.image ?? ''}`) {
+				ic.dataset.key = `stk:${sel}:${q?.image ?? ''}`
+				ic.innerHTML = icon(sel)
+			}
+			$s('pairSub').textContent = q ? `${money(q.price)} USD · ${signed(q.change)} % hoy · acciones de QvaPay` : 'Las acciones que vende QvaPay'
 		},
 		// El tema claro u oscuro
 		theme() {
@@ -337,8 +426,6 @@
 		},
 	}
 
-	// Los intervalos
-	$s('stkFrames').innerHTML = FRAMES.map(([f, label]) => `<button class="seg-tab" data-tf="${f}" role="tab">${label}</button>`).join('')
 	renderMarkets()
 	if (/^#acciones/.test(location.hash)) fromHash()
 	else if (store.get(SAVED, false)) enter()
