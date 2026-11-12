@@ -135,8 +135,10 @@ export async function loadQuotes(fetcher: typeof fetch = fetch, prev: Quote[] = 
 			const q = cleanQuote(s, { ...(raw as Record<string, unknown>), name: stockName(s) })
 			if (q) out.set(s, { ...q, fullName: q.name })
 		}
-	for (const [s] of STOCKS) {
-		if (out.has(s)) continue
+	// Primero las que no están en la lectura anterior: así, con pocas peticiones cada vez, acaban saliendo todas
+	const had = new Set(prev.map((q) => q?.symbol))
+	const order = STOCKS.map(([s]) => s).filter((s) => !out.has(s))
+	for (const s of [...order.filter((s) => !had.has(s)), ...order.filter((s) => had.has(s))]) {
 		if (limited) break
 		const q = await loadQuote(s, watched)
 		if (q) out.set(s, q)

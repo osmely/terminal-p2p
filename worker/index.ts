@@ -608,18 +608,32 @@ async function candles(url: URL, env: Env, ctx: ExecutionContext) {
 // último que se tuvo (hasta 12 veces su tiempo y al menos una hora: el de 1 año, un día). Si la bolsa de Nueva York
 // está abierta se calcula en cada visita
 const STOCKS_STALE_S = 3600
+// Lo guardado: el dato, cuándo se leyó (at) y cuándo se le preguntó a QvaPay por última vez (asked)
+type StockStored = { at: number; asked?: number; data: unknown }
 async function stockCached(url: URL, path: string, ttlS: number, ctx: ExecutionContext, load: (prev: unknown) => Promise<unknown>) {
 	const key = new Request(`${url.origin}${path}`)
 	const hit = await caches.default.match(key)
-	const raw = hit ? await hit.json<{ at: number; data: unknown }>().catch(() => null) : null
+	const raw = hit ? await hit.json<StockStored>().catch(() => null) : null
 	const had = raw && typeof raw.at === 'number' && raw.data != null ? raw : null
-	if (had && Date.now() - had.at < ttlS * 1000) return had
+	if (had && Date.now() - (had.asked ?? had.at) < ttlS * 1000) return had
 	const data = await load(had?.data).catch(() => null)
-	// Vacío (QvaPay no tiene ese dato): vale lo último que se tuvo; si no hubo nada, vacío y sin guardar
-	if (data === null) return had
-	if (Array.isArray(data) && !data.length) return had ?? { at: Date.now(), data }
-	const fresh = { at: Date.now(), data }
-	ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify(fresh), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${Math.max(ttlS * 12, STOCKS_STALE_S)}` } })))
+	const now = Date.now()
+	const keep = (v: StockStored) => ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify(v), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${Math.max(ttlS * 12, STOCKS_STALE_S)}` } })))
+	// QvaPay no lo dio (no responde, pide esperar o no lo tiene: con la bolsa cerrada no da lo intradía). Sigue lo
+	// último que se tuvo (hasta un día) y no se le vuelve a preguntar hasta pasado su tiempo, para no gastar su cupo
+	// con cada visita. Sin nada guardado: si dijo que no lo tiene, eso, guardado igual
+	if (data === null || (Array.isArray(data) && !data.length)) {
+		if (had && now - had.at < 86_400_000) {
+			keep({ ...had, asked: now })
+			return had
+		}
+		if (data === null) return null
+		const none = { at: now, asked: now, data }
+		keep(none)
+		return none
+	}
+	const fresh = { at: now, data }
+	keep(fresh)
 	return fresh
 }
 const STOCK_HEADERS = { 'Cache-Control': 'public, max-age=60' }

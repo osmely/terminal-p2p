@@ -102,6 +102,10 @@ test('acciones: la lista sale de la lista pública de QvaPay y solo las que falt
 	const before = [{ ...list[1], price: 150 }, { ...list[0], symbol: 'CRCL' as const, name: 'Circle', fullName: 'Circle', price: 64 }]
 	const merged = await loadQuotes(fetcher, before)
 	assert.deepEqual(merged.map((q) => [q.symbol, q.price]), [['SPY', 761], ['NVDA', 165], ['CRCL', 64]])
+	// Con SPY ya en la lectura anterior, primero se piden las que faltan (QQQ…) y SPY al final
+	asked.length = 0
+	await loadQuotes(fetcher, [{ ...list[0] }])
+	assert.equal(asked.filter((u) => u.endsWith('?type=quote'))[0], '/stocks/TSLA?type=quote')
 	const down = (async () => {
 		throw new Error('sin red')
 	}) as typeof fetch
