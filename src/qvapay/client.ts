@@ -158,8 +158,9 @@ export class QvaPayClient {
 	}
 
 	// Los mensajes nuevos del chat según llegan (SSE). Termina cuando QvaPay cierra la conexión (lo hace cada pocos
-	// minutos) o al abortar `signal`; quien llama vuelve a conectar. Sin cola: lo que llegue mientras tanto se lee con getChat
-	async chatStream(uuid: string, order: string | undefined, onMessage: (m: ChatMessage) => void, signal: AbortSignal) {
+	// minutos) o al abortar `signal`; quien llama vuelve a conectar. Sin cola: lo que llegue mientras tanto se lee con getChat.
+	// onOpen avisa en cuanto QvaPay acepta el flujo (desde ahí los mensajes llegan solos)
+	async chatStream(uuid: string, order: string | undefined, onMessage: (m: ChatMessage) => void, signal: AbortSignal, onOpen?: () => void) {
 		const url = new URL(`${this.baseUrl}/p2p/${uuid}/chat/stream`)
 		if (order) url.searchParams.set('order', order)
 		const res = await fetch(url, {
@@ -171,6 +172,7 @@ export class QvaPayClient {
 			const data = (await res.json().catch(() => null)) as { error?: string; message?: string; code?: string } | null
 			throw new QvaPayError(res.status, String(data?.error ?? data?.message ?? res.statusText), data?.code, data)
 		}
+		onOpen?.()
 		const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
 		const sse = new SseParser((event, data) => {
 			if (event !== 'message') return

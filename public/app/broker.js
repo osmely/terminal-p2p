@@ -464,6 +464,7 @@ function renderTrades() {
 async function openTrade(offer, order, parent = false) {
 	bk.detail = { offer, order, parent }
 	bk.detailSig = null
+	chatReadAt = 0
 	openModal('<p class="muted">Cargando operación…</p>')
 	await refreshDetail()
 }
@@ -471,13 +472,19 @@ async function openTrade(offer, order, parent = false) {
 // La operación que se está cargando: abrir otra no espera a la anterior,
 // pero el refresco periódico de la misma no se solapa
 let detailLoading = null
-async function refreshDetail() {
+// El chat entero se lee siempre que el usuario hace algo (abrir, enviar, pagar…). El refresco periódico ({ periodic: true }) se lo
+// salta mientras el flujo al instante está abierto, porque los mensajes ya llegan por ahí: solo pide el estado. Lo lee igual
+// si el flujo está caído o cada CHAT_SAFETY_MS, por si se coló algo
+const CHAT_SAFETY_MS = 60_000
+let chatReadAt = 0
+async function refreshDetail({ periodic = false } = {}) {
 	const d = bk.detail
 	if (!d || detailLoading === d) return
 	detailLoading = d
+	const skipChat = periodic && chatLive?.live && bk.chat && Date.now() - chatReadAt < CHAT_SAFETY_MS
 	let t
 	try {
-		t = await api(`/trade?offer=${d.offer}${d.order ? `&order=${d.order}` : ''}`)
+		t = await api(`/trade?offer=${d.offer}${d.order ? `&order=${d.order}` : ''}${skipChat ? '&chat=0' : ''}`)
 	} catch (e) {
 		if (bk.detail === d) $('modalBody').innerHTML = `<p class="empty">${esc(e.message)}</p>`
 		return
@@ -486,6 +493,16 @@ async function refreshDetail() {
 	}
 	// Mientras cargaba se abrió otra operación (u otra orden de la misma oferta)
 	if (bk.detail !== d) return
+	// Sin chat en la respuesta: vale el que ya se tiene (con lo que llegó por el flujo). Con chat, se conservan los mensajes
+	// del flujo más nuevos que esa lectura (llegaron mientras QvaPay respondía y ya no se vuelve a leer enseguida)
+	if (t.chat) {
+		chatReadAt = Date.now()
+		const last = t.chat.at(-1)?.at ?? ''
+		const ids = new Set(t.chat.map((m) => m.id))
+		const late = bk.detailKey === `${d.offer}:${d.order ?? ''}` ? (bk.chat ?? []).filter((m) => !ids.has(m.id) && m.at >= last) : []
+		if (late.length) t.chat = [...t.chat, ...late].slice(-30)
+	} else t.chat = bk.chat ?? []
+	bk.detailKey = `${d.offer}:${d.order ?? ''}`
 	syncChatLive(t)
 	// El refresco periódico no debe borrar lo que el usuario está escribiendo ni moverle el scroll:
 	// el chat sigue al final solo si ya estaba al final (si subió a leer, se queda donde estaba)
@@ -541,7 +558,15 @@ function syncChatLive(t) {
 	const key = d && LIVE_CHAT.has(t?.status) ? `${d.offer}:${d.order ?? ''}` : null
 	if (chatLive?.key === key) return
 	stopChatLive()
-	if (key && window.TPApi?.chat) chatLive = { key, stop: TPApi.chat(d.offer, d.order ?? null, chatArrived) }
+	if (!key || !window.TPApi?.chat) return
+	const me = { key, live: false, stop: null }
+	chatLive = me
+	me.stop = TPApi.chat(d.offer, d.order ?? null, chatArrived, (live) => {
+		if (chatLive !== me) return
+		me.live = live
+		// Al (re)conectar se lee el chat entero una vez: lo que llegó mientras el flujo estaba cortado no lo trae él
+		if (live && Date.now() - chatReadAt > 3_000) refreshSoon({ full: true })
+	})
 }
 // El mensaje se pinta en cuanto llega, sin esperar a releer la operación (eso va detrás, por si cambió algo más)
 function chatArrived(m) {
@@ -559,7 +584,8 @@ function stopChatLive() {
 	chatLive = null
 }
 // Si ya se está cargando, se repite al terminar: el mensaje que llegó puede no estar en esa lectura
-const refreshSoon = () => (detailLoading ? setTimeout(refreshSoon, 300) : refreshDetail())
+// Tras un mensaje del flujo basta el estado (el mensaje ya está pintado); { full: true } lee también el chat
+const refreshSoon = ({ full = false } = {}) => (detailLoading ? setTimeout(() => refreshSoon({ full }), 300) : refreshDetail({ periodic: !full }))
 
 const chatHtml = (chat) =>
 	chat.length
@@ -2636,4 +2662,4 @@ setInterval(() => {
 	if (bk.alerts && watching && tradeTicks % 2 === 0) loadTrades()
 }, 15_000)
 setInterval(() => !document.hidden && tickClocks(), 1000)
-setInterval(() => !document.hidden && bk.detail && refreshDetail(), 8_000)
+setInterval(() => !document.hidden && bk.detail && refreshDetail({ periodic: true }), 8_000)

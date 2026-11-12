@@ -326,7 +326,8 @@ export class Broker {
 		const order = url.searchParams.get('order') || undefined
 		const o = await acc.client.getOffer(offer)
 		const ord = order ? o.Orders?.find((x) => x.uuid === order) : undefined
-		const chat = await acc.client.getChat(offer, order).catch(() => [])
+		// ?chat=0: el terminal ya tiene el chat al día por el flujo al instante y solo quiere el estado; chat va null
+		const chat = url.searchParams.get('chat') === '0' ? null : await acc.client.getChat(offer, order).catch(() => [])
 		const isOwner = o.User?.uuid === acc.me.uuid
 		// Solo tu calificación: la que te dieron no se muestra, porque las notas se pueden
 		// cambiar durante 72 h y verla invitaría a la represalia
@@ -368,14 +369,15 @@ export class Broker {
 			counterpartyImage: (isOwner ? (ord?.Taker ?? o.Peer) : o.User)?.image ?? null,
 			// Para saber si está en línea (el punto verde)
 			counterpartyUuid: (isOwner ? (ord?.Taker ?? o.Peer) : o.User)?.uuid ?? null,
-			chat: chat.slice(-30).map((m) => ({
-				id: m.id,
-				mine: m.peer_id === acc.me.uuid,
-				moderator: !!m.is_moderator,
-				text: m.message,
-				image: m.image,
-				at: m.created_at,
-			})),
+			chat:
+				chat?.slice(-30).map((m) => ({
+					id: m.id,
+					mine: m.peer_id === acc.me.uuid,
+					moderator: !!m.is_moderator,
+					text: m.message,
+					image: m.image,
+					at: m.created_at,
+				})) ?? null,
 		})
 	}
 

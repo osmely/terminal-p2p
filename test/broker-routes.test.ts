@@ -7,6 +7,8 @@ import type { P2POffer } from '../src/qvapay/types.ts'
 // QvaPay simulado: el usuario "yo" ya tomó dos ofertas
 function fakeQvaPay() {
 	const calls: string[] = []
+	// Cada lectura del chat (aparte, para no mezclarla con las escrituras que comprueban otras pruebas)
+	const chats: string[] = []
 	const other = { uuid: 's1', username: 'otro' }
 	const me = { uuid: 'me', username: 'yo' }
 	const offers: Record<string, P2POffer> = {
@@ -20,7 +22,7 @@ function fakeQvaPay() {
 		extended: async () => (calls.push('extended'), { uuid: 'me', username: 'yo', balance: 100, kyc: true, golden_check: false, p2p_enabled: true, p2p_completed_count: 42, p2p_average_rating: 4.8, p2p_raters_count: 30 }),
 		getOffer: async (uuid: string) => structuredClone(offers[uuid]),
 		listOffers: async () => ({ current_page: 1, per_page: 50, total: 2, data: Object.values(offers) }),
-		getChat: async () => [],
+		getChat: async (uuid: string) => (chats.push(uuid), [{ id: '1', peer_id: 's1', message: 'hola', image: null, created_at: '2026-11-11T12:00:00Z' }]),
 		markPaid: async (uuid: string, tx: string) => {
 			calls.push(`paid:${uuid}:${tx}`)
 			offers[uuid].status = 'paid'
@@ -34,7 +36,7 @@ function fakeQvaPay() {
 		editOffer: async (uuid: string, body: unknown) => void calls.push(`edit:${uuid}:${JSON.stringify(body)}`),
 		sendChatImage: async (uuid: string, file: Blob, name: string, message?: string) => void calls.push(`image:${uuid}:${file.size}:${name}:${message ?? ''}`),
 	}
-	return { client: client as unknown as QvaPayClient, calls, offers }
+	return { client: client as unknown as QvaPayClient, calls, chats, offers }
 }
 
 const BASE = 'https://terminalp2p.com/api/broker'
@@ -246,4 +248,18 @@ test('/me trae tus operaciones y tu valoración de P2P, pedidas como mucho cada 
 	assert.equal(a.body.p2pRating, 4.8)
 	await get('/me')
 	assert.equal(fake.calls.filter((c) => c === 'extended').length, 1)
+})
+
+test('detalle de una operación: con chat=0 trae el estado sin leer el chat', async () => {
+	const { fake, get } = await setup()
+	const full = await get('/trade?offer=a1')
+	assert.equal(full.body.chat.length, 1)
+	assert.equal(full.body.chat[0].text, 'hola')
+	assert.equal(fake.chats.filter((c) => c === 'a1').length, 1)
+	const light = await get('/trade?offer=a1&chat=0')
+	assert.equal(light.status, 200)
+	assert.equal(light.body.chat, null)
+	assert.equal(light.body.status, 'processing')
+	// No se pidió el chat a QvaPay otra vez
+	assert.equal(fake.chats.filter((c) => c === 'a1').length, 1)
 })

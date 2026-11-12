@@ -262,16 +262,21 @@ const radar = {
 }
 
 // El chat de una operación al instante: cada mensaje nuevo llama a onMessage, ya con la forma de los de /trade. QvaPay corta el flujo cada pocos minutos
-// y se vuelve a conectar; si falla seguido, se espera más entre intentos (hasta 1 min). Devuelve la función que lo para
+// y se vuelve a conectar; si falla seguido, se espera más entre intentos (hasta 1 min). onLive(true) cuando el flujo queda abierto y onLive(false)
+// cuando se corta o se deja de intentar: así el terminal sabe si puede ahorrarse leer el chat entero en cada refresco. Devuelve la función que lo para
 const CHAT_RETRY_MS = 10_000
 const CHAT_RETRY_MAX_MS = 60_000
-function chat(offer: string, order: string | null, onMessage: (m: { id: string; mine: boolean; moderator: boolean; text: string | null; image: string | null; at: string }) => void) {
+type LiveMessage = { id: string; mine: boolean; moderator: boolean; text: string | null; image: string | null; at: string }
+function chat(offer: string, order: string | null, onMessage: (m: LiveMessage) => void, onLive?: (live: boolean) => void) {
 	const ctl = new AbortController()
+	const live = (v: boolean) => {
+		if (!ctl.signal.aborted) onLive?.(v)
+	}
 	void (async () => {
 		let wait = CHAT_RETRY_MS
 		while (!ctl.signal.aborted) {
 			const acc = await accounts.get().catch(() => null)
-			if (!acc) return
+			if (!acc) return live(false)
 			const started = Date.now()
 			try {
 				await acc.client.chatStream(
@@ -279,13 +284,16 @@ function chat(offer: string, order: string | null, onMessage: (m: { id: string; 
 					order ?? undefined,
 					(m) => onMessage({ id: m.id, mine: m.peer_id === acc.me.uuid, moderator: !!m.is_moderator, text: m.message, image: m.image, at: m.created_at }),
 					ctl.signal,
+					() => live(true),
 				)
 			} catch (e) {
 				if (ctl.signal.aborted) return
+				live(false)
 				// Sin permiso para ese chat o la operación ya no existe: no se insiste (el refresco normal sigue)
 				const status = (e as { status?: number }).status
 				if (status === 401 || status === 403 || status === 404) return
 			}
+			live(false)
 			// Un flujo que duró se cerró por tiempo (lo normal): se reconecta enseguida. Si cayó al momento, se espera más
 			const lasted = Date.now() - started > 60_000
 			if (lasted) wait = CHAT_RETRY_MS
