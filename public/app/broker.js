@@ -206,6 +206,8 @@ async function loadAccount() {
 	// Sin token esto acaba antes de que cargue pro.js: entonces es pro.js quien llama a refreshPro al cargar
 	bk.acctReady = true
 	if (typeof refreshPro === 'function') refreshPro()
+	// Lo que depende de la cuenta fuera de aquí (tus acciones en stocks.js)
+	document.dispatchEvent(new Event('tp:account'))
 }
 
 // El saldo cambia fuera de esta pestaña: otra pestaña o la web de QvaPay publica una venta (los USD quedan

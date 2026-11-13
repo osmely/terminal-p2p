@@ -3,7 +3,7 @@
 // Usa Request/Response estándar, así que también se prueba en Node.
 
 import { P2P_FEE } from '../qvapay/fees.ts'
-import type { SavedMethod } from '../qvapay/types.ts'
+import type { SavedMethod, StockPortfolio } from '../qvapay/types.ts'
 import { logger } from '../log.ts'
 import { locale, tl } from '../i18n.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
@@ -143,6 +143,8 @@ export class Broker {
 					return await this.coins(acc)
 				case 'GET /payment-methods':
 					return await this.paymentMethods(acc)
+				case 'GET /stocks/portfolio':
+					return await this.portfolio(ctx, acc)
 				case 'GET /offer':
 					return await this.offer(ctx, acc)
 				case 'POST /offer/create':
@@ -403,6 +405,21 @@ export class Broker {
 			typeof d === 'string' ? (d.trim() ? { '': d.trim() } : {}) : Object.fromEntries(Object.entries(d ?? {}).filter(([, v]) => typeof v === 'string' && v.trim()))
 		const methods = (Array.isArray(list) ? list : []).map((m) => ({ name: m.name, coin: m.coin?.tick ?? null, fields: fields(m.details) })).filter((m) => Object.keys(m.fields).length)
 		return json(200, { methods })
+	}
+
+	// Tus acciones en QvaPay (solo lectura): posiciones, resumen e historial, con solo los campos que usa el terminal
+	private async portfolio({ url }: Ctx, acc: Account) {
+		const page = Math.min(100, Math.max(1, Math.floor(Number(url.searchParams.get('page')) || 1)))
+		let res: { data?: StockPortfolio }
+		try {
+			res = await acc.client.stocksPortfolio(page, PORTFOLIO_TAKE)
+		} catch (err) {
+			// Un token sin el permiso «read»
+			if (err instanceof QvaPayError && (err.code === 'INSUFFICIENT_SCOPE' || err.status === 403))
+				return json(400, { error: tl('routes.noStockRead'), code: 'NO_READ' })
+			throw err
+		}
+		return json(200, portfolioView(res?.data ?? {}, page))
 	}
 
 	private async offer({ url }: Ctx, acc: Account) {
@@ -1187,4 +1204,51 @@ function friendly(err: unknown): string {
 	if (err.status === 429) return tl('routes.err429')
 	const body = err.body as { error?: string } | undefined
 	return body?.error ?? err.message
+}
+
+// La cartera de acciones tal como la usa el terminal: números de verdad, símbolos limpios y sin campos de más
+const PORTFOLIO_TAKE = 20
+const SYMBOL = /^[A-Z]{1,6}$/
+const numOr = (v: unknown) => {
+	const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v
+	return typeof n === 'number' && Number.isFinite(n) ? n : null
+}
+export function portfolioView(d: StockPortfolio, page = 1) {
+	const positions = (Array.isArray(d.positions) ? d.positions : [])
+		.filter((p) => SYMBOL.test(String(p?.symbol)) && (numOr(p.quantity) ?? 0) > 0)
+		.map((p) => ({
+			symbol: String(p.symbol),
+			quantity: numOr(p.quantity),
+			avgCost: numOr(p.avg_cost),
+			price: numOr(p.current_price),
+			value: numOr(p.market_value),
+			cost: numOr(p.cost_basis),
+			pnl: numOr(p.unrealized_pnl),
+			pnlPct: numOr(p.unrealized_pnl_percent),
+		}))
+	const s = d.summary ?? {}
+	const trades = (Array.isArray(d.trades) ? d.trades : [])
+		.filter((t) => SYMBOL.test(String(t?.symbol)) && (t.type === 'buy' || t.type === 'sell'))
+		.map((t) => ({
+			id: String(t.uuid ?? t.id ?? ''),
+			symbol: String(t.symbol),
+			side: t.type as 'buy' | 'sell',
+			quantity: numOr(t.quantity),
+			marketPrice: numOr(t.market_price),
+			price: numOr(t.effective_price),
+			spreadPct: numOr(t.spread_percent),
+			fee: numOr(t.fee_amount),
+			total: numOr(t.total_amount),
+			realizedPnl: numOr(t.realized_pnl),
+			afterHours: t.after_hours === true,
+			at: Number.isFinite(Date.parse(t.created_at)) ? Date.parse(t.created_at) : null,
+		}))
+	return {
+		positions,
+		summary: { value: numOr(s.total_market_value), cost: numOr(s.total_cost_basis), pnl: numOr(s.total_unrealized_pnl), pnlPct: numOr(s.total_unrealized_pnl_percent) },
+		trades,
+		page,
+		// QvaPay no dice cuántas hay: si llenó la página, puede haber más
+		more: (Array.isArray(d.trades) ? d.trades.length : 0) >= PORTFOLIO_TAKE,
+	}
 }

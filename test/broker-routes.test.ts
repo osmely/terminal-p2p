@@ -274,3 +274,46 @@ test('tomar una oferta pausada: dice por qué y, si es la pausa automática, a q
 	fake.offers.p1.pause = { reason: 'owner', until: null }
 	assert.match((await post('/offer/apply', { offer: 'p1' })).body.error, /Su dueño pausó la oferta/)
 })
+
+test('mi cartera de acciones: solo lectura, con números limpios, y sin el permiso «read» lo dice', async () => {
+	const { fake, get } = await setup()
+	const asked: string[] = []
+	let mode: 'ok' | 'scope' = 'ok'
+	Object.assign(fake.client, {
+		stocksPortfolio: async (page: number, take: number) => {
+			asked.push(`${page}:${take}`)
+			if (mode === 'scope') throw new QvaPayError(403, 'sin permiso', 'INSUFFICIENT_SCOPE')
+			return {
+				success: true,
+				data: {
+					positions: [
+						{ id: '1', symbol: 'AAPL', quantity: '1.279832', avg_cost: 175.4, current_price: 178.52, market_value: 228.48, cost_basis: 224.49, unrealized_pnl: 3.99, unrealized_pnl_percent: 1.78 },
+						{ symbol: '<b>', quantity: 1 },
+						{ symbol: 'NVDA', quantity: 0 },
+					],
+					summary: { total_market_value: 228.48, total_cost_basis: 224.49, total_unrealized_pnl: 3.99, total_unrealized_pnl_percent: 1.78, market_open: true },
+					trades: [
+						{ uuid: 'u1', symbol: 'AAPL', type: 'buy', quantity: 0.279832, market_price: 178.25, effective_price: 178.68, spread_percent: 0.24, fee_amount: 0.25, total_amount: 50.25, realized_pnl: null, after_hours: false, created_at: '2025-03-17T15:30:00.000Z' },
+						{ symbol: 'AAPL', type: 'raro', quantity: 1, effective_price: 1, total_amount: 1, created_at: 'x' },
+					],
+				},
+			}
+		},
+	})
+	const r = await get('/stocks/portfolio?page=2')
+	assert.equal(r.status, 200)
+	assert.deepEqual(asked, ['2:20'])
+	assert.deepEqual(r.body.positions, [{ symbol: 'AAPL', quantity: 1.279832, avgCost: 175.4, price: 178.52, value: 228.48, cost: 224.49, pnl: 3.99, pnlPct: 1.78 }])
+	assert.deepEqual(r.body.summary, { value: 228.48, cost: 224.49, pnl: 3.99, pnlPct: 1.78 })
+	assert.deepEqual(r.body.trades, [{ id: 'u1', symbol: 'AAPL', side: 'buy', quantity: 0.279832, marketPrice: 178.25, price: 178.68, spreadPct: 0.24, fee: 0.25, total: 50.25, realizedPnl: null, afterHours: false, at: Date.parse('2025-03-17T15:30:00.000Z') }])
+	assert.equal(r.body.more, false)
+	// Página fuera de rango: la primera
+	await get('/stocks/portfolio?page=abc')
+	assert.equal(asked.at(-1), '1:20')
+	mode = 'scope'
+	const denied = await get('/stocks/portfolio')
+	assert.equal(denied.status, 400)
+	assert.equal(denied.body.code, 'NO_READ')
+	// Sin cuenta conectada, nada
+	assert.equal((await get('/stocks/portfolio', { 'X-Broker': '1' })).status, 401)
+})

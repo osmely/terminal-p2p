@@ -13,6 +13,7 @@ import type {
 	P2POffer,
 	Paginated,
 	SavedMethod,
+	StockPortfolio,
 } from './types.ts'
 
 const log = logger('qvapay')
@@ -135,6 +136,11 @@ export class QvaPayClient {
 	listOffers(params: ListParams) {
 		const query: RequestOpts['query'] = { ...params, my: params.my ? 'true' : undefined }
 		return this.request<Paginated<P2POffer>>('GET', '/p2p', { bucket: 'list', query })
+	}
+
+	// Tus acciones en QvaPay: posiciones, resumen e historial de compras y ventas (solo lectura)
+	stocksPortfolio(page = 1, take = 20) {
+		return this.request<{ success?: boolean; data?: StockPortfolio }>('GET', '/stocks/portfolio', { bucket: 'general', query: { page, take } })
 	}
 
 	// Los métodos de pago que el usuario guardó en QvaPay (solo lectura)

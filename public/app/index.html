@@ -272,10 +272,16 @@
 		<section class="panel area-stk" id="stkRoot">
 			<div class="panel-head">
 				<h2 data-i18n="html.stkTitle">Acciones de QvaPay</h2>
+				<!-- Con la cuenta conectada: la acción elegida o tus acciones en QvaPay -->
+				<div class="seg-tabs stk-views" id="stkViews" role="tablist" aria-label="Qué ver" data-i18n-aria-label="html.stkViews" hidden>
+					<button class="seg-tab" data-view-stk="stock" role="tab" data-i18n="html.stkChart">Gráfico</button>
+					<button class="seg-tab" data-view-stk="portfolio" role="tab" data-i18n="html.stkPortfolio">Mi cartera</button>
+				</div>
 				<p class="panel-note" id="stkAt" aria-live="polite" data-i18n="html.loading">Cargando…</p>
 			</div>
 			<div class="stk-body">
-				<div class="stk-main">
+				<div class="stk-pf" id="stkPortfolio" hidden></div>
+				<div class="stk-main" id="stkMain">
 					<div class="stk-head" id="stkHead"></div>
 					<div class="stk-tools">
 						<div class="seg-tabs range-tabs" id="stkFrames" role="tablist" aria-label="Intervalo" data-i18n-aria-label="html.interval"></div>

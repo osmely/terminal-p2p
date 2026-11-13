@@ -221,3 +221,37 @@ export interface SavedMethod {
 	details: Record<string, string> | string
 	coin?: { tick?: string; name?: string } | null
 }
+
+// GET /stocks/portfolio (https://www.qvapay.com/docs/stocks/portfolio): las acciones del usuario en QvaPay, el resumen
+// y su historial de compras y ventas. Llega dentro de { success, data }
+export interface StockPosition {
+	symbol: string
+	quantity: Num
+	avg_cost: Num
+	current_price: Num
+	market_value: Num
+	cost_basis: Num
+	unrealized_pnl: Num
+	unrealized_pnl_percent: Num
+}
+export interface StockTrade {
+	uuid?: string
+	id?: string
+	symbol: string
+	type: 'buy' | 'sell' | string
+	quantity: Num
+	market_price?: Num
+	effective_price: Num
+	spread_percent?: Num
+	fee_amount?: Num
+	total_amount: Num
+	realized_pnl?: Num | null
+	after_hours?: boolean
+	created_at: string
+}
+export interface StockPortfolio {
+	positions?: StockPosition[]
+	summary?: { total_market_value?: Num; total_cost_basis?: Num; total_unrealized_pnl?: Num; total_unrealized_pnl_percent?: Num; market_open?: boolean }
+	trades?: StockTrade[]
+	pagination?: { page?: number; take?: number }
+}

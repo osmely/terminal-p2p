@@ -50,6 +50,12 @@
 	let timer = null
 	// Quien pide un aviso desde aquí: la pestaña de avisos lo trae elegido
 	let pick = null
+	// Tus acciones en QvaPay (con la cuenta conectada): lo que se ve en el panel ('stock' o 'portfolio') y la cartera
+	let pfView = store.get('stk.view', 'stock')
+	let pf = null
+	let pfAt = 0
+	let pfErr = ''
+	let pfLoading = null
 
 	if (typeof PRO_FEATURES !== 'undefined') PRO_FEATURES.push(['🔔', tl('stk.proFeature'), tl('stk.proFeatureSub')])
 
@@ -76,6 +82,9 @@
 	}
 	// El icono que usa QvaPay (lo trae su lista; el servidor solo deja los de su carpeta) o la inicial. En la columna
 	// colapsada, sin icono, el símbolo (las iniciales se repiten)
+	// Cantidad de acciones (fracciones de hasta 6 decimales)
+	const qty = (n) => (n == null || !isFinite(n) ? '—' : n.toLocaleString('en-US', { maximumFractionDigits: 6 }))
+	const held = (s) => pf?.positions.find((p) => p.symbol === s) ?? null
 	const icon = (s, sym = false) => {
 		const img = quote(s)?.image
 		const cls = `coin-ic stk-ic${sym && !img ? ' stk-sym' : ''}`
@@ -185,6 +194,35 @@
 		tf = order.find((f) => has(f) || (f === want && pending(f))) ?? order.find(pending) ?? want
 	}
 
+	// Tu cartera (posiciones, resumen e historial) por el broker con tu token; solo lectura. Con «más», la página
+	// siguiente del historial se suma a la que ya hay
+	function loadPortfolio(more = false) {
+		if (!bk.acct.connected) {
+			pf = null
+			pfErr = ''
+			return null
+		}
+		if (pfLoading) return pfLoading
+		const page = more && pf ? pf.page + 1 : 1
+		pfLoading = (async () => {
+			try {
+				const d = await api(`/stocks/portfolio?page=${page}`)
+				pf = more && pf ? { ...d, trades: [...pf.trades, ...d.trades] } : d
+				pfAt = Date.now()
+				pfErr = ''
+			} catch (e) {
+				pfErr = e.message
+			}
+			pfLoading = null
+			renderMarkets()
+			if (on) {
+				renderHead()
+				renderPortfolio()
+			}
+		})()
+		return pfLoading
+	}
+
 	// ── Pintar ───────────────────────────────────────────────────────────
 	// Las filas de la columna de mercados (app.js) con «Acciones» en el selector
 	function rows(query) {
@@ -200,7 +238,7 @@
 			.map((x) => {
 				const here = on && x.symbol === sel
 				return `<button class="mrow ${here ? 'active' : ''}" data-stk="${esc(x.symbol)}" role="option" aria-selected="${here}">
-				<span class="mmeta">${icon(x.symbol)}<span class="mname"><b>${esc(x.symbol)}</b><span>${esc(x.name)}</span></span></span>
+				<span class="mmeta">${icon(x.symbol)}<span class="mname"><b>${esc(x.symbol)}</b><span>${esc(x.name)}${held(x.symbol) ? ` · <i class="stk-own">${tl('stk.youHave', { qty: qty(held(x.symbol).quantity) })}</i>` : ''}</span></span></span>
 				<span class="num">${money(x.price)}</span><span class="num ${tone(x.change)}">${signed(x.change)} %</span></button>`
 			})
 			.join('')
@@ -235,10 +273,71 @@
 				<div><dt>${tl('stk.prevClose')}</dt><dd class="num">${money(q.previousClose)}</dd></div>
 				<div><dt>${tl('stk.weeks52')}</dt><dd class="num">${range}</dd></div>
 				<div><dt>${tl('stk.volume')}</dt><dd class="num">${compact(q.volume)}</dd></div>
-			</dl>`
+			</dl>${ownLine(q.symbol)}`
 		const alertBtn = $s('stkAlert')
 		alertBtn.hidden = !window.TPPro?.enabled
 		alertBtn.title = tl('stk.alertTitle', { symbol: q.symbol })
+	}
+
+	// Lo que tienes de la acción que se mira (si está en tu cartera)
+	function ownLine(s) {
+		const p = held(s)
+		if (!p) return ''
+		return `<p class="stk-mine">${tl('stk.mine')} <b class="num">${qty(p.quantity)}</b> ${esc(s)} · <span class="num">${money(p.value)} USD</span> · <span class="num ${tone(p.pnl)}">${signed(p.pnl)} (${signed(p.pnlPct)} %)</span> <button class="link small" data-view-stk="portfolio">${tl('stk.seePortfolio')}</button></p>`
+	}
+
+	// La cartera: resumen, posiciones (tocar una abre su gráfico) e historial de compras y ventas (hora de Cuba)
+	function renderPortfolio() {
+		const box = $s('stkPortfolio')
+		const views = $s('stkViews')
+		const can = !!bk.acct.connected
+		views.hidden = !can
+		if (!can && pfView === 'portfolio') pfView = 'stock'
+		for (const b of views.querySelectorAll('[data-view-stk]')) {
+			b.classList.toggle('active', b.dataset.viewStk === pfView)
+			b.setAttribute('aria-selected', String(b.dataset.viewStk === pfView))
+		}
+		box.hidden = pfView !== 'portfolio'
+		$s('stkMain').hidden = pfView === 'portfolio'
+		if (pfView !== 'portfolio') return
+		if (!pf) {
+			box.innerHTML = `<div class="empty">${esc(pfErr || tl('stk.pfLoading'))}</div>`
+			return
+		}
+		const s = pf.summary
+		const card = (label, value, cls = '') => `<div class="peer-stat"><span>${label}</span><b class="num ${cls}">${value}</b></div>`
+		const positions = pf.positions.length
+			? `<div class="stk-table-wrap"><table class="stk-table"><thead><tr><th>${tl('stk.colStock')}</th><th>${tl('stk.colQty')}</th><th>${tl('stk.colAvgCost')}</th><th>${tl('stk.colPrice')}</th><th>${tl('stk.colValue')}</th><th>${tl('stk.colPnl')}</th></tr></thead><tbody>${pf.positions
+					.map(
+						(p) => `<tr data-stk-open="${esc(p.symbol)}" title="${esc(tl('stk.openChart', { symbol: p.symbol }))}"><td><span class="stk-cell">${icon(p.symbol)}<b>${esc(p.symbol)}</b></span></td><td class="num">${qty(p.quantity)}</td><td class="num">${money(p.avgCost)}</td><td class="num">${money(p.price)}</td><td class="num">${money(p.value)}</td><td class="num ${tone(p.pnl)}">${signed(p.pnl)} <small>(${signed(p.pnlPct)} %)</small></td></tr>`,
+					)
+					.join('')}</tbody></table></div>`
+			: `<p class="muted small">${tl('stk.noPositions')}</p>`
+		const when = (ms) => (ms ? `${cubaFmt(ms, { day: 'numeric', month: 'short', year: 'numeric' })}, ${cubaTime(ms)}` : '—')
+		const trades = pf.trades.length
+			? `<div class="stk-table-wrap"><table class="stk-table"><thead><tr><th>${tl('stk.colDate')}</th><th>${tl('stk.colTrade')}</th><th>${tl('stk.colQty')}</th><th>${tl('stk.colPrice')}</th><th>${tl('stk.colTotal')}</th><th>${tl('stk.colFee')}</th></tr></thead><tbody>${pf.trades
+					.map(
+						(t) => `<tr><td>${when(t.at)}${t.afterHours ? ` <small class="muted">${tl('stk.afterHours')}</small>` : ''}</td><td><span class="${t.side === 'buy' ? 'bid' : 'ask'}">${tl(t.side === 'buy' ? 'stk.buy' : 'stk.sell')}</span> ${esc(t.symbol)}</td><td class="num">${qty(t.quantity)}</td><td class="num">${money(t.price)}</td><td class="num">${money(t.total)}</td><td class="num">${money(t.fee)}</td></tr>`,
+					)
+					.join('')}</tbody></table></div>${pf.more ? `<button class="btn sm" id="stkPfMore">${tl('stk.more')}</button>` : ''}`
+			: `<p class="muted small">${tl('stk.noTrades')}</p>`
+		box.innerHTML = `<div class="peer-stats stk-pf-sum">
+				${card(tl('stk.pfValue'), `${money(s.value)} USD`)}
+				${card(tl('stk.pfCost'), `${money(s.cost)} USD`)}
+				${card(tl('stk.pfPnl'), `${signed(s.pnl)} USD (${signed(s.pnlPct)} %)`, tone(s.pnl))}
+			</div>
+			<section><h4 class="stk-h4">${tl('stk.pfPositions')}</h4>${positions}</section>
+			<section><h4 class="stk-h4">${tl('stk.pfTrades')}</h4>${trades}</section>
+			<p class="stk-note">${tl('stk.pfNote', { time: cubaTime(pfAt) })}${pfErr ? ` ${esc(pfErr)}` : ''}</p>`
+	}
+
+	function setView(v) {
+		if (v === 'portfolio' && !bk.acct.connected) v = 'stock'
+		pfView = v
+		store.set('stk.view', v)
+		renderPortfolio()
+		if (v === 'portfolio' && (!pf || Date.now() - pfAt > 60_000)) loadPortfolio()
+		if (v === 'stock') draw()
 	}
 
 	function chartColors() {
@@ -311,6 +410,7 @@
 	function tick() {
 		if (!on || document.hidden) return
 		if (Date.now() - listAt > 60_000) loadList()
+		if (bk.acct.connected && Date.now() - pfAt > 120_000) loadPortfolio()
 		loadDetail(sel)
 		loadFrames(sel, true)
 	}
@@ -332,13 +432,17 @@
 			setMarketKind('stocks')
 		}
 		if (!keepSheet) closeMarketSheet()
+		// Elegir una acción de la lista la enseña (aunque se estuviera viendo la cartera)
+		if (s && pfView === 'portfolio') pfView = 'stock'
 		settle()
 		renderMarkets()
 		renderAt()
 		renderHead()
+		renderPortfolio()
 		draw()
 		window.render?.()
 		if (!list.length || Date.now() - listAt > 60_000) loadList()
+		if (bk.acct.connected && (!pf || Date.now() - pfAt > 60_000)) loadPortfolio()
 		loadDetail(sel)
 		loadFrames(sel)
 	}
@@ -379,6 +483,28 @@
 	$s('stkAlert').addEventListener('click', askAlert)
 	document.addEventListener('visibilitychange', tick)
 	document.addEventListener('tp:pro', () => on && renderHead())
+	// Al conectar o cambiar de cuenta, su cartera; al desconectar, fuera
+	document.addEventListener('tp:account', () => {
+		pf = null
+		pfAt = 0
+		pfErr = ''
+		if (bk.acct.connected && (on || store.get('marketKind', 'p2p') === 'stocks')) loadPortfolio()
+		renderMarkets()
+		if (on) {
+			renderHead()
+			renderPortfolio()
+		}
+	})
+	view.addEventListener('click', (e) => {
+		const v = e.target.closest('[data-view-stk]')?.dataset.viewStk
+		if (v) return setView(v)
+		const open = e.target.closest('[data-stk-open]')?.dataset.stkOpen
+		if (open) {
+			setView('stock')
+			enter(open)
+		}
+		if (e.target.closest('#stkPfMore')) loadPortfolio(true)
+	})
 	window.addEventListener('hashchange', fromHash)
 
 	const MARKET_IC = '<span class="coin-ic stk-mic" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M4 17l5-5 4 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'

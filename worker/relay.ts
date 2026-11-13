@@ -41,6 +41,8 @@ const RULES: [method: string, path: RegExp][] = [
 	['POST', new RegExp(`^/p2p/${UUID}/(paid|received|cancel|chat|rate|edit|pause|apply)$`)],
 	// Cambiar una calificación ya dada (QvaPay lo permite 72 h)
 	['PATCH', new RegExp(`^/p2p/${UUID}/rate$`)],
+	// Tus acciones en QvaPay (posiciones e historial): solo leer, nunca comprar ni vender
+	['GET', /^\/stocks\/portfolio$/],
 ]
 
 export function allowed(method: string, path: string) {
