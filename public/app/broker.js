@@ -1015,6 +1015,13 @@ function priceWarning(type, price, mid) {
 	return ''
 }
 
+// QvaPay deja una sola oferta por rango viva por mercado y lado (docs/p2p/range; una agotada con órdenes en curso
+// también cuenta): la tuya, de tus ofertas publicadas, que se releen cada 15 s. except: la oferta que se está editando
+function flexOfferOf(coin, type, except = null) {
+	return bk.openOffers.find((o) => o.kind === 'flexible' && o.coin === coin && o.offerType === type && o.offerUuid !== except) ?? null
+}
+const flexSide = (type) => (type === 'sell' ? tl('broker.flexSideSell') : tl('broker.flexSideBuy'))
+
 async function showCreateOffer(preset = null) {
 	if (!bk.acct.connected) return toast(tl('broker.connectToPost'), true)
 	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin), unit: unitOf(state.coin) }]
@@ -1045,6 +1052,7 @@ async function showCreateOffer(preset = null) {
 					<label class="field">${tl('broker.minPerOrder')}<input class="input" id="ofMin" inputmode="decimal" data-num data-dec="2" autocomplete="off" /></label>
 					<label class="field">${tl('broker.maxPerOrder')}<input class="input" id="ofMax" inputmode="decimal" data-num data-dec="2" autocomplete="off" /></label>
 				</div>
+				<div class="stack tight" id="ofFlexHas" hidden></div>
 			</section>
 			<section class="sec-box" id="ofKeep" hidden></section>
 			<section class="sec-box">
@@ -1110,7 +1118,7 @@ async function showCreateOffer(preset = null) {
 						const val = esc(window.TPNum?.show(f.name, saved[f.name]) ?? saved[f.name] ?? '')
 						return f.type === 'select' && f.options?.length
 							? `<label class="field">${label}<select class="input" data-detail="${esc(f.name)}">${f.options.map((o) => `<option ${o.value === saved[f.name] ? 'selected' : ''}>${esc(o.value)}</option>`).join('')}</select></label>`
-							: `<label class="field">${label}<input class="input" data-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} value="${val}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
+							: `<label class="field">${label}<input class="input" data-detail="${esc(f.name)}"${window.TPNum?.detail(f.name, coin) ?? ''} value="${val}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
 					})
 					.join('')
 			: `<p class="notice warn">${tl('broker.fieldsFail')}</p>`
@@ -1129,6 +1137,9 @@ async function showCreateOffer(preset = null) {
 	const onBalance = () => ($('ofAmount') ? update() : document.removeEventListener('tp:balance', onBalance))
 	document.addEventListener('tp:balance', onBalance)
 	refreshBalance(true)
+	// Tus ofertas publicadas se releen cada 15 s: si publicas o cancelas una por rango con esto abierto, el aviso se pone al día
+	const onOffers = () => ($('ofForm') ? update() : document.removeEventListener('tp:offers', onOffers))
+	document.addEventListener('tp:offers', onOffers)
 	const update = () => {
 		if (type === 'sell' && num2($('ofAmount').value) > balance()) $('ofAmount').value = String(balance())
 		$('ofBal').hidden = type !== 'sell'
@@ -1166,6 +1177,16 @@ async function showCreateOffer(preset = null) {
 		$('ofFlex').disabled = smartActive
 		$('ofFlexNote').hidden = !smartActive
 		if (smartActive) $('ofFlexBox').hidden = true
+		// Por rango con otra por rango ya publicada de ese lado y mercado: QvaPay no la publicaría
+		const has = $('ofFlex').checked ? flexOfferOf(f.coin, type) : null
+		$('ofFlexHas').hidden = !has
+		$('ofFlexHas').innerHTML = has
+			? `<p class="notice warn">${tl('broker.flexExists', { side: flexSide(type), market: esc(nameOf(has.coin)), usd: fmtM(has.available ?? has.usd), price: `${fmtP(has.price)} ${esc(unitOf(has.coin))}` })}</p>
+				<div class="row-btns"><button type="button" class="btn small" data-flex-see="${has.offerUuid}">${tl('broker.flexSee')}</button><button type="button" class="btn small" data-flex-fixed>${tl('broker.flexMakeFixed')}</button></div>`
+			: ''
+		// Al comprar, la tarjeta es opcional y QvaPay solo rechaza las extranjeras: lo demás se avisa sin bloquear
+		for (const el of $('ofDetails').querySelectorAll('input[data-num="card"]')) el.dataset.cardOptional = type === 'buy' ? '1' : ''
+		window.TPNum?.markAll($('ofDetails'))
 		// Con la orden inteligente el total es lo que tomas más lo que publicas
 		if (smartActive && total && sm.total) $('ofTotal').innerHTML = tl(type === 'sell' ? 'broker.youWillGetTotal' : 'broker.youWillPayTotal', { amount: `${fmtM(sm.total)} ${unit}` })
 		$('ofReview').textContent = smartActive ? tl('broker.reviewSmart') : tl('broker.review')
@@ -1211,6 +1232,13 @@ async function showCreateOffer(preset = null) {
 	}
 	$('ofSmart').addEventListener('click', (e) => e.target.closest('#smartPro') && typeof showPro === 'function' && showPro())
 	$('ofKeep').addEventListener('click', (e) => e.target.closest('#keepPro') && typeof showPro === 'function' && showPro())
+	$('ofFlexHas').onclick = (e) => {
+		const see = e.target.closest('[data-flex-see]')
+		if (see) return showManageOffer(see.dataset.flexSee)
+		if (!e.target.closest('[data-flex-fixed]')) return
+		$('ofFlex').checked = false
+		update()
+	}
 	$('ofRefs').onclick = (e) => {
 		const b = e.target.closest('[data-ref]')
 		if (!b) return
@@ -1230,7 +1258,9 @@ async function showCreateOffer(preset = null) {
 					? tl('broker.errPrice')
 					: f.kind === 'flexible' && !(f.orderMin > 0 && f.orderMax >= f.orderMin && f.orderMax <= f.amount)
 						? tl('broker.errMinMax')
-						: smartActive && type === 'sell' && !f.details.some((d) => d.value)
+						: f.kind === 'flexible' && flexOfferOf(f.coin, type)
+							? tl('broker.errFlexExists')
+							: smartActive && type === 'sell' && !f.details.some((d) => d.value)
 							? tl('broker.errSmartDetails')
 							: (window.TPNum?.cardError(document.querySelectorAll('[data-detail]')) ?? '')
 		if (err) return toast(err, true)
@@ -1241,6 +1271,8 @@ async function showCreateOffer(preset = null) {
 		if (smartActive) return smart.review(f)
 		const total = f.amount * f.price
 		const req = reqText(f.requirements)
+		// Una tarjeta rara (o mal al comprar, donde es opcional) no bloquea, pero se repite al confirmar
+		const cardWarn = window.TPNum?.cardWarn(document.querySelectorAll('[data-detail]')) ?? ''
 		$('ofForm').hidden = true
 		$('ofConfirm').hidden = false
 		$('ofConfirm').innerHTML = `<h3>${tl('broker.reviewTitle')}</h3>
@@ -1264,6 +1296,7 @@ async function showCreateOffer(preset = null) {
 						: tl('broker.noteBuy', { amount: `${fmtM(total)} ${unit}` })
 			}</p>
 			${$('ofWarn').innerHTML}
+			${cardWarn ? `<p class="notice warn">${esc(cardWarn)}</p>` : ''}
 			<div class="row-btns"><button class="btn" id="ofBack">${tl('broker.back')}</button><button class="btn primary" id="ofPublish">${tl('broker.publish')}</button></div>`
 		$('ofBack').onclick = () => {
 			$('ofConfirm').hidden = true
@@ -1348,7 +1381,7 @@ function renderManage(o) {
 					<label class="field">${tl('broker.minPerOrder')}<input class="input" id="edMin" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${o.orderMin ?? ''}" /></label>
 					<label class="field">${tl('broker.maxPerOrder')}<input class="input" id="edMax" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${o.orderMax ?? ''}" /></label>
 				</div>
-				${flex ? '' : `<p class="notice warn" id="edFlexNote" hidden>${tl('broker.edFlexNote')}</p>`}
+				${flex ? '' : `<p class="notice warn" id="edFlexNote" hidden>${tl('broker.edFlexNote')}</p><div class="stack tight" id="edFlexHas" hidden></div>`}
 				<details class="opts"><summary>${tl('broker.reqVis')}</summary><div class="stack tight">
 					${Object.entries(REQ_OPTIONS)
 						.map(([k, [label, vals, fmt]]) => {
@@ -1420,15 +1453,28 @@ function renderManage(o) {
 		}
 		for (const id of ['edAmount', 'edPrice']) $(id).addEventListener('input', upd)
 		upd()
+		// Convertirla en por rango cuenta para el límite de una por rango por mercado y lado
+		const otherFlex = () => flexOfferOf(o.coin, o.type, o.offer)
+		const otherFlexText = (x) => tl('broker.edFlexExists', { side: flexSide(o.type), market: esc(nameOf(x.coin)) })
 		$('edFlex')?.addEventListener('change', () => {
 			const on = $('edFlex').checked
+			const other = on ? otherFlex() : null
 			$('edFlexBox').hidden = !on
 			$('edFlexNote').hidden = !on
+			$('edFlexHas').hidden = !other
+			$('edFlexHas').innerHTML = other
+				? `<p class="notice warn">${otherFlexText(other)}</p><div class="row-btns"><button type="button" class="btn small" data-flex-see="${other.offerUuid}">${tl('broker.flexSee')}</button></div>`
+				: ''
+		})
+		$('edFlexHas')?.addEventListener('click', (e) => {
+			const see = e.target.closest('[data-flex-see]')
+			if (see) showManageOffer(see.dataset.flexSee)
 		})
 		$('edSave').onclick = async () => {
 			const btn = $('edSave')
 			const toFlexible = !flex && !!$('edFlex')?.checked
 			const makePublic = !!$('edPublic')?.checked
+			if (toFlexible && otherFlex()) return toast(otherFlexText(otherFlex()), true)
 			// Los requisitos que la web de QvaPay deja poner y aquí no salen se mantienen
 			const requirements = { ...(o.requirements ?? {}) }
 			for (const sel of document.querySelectorAll('[data-ed-req]')) requirements[sel.dataset.edReq] = Number(sel.value)
@@ -2193,14 +2239,15 @@ async function showSwap(mode) {
 						const label = esc(f.label || f.name)
 						return f.type === 'select' && f.options?.length
 							? `<label class="field">${label}<select class="input" data-sw-detail="${esc(f.name)}" data-label="${label}">${f.options.map((o) => `<option ${o.value === saved[f.name] ? 'selected' : ''}>${esc(o.value)}</option>`).join('')}</select></label>`
-							: `<label class="field">${label}<input class="input" data-sw-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} data-label="${label}" value="${esc(window.TPNum?.show(f.name, saved[f.name]) ?? saved[f.name] ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
+							: `<label class="field">${label}<input class="input" data-sw-detail="${esc(f.name)}"${window.TPNum?.detail(f.name, sw.coin) ?? ''} data-label="${label}" value="${esc(window.TPNum?.show(f.name, saved[f.name]) ?? saved[f.name] ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
 					})
 					.join('')
 			: `<p class="notice warn">${tl('broker.fieldsFailReopen')}</p>`
 		for (const i of $('swDetails').querySelectorAll('[data-sw-detail]')) i.addEventListener('input', render)
 		savedMethodChips($('swMethods'), sw.methods, sw.coin, () => [...$('swDetails').querySelectorAll('[data-sw-detail]')], (el) => el.dataset.swDetail)
-		// Con los datos ya guardados basta un resumen; se editan con «Cambiar»
-		const complete = list.length > 0 && list.every((f) => saved[f.name])
+		window.TPNum?.markAll($('swDetails'))
+		// Con los datos ya guardados basta un resumen; se editan con «Cambiar». Si la tarjeta guardada no vale, se ve el campo con su aviso
+		const complete = list.length > 0 && list.every((f) => saved[f.name]) && !window.TPNum?.cardError($('swDetails').querySelectorAll('[data-sw-detail]'))
 		$('swSaved').hidden = !complete
 		$('swEdit').hidden = complete
 		if (complete) {
@@ -2259,7 +2306,7 @@ async function showSwap(mode) {
 			const badCard = window.TPNum?.cardError(document.querySelectorAll('[data-sw-detail]')) ?? ''
 			const over = a > maxUsd()
 			go.disabled = sw.taking || !best || !(a > 0) || missing || badCard || over || sw.loading
-			go.textContent = sw.taking ? tl('broker.selling') : maxUsd() <= 0 ? tl('broker.swNoBalanceBtn') : !best ? tl('broker.swSell') : over ? tl('broker.swNotEnough') : missing ? tl('broker.swFillDetails') : badCard ? tl('broker.swCard16') : tl('broker.swSellGo', { usd: fmtM(a), total: `${fmtM(a * best.price)} ${unit()}` })
+			go.textContent = sw.taking ? tl('broker.selling') : maxUsd() <= 0 ? tl('broker.swNoBalanceBtn') : !best ? tl('broker.swSell') : over ? tl('broker.swNotEnough') : missing ? tl('broker.swFillDetails') : badCard ? tl('broker.swCheckCard') : tl('broker.swSellGo', { usd: fmtM(a), total: `${fmtM(a * best.price)} ${unit()}` })
 		}
 	}
 

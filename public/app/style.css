@@ -126,6 +126,11 @@ select.input { appearance: none; -webkit-appearance: none; cursor: pointer; padd
 .field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); font-weight: 500; }
 .field-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .field-row .link { font-size: 11.5px; font-weight: 500; }
+/* El aviso junto a un campo (la tarjeta, numfield.js): rojo si QvaPay lo rechazaría, amarillo si solo conviene mirarlo */
+.field-msg { font-size: 11.5px; line-height: 1.4; font-weight: 500; }
+.field-msg.err { color: var(--ask); }
+.field-msg.warn { color: var(--warn); }
+.input[aria-invalid='true'] { border-color: var(--ask); }
 .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
 .check input { accent-color: var(--accent); width: 15px; height: 15px; }
 .seg-tabs { display: inline-flex; gap: 2px; background: var(--bg); padding: 3px; border-radius: 8px; border: 1px solid var(--line); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
