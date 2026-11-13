@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import './i18n-es.ts'
 import { Broker, type AccountStore } from '../src/broker/routes.ts'
 import { QvaPayError, type QvaPayClient } from '../src/qvapay/client.ts'
 import type { P2POffer } from '../src/qvapay/types.ts'

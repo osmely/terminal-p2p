@@ -20,7 +20,7 @@ window.TPPush = (() => {
 	async function post(path, body) {
 		const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' })
 		const d = await r.json().catch(() => ({}))
-		if (!r.ok) throw Object.assign(new Error(d.error || `Error ${r.status}`), { status: r.status })
+		if (!r.ok) throw Object.assign(new Error(d.error || tl('push.error', { status: String(r.status) })), { status: r.status })
 		return d
 	}
 	// Tu cuenta, confirmada en este navegador: la huella del token y la cookie que firma el relé (si falta, se pide)

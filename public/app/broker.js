@@ -13,12 +13,12 @@ const bk = {
 const BASE_TITLE = document.title
 
 const STATUS = {
-	open: 'Publicada',
-	processing: 'Esperando pago',
-	paid: 'Pagado',
-	revision: 'En disputa',
-	completed: 'Completada',
-	cancelled: 'Cancelada',
+	open: tl('broker.stOpen'),
+	processing: tl('broker.stProcessing'),
+	paid: tl('broker.stPaid'),
+	revision: tl('broker.stRevision'),
+	completed: tl('broker.stCompleted'),
+	cancelled: tl('broker.stCancelled'),
 }
 
 // ── API ───────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ function avatar(user, img, cls = '') {
 	// Tu propia foto no lleva el punto de en línea
 	const self = !!user && String(user).toLowerCase() === String(myUsername() ?? '').toLowerCase()
 	const on = self ? '' : onlineCls(user)
-	const attrs = self ? '' : `${onlineAttr(user)}${on ? ` title="${ONLINE_TITLE[onlineOf(user)] ?? 'No está en línea'}"` : ''}`
+	const attrs = self ? '' : `${onlineAttr(user)}${on ? ` title="${ONLINE_TITLE[onlineOf(user)] ?? tl('broker.notOnline')}"` : ''}`
 	return `<span class="avatar ${cls}${on}"${attrs} aria-hidden="true">${esc(String(user ?? '?').slice(0, 2))}${url ? `<img src="${esc(url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ''}</span>`
 }
 document.addEventListener('error', (e) => e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains('avatar') && e.target.remove(), true)
@@ -101,7 +101,7 @@ async function shrinkImage(file) {
 	ctx.fillRect(0, 0, canvas.width, canvas.height)
 	ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height)
 	bmp.close?.()
-	return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error('No se pudo preparar la imagen'))), 'image/jpeg', 0.85))
+	return new Promise((ok, fail) => canvas.toBlob((b) => (b ? ok(b) : fail(new Error(tl('broker.imagePrepFail')))), 'image/jpeg', 0.85))
 }
 
 function toast(text, bad = false) {
@@ -115,7 +115,7 @@ function toast(text, bad = false) {
 // Botón de copiar con icono de portapapeles (y una marca de hecho al copiar)
 const ICON_COPY = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 8V5a2 2 0 00-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2h2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 const ICON_DONE = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-const copyBtn = (value, label) => `<button class="copy" data-copy="${esc(value)}" title="Copiar ${esc(label)}" aria-label="Copiar ${esc(label)}">${ICON_COPY}</button>`
+const copyBtn = (value, label) => `<button class="copy" data-copy="${esc(value)}" title="${tl('broker.copyLabel', { label: esc(label) })}" aria-label="${tl('broker.copyLabel', { label: esc(label) })}">${ICON_COPY}</button>`
 
 // Un mercado que el terminal no sigue (USDTBSC, BTC…) no está en el resumen: su unidad sale del nombre (USDTBSC → USDT),
 // nunca la del mercado que tienes abierto (una operación en USDT salía «por 90 CUP»)
@@ -125,20 +125,20 @@ const OTHER_UNIT = { BANK: 'USD', BANK_INTL: 'USD', BANK_EUR: 'EUR', EURCASH: 'E
 const unitOf = (tick) =>
 	state.overview.find((c) => c.tick === tick)?.unit ??
 	(state.book?.coin?.tick === tick ? state.book.coin.unit : (OTHER_UNIT[tick] ?? String(tick ?? '').match(CRYPTO_UNIT)?.[1] ?? String(tick ?? '')))
-const nameOf = (tick) => state.overview.find((c) => c.tick === tick)?.name ?? tick
+const nameOf = (tick) => TPI18N.coin(tick, state.overview.find((c) => c.tick === tick)?.name ?? tick)
 
 // ── Modal ─────────────────────────────────────────────────────────────
 let onModalClose = null
 // Mientras se ejecuta una orden inteligente la ventana no se cierra ni se sustituye: lo que pase debe verse
 let modalLocked = false
 function openModal(html, onClose) {
-	if (modalLocked) return toast('Espera a que termine la orden inteligente', true)
+	if (modalLocked) return toast(tl('broker.waitSmart'), true)
 	$('modalBody').innerHTML = html
 	$('modal').hidden = false
 	onModalClose = onClose ?? null
 }
 function closeModal() {
-	if (modalLocked) return toast('Espera a que termine la orden inteligente', true)
+	if (modalLocked) return toast(tl('broker.waitSmart'), true)
 	document.querySelector('.confirm-layer')?.remove()
 	$('modal').hidden = true
 	$('modalBody').innerHTML = ''
@@ -157,7 +157,7 @@ function askConfirm(title, html, okText, cls = 'primary') {
 		layer.className = 'confirm-layer'
 		layer.setAttribute('role', 'alertdialog')
 		layer.innerHTML = `<div class="confirm-box stack"><h3>${title}</h3><div>${html}</div>
-			<div class="row-btns"><button class="btn" data-c="no">Volver</button><button class="btn ${cls}" data-c="ok">${okText}</button></div></div>`
+			<div class="row-btns"><button class="btn" data-c="no">${tl('broker.back')}</button><button class="btn ${cls}" data-c="ok">${okText}</button></div></div>`
 		const done = (ok) => {
 			layer.remove()
 			resolve(ok)
@@ -174,7 +174,7 @@ function confirmDialog(title, html, okText, cls = 'primary') {
 	return new Promise((resolve) => {
 		openModal(
 			`<div class="stack"><h3>${title}</h3><div>${html}</div>
-			<div class="row-btns"><button class="btn" data-c="no">Volver</button><button class="btn ${cls}" data-c="ok">${okText}</button></div></div>`,
+			<div class="row-btns"><button class="btn" data-c="no">${tl('broker.back')}</button><button class="btn ${cls}" data-c="ok">${okText}</button></div></div>`,
 			() => resolve(false),
 		)
 		$('modalBody').querySelector('[data-c="ok"]').onclick = () => {
@@ -237,22 +237,22 @@ document.addEventListener('visibilitychange', () => !document.hidden && refreshB
 function renderAccount() {
 	const a = bk.acct
 	$('account').innerHTML = a.connected
-		? `${a.dryRun ? '<span class="badge warn" title="Modo simulación: no se envía nada a QvaPay">Simulación</span>' : ''}
+		? `${a.dryRun ? `<span class="badge warn" title="${tl('broker.dryRunTitle')}">${tl('broker.dryRun')}</span>` : ''}
 			<button class="pro-chip" id="proBtn" hidden></button>
 			<div class="acct">
-				<button type="button" class="acct-open" id="acctOpen" title="Mi cuenta">
+				<button type="button" class="acct-open" id="acctOpen" title="${tl('broker.myAccount')}">
 					${avatar(a.username, a.image)}
 					<div><div class="acct-name">@${esc(a.username)}${a.gold ? ' <span class="badge warn">GOLD</span>' : ''}</div><div class="acct-bal">${fmtM(a.balance ?? 0)} USD</div></div>
 				</button>
-				<button class="icon-btn small" id="disconnectBtn" title="Desconectar cuenta" aria-label="Desconectar cuenta">
+				<button class="icon-btn small" id="disconnectBtn" title="${tl('broker.disconnectTitle')}" aria-label="${tl('broker.disconnectTitle')}">
 					<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
 				</button>
 			</div>`
-		: `<button class="btn primary" id="connectBtn">Conectar<span class="hide-sm">QvaPay</span></button>`
+		: `<button class="btn primary" id="connectBtn">${tl('broker.connect')}<span class="hide-sm">QvaPay</span></button>`
 	if (typeof renderProChip === 'function') renderProChip()
 	$('connectBtn')?.addEventListener('click', showConnect)
 	$('disconnectBtn')?.addEventListener('click', async () => {
-		if (!(await confirmDialog('Desconectar cuenta', '<p class="muted">Se borra el token de este navegador. Tus operaciones en QvaPay no se tocan.</p>', 'Desconectar', 'danger'))) return
+		if (!(await confirmDialog(tl('broker.disconnectTitle'), `<p class="muted">${tl('broker.disconnectBody')}</p>`, tl('broker.disconnect'), 'danger'))) return
 		// Sin cuenta, este navegador deja de recibir los avisos push de ella
 		await window.TPPush?.unsubscribe()
 		await api('/disconnect', {}).catch(() => {})
@@ -267,44 +267,44 @@ function showBlocked(msg) {
 	// Con el módulo Pro cargado, se recarga primero (al volver, el aviso sale sin él)
 	if (window.TPPro?.loaded) return location.reload()
 	blockedShown = true
-	openModal(`<div class="stack"><h3>Cuenta bloqueada en Terminal P2P</h3>
+	openModal(`<div class="stack"><h3>${tl('broker.blockedTitle')}</h3>
 		<p class="muted">${esc(msg)}</p>
-		<button class="btn primary block" id="blockedOk">Entendido</button></div>`)
+		<button class="btn primary block" id="blockedOk">${tl('broker.gotIt')}</button></div>`)
 	$('blockedOk').onclick = closeModal
 }
 
 // title: por qué se pide (p. ej. al venir de la web a probar Pro)
 // after: lo que se hace al conectar (p. ej. volver a la oferta que se iba a tomar)
-function showConnect(title = 'Conectar tu cuenta de QvaPay', after = null) {
+function showConnect(title = tl('broker.connectTitle'), after = null) {
 	openModal(`<div class="stack">
 		<h3>${esc(title)}</h3>
-		<p class="muted">Operas con tu propia cuenta: el dinero sigue en el escrow de QvaPay, nunca pasa por aquí.</p>
-		<p class="ref-note">¿Aún no tienes cuenta? <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crea una en QvaPay</a> <small>(usuario referido)</small></p>
+		<p class="muted">${tl('broker.connectIntro')}</p>
+		<p class="ref-note">${tl('broker.connectNoAccount')} <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">${tl('broker.connectCreate')}</a> <small>${tl('broker.connectReferral')}</small></p>
 		<div class="notice">
-			Crea un token en <b>qvapay.com/dev/tokens</b> con estos permisos:
-			<ul><li><b>read</b> (para ver tu usuario y saldo)</li><li><b>p2p:buy</b> para comprar USD</li><li><b>p2p:sell</b> solo si también vas a vender</li></ul>
-			<a class="guide-link" href="https://terminalp2p.com/blog/conectar-qvapay-token/" target="_blank" rel="noopener">Guía paso a paso con capturas →</a>
+			${tl('broker.connectToken')}
+			<ul><li>${tl('broker.connectRead')}</li><li>${tl('broker.connectBuy')}</li><li>${tl('broker.connectSell')}</li></ul>
+			<a class="guide-link" href="https://terminalp2p.com/blog/conectar-qvapay-token/" target="_blank" rel="noopener">${tl('broker.connectGuide')}</a>
 		</div>
-		<div class="notice warn">No marques <b>store</b>, <b>transfer</b> ni <b>withdraw</b>, y nunca pegues el token de tu sesión de login.</div>
-		<label class="field">Token de API<input class="input" id="tokenInput" type="password" autocomplete="off" placeholder="12345|abcdef…" /></label>
-		<label class="check"><input type="checkbox" id="rememberToken" /> Recordar en este navegador</label>
-		<p class="hint">Tu token se guarda <strong>solo en este navegador</strong>, nunca en un servidor, y solo se usa para tu cuenta. Sin "recordar" se borra al cerrar la pestaña. Puedes revocar el token en QvaPay cuando quieras.</p>
-		<button class="btn primary block" id="doConnect">Conectar</button>
+		<div class="notice warn">${tl('broker.connectWarn')}</div>
+		<label class="field">${tl('broker.connectTokenLabel')}<input class="input" id="tokenInput" type="password" autocomplete="off" placeholder="12345|abcdef…" /></label>
+		<label class="check"><input type="checkbox" id="rememberToken" /> ${tl('broker.connectRemember')}</label>
+		<p class="hint">${tl('broker.connectHint')}</p>
+		<button class="btn primary block" id="doConnect">${tl('broker.connect')}</button>
 	</div>`)
 	$('tokenInput').focus()
 	$('doConnect').onclick = async () => {
 		const btn = $('doConnect')
 		btn.disabled = true
-		btn.textContent = 'Comprobando…'
+		btn.textContent = tl('broker.checking')
 		try {
 			const r = await api('/connect', { token: $('tokenInput').value, remember: $('rememberToken').checked })
 			closeModal()
-			toast(`Conectado como @${r.username}`)
+			toast(tl('broker.connectedAs', { user: r.username }))
 			loadAccount().then(() => after?.())
 			setTimeout(loadBook, 4500)
 		} catch (e) {
 			btn.disabled = false
-			btn.textContent = 'Conectar'
+			btn.textContent = tl('broker.connect')
 			toast(e.message, true)
 		}
 	}
@@ -349,12 +349,12 @@ async function loadTrades() {
 }
 
 const NEXT = {
-	pay: ['Te toca pagar', true],
-	wait_payment: ['Esperando que te paguen', false],
-	release: ['Te pagaron: comprueba y libera', true],
-	wait_release: ['Esperando que liberen', false],
-	wait_moderator: ['Un moderador revisa la disputa', false],
-	rate: ['Califica a la contraparte', false],
+	pay: [tl('broker.nextPay'), true],
+	wait_payment: [tl('broker.nextWaitPayment'), false],
+	release: [tl('broker.nextRelease'), true],
+	wait_release: [tl('broker.nextWaitRelease'), false],
+	wait_moderator: [tl('broker.nextModerator'), false],
+	rate: [tl('broker.nextRate'), false],
 }
 
 // Cancelar una oferta publicada, desde la lista o desde su ventana. Mientras QvaPay responde, su botón dice
@@ -365,8 +365,8 @@ async function cancelOffer(uuid) {
 	if (bk.cancelling.has(uuid)) return null
 	bk.cancelling.add(uuid)
 	renderTrades()
-	toast('Cancelando la oferta…')
-	const slow = setTimeout(() => toast('QvaPay deja cancelar una oferta cada 20 segundos: la tuya va en cola, no hace falta pulsar otra vez'), 4000)
+	toast(tl('broker.cancellingOffer'))
+	const slow = setTimeout(() => toast(tl('broker.cancelQueued')), 4000)
 	try {
 		const r = await api('/trade/action', { offer: uuid, action: 'cancel_offer' })
 		// Fuera de la lista ya, sin esperar a la próxima lectura (que no vuelva a enseñarse «Cancelar» entretanto)
@@ -383,7 +383,7 @@ async function cancelOffer(uuid) {
 let mineLinesKey = ''
 function mineLines() {
 	const lines = bk.acct.connected
-		? bk.openOffers.filter((o) => o.price > 0 && !o.pause).map((o) => ({ coin: o.coin, price: o.price, tone: o.offerType === 'sell' ? 'ask' : 'bid', title: 'tu oferta' }))
+		? bk.openOffers.filter((o) => o.price > 0 && !o.pause).map((o) => ({ coin: o.coin, price: o.price, tone: o.offerType === 'sell' ? 'ask' : 'bid', title: tl('broker.yourOfferLine') }))
 		: []
 	const key = JSON.stringify(lines)
 	if (key === mineLinesKey || !window.TPChartLines) return
@@ -406,55 +406,55 @@ function renderTrades() {
 
 	if (!bk.acct.connected) {
 		$('myTrades').innerHTML =
-			'<div class="empty">Conecta tu cuenta de QvaPay para seguir aquí tus operaciones P2P.</div>'
+			`<div class="empty">${tl('broker.tradesNoAccount')}</div>`
 		return
 	}
 
-	const side = (t) => `<span class="side-${t.side}">${t.side === 'buy' ? 'Compra' : 'Venta'}</span>`
+	const side = (t) => `<span class="side-${t.side}">${t.side === 'buy' ? tl('broker.sideBuy') : tl('broker.sideSell')}</span>`
 	const who = (t) =>
-		t.counterparty ? `<span class="who-ava">${avatar(t.counterparty.username, t.counterparty.image, 'sm')}<span>@${esc(t.counterparty.username)} <span class="muted">· ${t.counterparty.ops} ops</span></span></span>` : '<span class="muted">—</span>'
+		t.counterparty ? `<span class="who-ava">${avatar(t.counterparty.username, t.counterparty.image, 'sm')}<span>@${esc(t.counterparty.username)} <span class="muted">· ${tl('broker.opsShort', { n: String(t.counterparty.ops) })}</span></span></span>` : '<span class="muted">—</span>'
 	const head = (cols) => `<thead><tr>${cols.map(([c, cls]) => `<th class="${cls ?? ''}">${c}</th>`).join('')}</tr></thead>`
-	const common = [['Lado'], ['Mercado'], ['USD', 'r'], ['Precio', 'r'], ['Total', 'r']]
+	const common = [[tl('broker.colSide')], [tl('broker.colMarket')], ['USD', 'r'], [tl('broker.colPrice'), 'r'], [tl('broker.colTotal'), 'r']]
 
 	let html = ''
 	if (bk.tab === 'active') {
 		html = active.length
-			? `<table class="otable">${head([...common, ['Contraparte'], ['Estado'], ['Siguiente paso']])}<tbody>${active
+			? `<table class="otable">${head([...common, [tl('broker.colWho')], [tl('broker.colStatus')], [tl('broker.colNext')]])}<tbody>${active
 					.map((t) => {
 						const next = t.actions.map((a) => NEXT[a]).find(Boolean)
-						const clock = t.status === 'processing' && t.expiresAt ? `<span class="countdown" data-expires="${esc(t.expiresAt)}" title="Plazo de pago"></span>` : ''
+						const clock = t.status === 'processing' && t.expiresAt ? `<span class="countdown" data-expires="${esc(t.expiresAt)}" title="${tl('broker.payDeadline')}"></span>` : ''
 						return `<tr data-offer="${t.offerUuid}" data-order="${t.order ?? ''}">
 							<td class="c-side">${side(t)}</td><td class="c-mkt">${esc(nameOf(t.coin))}</td>
-							<td class="r num c-usd" data-l="USD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(t.price)}</td><td class="r num c-total" data-l="Total">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
+							<td class="r num c-usd" data-l="USD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(t.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
 							<td class="c-who">${who(t)}</td><td class="c-status"><span class="chip ${t.status}">${STATUS[t.status] ?? t.status}</span></td>
 							<td class="next c-next ${next?.[1] ? 'act' : ''}">${next ? next[0] : '—'}${clock}</td></tr>`
 					})
 					.join('')}</tbody></table>`
-			: '<div class="empty">No tienes operaciones en curso.</div>'
+			: `<div class="empty">${tl('broker.noActive')}</div>`
 	} else if (bk.tab === 'offers') {
 		html = bk.openOffers.length
-			? `<table class="otable">${head([...common, ['Estado'], ['Publicada'], ['', 'r']])}<tbody>${bk.openOffers
+			? `<table class="otable">${head([...common, [tl('broker.colStatus')], [tl('broker.colPosted')], ['', 'r']])}<tbody>${bk.openOffers
 					.map(
 						(o) => `<tr data-offer="${o.offerUuid}">
 							<td class="c-side">${side(o)}</td><td class="c-mkt">${esc(nameOf(o.coin))}</td>
-							<td class="r num c-usd" data-l="USD">${fmtM(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(o.price)}</td><td class="r num c-total" data-l="Total">${fmtM((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
-							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? `Pausada hasta ${cubaFmt(o.pause.until, { hour: '2-digit', minute: '2-digit' })}` : 'Pausada'}</span>` : '<span class="chip open">En el mercado</span>'}${o.kind === 'flexible' ? ' <span class="chip">Por partes</span>' : ''}${o.isPrivate ? ' <span class="chip">Privada</span>' : ''}${window.TPProKeep?.chip(o) ?? ''}</td>
+							<td class="r num c-usd" data-l="USD">${fmtM(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(o.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
+							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? tl('broker.pausedUntil', { time: cubaFmt(o.pause.until, { hour: '2-digit', minute: '2-digit' }) }) : tl('broker.paused')}</span>` : `<span class="chip open">${tl('broker.onMarket')}</span>`}${o.kind === 'flexible' ? ` <span class="chip">${tl('broker.byParts')}</span>` : ''}${o.isPrivate ? ` <span class="chip">${tl('broker.private')}</span>` : ''}${window.TPProKeep?.chip(o) ?? ''}</td>
 							<td class="muted c-date">${o.updatedAt ? cubaFmt(o.updatedAt, { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
-							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}" ${bk.cancelling.has(o.offerUuid) ? 'disabled>Cancelando…' : '>Cancelar'}</button></td></tr>`,
+							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}" ${bk.cancelling.has(o.offerUuid) ? `disabled>${tl('broker.cancelling')}` : `>${tl('common.cancel')}`}</button></td></tr>`,
 					)
 					.join('')}</tbody></table>`
-			: '<div class="empty">No tienes ofertas publicadas. Usa «Publicar oferta» para crear una.</div>'
+			: `<div class="empty">${tl('broker.noOffers')}</div>`
 	} else {
 		html = done.length
-			? `<table class="otable">${head([...common, ['Contraparte'], ['Fecha']])}<tbody>${done
+			? `<table class="otable">${head([...common, [tl('broker.colWho')], [tl('broker.colDate')]])}<tbody>${done
 					.map(
 						(t) => `<tr data-offer="${t.offerUuid}" data-order="${t.order ?? ''}">
 							<td class="c-side">${side(t)}</td><td class="c-mkt">${esc(nameOf(t.coin))}</td>
-							<td class="r num c-usd" data-l="USD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="Precio">${fmtP(t.price)}</td><td class="r num c-total" data-l="Total">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
+							<td class="r num c-usd" data-l="USD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(t.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
 							<td class="c-who">${who(t)}</td><td class="muted c-date">${t.updatedAt ? cubaFmt(t.updatedAt, { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`,
 					)
 					.join('')}</tbody></table>`
-			: '<div class="empty">Aún no hay operaciones completadas.</div>'
+			: `<div class="empty">${tl('broker.noDone')}</div>`
 	}
 	$('myTrades').innerHTML = html
 	tickClocks()
@@ -465,7 +465,7 @@ async function openTrade(offer, order, parent = false) {
 	bk.detail = { offer, order, parent }
 	bk.detailSig = null
 	chatReadAt = 0
-	openModal('<p class="muted">Cargando operación…</p>')
+	openModal(`<p class="muted">${tl('broker.loadingTrade')}</p>`)
 	await refreshDetail()
 }
 
@@ -592,10 +592,10 @@ const chatHtml = (chat) =>
 		? chat
 				.map(
 					(m) =>
-						`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${mediaUrl(m.image) ? `<a class="msg-img" href="${esc(mediaUrl(m.image))}" target="_blank" rel="noopener" title="Ver la imagen completa"><img src="${esc(mediaUrl(m.image))}" alt="Imagen" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${cubaFmt(m.at, { hour: '2-digit', minute: '2-digit' })}</time></div>`,
+						`<div class="msg ${m.mine ? 'mine' : ''} ${m.moderator ? 'mod' : ''}">${mediaUrl(m.image) ? `<a class="msg-img" href="${esc(mediaUrl(m.image))}" target="_blank" rel="noopener" title="${tl('broker.imgFull')}"><img src="${esc(mediaUrl(m.image))}" alt="${tl('broker.imgAlt')}" loading="lazy" /></a>` : ''}${esc(m.text ?? '')}<time>${cubaFmt(m.at, { hour: '2-digit', minute: '2-digit' })}</time></div>`,
 				)
 				.join('')
-		: '<p class="muted small">Sin mensajes.</p>'
+		: `<p class="muted small">${tl('broker.noMessages')}</p>`
 
 function renderDetail(t) {
 	const d = bk.detail
@@ -612,73 +612,73 @@ function renderDetail(t) {
 	let action = ''
 	// La oferta volvió a estar publicada y no es tuya: ya no participas en ella
 	if (status === 'open' && !t.isOwner) {
-		$('modalBody').innerHTML = `<div class="stack"><h3>Ya no participas en esta operación</h3>
-			<p class="muted">Se canceló y la oferta de @${esc(t.counterparty ?? '—')} volvió al mercado.</p>
-			<div class="row-btns"><button class="btn" id="gotIt">Cerrar</button></div></div>`
+		$('modalBody').innerHTML = `<div class="stack"><h3>${tl('broker.notInTrade')}</h3>
+			<p class="muted">${tl('broker.notInTradeBody', { user: esc(t.counterparty ?? '—') })}</p>
+			<div class="row-btns"><button class="btn" id="gotIt">${tl('common.close')}</button></div></div>`
 		$('gotIt').onclick = closeModal
 		return
 	}
 	if (status === 'processing' && payer)
 		action = `<div class="stack">
-			<p>Transfiere <b>${fmtM(t.coinAmount)} ${unit}</b> y marca el pago con la referencia.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
-			${t.isOwner ? `<p class="notice">@${esc(t.counterparty)} te pasará sus datos de pago por el chat.</p>` : ''}
-			<label class="field">Referencia de tu transferencia<input class="input" id="txRef" placeholder="Nº de transacción" /></label>
-			<div class="row-btns"><button class="btn danger" data-act="cancel">Cancelar</button><button class="btn primary" data-act="paid" disabled title="Escribe antes la referencia de tu transferencia">Ya pagué</button></div></div>`
+			<p>${tl('broker.payTransfer', { amount: `${fmtM(t.coinAmount)} ${unit}` })}</p>${clock ? `<p class="hint">${tl('broker.payDeadlineIn')} ${clock}</p>` : ''}
+			${t.isOwner ? `<p class="notice">${tl('broker.payDetailsByChat', { user: esc(t.counterparty) })}</p>` : ''}
+			<label class="field">${tl('broker.txRefLabel')}<input class="input" id="txRef" placeholder="${tl('broker.txRefPh')}" /></label>
+			<div class="row-btns"><button class="btn danger" data-act="cancel">${tl('common.cancel')}</button><button class="btn primary" data-act="paid" disabled title="${tl('broker.txRefFirst')}">${tl('broker.iPaid')}</button></div></div>`
 	else if (status === 'processing')
-		action = `<p>Esperando que @${esc(t.counterparty)} te pague <b>${fmtM(t.coinAmount)} ${unit}</b>.</p>${clock ? `<p class="hint">Plazo para pagar ${clock}</p>` : ''}
-			${needSendDetails ? '<p class="notice">Envía tus datos de pago por el chat para que sepa a dónde transferir.</p>' : ''}`
+		action = `<p>${tl('broker.waitingPay', { user: esc(t.counterparty), amount: `${fmtM(t.coinAmount)} ${unit}` })}</p>${clock ? `<p class="hint">${tl('broker.payDeadlineIn')} ${clock}</p>` : ''}
+			${needSendDetails ? `<p class="notice">${tl('broker.sendDetails')}</p>` : ''}`
 	else if (status === 'paid' && !payer && Date.now() - (bk.released.get(`${d.offer}:${d.order ?? ''}`) ?? 0) < 5 * 60_000)
-		action = '<p>Liberaste los USD. QvaPay tarda unos segundos en marcarla completada.</p>'
+		action = `<p>${tl('broker.releasedWait')}</p>`
 	else if (status === 'paid' && !payer)
 		action = `<div class="stack">
-			<p>@${esc(t.counterparty)} marcó el pago${t.txId ? ` (ref. <b>${esc(t.txId)}</b>)` : ''}. <b>Comprueba en tu banco</b> que entraron <b>${fmtM(t.coinAmount)} ${unit}</b> antes de liberar.</p>
-			<label class="check"><input type="checkbox" id="seenMoney" /> Vi el dinero en mi cuenta</label>
-			<div class="row-btns"><button class="btn danger" data-act="dispute">No llegó: disputar</button><button class="btn buy" data-act="release" disabled>Liberar ${fmtM(t.usd)} USD</button></div></div>`
-	else if (status === 'paid') action = `<p>Marcaste el pago. Esperando que @${esc(t.counterparty)} libere los USD.</p>`
-	else if (status === 'revision') action = '<p>En disputa: un moderador revisa el chat. Sube aquí tus comprobantes.</p>'
+			<p>${tl('broker.markedPaid', { user: esc(t.counterparty), ref: t.txId ? tl('broker.markedPaidRef', { ref: esc(t.txId) }) : '', amount: `${fmtM(t.coinAmount)} ${unit}` })}</p>
+			<label class="check"><input type="checkbox" id="seenMoney" /> ${tl('broker.seenMoney')}</label>
+			<div class="row-btns"><button class="btn danger" data-act="dispute">${tl('broker.notArrived')}</button><button class="btn buy" data-act="release" disabled>${tl('broker.releaseUsd', { usd: fmtM(t.usd) })}</button></div></div>`
+	else if (status === 'paid') action = `<p>${tl('broker.youMarkedPaid', { user: esc(t.counterparty) })}</p>`
+	else if (status === 'revision') action = `<p>${tl('broker.inDispute')}</p>`
 	else if (status === 'completed' && t.parts) {
 		// Una oferta por rango tuya: se califica cada parte por separado (QvaPay no deja calificar la oferta entera)
 		const rows = t.parts
 			.map(
 				(p) =>
 					`<button type="button" class="part-row" data-part="${esc(p.order)}"><span class="who-ava">${p.counterparty ? `${avatar(p.counterparty, p.image, 'sm')}<span class="link peer-link" role="link" tabindex="0" data-part-peer="${esc(p.counterparty)}" data-peer-id="${esc(p.counterpartyUuid ?? '')}">@${esc(p.counterparty)}</span>` : '@—'}</span><span>${fmtM(p.usd)} USD</span>${
-						p.status !== 'completed' ? `<span class="chip ${p.status}">${STATUS[p.status] ?? p.status}</span>` : p.rated ? `<span class="muted">${'★'.repeat(p.rated)}</span>` : '<b>Calificar</b>'
+						p.status !== 'completed' ? `<span class="chip ${p.status}">${STATUS[p.status] ?? p.status}</span>` : p.rated ? `<span class="muted">${'★'.repeat(p.rated)}</span>` : `<b>${tl('broker.rate')}</b>`
 					}</button>`,
 			)
 			.join('')
 		action = t.parts.length
-			? `<div class="stack tight"><p>Se completó en ${t.parts.length === 1 ? 'una parte' : `${t.parts.length} partes`}. Toca el usuario para ver su ficha, o la parte para calificarlo:</p><div class="part-list">${rows}</div></div>`
-			: '<p class="muted">Operación completada.</p>'
+			? `<div class="stack tight"><p>${tl('broker.partsDone', { n: t.parts.length })}</p><div class="part-list">${rows}</div></div>`
+			: `<p class="muted">${tl('broker.tradeDone')}</p>`
 	} else if (status === 'completed') {
 		const mine = t.myRating?.rating ?? 0
 		const until = t.myRating?.editableUntil ? Date.parse(t.myRating.editableUntil) : null
 		const locked = mine > 0 && until != null && until < nowMs()
 		const when = until ? cubaFmt(until, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
 		const stars = [1, 2, 3, 4, 5]
-			.map((n) => `<button data-rate="${n}" class="${n <= mine ? 'on' : ''}" title="${n} de 5" aria-label="${n} de 5 estrellas" aria-pressed="${n === mine}" ${locked ? 'disabled' : ''}>★</button>`)
+			.map((n) => `<button data-rate="${n}" class="${n <= mine ? 'on' : ''}" title="${tl('broker.starsOf', { n })}" aria-label="${tl('broker.starsAria', { n })}" aria-pressed="${n === mine}" ${locked ? 'disabled' : ''}>★</button>`)
 			.join('')
-		action = `<div class="stack tight"><p>${mine ? `Calificaste a @${esc(t.counterparty)}:` : `Operación completada. Califica a @${esc(t.counterparty)}:`}</p>
-			<div class="stars ${locked ? 'locked' : ''}" role="group" aria-label="Calificación">${stars}</div>
-			<p class="hint" id="rateHint" ${mine ? '' : 'hidden'}>${locked ? 'Ya no se puede cambiar.' : when ? `Puedes cambiarla hasta el ${when}.` : 'Puedes cambiarla.'}</p>
+		action = `<div class="stack tight"><p>${mine ? tl('broker.youRated', { user: esc(t.counterparty) }) : tl('broker.rateNow', { user: esc(t.counterparty) })}</p>
+			<div class="stars ${locked ? 'locked' : ''}" role="group" aria-label="${tl('broker.ratingAria')}">${stars}</div>
+			<p class="hint" id="rateHint" ${mine ? '' : 'hidden'}>${locked ? tl('broker.rateLocked') : when ? tl('broker.rateUntil', { when }) : tl('broker.rateCanChange')}</p>
 </div>`
 	}
 
 	if (t.counterpartyUuid) watchOnline([{ id: t.counterpartyUuid, u: t.counterparty }])
 	$('modalBody').innerHTML = `<div class="stack">
-		${d.parent ? '<button type="button" class="link" id="backParts">← Todas las partes de la oferta</button>' : ''}
-		<div><h3>${buy ? 'Compras' : 'Vendes'} ${fmtM(t.usd)} USD por ${fmtM(t.coinAmount)} ${unit}</h3>
-			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}" data-peer-id="${esc(t.counterpartyUuid ?? '')}">@${esc(t.counterparty)}</button>` : t.parts ? 'por partes' : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ' · <span class="badge warn">Simulación</span>' : ''}</p></div>
+		${d.parent ? `<button type="button" class="link" id="backParts">${tl('broker.backParts')}</button>` : ''}
+		<div><h3>${tl(buy ? 'broker.youBuy' : 'broker.youSell', { usd: fmtM(t.usd), amount: `${fmtM(t.coinAmount)} ${unit}` })}</h3>
+			<p class="muted who-ava">${t.counterparty ? `${avatar(t.counterparty, t.counterpartyImage, 'sm')}` : ''}${esc(nameOf(t.coin))} · ${t.counterparty ? `<button type="button" class="link peer-link" data-peer="${esc(t.counterparty)}" data-peer-id="${esc(t.counterpartyUuid ?? '')}">@${esc(t.counterparty)}</button>` : t.parts ? tl('broker.inParts') : '@—'} · <span class="chip ${status}">${STATUS[status] ?? status}</span>${bk.acct.dryRun ? ` · <span class="badge warn">${tl('broker.dryRun')}</span>` : ''}</p></div>
 		${
 			payTo.length
-				? `<div><p class="hint">Datos de pago de @${esc(t.counterparty)}:</p><div class="kv">${payTo
+				? `<div><p class="hint">${tl('broker.payDataOf', { user: esc(t.counterparty) })}</p><div class="kv">${payTo
 						.map((x) => `<span>${esc(x.name)}</span><b>${esc(x.value)}</b>${copyBtn(x.value, x.name)}`)
-						.join('')}<span>Monto</span><b>${fmtM(t.coinAmount)} ${unit}</b>${copyBtn(t.coinAmount, 'el monto')}</div></div>`
+						.join('')}<span>${tl('broker.amount')}</span><b>${fmtM(t.coinAmount)} ${unit}</b>${copyBtn(t.coinAmount, tl('broker.theAmount'))}</div></div>`
 				: ''
 		}
 		${action}
-		${t.parts ? '' : `<div><p class="hint">Chat</p><div class="chatbox" id="chatbox">${chatHtml(t.chat)}</div>
-		<form class="chatform" id="chatform"><label class="btn icon-only chat-attach" title="Enviar una imagen (comprobante, captura)" aria-label="Enviar una imagen"><input type="file" id="chatFile" accept="image/*" hidden /><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.5 3.5 0 015 5l-8.6 8.6a2 2 0 01-2.8-2.8l7.9-7.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label><input class="input" id="chatInput" maxlength="599" placeholder="Escribe un mensaje…" /><button class="btn">Enviar</button></form></div>`}
-		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${t.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
+		${t.parts ? '' : `<div><p class="hint">${tl('broker.chat')}</p><div class="chatbox" id="chatbox">${chatHtml(t.chat)}</div>
+		<form class="chatform" id="chatform"><label class="btn icon-only chat-attach" title="${tl('broker.attachTitle')}" aria-label="${tl('broker.attachAria')}"><input type="file" id="chatFile" accept="image/*" hidden /><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.5 3.5 0 015 5l-8.6 8.6a2 2 0 01-2.8-2.8l7.9-7.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label><input class="input" id="chatInput" maxlength="599" placeholder="${tl('broker.chatPh')}" /><button class="btn">${tl('broker.send')}</button></form></div>`}
+		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${t.offer}" target="_blank" rel="noopener">${tl('broker.openInQvaPay')}</a></p>
 	</div>`
 	tickClocks()
 	bindDetail(t)
@@ -752,37 +752,37 @@ function bindDetail(t) {
 			const who = `@${esc(t.counterparty ?? '—')}`
 			if (a === 'paid') {
 				const tx = $('txRef').value.trim()
-				if (tx.length < 4) return toast('Escribe la referencia de tu transferencia', true)
+				if (tx.length < 4) return toast(tl('broker.txRefNeeded'), true)
 				const ok = await askConfirm(
-					`¿Ya transferiste ${fmtM(t.coinAmount)} ${unit}?`,
-					`<p class="muted">Se avisará a ${who} de que le pagaste, con la referencia <b class="mono">${esc(tx)}</b>. Márcalo solo después de transferir: comprobará el dinero en su banco antes de liberar los USD.</p>`,
-					'Sí, ya pagué',
+					tl('broker.paidAsk', { amount: `${fmtM(t.coinAmount)} ${unit}` }),
+					`<p class="muted">${tl('broker.paidAskBody', { who, ref: esc(tx) })}</p>`,
+					tl('broker.paidYes'),
 				)
 				return ok && act('paid', { txId: tx })
 			}
 			if (a === 'release') {
 				const ok = await askConfirm(
-					`¿Liberar ${fmtM(t.usd)} USD?`,
-					`<p class="muted">Es irreversible: los USD pasan a ${who}. Hazlo solo si viste los <b>${fmtM(t.coinAmount)} ${unit}</b> en tu cuenta; un comprobante o una captura no bastan.</p>`,
-					'Liberar',
+					tl('broker.releaseAsk', { usd: fmtM(t.usd) }),
+					`<p class="muted">${tl('broker.releaseAskBody', { who, amount: `${fmtM(t.coinAmount)} ${unit}` })}</p>`,
+					tl('broker.release'),
 					'buy',
 				)
 				return ok && act('release')
 			}
 			if (a === 'dispute') {
 				const ok = await askConfirm(
-					'¿Abrir una disputa?',
-					`<p class="muted">Un moderador de QvaPay revisará el chat con ${who} y decidirá. Úsalo si no recibiste el pago; mientras dure, ninguno de los dos puede liberar ni cancelar.</p>`,
-					'Abrir disputa',
+					tl('broker.disputeAsk'),
+					`<p class="muted">${tl('broker.disputeAskBody', { who })}</p>`,
+					tl('broker.disputeOpen'),
 					'danger',
 				)
 				return ok && act('dispute')
 			}
 			if (a === 'cancel') {
 				const ok = await askConfirm(
-					'¿Cancelar la operación?',
-					`<p class="muted">Hazlo solo si todavía no pagaste. Si ya transferiste a ${who}, no canceles: escríbele por el chat.</p>`,
-					'Cancelar operación',
+					tl('broker.cancelAsk'),
+					`<p class="muted">${tl('broker.cancelAskBody', { who })}</p>`,
+					tl('broker.cancelTrade'),
 					'danger',
 				)
 				return ok && act('cancel')
@@ -804,7 +804,7 @@ function bindDetail(t) {
 				s.disabled = true
 			}
 			const hint = $('rateHint')
-			hint.textContent = 'Guardando…'
+			hint.textContent = tl('broker.saving')
 			hint.hidden = false
 			try {
 				await api('/trade/action', { offer: t.offer, order: t.order, action: 'rate', rating: n, edit: (t.myRating?.rating ?? 0) > 0 })
@@ -814,10 +814,10 @@ function bindDetail(t) {
 					s.classList.toggle('on', Number(s.dataset.rate) <= n)
 					s.disabled = false
 				}
-				hint.textContent = 'Calificación guardada.'
+				hint.textContent = tl('broker.ratingSaved')
 			} catch (e) {
 				toast(e.message, true)
-				hint.textContent = 'No se guardó.'
+				hint.textContent = tl('broker.notSaved')
 				for (const s of stars.querySelectorAll('[data-rate]')) s.classList.remove('pending')
 			}
 			// Se vuelve a leer la operación aunque no haya cambiado (nota igual que antes o error): así queda la nota que
@@ -847,7 +847,7 @@ function bindDetail(t) {
 		if (!file || !d) return
 		const label = $('chatFile')?.closest('label')
 		label?.classList.add('busy')
-		toast('Enviando imagen…')
+		toast(tl('broker.sendingImage'))
 		try {
 			const form = new FormData()
 			form.append('offer', d.offer)
@@ -857,10 +857,10 @@ function bindDetail(t) {
 			await apiForm('/trade/image', form)
 			$('chatInput').value = ''
 			bk.chatToEnd = true
-			toast('Imagen enviada')
+			toast(tl('broker.imageSent'))
 			refreshDetail()
 		} catch (e) {
-			toast(e.message || 'No se pudo enviar la imagen', true)
+			toast(e.message || tl('broker.imageFail'), true)
 			// Si se cortó sin respuesta puede que llegara: el chat se recarga para que se vea
 			if (e.status === 504) refreshDetail()
 		} finally {
@@ -877,10 +877,10 @@ async function loadCoinFields() {
 }
 
 const REQ_OPTIONS = {
-	min_completed: ['Operaciones completadas', [5, 10, 25, 50, 100], (v) => `${v} o más`],
-	min_rating: ['Valoración', [4, 4.5], (v) => `${v} ★ o más`],
-	min_account_days: ['Antigüedad de la cuenta', [7, 30, 90, 180, 365], (v) => `${v} días o más`],
-	min_trustscore: ['TrustScore', [50, 85], (v) => `${v} o más`],
+	min_completed: [tl('broker.reqCompleted'), [5, 10, 25, 50, 100], (v) => tl('broker.reqOrMore', { v })],
+	min_rating: [tl('broker.reqRating'), [4, 4.5], (v) => tl('broker.reqStarsOrMore', { v })],
+	min_account_days: [tl('broker.reqAge'), [7, 30, 90, 180, 365], (v) => tl('broker.reqDaysOrMore', { v })],
+	min_trustscore: ['TrustScore', [50, 85], (v) => tl('broker.reqOrMore', { v })],
 }
 const reqText = (r) =>
 	r
@@ -914,7 +914,7 @@ function savedMethodChips(box, methods, coin, inputs, nameOf) {
 		return v ? ` · <span class="mono">…${esc(v.replace(/\D/g, '').slice(-4))}</span>` : ''
 	}
 	box.innerHTML = list.length
-		? `<span class="muted small">Guardado en QvaPay:</span>${list.map((m, i) => `<button type="button" class="chip-btn" data-saved="${i}">${esc(m.name)}${tail(m)}</button>`).join('')}`
+		? `<span class="muted small">${tl('broker.savedInQvaPay')}</span>${list.map((m, i) => `<button type="button" class="chip-btn" data-saved="${i}">${esc(m.name)}${tail(m)}</button>`).join('')}`
 		: ''
 	const norm = (x) => String(x ?? '').trim().toLowerCase()
 	for (const b of box.querySelectorAll('[data-saved]'))
@@ -951,10 +951,10 @@ function marketRefs(coin) {
 		// Recién cargado el libro aún no hay operaciones completadas: la referencia es el promedio público
 		const o = state.overview.find((c) => c.tick === coin)
 		const avg = o?.avgSell && o?.avgBuy ? (o.avgSell + o.avgBuy) / 2 : (o?.avgSell ?? o?.avgBuy ?? null)
-		return { refs: [['Mejor venta', asks[0]?.price], ['Mejor compra', bids[0]?.price], ['Mediana completadas', m]].filter(([, p]) => p), mid: m ?? avg }
+		return { refs: [[tl('broker.refBestAsk'), asks[0]?.price], [tl('broker.refBestBid'), bids[0]?.price], [tl('broker.refMedian'), m]].filter(([, p]) => p), mid: m ?? avg }
 	}
 	const o = state.overview.find((c) => c.tick === coin)
-	const refs = [['Venta media 24 h', o?.avgSell], ['Compra media 24 h', o?.avgBuy]].filter(([, p]) => p)
+	const refs = [[tl('broker.refAvgAsk'), o?.avgSell], [tl('broker.refAvgBid'), o?.avgBuy]].filter(([, p]) => p)
 	return { refs, mid: o?.avgSell && o?.avgBuy ? (o.avgSell + o.avgBuy) / 2 : (o?.avgSell ?? o?.avgBuy ?? null) }
 }
 
@@ -981,7 +981,7 @@ function bookRank(coin, type, price) {
 const feeOf = (usd) => (bk.acct?.gold || !(bk.acct?.p2pFee > 0) ? 0 : Math.round(usd * bk.acct.p2pFee * 100) / 100)
 const netNote = (usd) => {
 	const fee = feeOf(usd)
-	return fee ? ` · te llegan <b>${fmtM(usd - fee)} USD</b> <span class="muted" title="QvaPay cobra un ${(bk.acct.p2pFee * 100).toLocaleString('en-US')} % al liberar; las cuentas GOLD no lo pagan">(comisión de QvaPay ${fmtM(fee)})</span>` : ''
+	return fee ? ` · ${tl('broker.netNote', { net: fmtM(usd - fee), pct: (bk.acct.p2pFee * 100).toLocaleString('en-US'), fee: fmtM(fee) })}` : ''
 }
 
 function smartTeaser(f) {
@@ -991,80 +991,80 @@ function smartTeaser(f) {
 	const buy = f.type === 'buy'
 	const n = (buy ? b.ask.levels : b.bid.levels).filter((l) => !l.outlier && l.user !== myUsername() && (buy ? l.price <= f.price : l.price >= f.price)).length
 	if (!n) return ''
-	return `<p class="smart-head"><b>⚡ Orden inteligente</b> <span class="pro-tag">PRO</span></p>
-		<p class="hint">Ya hay ${n === 1 ? 'una oferta' : `${n} ofertas`} a tu precio o mejor. Con Pro las tomarías al mejor precio y solo publicarías el resto, como en un exchange.</p>
-		<button type="button" class="btn small" id="smartPro">★ Comprar días de Pro</button>`
+	return `<p class="smart-head"><b>${tl('broker.smartTitle')}</b> <span class="pro-tag">PRO</span></p>
+		<p class="hint">${tl('broker.smartTeaser', { n })}</p>
+		<button type="button" class="btn small" id="smartPro">${tl('broker.buyProDays')}</button>`
 }
 
 // Sin Pro, en su sección de «Publicar oferta»: lo que haría mantenerla la primera
 function keepTeaser() {
 	if (!window.TPPro?.enabled) return ''
-	return `<p class="smart-head"><b>★ Precio automático</b> <span class="pro-tag">PRO</span></p>
-		<p class="hint">Con Pro, si alguien publica mejor precio, la tuya se pone un paso por delante sola, sin salir de tus límites, y vuelve a tu precio cuando se va.</p>
-		<button type="button" class="btn small" id="keepPro">★ Comprar días de Pro</button>`
+	return `<p class="smart-head"><b>${tl('broker.keepTitle')}</b> <span class="pro-tag">PRO</span></p>
+		<p class="hint">${tl('broker.keepTeaser')}</p>
+		<button type="button" class="btn small" id="keepPro">${tl('broker.buyProDays')}</button>`
 }
 
 function priceWarning(type, price, mid) {
 	if (!mid || !(price > 0)) return ''
 	const dev = price / mid - 1
-	if (Math.abs(dev) > 0.3) return `Tu precio está un ${pct(Math.abs(dev)).slice(1)} ${dev > 0 ? 'por encima' : 'por debajo'} de la referencia. ¿Es un error de tipeo?`
-	if (type === 'sell' && dev < -0.03) return `Vendes un ${pct(-dev).slice(1)} por debajo de la referencia (${fmtP(mid)}).`
-	if (type === 'buy' && dev > 0.03) return `Compras un ${pct(dev).slice(1)} por encima de la referencia (${fmtP(mid)}).`
+	if (Math.abs(dev) > 0.3) return tl(dev > 0 ? 'broker.warnTypoAbove' : 'broker.warnTypoBelow', { pct: pct(Math.abs(dev)).slice(1) })
+	if (type === 'sell' && dev < -0.03) return tl('broker.warnSellBelow', { pct: pct(-dev).slice(1), ref: fmtP(mid) })
+	if (type === 'buy' && dev > 0.03) return tl('broker.warnBuyAbove', { pct: pct(dev).slice(1), ref: fmtP(mid) })
 	return ''
 }
 
 async function showCreateOffer(preset = null) {
-	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para publicar', true)
+	if (!bk.acct.connected) return toast(tl('broker.connectToPost'), true)
 	const markets = state.overview.length ? state.overview : [{ tick: state.coin, name: nameOf(state.coin), unit: unitOf(state.coin) }]
 	const key = `tp-${crypto.randomUUID()}` // misma clave si se reintenta: QvaPay no la duplica
 	let type = preset?.type === 'buy' ? 'buy' : 'sell'
 	openModal(`<div class="stack offer-form">
 		<div id="ofForm" class="stack">
-			<h3>Publicar oferta</h3>
-			<div class="seg-tabs choice" role="radiogroup" aria-label="Lado">
-				<button type="button" class="seg-tab" data-type="sell" role="radio">Vendo USD</button>
-				<button type="button" class="seg-tab" data-type="buy" role="radio">Compro USD</button>
+			<h3>${tl('broker.postOffer')}</h3>
+			<div class="seg-tabs choice" role="radiogroup" aria-label="${tl('broker.colSide')}">
+				<button type="button" class="seg-tab" data-type="sell" role="radio">${tl('broker.iSellUsd')}</button>
+				<button type="button" class="seg-tab" data-type="buy" role="radio">${tl('broker.iBuyUsd')}</button>
 			</div>
 			<section class="sec-box">
-				<p class="sec-box-t">Oferta</p>
-				<label class="field">Mercado<select class="input" id="ofCoin">${markets.map((c) => `<option value="${c.tick}">${esc(c.name)}</option>`).join('')}</select></label>
+				<p class="sec-box-t">${tl('broker.offer')}</p>
+				<label class="field">${tl('broker.colMarket')}<select class="input" id="ofCoin">${markets.map((c) => `<option value="${c.tick}">${esc(TPI18N.coin(c.tick, c.name))}</option>`).join('')}</select></label>
 				<div class="grid2">
-					<label class="field"><span class="field-row">Monto (USD)<button type="button" class="link small" id="ofBal" hidden></button></span><input class="input" id="ofAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" placeholder="100" /></label>
-					<label class="field"><span>Precio por USD (<span id="ofUnit"></span>)</span><input class="input" id="ofPrice" inputmode="decimal" data-num autocomplete="off" /></label>
+					<label class="field"><span class="field-row">${tl('broker.amountUsd')}<button type="button" class="link small" id="ofBal" hidden></button></span><input class="input" id="ofAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" placeholder="100" /></label>
+					<label class="field"><span>${tl('broker.pricePerUsd')} (<span id="ofUnit"></span>)</span><input class="input" id="ofPrice" inputmode="decimal" data-num autocomplete="off" /></label>
 				</div>
 				<div class="ref-chips" id="ofRefs"></div>
 				<p class="hint" id="ofTotal"></p>
 				<div class="smart" id="ofSmart" hidden></div>
 			</section>
 			<section class="sec-box">
-				<label class="check sec-box-h"><input type="checkbox" id="ofFlex" /> Por rango: que la tomen por partes</label>
-				<p class="hint" id="ofFlexNote" hidden>Con la orden inteligente el resto se publica entero. Desmárcala si lo quieres por partes.</p>
+				<label class="check sec-box-h"><input type="checkbox" id="ofFlex" /> ${tl('broker.flexLabel')}</label>
+				<p class="hint" id="ofFlexNote" hidden>${tl('broker.flexNote')}</p>
 				<div class="grid2" id="ofFlexBox" hidden>
-					<label class="field">Mínimo por orden (USD)<input class="input" id="ofMin" inputmode="decimal" data-num data-dec="2" autocomplete="off" /></label>
-					<label class="field">Máximo por orden (USD)<input class="input" id="ofMax" inputmode="decimal" data-num data-dec="2" autocomplete="off" /></label>
+					<label class="field">${tl('broker.minPerOrder')}<input class="input" id="ofMin" inputmode="decimal" data-num data-dec="2" autocomplete="off" /></label>
+					<label class="field">${tl('broker.maxPerOrder')}<input class="input" id="ofMax" inputmode="decimal" data-num data-dec="2" autocomplete="off" /></label>
 				</div>
 			</section>
 			<section class="sec-box" id="ofKeep" hidden></section>
 			<section class="sec-box">
 				<p class="sec-box-t" id="ofDetailsTitle"></p>
-				<div class="saved-methods" id="ofSaved" hidden></div><div class="stack tight" id="ofDetails"><p class="muted small">Cargando campos…</p></div>
-				<label class="check small"><input type="checkbox" id="ofRemember" /> Recordar estos datos en este navegador</label>
+				<div class="saved-methods" id="ofSaved" hidden></div><div class="stack tight" id="ofDetails"><p class="muted small">${tl('broker.loadingFields')}</p></div>
+				<label class="check small"><input type="checkbox" id="ofRemember" /> ${tl('broker.rememberData')}</label>
 			</section>
-			<details class="sec-box opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
-				<label class="check"><input type="checkbox" id="ofVip" /> Solo cuentas VIP</label>
-				<label class="check"><input type="checkbox" id="ofPrivate" /> Privada: no se anuncia en el canal de Telegram de QvaPay</label>
+			<details class="sec-box opts"><summary>${tl('broker.reqVis')}</summary><div class="stack tight">
+				<label class="check"><input type="checkbox" id="ofVip" /> ${tl('broker.vipOnly')}</label>
+				<label class="check"><input type="checkbox" id="ofPrivate" /> ${tl('broker.privateLabel')}</label>
 				${
 					bk.acct.gold
-						? '<label class="field">Mensaje público (GOLD)<input class="input" id="ofMsg" maxlength="79" placeholder="Ej.: lee el mensaje fijado antes de tomar" /></label><p class="hint">Hasta 79 caracteres. Sale en tu oferta; QvaPay quita los enlaces.</p>'
-						: '<p class="hint">Mensaje público en la oferta: solo para cuentas GOLD de QvaPay.</p>'
+						? `<label class="field">${tl('broker.publicMsg')}<input class="input" id="ofMsg" maxlength="79" placeholder="${tl('broker.publicMsgPh')}" /></label><p class="hint">${tl('broker.publicMsgHint')}</p>`
+						: `<p class="hint">${tl('broker.publicMsgGold')}</p>`
 				}
-				<p class="hint">Requisitos para quien la tome: solo podrán las cuentas que los cumplan. Cuantos más pongas, menos personas podrán tomarla.</p>
+				<p class="hint">${tl('broker.reqHint')}</p>
 				${Object.entries(REQ_OPTIONS)
-					.map(([k, [label, vals, fmt]]) => `<label class="field">${label}<select class="input" data-req="${k}"><option value="0">Sin requisito</option>${vals.map((v) => `<option value="${v}">${fmt(v)}</option>`).join('')}</select></label>`)
+					.map(([k, [label, vals, fmt]]) => `<label class="field">${label}<select class="input" data-req="${k}"><option value="0">${tl('broker.noReq')}</option>${vals.map((v) => `<option value="${v}">${fmt(v)}</option>`).join('')}</select></label>`)
 					.join('')}
 			</div></details>
 			<div id="ofWarn"></div>
-			<button class="btn primary block" id="ofReview">Revisar</button>
+			<button class="btn primary block" id="ofReview">${tl('broker.review')}</button>
 		</div>
 		<div id="ofConfirm" class="stack" hidden></div>
 	</div>`)
@@ -1111,7 +1111,7 @@ async function showCreateOffer(preset = null) {
 							: `<label class="field">${label}<input class="input" data-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} value="${val}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
 					})
 					.join('')
-			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Inténtalo de nuevo.</p>'
+			: `<p class="notice warn">${tl('broker.fieldsFail')}</p>`
 		renderSaved()
 	}
 	// Lo que guardaste en QvaPay para este mercado (tarjetas, cuentas): un toque y se rellena el campo
@@ -1130,7 +1130,7 @@ async function showCreateOffer(preset = null) {
 	const update = () => {
 		if (type === 'sell' && num2($('ofAmount').value) > balance()) $('ofAmount').value = String(balance())
 		$('ofBal').hidden = type !== 'sell'
-		$('ofBal').innerHTML = `Saldo: <b class="mono">${fmtM(balance())}</b> USD`
+		$('ofBal').innerHTML = tl('broker.balanceLink', { bal: fmtM(balance()) })
 		$('ofAmount').max = String(type === 'sell' ? Math.min(10_000, balance()) : 10_000)
 		for (const b of document.querySelectorAll('[data-type]')) {
 			b.classList.toggle('active', b.dataset.type === type)
@@ -1140,13 +1140,13 @@ async function showCreateOffer(preset = null) {
 		const unit = unitOf(f.coin)
 		$('ofUnit').textContent = unit
 		$('ofFlexBox').hidden = f.kind !== 'flexible'
-		$('ofDetailsTitle').textContent = type === 'sell' ? 'Dónde quieres recibir el pago (opcional)' : 'Tus datos de pago (opcional: los verá quien tome la oferta)'
+		$('ofDetailsTitle').textContent = type === 'sell' ? tl('broker.detailsSell') : tl('broker.detailsBuy')
 		const { refs, mid } = marketRefs(f.coin)
 		$('ofRefs').innerHTML = refs.map(([label, p]) => `<button type="button" class="chip-btn" data-ref="${p}">${label} <b class="mono">${fmtP(p)}</b></button>`).join('')
 		const total = f.amount > 0 && f.price > 0 ? f.amount * f.price : 0
 		const rank = bookRank(f.coin, type, f.price)
 		$('ofTotal').innerHTML = total
-			? `${type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtM(total)} ${unit}</b>${type === 'buy' ? netNote(f.amount) : ''}${rank ? ` · serías la <b>${rank}ª</b> ${type === 'sell' ? 'venta' : 'compra'} del libro` : ''}`
+			? `${tl(type === 'sell' ? 'broker.youWillGet' : 'broker.youWillPay', { amount: `${fmtM(total)} ${unit}` })}${type === 'buy' ? netNote(f.amount) : ''}${rank ? ` · ${tl(type === 'sell' ? 'broker.rankAsk' : 'broker.rankBid', { rank })}` : ''}`
 			: ''
 		const w = priceWarning(type, f.price, mid)
 		// La orden inteligente (módulo Pro) rellena su hueco y dice si está activa; sin Pro, el aviso de lo que haría
@@ -1165,8 +1165,8 @@ async function showCreateOffer(preset = null) {
 		$('ofFlexNote').hidden = !smartActive
 		if (smartActive) $('ofFlexBox').hidden = true
 		// Con la orden inteligente el total es lo que tomas más lo que publicas
-		if (smartActive && total && sm.total) $('ofTotal').innerHTML = `${type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtM(sm.total)} ${unit}</b> en total`
-		$('ofReview').textContent = smartActive ? 'Revisar orden inteligente' : 'Revisar'
+		if (smartActive && total && sm.total) $('ofTotal').innerHTML = tl(type === 'sell' ? 'broker.youWillGetTotal' : 'broker.youWillPayTotal', { amount: `${fmtM(sm.total)} ${unit}` })
+		$('ofReview').textContent = smartActive ? tl('broker.reviewSmart') : tl('broker.review')
 		// Mantenerla la primera (módulo Pro) tiene su sección; sin Pro, lo que haría
 		if (keep) keep.update()
 		else $('ofKeep').innerHTML = keepTeaser()
@@ -1221,15 +1221,15 @@ async function showCreateOffer(preset = null) {
 		const unit = unitOf(f.coin)
 		const err =
 			type === 'sell' && f.amount > balance()
-				? `No tienes saldo suficiente: tienes ${fmtM(balance())} USD`
+				? tl('broker.errNoBalance', { bal: fmtM(balance()) })
 				: !(f.amount >= 0.1 && f.amount <= 10000)
-				? 'El monto debe estar entre 0.1 y 10,000 USD'
+				? tl('broker.errAmountRange')
 				: !(f.price > 0)
-					? 'Pon el precio por cada USD'
+					? tl('broker.errPrice')
 					: f.kind === 'flexible' && !(f.orderMin > 0 && f.orderMax >= f.orderMin && f.orderMax <= f.amount)
-						? 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo ≤ monto'
+						? tl('broker.errMinMax')
 						: smartActive && type === 'sell' && !f.details.some((d) => d.value)
-							? 'Pon dónde quieres recibir el pago: la orden inteligente se los manda por el chat a quien le vendes'
+							? tl('broker.errSmartDetails')
 							: (window.TPNum?.cardError(document.querySelectorAll('[data-detail]')) ?? '')
 		if (err) return toast(err, true)
 		// Los límites de «mantenerla la primera»: se guardan para la oferta al publicarla
@@ -1241,28 +1241,28 @@ async function showCreateOffer(preset = null) {
 		const req = reqText(f.requirements)
 		$('ofForm').hidden = true
 		$('ofConfirm').hidden = false
-		$('ofConfirm').innerHTML = `<h3>Revisa tu oferta</h3>
+		$('ofConfirm').innerHTML = `<h3>${tl('broker.reviewTitle')}</h3>
 			<div class="kv">
-				<span>${type === 'sell' ? 'Vendes' : 'Compras'}</span><b>${fmtM(f.amount)} USD</b><span></span>
-				<span>Precio</span><b>${fmtP(f.price)} ${unit}</b><span></span>
-				<span>${type === 'sell' ? 'Recibes' : 'Pagas'}</span><b>${fmtM(total)} ${unit}</b><span></span>
-				${type === 'buy' && feeOf(f.amount) ? `<span>Te llegan</span><b>${fmtM(f.amount - feeOf(f.amount))} USD</b><span class="muted">tras la comisión de QvaPay</span>` : ''}
-				<span>Mercado</span><b>${esc(nameOf(f.coin))}</b><span></span>
-				${f.kind === 'flexible' ? `<span>Por partes</span><b>${fmtM(f.orderMin)}–${fmtM(f.orderMax)} USD</b><span></span>` : ''}
-				${f.keep ? `<span>★ Precio automático</span><b>${fmtP(f.keep.min)}–${fmtP(f.keep.max)} ${unit}</b><span class="muted">sin salir de esos límites</span>` : ''}
-				${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
-				<span>Visibilidad</span><b>${f.private ? 'Privada' : 'Pública en Telegram'}${f.onlyVip ? ' · solo VIP' : ''}</b><span></span>
-				${f.message ? `<span>Mensaje</span><b>${esc(f.message)}</b><span></span>` : ''}
+				<span>${type === 'sell' ? tl('broker.kvSell') : tl('broker.kvBuy')}</span><b>${fmtM(f.amount)} USD</b><span></span>
+				<span>${tl('broker.colPrice')}</span><b>${fmtP(f.price)} ${unit}</b><span></span>
+				<span>${type === 'sell' ? tl('broker.kvReceive') : tl('broker.kvPay')}</span><b>${fmtM(total)} ${unit}</b><span></span>
+				${type === 'buy' && feeOf(f.amount) ? `<span>${tl('broker.kvNet')}</span><b>${fmtM(f.amount - feeOf(f.amount))} USD</b><span class="muted">${tl('broker.kvAfterFee')}</span>` : ''}
+				<span>${tl('broker.colMarket')}</span><b>${esc(nameOf(f.coin))}</b><span></span>
+				${f.kind === 'flexible' ? `<span>${tl('broker.kvParts')}</span><b>${fmtM(f.orderMin)}–${fmtM(f.orderMax)} USD</b><span></span>` : ''}
+				${f.keep ? `<span>${tl('broker.keepTitle')}</span><b>${fmtP(f.keep.min)}–${fmtP(f.keep.max)} ${unit}</b><span class="muted">${tl('broker.kvKeepLimits')}</span>` : ''}
+				${req ? `<span>${tl('broker.kvReq')}</span><b>${esc(req)}</b><span></span>` : ''}
+				<span>${tl('broker.kvVis')}</span><b>${f.private ? tl('broker.private') : tl('broker.kvPublicTg')}${f.onlyVip ? tl('broker.kvVipOnly') : ''}</b><span></span>
+				${f.message ? `<span>${tl('broker.kvMsg')}</span><b>${esc(f.message)}</b><span></span>` : ''}
 			</div>
 			<p class="notice">${
 				type === 'sell'
-					? `Se reservan <b>${fmtM(f.amount)} USD</b> de tu saldo mientras la oferta esté publicada. Cuando alguien la tome, te pagará ${f.details.some((d) => d.value) ? 'a tus datos' : 'a los datos que le pases por el chat (no pusiste ninguno en la oferta)'} y liberarás los USD al ver el dinero.`
+					? tl('broker.noteSell', { usd: fmtM(f.amount), to: f.details.some((d) => d.value) ? tl('broker.noteSellToYours') : tl('broker.noteSellToChat') })
 					: f.kind === 'flexible'
-						? `No se reserva saldo. Cada vez que alguien tome una parte, tendrás que transferirle lo de esa parte a sus datos y marcar el pago (en total, hasta <b>${fmtM(total)} ${unit}</b>).`
-						: `No se reserva saldo. Cuando alguien la tome, tendrás que transferirle <b>${fmtM(total)} ${unit}</b> a sus datos y marcar el pago.`
+						? tl('broker.noteBuyFlex', { amount: `${fmtM(total)} ${unit}` })
+						: tl('broker.noteBuy', { amount: `${fmtM(total)} ${unit}` })
 			}</p>
 			${$('ofWarn').innerHTML}
-			<div class="row-btns"><button class="btn" id="ofBack">Volver</button><button class="btn primary" id="ofPublish">Publicar</button></div>`
+			<div class="row-btns"><button class="btn" id="ofBack">${tl('broker.back')}</button><button class="btn primary" id="ofPublish">${tl('broker.publish')}</button></div>`
 		$('ofBack').onclick = () => {
 			$('ofConfirm').hidden = true
 			$('ofForm').hidden = false
@@ -1270,21 +1270,21 @@ async function showCreateOffer(preset = null) {
 		$('ofPublish').onclick = async () => {
 			const btn = $('ofPublish')
 			btn.disabled = true
-			btn.textContent = 'Publicando…'
+			btn.textContent = tl('broker.publishing')
 			try {
 				const r = await api('/offer/create', { ...f, keep: undefined })
 				markOrigin(r.offer)
 				if (f.keep) window.TPProKeep?.save(r.offer, f.keep)
 				if ($('ofRemember').checked) store.setMine(`details.${f.coin}`, Object.fromEntries(f.details.map((d) => [d.name, d.value])))
 				else store.setMine(`details.${f.coin}`, {})
-				toast(r.message || 'Oferta publicada')
+				toast(r.message || tl('broker.offerPosted'))
 				bk.tab = 'offers'
 				await loadTrades()
 				showManageOffer(r.offer)
 				loadBook()
 			} catch (e) {
 				btn.disabled = false
-				btn.textContent = 'Publicar'
+				btn.textContent = tl('broker.publish')
 				toast(e.message, true)
 			}
 		}
@@ -1296,7 +1296,7 @@ async function showCreateOffer(preset = null) {
 async function showManageOffer(uuid) {
 	bk.detail = null
 	stopChatLive()
-	openModal('<p class="muted">Cargando oferta…</p>')
+	openModal(`<p class="muted">${tl('broker.loadingOffer')}</p>`)
 	let o
 	try {
 		o = await api(`/offer?offer=${uuid}`)
@@ -1309,9 +1309,9 @@ async function showManageOffer(uuid) {
 
 function pauseText(p) {
 	if (!p) return ''
-	if (p.reason === 'owner') return 'Pausada por ti: no aparece en el mercado'
+	if (p.reason === 'owner') return tl('broker.pausedByYou')
 	const until = p.until ? cubaFmt(p.until, { hour: '2-digit', minute: '2-digit' }) : null
-	return `Pausada porque se fue la contraparte${until ? `: vuelve al mercado a las ${until}` : ''}`
+	return until ? tl('broker.pausedLeftUntil', { until }) : tl('broker.pausedLeft')
 }
 
 function renderManage(o) {
@@ -1323,69 +1323,69 @@ function renderManage(o) {
 	const req = reqText(o.requirements)
 	const orders = o.orders.filter((x) => x.status !== 'cancelled')
 	$('modalBody').innerHTML = `<div class="stack">
-		<div><h3>${o.type === 'sell' ? 'Vendes' : 'Compras'} ${fmtM(amount)} USD a ${fmtP(o.price)} ${unit}</h3>
-			<p class="muted">${esc(nameOf(o.coin))} · <span class="chip ${o.status}">${STATUS[o.status] ?? o.status}</span>${o.isPrivate ? ' · Privada' : ''}${flex ? ` · Por partes de ${fmtM(o.orderMin)}–${fmtM(o.orderMax)} USD` : ''}</p></div>
-		${o.pause ? `<p class="notice warn">${pauseText(o.pause)}</p>` : rank ? `<p class="hint">Ahora mismo es la <b>${rank}ª</b> ${o.type === 'sell' ? 'venta' : 'compra'} del libro.</p>` : ''}
+		<div><h3>${tl(o.type === 'sell' ? 'broker.mgSell' : 'broker.mgBuy', { usd: fmtM(amount), price: `${fmtP(o.price)} ${unit}` })}</h3>
+			<p class="muted">${esc(nameOf(o.coin))} · <span class="chip ${o.status}">${STATUS[o.status] ?? o.status}</span>${o.isPrivate ? ` · ${tl('broker.private')}` : ''}${flex ? ` · ${tl('broker.mgParts', { min: fmtM(o.orderMin), max: fmtM(o.orderMax) })}` : ''}</p></div>
+		${o.pause ? `<p class="notice warn">${pauseText(o.pause)}</p>` : rank ? `<p class="hint">${tl(o.type === 'sell' ? 'broker.mgRankAsk' : 'broker.mgRankBid', { rank })}</p>` : ''}
 		${
 			o.status === 'cancelled'
-				? '<p class="notice">Cancelaste esta oferta: ya no está en el mercado.</p>'
+				? `<p class="notice">${tl('broker.mgCancelled')}</p>`
 				: o.status !== 'open'
-					? `<p class="notice">Alguien tomó esta oferta. <button class="link" data-open-trade>Ver la operación</button></p>`
+					? `<p class="notice">${tl('broker.mgTaken')} <button class="link" data-open-trade>${tl('broker.mgSeeTrade')}</button></p>`
 					: ''
 		}
 		${
 			editable
-				? `<div class="stack tight"><p class="hint">Cambiar precio o monto</p>
+				? `<div class="stack tight"><p class="hint">${tl('broker.edTitle')}</p>
 				<div class="grid2">
-					<label class="field">${flex ? 'Disponible' : 'Monto'} (USD)<input class="input" id="edAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${amount}" /></label>
-					<label class="field">Precio por USD (${unit})<input class="input" id="edPrice" inputmode="decimal" data-num autocomplete="off" value="${Math.round(o.price * 10000) / 10000}" /></label>
+					<label class="field">${flex ? tl('broker.edAvailable') : tl('broker.amount')} (USD)<input class="input" id="edAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${amount}" /></label>
+					<label class="field">${tl('broker.pricePerUsd')} (${unit})<input class="input" id="edPrice" inputmode="decimal" data-num autocomplete="off" value="${Math.round(o.price * 10000) / 10000}" /></label>
 				</div>
 				<p class="hint" id="edTotal"></p><div id="edWarn"></div>
-				${flex ? '' : '<label class="check"><input type="checkbox" id="edFlex" /> Pasarla a por partes: que la tomen por partes</label>'}
+				${flex ? '' : `<label class="check"><input type="checkbox" id="edFlex" /> ${tl('broker.edFlex')}</label>`}
 				<div class="grid2" id="edFlexBox" ${flex ? '' : 'hidden'}>
-					<label class="field">Mínimo por orden (USD)<input class="input" id="edMin" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${o.orderMin ?? ''}" /></label>
-					<label class="field">Máximo por orden (USD)<input class="input" id="edMax" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${o.orderMax ?? ''}" /></label>
+					<label class="field">${tl('broker.minPerOrder')}<input class="input" id="edMin" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${o.orderMin ?? ''}" /></label>
+					<label class="field">${tl('broker.maxPerOrder')}<input class="input" id="edMax" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${o.orderMax ?? ''}" /></label>
 				</div>
-				${flex ? '' : '<p class="notice warn" id="edFlexNote" hidden>No tiene vuelta atrás: QvaPay no deja volver a convertir una oferta por partes en una que se toma entera.</p>'}
-				<details class="opts"><summary>Requisitos y visibilidad</summary><div class="stack tight">
+				${flex ? '' : `<p class="notice warn" id="edFlexNote" hidden>${tl('broker.edFlexNote')}</p>`}
+				<details class="opts"><summary>${tl('broker.reqVis')}</summary><div class="stack tight">
 					${Object.entries(REQ_OPTIONS)
 						.map(([k, [label, vals, fmt]]) => {
 							const cur = Number(o.requirements?.[k] ?? 0)
 							// Un valor puesto desde la web de QvaPay que aquí no está en la lista se conserva
 							const opts = cur && !vals.includes(cur) ? [...vals, cur].sort((a, b) => a - b) : vals
-							return `<label class="field">${label}<select class="input" data-ed-req="${k}"><option value="0">Sin requisito</option>${opts.map((v) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${fmt(v)}</option>`).join('')}</select></label>`
+							return `<label class="field">${label}<select class="input" data-ed-req="${k}"><option value="0">${tl('broker.noReq')}</option>${opts.map((v) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${fmt(v)}</option>`).join('')}</select></label>`
 						})
 						.join('')}
-					<label class="check"><input type="checkbox" id="edVip" ${o.onlyVip ? 'checked' : ''} /> Solo cuentas VIP</label>
-					${o.isPrivate ? '<label class="check"><input type="checkbox" id="edPublic" /> Hacerla pública: que se anuncie en el canal de Telegram de QvaPay (no se puede volver a privada)</label>' : ''}
+					<label class="check"><input type="checkbox" id="edVip" ${o.onlyVip ? 'checked' : ''} /> ${tl('broker.vipOnly')}</label>
+					${o.isPrivate ? `<label class="check"><input type="checkbox" id="edPublic" /> ${tl('broker.edPublic')}</label>` : ''}
 					${
 						bk.acct.gold
-							? `<label class="field">Mensaje público (GOLD)<input class="input" id="edMsg" maxlength="79" placeholder="Ej.: pago rápido, respondo al momento" value="${esc(o.message ?? '')}" /></label><p class="hint">Hasta 79 caracteres. QvaPay quita los enlaces.</p>`
+							? `<label class="field">${tl('broker.publicMsg')}<input class="input" id="edMsg" maxlength="79" placeholder="${tl('broker.edMsgPh')}" value="${esc(o.message ?? '')}" /></label><p class="hint">${tl('broker.edMsgHint')}</p>`
 							: o.message
-								? `<p class="hint">Mensaje público: «${esc(o.message)}». Solo una cuenta GOLD puede cambiarlo.</p>`
+								? `<p class="hint">${tl('broker.edMsgGold', { msg: esc(o.message) })}</p>`
 								: ''
 					}
 				</div></details>
-				<p class="hint">Los datos de pago, el mercado y si compras o vendes no se pueden cambiar en QvaPay: para eso, cancela la oferta y publica otra.</p>
-				<button class="btn" id="edSave">Guardar cambios</button></div>`
+				<p class="hint">${tl('broker.edFixed')}</p>
+				<button class="btn" id="edSave">${tl('broker.edSave')}</button></div>`
 				: ''
 		}
 		${keepSlot(o, editable)}
-		${req ? `<p class="hint">Requisitos: ${esc(req)}</p>` : ''}
+		${req ? `<p class="hint">${tl('broker.reqLine', { req: esc(req) })}</p>` : ''}
 		${
 			// QvaPay devuelve todos los campos del mercado, también los que dejaste vacíos al publicar: solo van los rellenos
 			o.details.some((d) => d.value)
-				? `<div><p class="hint">Tus datos de pago en esta oferta</p><div class="kv">${o.details
+				? `<div><p class="hint">${tl('broker.myDetails')}</p><div class="kv">${o.details
 						.filter((d) => d.value)
 						.map((d) => `<span>${esc(d.name)}</span><b>${esc(d.value)}</b><span></span>`)
 						.join('')}</div></div>`
 				: o.type === 'sell' && o.status === 'open'
-					? '<p class="hint">Esta oferta no tiene datos de pago: pásaselos por el chat a quien la tome.</p>'
+					? `<p class="hint">${tl('broker.noDetails')}</p>`
 					: ''
 		}
 		${
 			flex && orders.length
-				? `<div><p class="hint">Órdenes</p><table class="otable"><tbody>${orders
+				? `<div><p class="hint">${tl('broker.orders')}</p><table class="otable"><tbody>${orders
 						.map(
 							(x) =>
 								`<tr data-order-row="${x.order}"><td class="num">${fmtM(x.usd)} USD</td><td class="num">${fmtM(x.coinAmount)} ${unit}</td><td>@${esc(x.taker ?? '—')}</td><td><span class="chip ${x.status}">${STATUS[x.status] ?? x.status}</span></td></tr>`,
@@ -1394,10 +1394,10 @@ function renderManage(o) {
 				: ''
 		}
 		<div class="row-btns">
-			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? 'Volver a publicar' : 'Pausar'}</button><button class="btn danger" id="mgCancel" ${bk.cancelling.has(o.offer) ? 'disabled>Cancelando…' : '>Cancelar oferta'}</button>` : ''}
+			${o.status === 'open' ? `<button class="btn" id="mgPause">${o.pause ? tl('broker.resume') : tl('broker.pause')}</button><button class="btn danger" id="mgCancel" ${bk.cancelling.has(o.offer) ? `disabled>${tl('broker.cancelling')}` : `>${tl('broker.cancelOffer')}`}</button>` : ''}
 		</div>
-		${o.status === 'open' ? `<div class="share"><p class="hint">Anúnciala en tus grupos: una imagen con la oferta y un enlace que la abre en el terminal${o.isPrivate ? ' (en las privadas, quien lo abra tendrá que conectar su cuenta para verla)' : ''}</p><div class="row-btns"><button class="btn primary" id="mgShare">${ICON_SHARE} Compartir</button><input class="input" id="mgLink" readonly value="${shareLink(o.offer)}" /><button class="btn icon-only" id="mgCopy" title="Copiar enlace" aria-label="Copiar enlace">${ICON_COPY}</button></div></div>` : ''}
-		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${o.offer}" target="_blank" rel="noopener">Abrir en QvaPay</a></p>
+		${o.status === 'open' ? `<div class="share"><p class="hint">${tl('broker.shareHint')}${o.isPrivate ? tl('broker.shareHintPrivate') : ''}</p><div class="row-btns"><button class="btn primary" id="mgShare">${ICON_SHARE} ${tl('broker.share')}</button><input class="input" id="mgLink" readonly value="${shareLink(o.offer)}" /><button class="btn icon-only" id="mgCopy" title="${tl('broker.copyLink')}" aria-label="${tl('broker.copyLink')}">${ICON_COPY}</button></div></div>` : ''}
+		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${o.offer}" target="_blank" rel="noopener">${tl('broker.openInQvaPay')}</a></p>
 	</div>`
 
 	$('mgShare')?.addEventListener('click', () => showShareOffer(o))
@@ -1405,14 +1405,14 @@ function renderManage(o) {
 		navigator.clipboard?.writeText($('mgLink').value)
 		$('mgCopy').innerHTML = ICON_DONE
 		setTimeout(() => $('mgCopy') && ($('mgCopy').innerHTML = ICON_COPY), 1400)
-		toast('Enlace copiado')
+		toast(tl('broker.linkCopied'))
 	})
 	const refresh = () => showManageOffer(o.offer)
 	if (editable) {
 		const upd = () => {
 			const a = num2($('edAmount').value)
 			const p = Number($('edPrice').value)
-			$('edTotal').innerHTML = a > 0 && p > 0 ? `${o.type === 'sell' ? 'Recibirás' : 'Pagarás'} <b>${fmtM(a * p)} ${unit}</b>${o.type === 'buy' ? netNote(a) : ''}` : ''
+			$('edTotal').innerHTML = a > 0 && p > 0 ? `${tl(o.type === 'sell' ? 'broker.youWillGet' : 'broker.youWillPay', { amount: `${fmtM(a * p)} ${unit}` })}${o.type === 'buy' ? netNote(a) : ''}` : ''
 			const w = priceWarning(o.type, p, marketRefs(o.coin).mid)
 			$('edWarn').innerHTML = w ? `<p class="notice warn">${w}</p>` : ''
 		}
@@ -1444,8 +1444,8 @@ function renderManage(o) {
 				message: $('edMsg') ? $('edMsg').value : undefined,
 			}
 			// Lo que no tiene vuelta atrás se confirma antes
-			const oneWay = [toFlexible && 'pasará a tomarse por partes y no podrá volver a tomarse entera', makePublic && 'será pública y no podrá volver a ser privada'].filter(Boolean)
-			if (oneWay.length && !(await confirmDialog('Guardar cambios', `<p class="muted">La oferta ${oneWay.join(', y ')}.</p>`, 'Guardar cambios'))) return showManageOffer(o.offer)
+			const oneWay = [toFlexible && tl('broker.oneWayFlex'), makePublic && tl('broker.oneWayPublic')].filter(Boolean)
+			if (oneWay.length && !(await confirmDialog(tl('broker.edSave'), `<p class="muted">${tl('broker.oneWay', { what: oneWay.join(tl('broker.oneWayAnd')) })}</p>`, tl('broker.edSave')))) return showManageOffer(o.offer)
 			btn.disabled = true
 			try {
 				const r = await api('/offer/edit', edit)
@@ -1473,12 +1473,12 @@ function renderManage(o) {
 	})
 	$('mgCancel')?.addEventListener('click', async () => {
 		if (bk.cancelling.has(o.offer)) return
-		const msg = o.type === 'sell' ? 'Se retira del mercado y los USD reservados vuelven a tu saldo.' : 'Se retira del mercado.'
-		if (!(await confirmDialog('Cancelar oferta', `<p class="muted">${msg}</p>`, 'Cancelar oferta', 'danger'))) return showManageOffer(o.offer)
+		const msg = o.type === 'sell' ? tl('broker.cancelSellBody') : tl('broker.cancelBuyBody')
+		if (!(await confirmDialog(tl('broker.cancelOffer'), `<p class="muted">${msg}</p>`, tl('broker.cancelOffer'), 'danger'))) return showManageOffer(o.offer)
 		try {
 			const r = await cancelOffer(o.offer)
 			if (!r) return
-			toast(r.message || 'Oferta cancelada')
+			toast(r.message || tl('broker.offerCancelled'))
 			loadTrades()
 			loadBook()
 			// Cancelada: la ventana ya no tiene nada que hacer (el aviso de abajo dice que se canceló)
@@ -1502,7 +1502,7 @@ function renderManage(o) {
 function keepSlot(o, editable) {
 	if (!editable || o.isPrivate || !window.TPPro?.enabled) return ''
 	if (window.TPPro.active) return '<div id="mgKeep"></div>'
-	return `<p class="hint" id="mgKeep">★ Con Pro, precio automático: si alguien publica mejor precio, el terminal ajusta el tuyo sin salirse de tus límites. <button class="link" id="mgKeepPro">Ver Pro</button></p>`
+	return `<p class="hint" id="mgKeep">${tl('broker.keepSlot')} <button class="link" id="mgKeepPro">${tl('broker.seePro')}</button></p>`
 }
 
 // ── Tomar una oferta del libro ────────────────────────────────────────
@@ -1518,7 +1518,7 @@ function showTakeOffer(uuid, side) {
 async function showTakeOfferById(uuid, amount) {
 	// Sin cuenta conectada, lo que el libro en vivo sabe de ella (el enlace que comparte su dueño)
 	if (!bk.acct.connected) return showPublicOffer(uuid, amount)
-	openModal('<p class="muted">Cargando oferta…</p>')
+	openModal(`<p class="muted">${tl('broker.loadingOffer')}</p>`)
 	let o
 	try {
 		o = await api(`/offer?offer=${encodeURIComponent(uuid)}`)
@@ -1528,7 +1528,7 @@ async function showTakeOfferById(uuid, amount) {
 	}
 	if (o.isOwner) return renderManage(o)
 	if (o.status === 'open' && o.pause && window.showPaused) return showPaused(o.coin, o.type === 'sell' ? 'ask' : 'bid', o.offer, o.pause)
-	if (o.status !== 'open' || o.pause) return showGone(o.coin, o.type === 'sell' ? 'ask' : 'bid', o.offer, `Está ${(STATUS[o.status] ?? o.status).toLowerCase()}${o.pause ? ' y pausada' : ''}.`)
+	if (o.status !== 'open' || o.pause) return showGone(o.coin, o.type === 'sell' ? 'ask' : 'bid', o.offer, tl(o.pause ? 'broker.goneStatusPaused' : 'broker.goneStatus', { status: (STATUS[o.status] ?? o.status).toLowerCase() }))
 	const flex = o.kind === 'flexible'
 	const level = {
 		price: o.price,
@@ -1549,7 +1549,7 @@ async function showTakeOfferById(uuid, amount) {
 	renderTake(o.offer, o.type === 'sell' ? 'ask' : 'bid', level, o.coin, amount)
 }
 
-const REQ_NAMES = { min_completed: ['operaciones completadas', ''], min_rating: ['valoración', '★'], min_account_days: ['días de cuenta', ''], min_trustscore: ['trustscore', ''] }
+const REQ_NAMES = { min_completed: [tl('broker.rnCompleted'), ''], min_rating: [tl('broker.rnRating'), '★'], min_account_days: [tl('broker.rnDays'), ''], min_trustscore: ['trustscore', ''] }
 // ── Ofertas que puedes tomar ──────────────────────────────────────────
 // Para el filtro «Solo las que puedo tomar»: ni tuyas ni solo VIP, con saldo para lo mínimo si les vendes y con
 // requisitos que cumples. Las operaciones y la valoración salen de tu perfil de P2P (/me); la antigüedad de la cuenta y
@@ -1640,10 +1640,10 @@ async function checkRequirements(uuid, l) {
 	const why = (o.requirementsMissing ?? [])
 		.map((m) => {
 			const [name, unit] = REQ_NAMES[m.key] ?? [m.key, '']
-			return `${name}: pide ${m.required}${unit}, tienes ${m.actual}${unit}`
+			return tl('broker.reqMissing', { name, need: `${m.required}${unit}`, have: `${m.actual}${unit}` })
 		})
 		.join(' · ')
-	$('tkGo').insertAdjacentHTML('beforebegin', `<p class="notice warn">No cumples los requisitos de esta oferta${why ? ` (${esc(why)})` : ''}. QvaPay la rechazaría.</p>`)
+	$('tkGo').insertAdjacentHTML('beforebegin', `<p class="notice warn">${tl('broker.reqNotMet', { why: why ? ` (${esc(why)})` : '' })}</p>`)
 	$('tkGo').disabled = true
 }
 
@@ -1658,40 +1658,36 @@ function renderTake(uuid, side, l, coin, preset) {
 	const start = flex && preset > 0 ? Math.min(max, Math.max(min, preset)) : max
 	const req = reqText(l.requirements)
 	openModal(`<div class="stack">
-		<div><h3>${youBuy ? 'Comprar' : 'Vender'} USD a ${fmtP(l.price)} ${unit}</h3>
-			<p class="muted who-ava">${avatar(l.user, l.image, 'sm')}${esc(nameOf(coin))} · <button type="button" class="link peer-link" data-peer="${esc(l.user)}">@${esc(l.user)}</button>${l.ops != null ? ` · ${l.ops} operaciones` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ' · sin valoraciones' : ''}${l.kyc ? ' · KYC' : ''}</p>
-			${typeof rankText === 'function' && rankText(l.user) ? `<p class="rank-line">🏆 Ranking: ${esc(rankText(l.user))}</p>` : ''}</div>
+		<div><h3>${tl(youBuy ? 'broker.tkBuyTitle' : 'broker.tkSellTitle', { price: `${fmtP(l.price)} ${unit}` })}</h3>
+			<p class="muted who-ava">${avatar(l.user, l.image, 'sm')}${esc(nameOf(coin))} · <button type="button" class="link peer-link" data-peer="${esc(l.user)}">@${esc(l.user)}</button>${l.ops != null ? ` · ${tl('broker.nOps', { n: String(l.ops) })}` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ` · ${tl('broker.noRatings')}` : ''}${l.kyc ? ' · KYC' : ''}</p>
+			${typeof rankText === 'function' && rankText(l.user) ? `<p class="rank-line">🏆 ${tl('broker.rankingLine', { rank: esc(rankText(l.user)) })}</p>` : ''}</div>
 		<div class="kv">
-			<span>${youBuy ? 'Vende' : 'Compra'}</span><b>${fmtM(l.usd)} USD</b><span></span>
-			${flex ? `<span>Por orden</span><b>${min ? `${fmtM(min)}–${fmtM(max)}` : `hasta ${fmtM(max)}`} USD</b><span></span>` : ''}
-			${req ? `<span>Requisitos</span><b>${esc(req)}</b><span></span>` : ''}
-			${l.vipOnly ? '<span>Solo</span><b>cuentas VIP</b><span></span>' : ''}
+			<span>${youBuy ? tl('broker.tkSells') : tl('broker.tkBuys')}</span><b>${fmtM(l.usd)} USD</b><span></span>
+			${flex ? `<span>${tl('broker.tkPerOrder')}</span><b>${min ? `${fmtM(min)}–${fmtM(max)}` : tl('broker.tkUpTo', { max: fmtM(max) })} USD</b><span></span>` : ''}
+			${req ? `<span>${tl('broker.kvReq')}</span><b>${esc(req)}</b><span></span>` : ''}
+			${l.vipOnly ? `<span>${tl('broker.tkOnly')}</span><b>${tl('broker.tkVipAccounts')}</b><span></span>` : ''}
 		</div>
-		${flex ? `<label class="field">¿Cuántos USD ${youBuy ? 'compras' : 'vendes'}?<input class="input" id="tkAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${start}" /></label>` : ''}
+		${flex ? `<label class="field">${tl(youBuy ? 'broker.tkHowManyBuy' : 'broker.tkHowManySell')}<input class="input" id="tkAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${start}" /></label>` : ''}
 		<p class="hint" id="tkTotal"></p>
-		<p class="notice">${
-			youBuy
-				? 'Al tomarla tendrás que transferir el total a los datos de pago del vendedor y marcar el pago antes de que venza el plazo.'
-				: 'Al tomarla se reservan esos USD de tu saldo como garantía. Los liberas solo cuando veas el pago en tu cuenta.'
-		}</p>
+		<p class="notice">${youBuy ? tl('broker.tkNoteBuy') : tl('broker.tkNoteSell')}</p>
 		${
 			bk.acct.connected
 				? '<button class="btn primary block" id="tkGo"></button>'
-				: `<button class="btn primary block" id="tkConnect">Conectar mi cuenta para ${youBuy ? 'comprar' : 'vender'}</button>`
+				: `<button class="btn primary block" id="tkConnect">${tl(youBuy ? 'broker.tkConnectBuy' : 'broker.tkConnectSell')}</button>`
 		}
-		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${uuid}" target="_blank" rel="noopener">Ver en QvaPay</a></p>
+		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${uuid}" target="_blank" rel="noopener">${tl('broker.seeInQvaPay')}</a></p>
 	</div>`)
 	const amount = () => (flex ? num2($('tkAmount').value) : l.usd)
 	const upd = () => {
 		const a = amount()
 		const total = a * l.price
-		$('tkTotal').innerHTML = a > 0 ? `${youBuy ? 'Pagas' : 'Recibes'} <b>${fmtM(total)} ${unit}</b> por <b>${fmtM(a)} USD</b>${youBuy ? netNote(a) : ''}` : ''
-		if ($('tkGo')) $('tkGo').textContent = `Tomar: ${youBuy ? 'comprar' : 'vender'} ${fmtM(a)} USD`
+		$('tkTotal').innerHTML = a > 0 ? `${tl(youBuy ? 'broker.tkPay' : 'broker.tkGet', { total: `${fmtM(total)} ${unit}`, usd: fmtM(a) })}${youBuy ? netNote(a) : ''}` : ''
+		if ($('tkGo')) $('tkGo').textContent = tl(youBuy ? 'broker.tkGoBuy' : 'broker.tkGoSell', { usd: fmtM(a) })
 	}
 	$('tkAmount')?.addEventListener('input', upd)
 	$('tkConnect')?.addEventListener('click', () => {
 		const a = amount()
-		showConnect('Conecta tu cuenta para tomar la oferta', () => showTakeOfferById(uuid, a))
+		showConnect(tl('broker.connectToTake'), () => showTakeOfferById(uuid, a))
 	})
 	$('modalBody').querySelector('[data-peer]')?.addEventListener('click', (e) => showPeer(e.currentTarget.dataset.peer))
 	upd()
@@ -1699,17 +1695,17 @@ function renderTake(uuid, side, l, coin, preset) {
 	if (req && bk.acct.connected) checkRequirements(uuid, l)
 	$('tkGo')?.addEventListener('click', async () => {
 		const a = amount()
-		if (flex && !(a >= min && a <= max)) return toast(`El monto debe estar entre ${fmtM(min)} y ${fmtM(max)} USD`, true)
+		if (flex && !(a >= min && a <= max)) return toast(tl('broker.errBetween', { min: fmtM(min), max: fmtM(max) }), true)
 		const btn = $('tkGo')
 		btn.disabled = true
-		btn.textContent = 'Tomando…'
+		btn.textContent = tl('broker.taking')
 		try {
 			// Con el precio y el monto que ves: si cambiaron, el servidor no la toma
 			const r = await api('/offer/apply', { offer: uuid, amount: flex ? a : undefined, price: l.price, usd: flex ? undefined : l.usd })
 			markOrigin(r.offer)
 			// Una fija: el servidor te avisa de lo que haga su dueño (en las de rango QvaPay no avisa de cada parte)
 			if (!flex) window.TPPush?.watch(r.offer)
-			toast(r.message || 'Tomaste la oferta')
+			toast(r.message || tl('broker.taken'))
 			bk.tab = 'active'
 			await loadTrades()
 			loadBook()
@@ -1751,22 +1747,22 @@ function peerSignals(p, known, offers) {
 	const ops = p ? p.opsOwner + p.opsTaker : (known?.ops ?? null)
 	const rating = p ? p.rating : (known?.rating ?? null)
 	if (p) {
-		const missing = [!p.kyc && 'identidad (KYC)', p.phone === false && 'teléfono', p.telegram === false && 'Telegram'].filter(Boolean)
-		out.push(missing.length ? ['warn', `Sin verificar: ${missing.join(', ')}`] : ['ok', 'Identidad, teléfono y Telegram verificados'])
+		const missing = [!p.kyc && tl('broker.sigKyc'), p.phone === false && tl('broker.sigPhone'), p.telegram === false && 'Telegram'].filter(Boolean)
+		out.push(missing.length ? ['warn', tl('broker.sigUnverified', { what: missing.join(', ') })] : ['ok', tl('broker.sigVerified')])
 	}
-	if ((p?.vip ?? known?.vip) === true) out.push(['ok', 'Cuenta VIP de QvaPay'])
+	if ((p?.vip ?? known?.vip) === true) out.push(['ok', tl('broker.sigVip')])
 	if (ops != null) {
-		if (ops >= 200) out.push(['ok', `Mucha experiencia: ${ops.toLocaleString('en-US')} operaciones completadas`])
-		else if (ops < 10) out.push(['warn', `Pocas operaciones (${ops}): cuenta nueva o poco usada`])
-		else out.push(['info', `${ops.toLocaleString('en-US')} operaciones completadas`])
+		if (ops >= 200) out.push(['ok', tl('broker.sigManyOps', { n: ops })])
+		else if (ops < 10) out.push(['warn', tl('broker.sigFewOps', { n: ops })])
+		else out.push(['info', tl('broker.sigOps', { n: ops })])
 	}
-	if (rating == null) out.push(['warn', 'Sin valoraciones todavía'])
-	else if (rating < 4.5) out.push(['warn', `Valoración baja: ${rating.toFixed(2)} de 5`])
-	else if (rating >= 4.8 && (p?.ratings ?? 10) >= 10) out.push(['ok', `Muy bien valorado: ${rating.toFixed(2)} de 5${p ? ` (${p.ratings.toLocaleString('en-US')} valoraciones)` : ''}`])
+	if (rating == null) out.push(['warn', tl('broker.sigNoRatings')])
+	else if (rating < 4.5) out.push(['warn', tl('broker.sigLowRating', { r: rating.toFixed(2) })])
+	else if (rating >= 4.8 && (p?.ratings ?? 10) >= 10) out.push(['ok', `${tl('broker.sigHighRating', { r: rating.toFixed(2) })}${p ? ` (${tl('broker.nRatings', { n: p.ratings })})` : ''}`])
 	if (p && p.opsOwner + p.opsTaker >= 20) {
 		const taker = p.opsTaker / (p.opsOwner + p.opsTaker)
-		if (taker >= 0.75) out.push(['info', `Suele tomar ofertas de otros (${Math.round(taker * 100)}% de sus operaciones)`])
-		else if (taker <= 0.25) out.push(['info', `Suele publicar sus propias ofertas (${Math.round((1 - taker) * 100)}% de sus operaciones)`])
+		if (taker >= 0.75) out.push(['info', tl('broker.sigTaker', { pct: Math.round(taker * 100) })])
+		else if (taker <= 0.25) out.push(['info', tl('broker.sigMaker', { pct: Math.round((1 - taker) * 100) })])
 	}
 	// Precio muy lejos del mercado: casi siempre un error de tipeo, a veces un intento de engaño
 	const far = offers.filter((o) => {
@@ -1774,19 +1770,19 @@ function peerSignals(p, known, offers) {
 		const mid = m?.ask && m?.bid ? (m.ask + m.bid) / 2 : (m?.ask ?? m?.bid)
 		return mid && Math.abs(o.price / mid - 1) > PEER_OUTLIER_PCT
 	})
-	if (far.length) out.push(['warn', `${far.length === 1 ? 'Una oferta' : `${far.length} ofertas`} con el precio muy lejos del mercado`])
+	if (far.length) out.push(['warn', tl('broker.sigFar', { n: far.length })])
 	return out
 }
 
 async function showPeer(user, peerId = null) {
 	user = String(user ?? '').trim().replace(/^@/, '')
 	// «—» u otro hueco: aún no se sabe de quién es (no se abre una ficha vacía que solo dice «Usuario no válido»)
-	if (!/^[A-Za-z0-9._-]{1,40}$/.test(user)) return toast('Aún no se sabe quién publicó esta oferta: ábrela para verlo', true)
-	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para ver la ficha', true)
+	if (!/^[A-Za-z0-9._-]{1,40}$/.test(user)) return toast(tl('broker.peerUnknown'), true)
+	if (!bk.acct.connected) return toast(tl('broker.connectToPeer'), true)
 	// Abierta desde una operación: esa deja de refrescarse (cada 8 s), si no volvía a pintarse encima de la ficha
 	bk.detail = null
 	stopChatLive()
-	openModal(`<div class="stack"><h3>@${esc(user)}</h3><p class="muted">Cargando ficha…</p></div>`)
+	openModal(`<div class="stack"><h3>@${esc(user)}</h3><p class="muted">${tl('broker.loadingPeer')}</p></div>`)
 	let d
 	try {
 		d = await api(`/peer?user=${encodeURIComponent(user)}`)
@@ -1794,7 +1790,7 @@ async function showPeer(user, peerId = null) {
 		$('modalBody').innerHTML = `<div class="stack"><h3>@${esc(user)}</h3><p class="empty">${esc(e.message)}</p></div>`
 		return
 	}
-	if (!$('modalBody').textContent.includes('Cargando ficha')) return // la cerraron mientras cargaba
+	if (!$('modalBody').textContent.includes(tl('broker.loadingPeer'))) return // la cerraron mientras cargaba
 	const p = d.profile ?? tradeProfile(user)
 	const known = p ? null : knownPeer(user)
 	if (p?.uuid) watchOnline([{ id: p.uuid, u: p.username }])
@@ -1807,7 +1803,7 @@ async function showPeer(user, peerId = null) {
 		(p?.kyc ?? known?.kyc) && '<span class="badge ok">KYC</span>',
 		(p?.vip ?? known?.vip) && '<span class="badge ok">VIP</span>',
 		(p?.gold ?? known?.gold) && '<span class="badge warn">GOLD</span>',
-		p?.phone && '<span class="badge neutral">Teléfono</span>',
+		p?.phone && `<span class="badge neutral">${tl('broker.badgePhone')}</span>`,
 		p?.telegram && '<span class="badge neutral">Telegram</span>',
 	]
 		.filter(Boolean)
@@ -1824,11 +1820,11 @@ async function showPeer(user, peerId = null) {
 			const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)}` : fmtM(o.usd)
 			const t = Date.parse(o.updatedAt ?? o.createdAt ?? '')
 			return `<button type="button" class="peer-offer" data-peer-offer="${esc(o.offer)}">
-				<span class="po-side ${o.type === 'sell' ? 'ask' : 'bid'}">${o.type === 'sell' ? 'Vende' : 'Compra'}</span>
-				<span class="po-mkt">${esc(nameOf(o.coin))}${o.vipOnly ? ' · solo VIP' : ''}${o.paused ? ' · pausada' : ''}</span>
+				<span class="po-side ${o.type === 'sell' ? 'ask' : 'bid'}">${o.type === 'sell' ? tl('broker.tkSells') : tl('broker.tkBuys')}</span>
+				<span class="po-mkt">${esc(nameOf(o.coin))}${o.vipOnly ? tl('broker.kvVipOnly') : ''}${o.paused ? tl('broker.poPaused') : ''}</span>
 				<span class="po-price mono">${fmtP(o.price)} <small>${esc(unit)}</small></span>
 				<span class="po-usd mono">${range} USD</span>
-				<span class="po-age">${t ? `hace ${ago(now - t)}` : ''}</span>
+				<span class="po-age">${t ? tl('broker.ago', { t: ago(now - t) }) : ''}</span>
 			</button>`
 		})
 		.join('')
@@ -1840,7 +1836,7 @@ async function showPeer(user, peerId = null) {
 		.slice(0, 6)
 		.map(
 			(t) => `<button type="button" class="peer-trade" data-peer-trade="${esc(t.offerUuid)}" data-order="${esc(t.order ?? '')}">
-				<span>${t.side === 'buy' ? 'Le compraste' : 'Le vendiste'} <b class="mono">${fmtM(t.usd)} USD</b> · ${esc(nameOf(t.coin))}${t.updatedAt ? ` <small class="muted">· ${cubaFmt(t.updatedAt, { day: 'numeric', month: 'short' })}</small>` : ''}</span>
+				<span>${tl(t.side === 'buy' ? 'broker.youBoughtFrom' : 'broker.youSoldTo', { usd: fmtM(t.usd) })} · ${esc(nameOf(t.coin))}${t.updatedAt ? ` <small class="muted">· ${cubaFmt(t.updatedAt, { day: 'numeric', month: 'short' })}</small>` : ''}</span>
 				<span class="chip ${t.status}">${STATUS[t.status] ?? t.status}</span></button>`,
 		)
 		.join('')
@@ -1848,24 +1844,24 @@ async function showPeer(user, peerId = null) {
 	$('modalBody').innerHTML = `<div class="stack peer">
 		<div class="peer-head">
 			${avatar(name, p?.image ?? known?.image, 'lg')}
-			<div><h3>@${esc(name)}${isMe ? ' <span class="badge info">tú</span>' : ''}</h3><div class="peer-badges">${badges || '<span class="muted small">Sin datos de verificación</span>'}</div></div>
+			<div><h3>@${esc(name)}${isMe ? ` <span class="badge info">${tl('broker.you')}</span>` : ''}</h3><div class="peer-badges">${badges || `<span class="muted small">${tl('broker.noVerif')}</span>`}</div></div>
 		</div>
 		<div class="peer-stats">
-			${stat('Operaciones', ops != null ? ops.toLocaleString('en-US') : '—', p ? `${p.opsOwner.toLocaleString('en-US')} publicando · ${p.opsTaker.toLocaleString('en-US')} tomando` : '')}
-			${stat('Valoración', rating != null ? `⭐ ${rating.toFixed(2)}` : '—', p ? `${p.ratings.toLocaleString('en-US')} valoraciones` : '')}
-			${stat('Ofertas abiertas', String(d.offers.length), d.offers.length ? `${fmtM(d.offers.reduce((s, o) => s + o.usd, 0))} USD en total` : '')}
+			${stat(tl('broker.statOps'), ops != null ? ops.toLocaleString('en-US') : '—', p ? tl('broker.statOpsSub', { owner: p.opsOwner, taker: p.opsTaker }) : '')}
+			${stat(tl('broker.statRating'), rating != null ? `⭐ ${rating.toFixed(2)}` : '—', p ? tl('broker.nRatings', { n: p.ratings }) : '')}
+			${stat(tl('broker.statOffers'), String(d.offers.length), d.offers.length ? tl('broker.statOffersSub', { usd: fmtM(d.offers.reduce((s, o) => s + o.usd, 0)) }) : '')}
 		</div>
-		${qpId ? (window.TPPro?.active ? '<div id="peerQp" class="peer-qp"></div>' : `<button type="button" class="peer-qp-up" data-peer-pro><b>★ Pro</b> Mira su actividad en todo el P2P de QvaPay: operaciones de 30 días, completadas, canceladas y sus estrellas</button>`) : ''}
-		${rank ? `<p class="rank-line">🏆 Ranking: ${esc(rank)}</p>` : ''}
+		${qpId ? (window.TPPro?.active ? '<div id="peerQp" class="peer-qp"></div>' : `<button type="button" class="peer-qp-up" data-peer-pro><b>★ Pro</b> ${tl('broker.qpUpsell')}</button>`) : ''}
+		${rank ? `<p class="rank-line">🏆 ${tl('broker.rankingLine', { rank: esc(rank) })}</p>` : ''}
 		${signals.length ? `<ul class="peer-signals">${signals.map(([k, t]) => `<li class="${k}">${esc(t)}</li>`).join('')}</ul>` : ''}
-		<div><p class="hint">Ofertas abiertas ahora</p>${offers ? `<div class="peer-offers">${offers}</div>` : '<p class="muted small">No tiene ofertas publicadas ahora.</p>'}</div>
+		<div><p class="hint">${tl('broker.openNow')}</p>${offers ? `<div class="peer-offers">${offers}</div>` : `<p class="muted small">${tl('broker.noOpenNow')}</p>`}</div>
 		${
 			isMe
 				? ''
-				: `<div><p class="hint">Tu historial con @${esc(name)}</p>${
+				: `<div><p class="hint">${tl('broker.historyWith', { user: esc(name) })}</p>${
 						together.length
-							? `<p class="small">${together.length} ${together.length === 1 ? 'operación' : 'operaciones'} entre tus últimas · ${done.length} completadas${vol ? ` · ${fmtM(vol)} USD` : ''}</p><div class="peer-trades">${history}</div>`
-							: '<p class="muted small">No has operado con este usuario (en tus últimas operaciones).</p>'
+							? `<p class="small">${tl('broker.historyCount', { n: together.length })} · ${tl('broker.historyDone', { n: done.length })}${vol ? ` · ${fmtM(vol)} USD` : ''}</p><div class="peer-trades">${history}</div>`
+							: `<p class="muted small">${tl('broker.historyNone')}</p>`
 					}</div>`
 		}
 	</div>`
@@ -1892,7 +1888,7 @@ async function showPeerStats(uuid) {
 		// El tope de fichas por minuto o por día: se dice en el bloque en vez de quitarlo
 		if (r.status === 429) {
 			const msg = (await r.json().catch(() => null))?.error
-			if ($('peerQp')) $('peerQp').innerHTML = `<p class="hint">★ Su actividad en el P2P de QvaPay</p><p class="muted small">${esc(msg || 'Espera un minuto para ver más')}</p>`
+			if ($('peerQp')) $('peerQp').innerHTML = `<p class="hint">★ ${tl('broker.qpTitle')}</p><p class="muted small">${esc(msg || tl('broker.qpWait'))}</p>`
 			return
 		}
 		if (!r.ok) throw new Error()
@@ -1907,13 +1903,13 @@ async function showPeerStats(uuid) {
 	const since = s.since ? cubaFmt(Date.parse(s.since), { month: 'short', year: 'numeric' }) : null
 	const most = Math.max(1, ...Object.values(s.stars))
 	const stars = ['5', '4', '3', '2', '1'].map((k) => `<div class="qp-star"><span>${k}★</span><i style="--w:${(s.stars[k] / most) * 100}%"></i><b>${s.stars[k].toLocaleString('en-US')}</b></div>`).join('')
-	box.innerHTML = `<p class="hint">★ Su actividad en el P2P de QvaPay${since ? ` · desde ${esc(since)}` : ''}</p>
+	box.innerHTML = `<p class="hint">★ ${tl('broker.qpTitle')}${since ? ` · ${tl('broker.qpSince', { since: esc(since) })}` : ''}</p>
 		<div class="peer-stats">
-			${stat('Últimos 30 días', `${s.ops30d.toLocaleString('en-US')} ops`)}
-			${stat('Completadas', s.completed.toLocaleString('en-US'), s.peers != null ? `con ${s.peers.toLocaleString('en-US')} usuarios distintos` : '')}
-			${stat('Canceladas', s.cancelled.toLocaleString('en-US'), 'por cualquiera de las partes')}
+			${stat(tl('broker.qp30d'), tl('broker.opsShort', { n: s.ops30d }))}
+			${stat(tl('broker.qpDone'), s.completed.toLocaleString('en-US'), s.peers != null ? tl('broker.qpPeers', { n: s.peers }) : '')}
+			${stat(tl('broker.qpCancelled'), s.cancelled.toLocaleString('en-US'), tl('broker.qpEitherSide'))}
 		</div>
-		${s.raters ? `<div class="qp-stars" title="${s.raters.toLocaleString('en-US')} valoraciones recibidas">${stars}</div>` : ''}`
+		${s.raters ? `<div class="qp-stars" title="${tl('broker.qpRaters', { n: s.raters })}">${stars}</div>` : ''}`
 	fillFromQp(s)
 }
 
@@ -1923,13 +1919,13 @@ function fillFromQp(s) {
 	const body = $('modalBody')
 	const card = (label) => [...body.querySelectorAll('.peer > .peer-stats .peer-stat')].find((c) => c.querySelector('span')?.textContent === label)?.querySelector('b')
 	const avg = s.raters ? ['1', '2', '3', '4', '5'].reduce((t, k) => t + Number(k) * s.stars[k], 0) / s.raters : null
-	const ops = card('Operaciones')
+	const ops = card(tl('broker.statOps'))
 	if (ops?.textContent === '—') ops.textContent = s.completed.toLocaleString('en-US')
-	const rate = card('Valoración')
+	const rate = card(tl('broker.statRating'))
 	if (rate?.textContent === '—' && avg != null) rate.textContent = `⭐ ${avg.toFixed(2)}`
 	for (const li of body.querySelectorAll('.peer-signals li')) {
 		const t = li.textContent
-		if ((avg != null && t === 'Sin valoraciones todavía') || (s.completed >= 10 && /^Pocas operaciones \(0\)/.test(t))) li.remove()
+		if ((avg != null && t === tl('broker.sigNoRatings')) || (s.completed >= 10 && t === tl('broker.sigFewOps', { n: 0 }))) li.remove()
 	}
 	const list = body.querySelector('.peer-signals')
 	if (list && !list.children.length) list.remove()
@@ -1945,25 +1941,25 @@ async function showBuy() {
 	openModal(
 		`<div class="stack swap">
 		<div class="swap-head">${swapTabs('buy')}</div>
-		<p class="muted swap-sub">Compra saldo de QvaPay a la oferta de venta más barata del mercado y págala desde tu cuenta.</p>
+		<p class="muted swap-sub">${tl('broker.swBuySub')}</p>
 		<div class="swap-box">
-			<div class="swap-row"><span>Compras</span></div>
+			<div class="swap-row"><span>${tl('broker.kvBuy')}</span></div>
 			<div class="swap-main">
-				<input class="swap-input mono" id="swAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${sw.amount}" aria-label="USD que compras" />
+				<input class="swap-input mono" id="swAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${sw.amount}" aria-label="${tl('broker.swBuyAria')}" />
 				<span class="swap-asset"><span class="swap-coin usd">$</span>USD QvaPay</span>
 			</div>
 		</div>
 		<div class="swap-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 		<div class="swap-box">
-			<div class="swap-row"><span>Pagas</span><span class="swap-age" id="swAge"></span></div>
+			<div class="swap-row"><span>${tl('broker.kvPay')}</span><span class="swap-age" id="swAge"></span></div>
 			<div class="swap-main">
 				<b class="swap-out pay mono" id="swOut">—</b>
-				<select class="swap-select" id="swCoin" aria-label="Con qué pagas">${markets.map((m) => `<option value="${m.tick}" ${m.tick === sw.coin ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+				<select class="swap-select" id="swCoin" aria-label="${tl('broker.swPayWith')}">${markets.map((m) => `<option value="${m.tick}" ${m.tick === sw.coin ? 'selected' : ''}>${esc(TPI18N.coin(m.tick, m.name))}</option>`).join('')}</select>
 			</div>
 		</div>
 		<div id="swQuote" class="swap-quote"></div>
-		${bk.acct.connected ? '<button class="btn primary block swap-go" id="swGo" disabled>Comprar</button>' : '<button class="btn primary block" id="swConnect">Conectar QvaPay para comprar</button>'}
-		<p class="hint swap-foot">Los USD del vendedor ya están en el escrow de QvaPay. Al comprar, te pasa sus datos por el chat, le pagas y marcas «Ya pagué»: QvaPay te suelta los USD cuando él confirma. La sigues en «Mis operaciones».</p>
+		${bk.acct.connected ? `<button class="btn primary block swap-go" id="swGo" disabled>${tl('broker.swBuy')}</button>` : `<button class="btn primary block" id="swConnect">${tl('broker.swConnectBuy')}</button>`}
+		<p class="hint swap-foot">${tl('broker.swBuyFoot')}</p>
 	</div>`,
 		() => clearInterval(sw.timer),
 	)
@@ -1977,8 +1973,8 @@ async function showBuy() {
 			.slice(0, 4)
 			.map((o) => {
 				const target = o.kind === 'flexible' ? Math.min(Math.max(amount() || 0, o.orderMin ?? 0), o.orderMax ?? o.usd) : o.usd
-				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} USD` : `${fmtM(o.usd)} USD exactos`
-				return `<button type="button" class="chip-btn" data-sw-pick="${target}">${range} a <b class="mono">${fmtP(o.price)}</b></button>`
+				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} USD` : tl('broker.swExact', { usd: fmtM(o.usd) })
+				return `<button type="button" class="chip-btn" data-sw-pick="${target}">${tl('broker.swPick', { range, price: fmtP(o.price) })}</button>`
 			})
 			.join('')
 
@@ -1989,25 +1985,25 @@ async function showBuy() {
 		const a = amount()
 		$('swOut').textContent = best && a > 0 ? fmtM(a * best.price) : '—'
 		$('swOut').classList.toggle('dim', !best)
-		if ($('swAge')) $('swAge').textContent = sw.loading ? 'Actualizando…' : q ? `Precio de hace ${Math.max(0, Math.round((Date.now() - q.at) / 1000))} s` : ''
+		if ($('swAge')) $('swAge').textContent = sw.loading ? tl('broker.updating') : q ? tl('broker.priceAge', { s: Math.max(0, Math.round((Date.now() - q.at) / 1000)) }) : ''
 		let html = ''
-		if (!bk.acct.connected) html = '<p class="notice">Para ver los precios y comprar, conecta tu cuenta de QvaPay con tu token.</p>'
+		if (!bk.acct.connected) html = `<p class="notice">${tl('broker.swBuyNoAcct')}</p>`
 		else if (sw.error) html = `<p class="notice warn">${esc(sw.error)}</p>`
-		else if (!q) html = '<p class="hint">Buscando ofertas de venta…</p>'
-		else if (!q.offers.length) html = `<p class="notice warn">Ahora mismo nadie vende USD en ${esc(nameOf(sw.coin))}. Prueba otro mercado o vuelve en un rato.</p>`
-		else if (!best) html = `<p class="notice warn">${a > 0 ? `Nadie vende ${fmtM(a)} USD de una vez en este mercado.` : 'Pon cuántos USD compras.'} Montos posibles:</p><div class="swap-picks">${options(q.offers)}</div>`
+		else if (!q) html = `<p class="hint">${tl('broker.swSearchingAsks')}</p>`
+		else if (!q.offers.length) html = `<p class="notice warn">${tl('broker.swNoSellers', { market: esc(nameOf(sw.coin)) })}</p>`
+		else if (!best) html = `<p class="notice warn">${a > 0 ? tl('broker.swNoSellerFor', { usd: fmtM(a) }) : tl('broker.swHowManyBuy')} ${tl('broker.swPossible')}</p><div class="swap-picks">${options(q.offers)}</div>`
 		else
 			html = `<div class="kv swap-kv">
-				<span>Precio</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
-				<span>Vende</span><b>@${esc(best.user)}${best.vip ? ' <span class="badge ok">VIP</span>' : ''}${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
-				<span>Reputación</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : 'sin valoraciones'}${best.ops != null ? ` · ${best.ops.toLocaleString('en-US')} operaciones` : ''}</b><span></span>
+				<span>${tl('broker.colPrice')}</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
+				<span>${tl('broker.tkSells')}</span><b>@${esc(best.user)}${best.vip ? ' <span class="badge ok">VIP</span>' : ''}${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
+				<span>${tl('broker.reputation')}</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : tl('broker.noRatings')}${best.ops != null ? ` · ${tl('broker.nOps', { n: best.ops })}` : ''}</b><span></span>
 			</div>`
 		$('swQuote').innerHTML = html
 		const go = $('swGo')
 		if (go) {
 			// Mientras se toma, ni el refresco de cada segundo ni una cotización nueva lo vuelven a activar
 			go.disabled = sw.taking || !best || !(a > 0) || sw.loading
-			go.textContent = sw.taking ? 'Comprando…' : !best ? 'Comprar' : `Comprar ${fmtM(a)} USD por ${fmtM(a * best.price)} ${unit()}`
+			go.textContent = sw.taking ? tl('broker.buying') : !best ? tl('broker.swBuy') : tl('broker.swBuyGo', { usd: fmtM(a), total: `${fmtM(a * best.price)} ${unit()}` })
 		}
 	}
 
@@ -2055,15 +2051,15 @@ async function showBuy() {
 		if (!best || sw.taking) return
 		const total = a * best.price
 		const ok = await askConfirm(
-			'Confirmar compra',
+			tl('broker.swConfirmBuy'),
 			`<div class="kv">
-				<span>Compras</span><b>${fmtM(a)} USD</b><span></span>
-				<span>Pagas</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
-				<span>Con</span><b>${esc(nameOf(sw.coin))}</b><span></span>
-				<span>Vende</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>
+				<span>${tl('broker.kvBuy')}</span><b>${fmtM(a)} USD</b><span></span>
+				<span>${tl('broker.kvPay')}</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
+				<span>${tl('broker.swWith')}</span><b>${esc(nameOf(sw.coin))}</b><span></span>
+				<span>${tl('broker.tkSells')}</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>
 			</div>
-			<p class="notice">Tomas su oferta: sus ${fmtM(a)} USD quedan reservados para ti en el escrow de QvaPay. Le pagas ${fmtM(total)} ${esc(unit())} a los datos que te pase y marcas «Ya pagué».</p>`,
-			'Comprar',
+			<p class="notice">${tl('broker.swConfirmBuyNote', { usd: fmtM(a), total: `${fmtM(total)} ${esc(unit())}` })}</p>`,
+			tl('broker.swBuy'),
 			'primary',
 		)
 		if (!ok || sw.taking) return
@@ -2073,7 +2069,7 @@ async function showBuy() {
 			const r = await api('/swap/buy', { offer: best.offer, amount: a, maxPrice: best.price })
 			markOrigin(r.offer)
 			window.TPPush?.watch(r.offer)
-			toast(`Compra en marcha: págale a @${best.user} y marca «Ya pagué»`)
+			toast(tl('broker.swBuyStarted', { user: best.user }))
 			clearInterval(sw.timer)
 			bk.tab = 'active'
 			await loadTrades()
@@ -2106,8 +2102,8 @@ const SWAP_REFRESH_MS = 15_000
 // terminal casi todo es comprar USD)
 const swapTabs = (mode) =>
 	`<div class="seg-tabs swap-tabs" role="tablist">${[
-		['buy', 'Comprar'],
-		['sell', 'Vender'],
+		['buy', tl('broker.swBuy')],
+		['sell', tl('broker.swSell')],
 	]
 		.map(([m, t]) => `<button type="button" role="tab" class="seg-tab${m === mode ? ' active' : ''}" aria-selected="${m === mode}" data-sw-mode="${m}">${t}</button>`)
 		.join('')}</div>`
@@ -2130,34 +2126,34 @@ async function showSwap(mode) {
 	openModal(
 		`<div class="stack swap">
 		<div class="swap-head">${swapTabs('sell')}</div>
-		<p class="muted swap-sub">Vende tu saldo de QvaPay a la oferta de compra que más paga del mercado y recibe el dinero en tu cuenta.</p>
+		<p class="muted swap-sub">${tl('broker.swSellSub')}</p>
 		<div class="swap-box">
-			<div class="swap-row"><span>Vendes</span>${bk.acct.connected ? `<button type="button" class="link small" id="swMax">Saldo: <b class="mono">${fmtM(bk.acct.balance ?? 0)}</b> USD</button>` : ''}</div>
+			<div class="swap-row"><span>${tl('broker.kvSell')}</span>${bk.acct.connected ? `<button type="button" class="link small" id="swMax">${tl('broker.balanceLink', { bal: fmtM(bk.acct.balance ?? 0) })}</button>` : ''}</div>
 			<div class="swap-main">
-				<input class="swap-input mono" id="swAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${sw.amount}" aria-label="USD que vendes" />
+				<input class="swap-input mono" id="swAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${sw.amount}" aria-label="${tl('broker.swSellAria')}" />
 				<span class="swap-asset"><span class="swap-coin usd">$</span>USD QvaPay</span>
 			</div>
 		</div>
 		<div class="swap-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 		<div class="swap-box">
-			<div class="swap-row"><span>Recibes</span><span class="swap-age" id="swAge"></span></div>
+			<div class="swap-row"><span>${tl('broker.kvReceive')}</span><span class="swap-age" id="swAge"></span></div>
 			<div class="swap-main">
 				<b class="swap-out mono" id="swOut">—</b>
-				<select class="swap-select" id="swCoin" aria-label="Dónde recibes el dinero">${markets.map((m) => `<option value="${m.tick}" ${m.tick === sw.coin ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+				<select class="swap-select" id="swCoin" aria-label="${tl('broker.swWhere')}">${markets.map((m) => `<option value="${m.tick}" ${m.tick === sw.coin ? 'selected' : ''}>${esc(TPI18N.coin(m.tick, m.name))}</option>`).join('')}</select>
 			</div>
 		</div>
 		<div id="swQuote" class="swap-quote"></div>
 		<div id="swDetailsBox" class="stack tight">
 			<div class="swap-saved" id="swSaved" hidden></div>
 			<div id="swEdit" class="stack tight">
-				<p class="hint">Dónde quieres recibir el pago (se lo enviamos al comprador por el chat de la operación)</p>
+				<p class="hint">${tl('broker.swDetailsHint')}</p>
 				<div class="saved-methods" id="swMethods" hidden></div>
 				<div id="swDetails" class="stack tight"></div>
-				<label class="check"><input type="checkbox" id="swRemember" /> Recordar en este navegador</label>
+				<label class="check"><input type="checkbox" id="swRemember" /> ${tl('broker.connectRemember')}</label>
 			</div>
 		</div>
-		${bk.acct.connected ? '<button class="btn buy block swap-go" id="swGo" disabled>Vender</button>' : '<button class="btn primary block" id="swConnect">Conectar QvaPay para vender</button>'}
-		<p class="hint swap-foot">Tus USD quedan en el escrow de QvaPay hasta que el comprador te paga. Si es una cuenta VIP no tienes que liberar tú; si no, cuando veas el pago en tu cuenta lo confirmas y QvaPay le pasa los USD. Sigues la venta en «Mis operaciones».</p>
+		${bk.acct.connected ? `<button class="btn buy block swap-go" id="swGo" disabled>${tl('broker.swSell')}</button>` : `<button class="btn primary block" id="swConnect">${tl('broker.swConnectSell')}</button>`}
+		<p class="hint swap-foot">${tl('broker.swSellFoot')}</p>
 	</div>`,
 		() => clearInterval(sw.timer),
 	)
@@ -2174,7 +2170,7 @@ async function showSwap(mode) {
 	// El saldo se pide al abrir y, si cambia mientras está abierto, se aplica
 	const onBalance = () => {
 		if (!$('swAmount')) return document.removeEventListener('tp:balance', onBalance)
-		if ($('swMax')) $('swMax').innerHTML = `Saldo: <b class="mono">${fmtM(bk.acct.balance ?? 0)}</b> USD`
+		if ($('swMax')) $('swMax').innerHTML = tl('broker.balanceLink', { bal: fmtM(bk.acct.balance ?? 0) })
 		clamp()
 		render()
 	}
@@ -2198,7 +2194,7 @@ async function showSwap(mode) {
 							: `<label class="field">${label}<input class="input" data-sw-detail="${esc(f.name)}"${window.TPNum?.detail(f.name) ?? ''} data-label="${label}" value="${esc(window.TPNum?.show(f.name, saved[f.name]) ?? saved[f.name] ?? '')}" placeholder="${esc(f.placeholder ?? '')}" autocomplete="off" /></label>`
 					})
 					.join('')
-			: '<p class="notice warn">No se pudieron cargar los campos de pago de este mercado. Cierra y vuelve a abrir.</p>'
+			: `<p class="notice warn">${tl('broker.fieldsFailReopen')}</p>`
 		for (const i of $('swDetails').querySelectorAll('[data-sw-detail]')) i.addEventListener('input', render)
 		savedMethodChips($('swMethods'), sw.methods, sw.coin, () => [...$('swDetails').querySelectorAll('[data-sw-detail]')], (el) => el.dataset.swDetail)
 		// Con los datos ya guardados basta un resumen; se editan con «Cambiar»
@@ -2208,7 +2204,7 @@ async function showSwap(mode) {
 		if (complete) {
 			const card = list.find((f) => /tarjeta|cuenta|card/i.test(f.name))
 			const shown = card ? `${esc(card.label || card.name)} <b>···· ${esc(String(saved[card.name]).replace(/\s/g, '').slice(-4))}</b>` : `<b>${esc(saved[list[0].name])}</b>`
-			$('swSaved').innerHTML = `<span>Cobras en ${shown}</span><button type="button" class="link small" id="swChange">Cambiar</button>`
+			$('swSaved').innerHTML = `<span>${tl('broker.swPaidTo', { shown })}</span><button type="button" class="link small" id="swChange">${tl('broker.change')}</button>`
 			$('swChange').onclick = () => {
 				$('swSaved').hidden = true
 				$('swEdit').hidden = false
@@ -2225,8 +2221,8 @@ async function showSwap(mode) {
 			.slice(0, 4)
 			.map((o) => {
 				const target = o.kind === 'flexible' ? Math.min(Math.max(amount() || 0, o.orderMin ?? 0), o.orderMax ?? o.usd, maxUsd()) : o.usd
-				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} USD` : `${fmtM(o.usd)} USD exactos`
-				return `<button type="button" class="chip-btn" data-sw-pick="${target}">${range} a <b class="mono">${fmtP(o.price)}</b></button>`
+				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} USD` : tl('broker.swExact', { usd: fmtM(o.usd) })
+				return `<button type="button" class="chip-btn" data-sw-pick="${target}">${tl('broker.swPick', { range, price: fmtP(o.price) })}</button>`
 			})
 			.join('')
 
@@ -2239,19 +2235,19 @@ async function showSwap(mode) {
 		$('swOut').classList.toggle('dim', !best)
 		renderAge()
 		let html = ''
-		if (!bk.acct.connected) html = '<p class="notice">Para ver los precios y vender, conecta tu cuenta de QvaPay con tu token.</p>'
+		if (!bk.acct.connected) html = `<p class="notice">${tl('broker.swSellNoAcct')}</p>`
 		else if (sw.error) html = `<p class="notice warn">${esc(sw.error)}</p>`
-		else if (!q) html = '<p class="hint">Buscando ofertas de compra…</p>'
-		else if (!q.offers.length) html = `<p class="notice warn">Ahora mismo nadie compra USD en ${esc(nameOf(sw.coin))}. Prueba otro mercado o vuelve en un rato.</p>`
+		else if (!q) html = `<p class="hint">${tl('broker.swSearchingBids')}</p>`
+		else if (!q.offers.length) html = `<p class="notice warn">${tl('broker.swNoBuyers', { market: esc(nameOf(sw.coin)) })}</p>`
 		else if (!best && !reachable(q.offers).length)
-			html = `<p class="notice warn">${maxUsd() > 0 ? `Con tu saldo (${fmtM(maxUsd())} USD) no llegas al mínimo de ninguna oferta de compra en este mercado.` : 'No tienes saldo en QvaPay para vender.'}</p>`
+			html = `<p class="notice warn">${maxUsd() > 0 ? tl('broker.swBelowMin', { bal: fmtM(maxUsd()) }) : tl('broker.swNoBalance')}</p>`
 		else if (!best)
-			html = `<p class="notice warn">${a > 0 ? `Nadie compra ${fmtM(a)} USD de una vez en este mercado.` : 'Pon cuántos USD vendes.'} Montos posibles:</p><div class="swap-picks">${options(q.offers)}</div>`
+			html = `<p class="notice warn">${a > 0 ? tl('broker.swNoBuyerFor', { usd: fmtM(a) }) : tl('broker.swHowManySell')} ${tl('broker.swPossible')}</p><div class="swap-picks">${options(q.offers)}</div>`
 		else {
 			html = `<div class="kv swap-kv">
-				<span>Precio</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
-				<span>Compra</span><b>@${esc(best.user)}${best.vip ? ' <span class="badge ok">VIP</span>' : ''}${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
-				<span>Reputación</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : 'sin valoraciones'}${best.ops != null ? ` · ${best.ops.toLocaleString('en-US')} operaciones` : ''}</b><span></span>
+				<span>${tl('broker.colPrice')}</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
+				<span>${tl('broker.tkBuys')}</span><b>@${esc(best.user)}${best.vip ? ' <span class="badge ok">VIP</span>' : ''}${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
+				<span>${tl('broker.reputation')}</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : tl('broker.noRatings')}${best.ops != null ? ` · ${tl('broker.nOps', { n: best.ops })}` : ''}</b><span></span>
 			</div>`
 		}
 		$('swQuote').innerHTML = html
@@ -2261,13 +2257,13 @@ async function showSwap(mode) {
 			const badCard = window.TPNum?.cardError(document.querySelectorAll('[data-sw-detail]')) ?? ''
 			const over = a > maxUsd()
 			go.disabled = sw.taking || !best || !(a > 0) || missing || badCard || over || sw.loading
-			go.textContent = sw.taking ? 'Vendiendo…' : maxUsd() <= 0 ? 'No tienes saldo en QvaPay' : !best ? 'Vender' : over ? 'No tienes saldo suficiente' : missing ? 'Completa dónde recibes el pago' : badCard ? 'La tarjeta lleva 16 cifras' : `Vender ${fmtM(a)} USD por ${fmtM(a * best.price)} ${unit()}`
+			go.textContent = sw.taking ? tl('broker.selling') : maxUsd() <= 0 ? tl('broker.swNoBalanceBtn') : !best ? tl('broker.swSell') : over ? tl('broker.swNotEnough') : missing ? tl('broker.swFillDetails') : badCard ? tl('broker.swCard16') : tl('broker.swSellGo', { usd: fmtM(a), total: `${fmtM(a * best.price)} ${unit()}` })
 		}
 	}
 
 	function renderAge() {
 		const q = sw.quote
-		if ($('swAge')) $('swAge').textContent = sw.loading ? 'Actualizando…' : q ? `Precio de hace ${Math.max(0, Math.round((Date.now() - q.at) / 1000))} s` : ''
+		if ($('swAge')) $('swAge').textContent = sw.loading ? tl('broker.updating') : q ? tl('broker.priceAge', { s: Math.max(0, Math.round((Date.now() - q.at) / 1000)) }) : ''
 	}
 
 	async function quote(fresh = false) {
@@ -2321,16 +2317,16 @@ async function showSwap(mode) {
 		const d = details()
 		const total = a * best.price
 		const ok = await askConfirm(
-			'Confirmar venta',
+			tl('broker.swConfirmSell'),
 			`<div class="kv">
-				<span>Vendes</span><b>${fmtM(a)} USD</b><span></span>
-				<span>Recibes</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
-				<span>En</span><b>${esc(nameOf(sw.coin))}</b><span></span>
-				<span>Compra</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>
+				<span>${tl('broker.kvSell')}</span><b>${fmtM(a)} USD</b><span></span>
+				<span>${tl('broker.kvReceive')}</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
+				<span>${tl('broker.swIn')}</span><b>${esc(nameOf(sw.coin))}</b><span></span>
+				<span>${tl('broker.tkBuys')}</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>
 				${d.map((x) => `<span>${esc(x.label)}</span><b>${esc(x.value)}</b><span></span>`).join('')}
 			</div>
-			<p class="notice">Se reservan ${fmtM(a)} USD de tu saldo en el escrow de QvaPay y se le envían tus datos por el chat para que te pague.${best.vip ? '' : ' No es una cuenta VIP: cuando te llegue el pago a tu cuenta, confírmalo en «Mis operaciones» para que QvaPay le pase los USD. No lo confirmes antes de verlo.'}</p>`,
-			'Vender',
+			<p class="notice">${tl('broker.swConfirmSellNote', { usd: fmtM(a) })}${best.vip ? '' : tl('broker.swConfirmSellNoVip')}</p>`,
+			tl('broker.swSell'),
 			'buy',
 		)
 		if (!ok || sw.taking) return
@@ -2342,7 +2338,7 @@ async function showSwap(mode) {
 			window.TPPush?.watch(r.offer)
 			if ($('swRemember').checked) store.setMine(`details.${sw.coin}`, Object.fromEntries(d.map((x) => [x.name, x.value])))
 			else store.setMine(`details.${sw.coin}`, {})
-			toast(r.chatSent ? `Venta en marcha: @${best.user} ya tiene tus datos para pagarte` : 'Venta en marcha. No se pudo enviar el chat: manda tus datos de pago a mano', !r.chatSent)
+			toast(r.chatSent ? tl('broker.swSellStarted', { user: best.user }) : tl('broker.swSellNoChat'), !r.chatSent)
 			clearInterval(sw.timer)
 			bk.tab = 'active'
 			await loadTrades()
@@ -2382,7 +2378,7 @@ let audio = null
 function renderAlertsBtn() {
 	const b = $('alertsBtn')
 	b.setAttribute('aria-pressed', String(bk.alerts))
-	b.title = bk.alerts ? 'Avisos activados: pulsa para desactivarlos' : 'Activar avisos de tus operaciones'
+	b.title = bk.alerts ? tl('broker.alertsOnTitle') : tl('broker.alertsOffTitle')
 }
 
 async function toggleAlerts() {
@@ -2391,7 +2387,7 @@ async function toggleAlerts() {
 	renderAlertsBtn()
 	if (!bk.alerts) {
 		window.TPPush?.unsubscribe()
-		return toast('Avisos desactivados')
+		return toast(tl('broker.alertsOff'))
 	}
 	// El sonido necesita un gesto del usuario para poder sonar después
 	try {
@@ -2401,15 +2397,15 @@ async function toggleAlerts() {
 	let perm = 'Notification' in window ? Notification.permission : 'denied'
 	if (perm === 'default') perm = await Notification.requestPermission().catch(() => 'denied')
 	beep(false)
-	if (perm !== 'granted') return toast('Avisos activados con sonido. Para recibirlos en otra pestaña o con el terminal cerrado, permite las notificaciones del navegador')
+	if (perm !== 'granted') return toast(tl('broker.alertsSoundOnly'))
 	// Con tu cuenta conectada, también con el terminal cerrado (avisos push): llega uno de prueba
 	const push = bk.acct.connected && window.TPPush ? await TPPush.subscribe({ test: true }).catch(() => 'error') : null
 	toast(
 		push === 'on'
-			? 'Avisos activados: te avisaremos aunque cierres el terminal'
+			? tl('broker.alertsPush')
 			: push === 'unsupported' && /iPhone|iPad/.test(navigator.userAgent)
-				? 'Avisos activados con el terminal abierto. En el iPhone, para recibirlos con el terminal cerrado, añádelo a la pantalla de inicio'
-				: 'Avisos activados: te avisaremos aunque estés en otra pestaña',
+				? tl('broker.alertsIphone')
+				: tl('broker.alertsTab'),
 	)
 }
 
@@ -2527,7 +2523,7 @@ function deliver(alerts) {
 
 // ── Cuenta atrás del plazo de pago ────────────────────────────────────
 function clockText(ms) {
-	if (ms <= 0) return 'vencido'
+	if (ms <= 0) return tl('broker.expired')
 	const s = Math.floor(ms / 1000)
 	const h = Math.floor(s / 3600)
 	const m = Math.floor((s % 3600) / 60)
@@ -2568,11 +2564,11 @@ function bindBroker() {
 		if (cancel) {
 			e.stopPropagation()
 			if (bk.cancelling.has(cancel.dataset.cancelBtn)) return
-			if (!(await confirmDialog('Cancelar oferta', '<p class="muted">Se retira del mercado y, si es de venta, tus USD vuelven a tu saldo.</p>', 'Cancelar oferta', 'danger'))) return
+			if (!(await confirmDialog(tl('broker.cancelOffer'), `<p class="muted">${tl('broker.cancelListBody')}</p>`, tl('broker.cancelOffer'), 'danger'))) return
 			try {
 				const r = await cancelOffer(cancel.dataset.cancelBtn)
 				if (!r) return
-				toast(r.message || 'Oferta cancelada')
+				toast(r.message || tl('broker.offerCancelled'))
 				loadTrades()
 				loadBook()
 			} catch (err) {
@@ -2612,11 +2608,11 @@ window.addEventListener('hashchange', openOfferLink)
 // (qvapay.com/p2p/<uuid>) o el del terminal. Vale también pegar solo el código de la oferta
 const UUID_IN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 function showOpenLink() {
-	openModal(`<div class="stack"><h3>Abrir una oferta por su enlace</h3>
-		<p class="muted">Las ofertas privadas no salen en el libro: quien la publica te manda su enlace. Pega el de QvaPay (qvapay.com/p2p/…) o el del terminal y se abre para tomarla.</p>
-		<form class="row-btns" id="linkForm"><input class="input" id="linkInput" placeholder="https://qvapay.com/p2p/…" autocomplete="off" spellcheck="false" /><button class="btn primary">Abrir</button></form>
-		<p class="hint" id="linkErr" hidden>Ese texto no trae el código de una oferta. Copia el enlace completo que te mandaron.</p>
-		<p class="hint">También puedes pegar el enlace en cualquier parte del terminal (Ctrl+V o ⌘V).</p></div>`)
+	openModal(`<div class="stack"><h3>${tl('broker.linkTitle')}</h3>
+		<p class="muted">${tl('broker.linkIntro')}</p>
+		<form class="row-btns" id="linkForm"><input class="input" id="linkInput" placeholder="https://qvapay.com/p2p/…" autocomplete="off" spellcheck="false" /><button class="btn primary">${tl('broker.open')}</button></form>
+		<p class="hint" id="linkErr" hidden>${tl('broker.linkErr')}</p>
+		<p class="hint">${tl('broker.linkPaste')}</p></div>`)
 	$('linkInput').focus()
 	$('linkForm').addEventListener('submit', (e) => {
 		e.preventDefault()

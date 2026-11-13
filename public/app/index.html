@@ -3,11 +3,12 @@
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-	<title>Terminal P2P · Mercado P2P de QvaPay</title>
+	<title data-i18n="html.title">Terminal P2P · Mercado P2P de QvaPay</title>
 	<meta name="theme-color" content="#1e2329" media="(prefers-color-scheme: dark)" />
 	<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
 	<script src="/theme.js"></script>
 	<script src="/clock.js"></script>
+	<script src="/i18n.js"></script>
 	<script src="/hit.js" defer></script>
 	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 	<!-- Fuentes y gráficos servidos desde este dominio: ningún tercero ve a los visitantes -->
@@ -29,7 +30,7 @@
 </head>
 <body>
 	<header class="nav">
-		<a class="brand" href="https://terminalp2p.com" title="Ir a la portada de Terminal P2P" aria-label="Terminal P2P: ir a la portada">
+		<a class="brand" href="https://terminalp2p.com" title="Ir a la portada de Terminal P2P" aria-label="Terminal P2P: ir a la portada" data-i18n-title="html.brandTitle" data-i18n-aria-label="html.brandAria">
 			<span class="brand-mark" aria-hidden="true">
 				<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16l4.5-5 3.5 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			</span>
@@ -38,33 +39,41 @@
 
 		<div class="nav-spacer"></div>
 
-		<div class="status-pill" id="statusPill" title="Conectando…"><span id="dot" class="dot"></span><span id="updated">Conectando…</span></div>
+		<div class="status-pill" id="statusPill" title="Conectando…" data-i18n-title="html.connecting"><span id="dot" class="dot"></span><span id="updated" data-i18n="html.connecting">Conectando…</span></div>
 		<details class="help">
-			<summary class="help-btn" title="Ayuda" aria-label="Ayuda"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></g></svg><span class="help-label">Ayuda</span></summary>
+			<summary class="help-btn" title="Ayuda" aria-label="Ayuda" data-i18n-title="html.help" data-i18n-aria-label="html.help"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></g></svg><span class="help-label" data-i18n="html.help">Ayuda</span></summary>
 			<div class="help-menu">
-				<a href="https://terminalp2p.com/blog/guia-primeros-pasos/" target="_blank" rel="noopener"><b>Primeros pasos</b><span>Guía para nuevos usuarios: la pantalla, comprar, vender y operar seguro</span></a>
-				<a href="https://terminalp2p.com/blog/conectar-qvapay-token/" target="_blank" rel="noopener"><b>Conectar tu cuenta</b><span>Crear el token de QvaPay paso a paso</span></a>
-				<a href="https://terminalp2p.com/blog/modo-pro/" target="_blank" rel="noopener" data-pro><b>Modo Pro</b><span>Qué incluye, cuánto cuesta y cómo funciona</span></a>
-				<a class="help-tg" href="https://t.me/terminalp2p" target="_blank" rel="noopener">¿Otra duda? Pregunta en @terminalp2p</a>
+				<a href="https://terminalp2p.com/blog/guia-primeros-pasos/" target="_blank" rel="noopener"><b data-i18n="html.helpStart">Primeros pasos</b><span data-i18n="html.helpStartSub">Guía para nuevos usuarios: la pantalla, comprar, vender y operar seguro</span></a>
+				<a href="https://terminalp2p.com/blog/conectar-qvapay-token/" target="_blank" rel="noopener"><b data-i18n="html.helpConnect">Conectar tu cuenta</b><span data-i18n="html.helpConnectSub">Crear el token de QvaPay paso a paso</span></a>
+				<a href="https://terminalp2p.com/blog/modo-pro/" target="_blank" rel="noopener" data-pro><b data-i18n="html.helpPro">Modo Pro</b><span data-i18n="html.helpProSub">Qué incluye, cuánto cuesta y cómo funciona</span></a>
+				<a class="help-tg" href="https://t.me/terminalp2p" target="_blank" rel="noopener" data-i18n="html.helpTg">¿Otra duda? Pregunta en @terminalp2p</a>
+			</div>
+		</details>
+		<details class="lang" id="langPick">
+			<summary class="lang-btn" title="Idioma · Language" aria-label="Idioma · Language"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c2.6 2.6 3.9 5.8 3.9 9.5s-1.3 6.9-3.9 9.5c-2.6-2.6-3.9-5.8-3.9-9.5S9.4 5.1 12 2.5z"/></g></svg><span class="lang-cur">ES</span></summary>
+			<div class="lang-menu" role="menu">
+				<button type="button" role="menuitemradio" data-lang="es" lang="es">Español</button>
+				<button type="button" role="menuitemradio" data-lang="en" lang="en">English</button>
+				<button type="button" role="menuitemradio" data-lang="pt" lang="pt">Português</button>
 			</div>
 		</details>
 		<div class="inbox">
-			<button class="icon-btn inbox-btn" id="inboxBtn" title="Buzón" aria-label="Buzón" aria-expanded="false" hidden>
+			<button class="icon-btn inbox-btn" id="inboxBtn" title="Buzón" aria-label="Buzón" data-i18n-title="html.inbox" data-i18n-aria-label="html.inbox" aria-expanded="false" hidden>
 				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 8a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 003.4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				<span class="inbox-n" hidden></span>
 			</button>
 		</div>
-		<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+		<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema" data-i18n-title="html.theme" data-i18n-aria-label="html.theme">
 			<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 			<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
 		</button>
-		<button class="btn buy swap-btn" data-swap title="Comprar o vender saldo de QvaPay al mejor precio del mercado, en un paso" aria-label="Comprar o vender">
+		<button class="btn buy swap-btn" data-swap title="Comprar o vender saldo de QvaPay al mejor precio del mercado, en un paso" aria-label="Comprar o vender" data-i18n-title="html.swapTitle" data-i18n-aria-label="html.swapAria">
 			<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 4v16M7 4L3 8M7 4l4 4M17 20V4M17 20l-4-4M17 20l4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-			<span class="hide-sm">Comprar / Vender</span>
+			<span class="hide-sm" data-i18n="html.swap">Comprar / Vender</span>
 		</button>
-		<button class="btn primary swap-btn" data-new-offer title="Publicar una oferta de compra o venta" aria-label="Publicar">
+		<button class="btn primary swap-btn" data-new-offer title="Publicar una oferta de compra o venta" aria-label="Publicar" data-i18n-title="html.publishTitle" data-i18n-aria-label="html.publish">
 			<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-			<span class="hide-sm">Publicar</span>
+			<span class="hide-sm" data-i18n="html.publish">Publicar</span>
 		</button>
 		<div id="account" class="account"></div>
 	</header>
@@ -73,66 +82,66 @@
 		<div class="ticker-pair">
 			<!-- Sin la columna de mercados (móvil y pantallas medianas), el par abre la lista en una hoja desde abajo -->
 			<h1><button class="pair-btn" id="pairBtn" aria-haspopup="dialog" aria-controls="marketList"><span class="pair-ic" id="pairIcon"></span><span id="pairName">QUSD / CUP Transferencia</span><svg class="pair-caret" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg></button></h1>
-			<p id="pairSub">Precio en CUP por cada USD de saldo QvaPay</p>
+			<p id="pairSub" data-i18n="html.pairSub">Precio en CUP por cada USD de saldo QvaPay</p>
 		</div>
 		<div class="ticker-stats" id="stats"></div>
-		<div class="intent off" id="intent" role="img" aria-label="Intención del mercado"></div>
-		<div class="pulse off" id="pulse" role="img" aria-label="Actividad del mercado"></div>
+		<div class="intent off" id="intent" role="img" aria-label="Intención del mercado" data-i18n-aria-label="html.intent"></div>
+		<div class="pulse off" id="pulse" role="img" aria-label="Actividad del mercado" data-i18n-aria-label="html.pulse"></div>
 	</section>
 
 	<!-- En el móvil, una sección a la vez -->
-	<nav class="view-tabs" id="viewTabs" role="tablist" aria-label="Secciones">
-		<button class="view-tab" data-view="book" role="tab">Libro</button>
-		<button class="view-tab" data-view="chart" role="tab">Gráficos</button>
-		<button class="view-tab" data-view="insights" role="tab">Lectura</button>
-		<button class="view-tab" data-view="orders" role="tab">Mis operaciones <span class="count" id="cntView" hidden></span></button>
+	<nav class="view-tabs" id="viewTabs" role="tablist" aria-label="Secciones" data-i18n-aria-label="html.sections">
+		<button class="view-tab" data-view="book" role="tab" data-i18n="html.viewBook">Libro</button>
+		<button class="view-tab" data-view="chart" role="tab" data-i18n="html.viewChart">Gráficos</button>
+		<button class="view-tab" data-view="insights" role="tab" data-i18n="html.viewInsights">Lectura</button>
+		<button class="view-tab" data-view="orders" role="tab"><span data-i18n="html.viewOrders">Mis operaciones</span> <span class="count" id="cntView" hidden></span></button>
 	</nav>
 
 	<main class="layout" id="layout">
-		<aside class="panel area-markets" aria-label="Mercados">
+		<aside class="panel area-markets" aria-label="Mercados" data-i18n-aria-label="html.markets">
 			<div class="panel-head" id="marketsHead">
 				<!-- La misma lista para los mercados del P2P y las acciones de QvaPay (stocks.js) -->
-				<div class="seg-tabs mk-kind" id="marketKind" role="tablist" aria-label="Qué lista">
-					<button class="seg-tab" data-kind="p2p" role="tab">Mercados</button>
-					<button class="seg-tab" data-kind="stocks" role="tab">Acciones</button>
+				<div class="seg-tabs mk-kind" id="marketKind" role="tablist" aria-label="Qué lista" data-i18n-aria-label="html.whichList">
+					<button class="seg-tab" data-kind="p2p" role="tab" data-i18n="html.markets">Mercados</button>
+					<button class="seg-tab" data-kind="stocks" role="tab" data-i18n="html.stocks">Acciones</button>
 				</div>
-				<button class="icon-btn small markets-close" id="marketsClose" aria-label="Cerrar la lista de mercados" title="Cerrar">
+				<button class="icon-btn small markets-close" id="marketsClose" aria-label="Cerrar la lista de mercados" title="Cerrar" data-i18n-aria-label="html.marketsClose" data-i18n-title="html.close">
 					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
 				</button>
 				<button class="icon-btn small markets-toggle" id="marketsToggle" aria-expanded="true" aria-controls="marketList" aria-label="Ocultar la lista de mercados" title="Ocultar la lista de mercados">
 					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</button>
 			</div>
-			<div class="markets-search"><input class="input" id="marketSearch" placeholder="Buscar…" autocomplete="off" /></div>
-			<div class="markets-cols" id="marketCols"><span>Mercado</span><span>Compra</span><span>Venta</span></div>
+			<div class="markets-search"><input class="input" id="marketSearch" placeholder="Buscar…" data-i18n-placeholder="html.search" autocomplete="off" /></div>
+			<div class="markets-cols" id="marketCols"><span data-i18n="html.colMarket">Mercado</span><span data-i18n="html.colBuy">Compra</span><span data-i18n="html.colSell">Venta</span></div>
 			<div class="markets-list" id="marketList"></div>
 			<!-- Con la columna colapsada: un icono por mercado, para cambiar sin abrirla -->
-			<div class="markets-rail" id="marketRail" aria-label="Mercados"></div>
+			<div class="markets-rail" id="marketRail" aria-label="Mercados" data-i18n-aria-label="html.markets"></div>
 		</aside>
 
 		<section class="panel area-chart">
 			<div class="panel-head">
 				<div class="seg-tabs" role="tablist">
-					<button class="seg-tab active" data-chart="depth" role="tab">Profundidad</button>
-					<button class="seg-tab" data-chart="completed" role="tab">Operaciones 48 h</button>
-					<button class="seg-tab" data-chart="history" role="tab">Histórico</button>
-					<button class="seg-tab" data-chart="candles" role="tab" title="Modo Pro">★ Velas</button>
+					<button class="seg-tab active" data-chart="depth" role="tab" data-i18n="html.chartDepth">Profundidad</button>
+					<button class="seg-tab" data-chart="completed" role="tab" data-i18n="html.chartCompleted">Operaciones 48 h</button>
+					<button class="seg-tab" data-chart="history" role="tab" data-i18n="html.chartHistory">Histórico</button>
+					<button class="seg-tab" data-chart="candles" role="tab" title="Modo Pro" data-i18n-title="html.helpPro" data-i18n="html.chartCandles">★ Velas</button>
 				</div>
 				<span class="panel-note" id="chartNote"></span>
 			</div>
 			<div class="chart-wrap">
 				<div class="chart-tools" id="chartTools" hidden>
 					<div class="seg-tabs range-tabs" id="rangeTabs" role="tablist">
-						<button class="seg-tab" data-range="7" role="tab">7 días</button>
-						<button class="seg-tab" data-range="30" role="tab">30 días</button>
-						<button class="seg-tab" data-range="365" role="tab">1 año</button>
-						<button class="seg-tab" data-range="3650" role="tab" title="Desde 2020 con la referencia del mercado informal de elTOQUE">Todo</button>
+						<button class="seg-tab" data-range="7" role="tab" data-i18n="html.range7">7 días</button>
+						<button class="seg-tab" data-range="30" role="tab" data-i18n="html.range30">30 días</button>
+						<button class="seg-tab" data-range="365" role="tab" data-i18n="html.range365">1 año</button>
+						<button class="seg-tab" data-range="3650" role="tab" title="Desde 2020 con la referencia del mercado informal de elTOQUE" data-i18n-title="html.rangeAllTitle" data-i18n="html.rangeAll">Todo</button>
 					</div>
 					<div class="seg-tabs range-tabs" id="frameTabs" role="tablist" hidden>
 						<button class="seg-tab" data-frame="15m" role="tab">15 min</button>
 						<button class="seg-tab" data-frame="1h" role="tab">1 h</button>
 						<button class="seg-tab" data-frame="4h" role="tab">4 h</button>
-						<button class="seg-tab" data-frame="1d" role="tab">1 día</button>
+						<button class="seg-tab" data-frame="1d" role="tab" data-i18n="html.frame1d">1 día</button>
 					</div>
 				</div>
 				<canvas id="depth" class="chart"></canvas>
@@ -147,61 +156,61 @@
 
 		<section class="panel area-book">
 			<div class="panel-head">
-				<h2>Libro de órdenes</h2>
+				<h2 data-i18n="html.book">Libro de órdenes</h2>
 				<div class="head-btns">
-				<button class="chip-btn radar-btn" id="radarBtn" hidden title="Radar: te avisa (o la toma sola) cuando aparece una oferta con tus reglas"><span class="radar-dot" aria-hidden="true"></span>Radar</button>
-				<button class="chip-btn" data-new-offer title="Publicar una oferta de compra o venta">+ Publicar</button>
-				<button class="chip-btn group-btn" id="groupBtn" aria-pressed="false" aria-label="Agrupar por rangos de precio" title="Agrupar el libro por rangos de precio">
+				<button class="chip-btn radar-btn" id="radarBtn" hidden title="Radar: te avisa (o la toma sola) cuando aparece una oferta con tus reglas" data-i18n-title="html.radarTitle"><span class="radar-dot" aria-hidden="true"></span>Radar</button>
+				<button class="chip-btn" data-new-offer title="Publicar una oferta de compra o venta" data-i18n-title="html.publishTitle" data-i18n="html.publishChip">+ Publicar</button>
+				<button class="chip-btn group-btn" id="groupBtn" aria-pressed="false" aria-label="Agrupar por rangos de precio" title="Agrupar el libro por rangos de precio" data-i18n-aria-label="html.groupAria" data-i18n-title="html.groupTitle">
 					<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 4.5-9 4.5-9-4.5z" /><path d="M3 12l9 4.5 9-4.5" /><path d="M3 16.5l9 4.5 9-4.5" /></svg>
 				</button>
 				<div class="filter-wrap">
 					<button class="chip-btn" id="filterBtn" aria-haspopup="dialog" aria-expanded="false">
 						<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
-						Filtros <span class="count" id="filterCount" hidden></span>
+						<span data-i18n="html.filters">Filtros</span> <span class="count" id="filterCount" hidden></span>
 					</button>
 					<div class="menu filter-menu" id="filterMenu" hidden>
-						<label class="check"><input type="checkbox" id="fVip" checked /> Ocultar ofertas solo-VIP</label>
-						<label class="check"><input type="checkbox" id="fOutlier" checked /> Ocultar precios atípicos</label>
-						<label class="check" title="Sin tus ofertas ni las solo VIP, con requisitos que cumples y, si les vendes, con saldo para lo mínimo"><input type="checkbox" id="fTake" /> Solo las que puedo tomar</label>
-						<p class="hint" id="fTakeHint" hidden>Conecta tu cuenta para usarlo.</p>
-						<label class="field">Reputación mínima
+						<label class="check"><input type="checkbox" id="fVip" checked /> <span data-i18n="html.fVip">Ocultar ofertas solo-VIP</span></label>
+						<label class="check"><input type="checkbox" id="fOutlier" checked /> <span data-i18n="html.fOutlier">Ocultar precios atípicos</span></label>
+						<label class="check" title="Sin tus ofertas ni las solo VIP, con requisitos que cumples y, si les vendes, con saldo para lo mínimo" data-i18n-title="html.fTakeTitle"><input type="checkbox" id="fTake" /> <span data-i18n="html.fTake">Solo las que puedo tomar</span></label>
+						<p class="hint" id="fTakeHint" hidden data-i18n="html.fTakeHint">Conecta tu cuenta para usarlo.</p>
+						<label class="field"><span data-i18n="html.fOps">Reputación mínima</span>
 							<select class="input" id="fOps">
-								<option value="0">Cualquiera</option>
-								<option value="10">10+ operaciones</option>
-								<option value="50">50+ operaciones</option>
-								<option value="200">200+ operaciones</option>
+								<option value="0" data-i18n="html.any">Cualquiera</option>
+								<option value="10" data-i18n="html.ops10">10+ operaciones</option>
+								<option value="50" data-i18n="html.ops50">50+ operaciones</option>
+								<option value="200" data-i18n="html.ops200">200+ operaciones</option>
 							</select>
 						</label>
-						<label class="field">Última actividad
+						<label class="field"><span data-i18n="html.fAge">Última actividad</span>
 							<select class="input" id="fAge">
-								<option value="0">Cualquiera</option>
-								<option value="1">Última hora</option>
-								<option value="6">Últimas 6 h</option>
-								<option value="24">Últimas 24 h</option>
-								<option value="72">Últimos 3 días</option>
-								<option value="168">Última semana</option>
+								<option value="0" data-i18n="html.any">Cualquiera</option>
+								<option value="1" data-i18n="html.age1">Última hora</option>
+								<option value="6" data-i18n="html.age6">Últimas 6 h</option>
+								<option value="24" data-i18n="html.age24">Últimas 24 h</option>
+								<option value="72" data-i18n="html.age72">Últimos 3 días</option>
+								<option value="168" data-i18n="html.age168">Última semana</option>
 							</select>
 						</label>
-						<label class="field">Monto mínimo
+						<label class="field"><span data-i18n="html.fUsd">Monto mínimo</span>
 							<select class="input" id="fUsd">
-								<option value="0">Cualquiera</option>
+								<option value="0" data-i18n="html.any">Cualquiera</option>
 								<option value="10">10+ USD</option>
 								<option value="50">50+ USD</option>
 								<option value="100">100+ USD</option>
 							</select>
 						</label>
-						<button class="link small" id="filterReset">Restablecer filtros</button>
+						<button class="link small" id="filterReset" data-i18n="html.filterReset">Restablecer filtros</button>
 					</div>
 				</div>
 				</div>
 			</div>
-			<div class="book-cols"><span>Precio</span><span>USD</span><span>Acumulado</span><span id="bookWho">Contraparte</span></div>
+			<div class="book-cols"><span data-i18n="html.colPrice">Precio</span><span>USD</span><span data-i18n="html.colTotal">Acumulado</span><span id="bookWho" data-i18n="html.colWho">Contraparte</span></div>
 			<div class="book-side asks" id="asks"></div>
 			<div class="spread" id="spread">—</div>
 			<div class="book-side bids" id="bids"></div>
 			<div class="book-foot">
-				<span class="legend"><i class="sw ask"></i>Venden USD</span>
-				<span class="legend"><i class="sw bid"></i>Compran USD</span>
+				<span class="legend"><i class="sw ask"></i><span data-i18n="html.legendAsk">Venden USD</span></span>
+				<span class="legend"><i class="sw bid"></i><span data-i18n="html.legendBid">Compran USD</span></span>
 				<span class="book-count" id="bookCount"></span>
 			</div>
 		</section>
@@ -209,26 +218,26 @@
 		<section class="panel area-insights">
 			<div class="panel-head">
 				<div class="seg-tabs" role="tablist">
-					<button class="seg-tab active" data-pane="insight" role="tab">Lectura del mercado</button>
-					<button class="seg-tab" data-pane="activityPane" role="tab">Actividad</button>
-					<button class="seg-tab" data-pane="rankingPane" role="tab">Ranking</button>
+					<button class="seg-tab active" data-pane="insight" role="tab" data-i18n="html.paneInsight">Lectura del mercado</button>
+					<button class="seg-tab" data-pane="activityPane" role="tab" data-i18n="html.paneActivity">Actividad</button>
+					<button class="seg-tab" data-pane="rankingPane" role="tab" data-i18n="html.paneRanking">Ranking</button>
 				</div>
 			</div>
 			<div class="pane" id="insight"></div>
 			<div class="pane" id="activityPane" hidden><ul id="activity" class="feed"></ul></div>
 			<div class="pane" id="rankingPane" hidden>
 				<div class="rank-controls">
-					<div class="rank-crits" id="rankCrits" role="tablist" aria-label="Tipo de ranking">
-						<button class="rank-crit" data-crit="liquidity" title="USD que ofrece ahora, sumando todas sus ofertas">Liquidez</button>
-						<button class="rank-crit" data-crit="experience" title="Operaciones completadas en QvaPay">Experiencia</button>
-						<button class="rank-crit" data-crit="reputation" title="Valoración ajustada por número de operaciones: un 5.0 con pocas operaciones pesa menos">Reputación</button>
-						<button class="rank-crit" data-crit="best" title="En cuántos lados de mercado tiene el mejor precio ahora">Mejor precio</button>
-						<button class="rank-crit" data-crit="maker" title="Compra y vende a la vez; ordena por el lado con menos USD">Ambos lados</button>
-						<button class="rank-crit" data-crit="active" title="Ofertas publicadas o actualizadas en las últimas 24 h">Más activos</button>
+					<div class="rank-crits" id="rankCrits" role="tablist" aria-label="Tipo de ranking" data-i18n-aria-label="html.rankType">
+						<button class="rank-crit" data-crit="liquidity" title="USD que ofrece ahora, sumando todas sus ofertas" data-i18n-title="html.critLiquidityTitle" data-i18n="html.critLiquidity">Liquidez</button>
+						<button class="rank-crit" data-crit="experience" title="Operaciones completadas en QvaPay" data-i18n-title="html.critExperienceTitle" data-i18n="html.critExperience">Experiencia</button>
+						<button class="rank-crit" data-crit="reputation" title="Valoración ajustada por número de operaciones: un 5.0 con pocas operaciones pesa menos" data-i18n-title="html.critReputationTitle" data-i18n="html.critReputation">Reputación</button>
+						<button class="rank-crit" data-crit="best" title="En cuántos lados de mercado tiene el mejor precio ahora" data-i18n-title="html.critBestTitle" data-i18n="html.critBest">Mejor precio</button>
+						<button class="rank-crit" data-crit="maker" title="Compra y vende a la vez; ordena por el lado con menos USD" data-i18n-title="html.critMakerTitle" data-i18n="html.critMaker">Ambos lados</button>
+						<button class="rank-crit" data-crit="active" title="Ofertas publicadas o actualizadas en las últimas 24 h" data-i18n-title="html.critActiveTitle" data-i18n="html.critActive">Más activos</button>
 					</div>
 					<div class="rank-scope">
-						<select id="rankScope" aria-label="Mercados"><option value="all">Todos los mercados</option><option value="coin">Este mercado</option></select>
-						<select id="rankSide" aria-label="Lado"><option value="">Compran y venden</option><option value="ask">Solo venden USD</option><option value="bid">Solo compran USD</option></select>
+						<select id="rankScope" aria-label="Mercados" data-i18n-aria-label="html.markets"><option value="all" data-i18n="html.scopeAll">Todos los mercados</option><option value="coin" data-i18n="html.scopeCoin">Este mercado</option></select>
+						<select id="rankSide" aria-label="Lado" data-i18n-aria-label="html.side"><option value="" data-i18n="html.sideBoth">Compran y venden</option><option value="ask" data-i18n="html.sideAsk">Solo venden USD</option><option value="bid" data-i18n="html.sideBid">Solo compran USD</option></select>
 					</div>
 				</div>
 				<ol class="rank-list" id="rankList"></ol>
@@ -239,19 +248,19 @@
 		<section class="panel area-orders">
 			<div class="panel-head">
 				<div class="seg-tabs" role="tablist" id="ordersTabs">
-					<button class="seg-tab active" data-tab="active" role="tab">En curso <span class="count" id="cntActive" hidden></span></button>
-					<button class="seg-tab" data-tab="offers" role="tab">Ofertas<span class="hide-sm">publicadas</span> <span class="count" id="cntOffers" hidden></span></button>
-					<button class="seg-tab" data-tab="done" role="tab">Completadas</button>
+					<button class="seg-tab active" data-tab="active" role="tab"><span data-i18n="html.tabActive">En curso</span> <span class="count" id="cntActive" hidden></span></button>
+					<button class="seg-tab" data-tab="offers" role="tab"><span data-i18n="html.tabOffers">Ofertas</span><span class="hide-sm" data-i18n="html.tabOffersMore">publicadas</span> <span class="count" id="cntOffers" hidden></span></button>
+					<button class="seg-tab" data-tab="done" role="tab" data-i18n="html.tabDone">Completadas</button>
 				</div>
 				<div class="head-btns">
-				<button class="btn primary sm" data-new-offer>+ Publicar oferta</button>
-				<button class="icon-btn small" id="openLinkBtn" title="Abrir una oferta por su enlace (las privadas que te mandan)" aria-label="Abrir una oferta por su enlace">
+				<button class="btn primary sm" data-new-offer data-i18n="html.publishOffer">+ Publicar oferta</button>
+				<button class="icon-btn small" id="openLinkBtn" title="Abrir una oferta por su enlace (las privadas que te mandan)" aria-label="Abrir una oferta por su enlace" data-i18n-title="html.openLinkTitle" data-i18n-aria-label="html.openLinkAria">
 					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M10 14a4.5 4.5 0 006.4 0l3-3a4.5 4.5 0 00-6.4-6.4l-1.2 1.2M14 10a4.5 4.5 0 00-6.4 0l-3 3a4.5 4.5 0 006.4 6.4l1.2-1.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</button>
-				<button class="icon-btn small" id="alertsBtn" title="Activar avisos" aria-label="Avisos de tus operaciones" aria-pressed="false">
+				<button class="icon-btn small" id="alertsBtn" title="Activar avisos" aria-label="Avisos de tus operaciones" data-i18n-title="html.alertsOn" data-i18n-aria-label="html.alertsAria" aria-pressed="false">
 					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 16V11a6 6 0 1112 0v5l1.5 2h-15L6 16zM10 20.5a2 2 0 004 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</button>
-				<button class="icon-btn small" id="refreshTrades" title="Actualizar" aria-label="Actualizar operaciones">
+				<button class="icon-btn small" id="refreshTrades" title="Actualizar" aria-label="Actualizar operaciones" data-i18n-title="html.refresh" data-i18n-aria-label="html.refreshAria">
 					<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 12a8 8 0 11-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</button>
 				</div>
@@ -262,29 +271,29 @@
 		<!-- Mercado «Acciones · QvaPay» (stocks.js, experimental): las acciones que vende QvaPay, solo para mirar -->
 		<section class="panel area-stk" id="stkRoot">
 			<div class="panel-head">
-				<h2>Acciones de QvaPay</h2>
-				<p class="panel-note" id="stkAt" aria-live="polite">Cargando…</p>
+				<h2 data-i18n="html.stkTitle">Acciones de QvaPay</h2>
+				<p class="panel-note" id="stkAt" aria-live="polite" data-i18n="html.loading">Cargando…</p>
 			</div>
 			<div class="stk-body">
 				<div class="stk-main">
 					<div class="stk-head" id="stkHead"></div>
 					<div class="stk-tools">
-						<div class="seg-tabs range-tabs" id="stkFrames" role="tablist" aria-label="Intervalo"></div>
+						<div class="seg-tabs range-tabs" id="stkFrames" role="tablist" aria-label="Intervalo" data-i18n-aria-label="html.interval"></div>
 						<span class="stk-range" id="stkRange"></span>
-						<button class="btn sm stk-alert" id="stkAlert" type="button" hidden>🔔 Avísame <span class="stk-star">★</span></button>
+						<button class="btn sm stk-alert" id="stkAlert" type="button" hidden>🔔 <span data-i18n="html.stkAlert">Avísame</span> <span class="stk-star">★</span></button>
 					</div>
 					<div class="stk-chart-wrap">
 						<div class="stk-chart" id="stkChart"></div>
 						<p class="stk-chart-msg" id="stkChartMsg" hidden></p>
 					</div>
-					<p class="stk-note">Precios públicos de QvaPay: la cotización de mercado, cada 5 minutos. Comprar y vender se hace en QvaPay. Terminal P2P no compra ni vende acciones.</p>
+					<p class="stk-note" data-i18n="html.stkNote">Precios públicos de QvaPay: la cotización de mercado, cada 5 minutos. Comprar y vender se hace en QvaPay. Terminal P2P no compra ni vende acciones.</p>
 				</div>
 			</div>
 		</section>
 	</main>
 	<div class="sheet-backdrop" id="marketsBackdrop" hidden></div>
 
-	<footer class="foot">
+	<footer class="foot" data-i18n-html="html.foot">
 		Tu token se guarda solo en tu navegador, y el dinero de cada operación queda en el escrow de QvaPay.
 		Síguenos en Telegram: <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>
 		· Código abierto en <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a>
@@ -296,7 +305,7 @@
 	<div id="tip" class="tip" hidden></div>
 	<div id="modal" class="modal" hidden>
 		<div class="modal-card" role="dialog" aria-modal="true">
-			<button class="icon-btn modal-x" id="modalX" aria-label="Cerrar">
+			<button class="icon-btn modal-x" id="modalX" aria-label="Cerrar" data-i18n-aria-label="html.close">
 				<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 			</button>
 			<div id="modalBody"></div>

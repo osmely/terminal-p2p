@@ -12,9 +12,9 @@
 	const FRAMES = [
 		['1H', '1 h'],
 		['24H', '24 h'],
-		['1W', '1 sem'],
-		['1M', '1 mes'],
-		['1Y', '1 año'],
+		['1W', tl('stk.frame1W')],
+		['1M', tl('stk.frame1M')],
+		['1Y', tl('stk.frame1Y')],
 	]
 	// Si QvaPay no tiene el intervalo elegido para una acción, el que se enseña en su lugar
 	const FALLBACK = ['24H', '1W', '1M', '1Y', '1H']
@@ -51,7 +51,7 @@
 	// Quien pide un aviso desde aquí: la pestaña de avisos lo trae elegido
 	let pick = null
 
-	if (typeof PRO_FEATURES !== 'undefined') PRO_FEATURES.push(['🔔', 'Avisos de acciones', 'por Telegram, cuando una acción de QvaPay pasa tu precio'])
+	if (typeof PRO_FEATURES !== 'undefined') PRO_FEATURES.push(['🔔', tl('stk.proFeature'), tl('stk.proFeatureSub')])
 
 	const money = (n, d = 2) => (n == null || !isFinite(n) ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }))
 	const signed = (n, d = 2) => (n == null || !isFinite(n) ? '—' : `${n > 0 ? '+' : n < 0 ? '−' : ''}${money(Math.abs(n), d)}`)
@@ -90,7 +90,7 @@
 			listTry = Date.now()
 			try {
 				const r = await fetch('/data/stocks')
-				if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'No se pudieron leer las acciones')
+				if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? tl('stk.listError'))
 				const d = await r.json()
 				list = d.stocks ?? []
 				market = d.market ?? null
@@ -134,9 +134,9 @@
 		const run = (async () => {
 			try {
 				const r = await fetch(`/data/stocks/history?s=${encodeURIComponent(s)}&tf=${f}`)
-				if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? 'No se pudo leer el histórico')
+				if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? tl('stk.historyError'))
 				const d = await r.json()
-				if ((d.points?.length ?? 0) < 2) throw new Error('QvaPay no da este intervalo ahora mismo')
+				if ((d.points?.length ?? 0) < 2) throw new Error(tl('stk.noFrame'))
 				hist.set(key, { points: d.points, got: Date.now() })
 				failed.delete(key)
 			} catch (e) {
@@ -190,12 +190,12 @@
 	function rows(query) {
 		if (!list.length) {
 			if (!listing && Date.now() - listTry > 30_000) loadList()
-			return `<div class="empty">${esc(listErr || 'Cargando…')}</div>`
+			return `<div class="empty">${esc(listErr || tl('html.loading'))}</div>`
 		}
 		if (!on && Date.now() - listAt > 60_000 && Date.now() - listTry > 30_000) loadList()
 		const q = (query ?? '').trim().toLowerCase()
 		const shown = list.filter((x) => !q || x.symbol.toLowerCase().includes(q) || x.name.toLowerCase().includes(q) || (x.fullName ?? '').toLowerCase().includes(q))
-		if (!shown.length) return '<div class="empty">Sin resultados</div>'
+		if (!shown.length) return `<div class="empty">${tl('stk.noResults')}</div>`
 		return shown
 			.map((x) => {
 				const here = on && x.symbol === sel
@@ -208,33 +208,37 @@
 
 	function renderAt() {
 		if (!list.length) {
-			$s('stkAt').textContent = listErr || 'Cargando…'
+			$s('stkAt').textContent = listErr || tl('html.loading')
 			return
 		}
-		const status = market ? (market.open ? `Bolsa de Nueva York abierta · cierra a las ${cubaTime(market.until)}` : `Bolsa cerrada · abre ${cubaFmt(market.until, { weekday: 'short', day: 'numeric', month: 'short' })}, ${cubaTime(market.until)}`) : ''
-		$s('stkAt').textContent = `${status}${status ? ' · ' : ''}precios de las ${cubaTime(listAt)} (hora de Cuba)`
+		const status = market
+			? market.open
+				? tl('stk.nyseOpen', { time: cubaTime(market.until) })
+				: tl('stk.nyseClosed', { day: cubaFmt(market.until, { weekday: 'short', day: 'numeric', month: 'short' }), time: cubaTime(market.until) })
+			: ''
+		$s('stkAt').textContent = `${status}${status ? ' · ' : ''}${tl('stk.pricesAt', { time: cubaTime(listAt) })}`
 	}
 
 	function renderHead() {
 		const q = full(sel)
 		if (!q) {
-			$s('stkHead').innerHTML = '<div class="empty">Cargando…</div>'
+			$s('stkHead').innerHTML = `<div class="empty">${tl('html.loading')}</div>`
 			return
 		}
 		const range = q.low52 && q.high52 ? `${money(q.low52)} – ${money(q.high52)}` : '—'
-		$s('stkHead').innerHTML = `<div class="stk-title">${icon(q.symbol)}<div><h3>${esc(q.fullName)}</h3><p>${esc(q.symbol)} · en USD de saldo QvaPay</p></div></div>
-			<div class="stk-price"><b class="num">${money(q.price)}</b><span class="num ${tone(q.change)}">${signed(q.changeDollar)} (${signed(q.change)} %)</span><small>hoy</small></div>
+		$s('stkHead').innerHTML = `<div class="stk-title">${icon(q.symbol)}<div><h3>${esc(q.fullName)}</h3><p>${esc(q.symbol)} · ${tl('stk.inUsd')}</p></div></div>
+			<div class="stk-price"><b class="num">${money(q.price)}</b><span class="num ${tone(q.change)}">${signed(q.changeDollar)} (${signed(q.change)} %)</span><small>${tl('stk.today')}</small></div>
 			<dl class="stk-stats">
-				<div><dt>Apertura</dt><dd class="num">${money(q.open)}</dd></div>
-				<div><dt>Máximo</dt><dd class="num">${money(q.high)}</dd></div>
-				<div><dt>Mínimo</dt><dd class="num">${money(q.low)}</dd></div>
-				<div><dt>Cierre anterior</dt><dd class="num">${money(q.previousClose)}</dd></div>
-				<div><dt>52 semanas</dt><dd class="num">${range}</dd></div>
-				<div><dt>Volumen</dt><dd class="num">${compact(q.volume)}</dd></div>
+				<div><dt>${tl('stk.open')}</dt><dd class="num">${money(q.open)}</dd></div>
+				<div><dt>${tl('stk.high')}</dt><dd class="num">${money(q.high)}</dd></div>
+				<div><dt>${tl('stk.low')}</dt><dd class="num">${money(q.low)}</dd></div>
+				<div><dt>${tl('stk.prevClose')}</dt><dd class="num">${money(q.previousClose)}</dd></div>
+				<div><dt>${tl('stk.weeks52')}</dt><dd class="num">${range}</dd></div>
+				<div><dt>${tl('stk.volume')}</dt><dd class="num">${compact(q.volume)}</dd></div>
 			</dl>`
 		const alertBtn = $s('stkAlert')
 		alertBtn.hidden = !window.TPPro?.enabled
-		alertBtn.title = `Avísame por Telegram cuando ${q.symbol} suba o baje del precio que pongas (modo Pro)`
+		alertBtn.title = tl('stk.alertTitle', { symbol: q.symbol })
 	}
 
 	function chartColors() {
@@ -258,7 +262,7 @@
 				series.setData([])
 				drawnKey = ''
 			}
-			msg.textContent = retrying.has(sel) ? 'Cargando…' : (failed.get(key) ?? 'Cargando…')
+			msg.textContent = retrying.has(sel) ? tl('html.loading') : (failed.get(key) ?? tl('html.loading'))
 			return
 		}
 		if (!window.LightweightCharts) return
@@ -267,7 +271,7 @@
 				autoSize: true,
 				layout: { background: { color: 'transparent' }, fontFamily: 'JetBrains Mono' },
 				timeScale: { timeVisible: true, secondsVisible: false },
-				localization: { locale: 'es', priceFormatter: (p) => money(p) },
+				localization: { locale: TPI18N.locale, priceFormatter: (p) => money(p) },
 				handleScroll: false,
 				handleScale: false,
 			})
@@ -300,7 +304,7 @@
 		const p = h?.points ?? []
 		const change = p.length > 1 ? (p.at(-1)[1] - p[0][1]) / p[0][1] : null
 		const label = FRAMES.find(([f]) => f === tf)?.[1] ?? ''
-		$s('stkRange').innerHTML = change == null ? '' : `En ${label}: <b class="num ${tone(change)}">${signed(change * 100)} %</b>`
+		$s('stkRange').innerHTML = change == null ? '' : tl('stk.rangeChange', { frame: label, change: `<b class="num ${tone(change)}">${signed(change * 100)} %</b>` })
 	}
 
 	// ── Entrar y salir ───────────────────────────────────────────────────
@@ -358,7 +362,7 @@
 
 	function askAlert() {
 		const key = `stock:${sel}`
-		if (!bk.acct.connected) return showConnect('Conecta tu cuenta de QvaPay para los avisos de precio')
+		if (!bk.acct.connected) return showConnect(tl('stk.connectForAlerts'))
 		if (!window.TPPro?.active) return showPro()
 		pick = key
 		showAccount('alerts')
@@ -405,17 +409,17 @@
 				.join('')
 		},
 		// En la columna colapsada con los mercados del P2P, el botón que pasa a las acciones
-		railSwitch: () => `<button class="rail-btn rail-kind" data-kind="stocks" title="Acciones de QvaPay" aria-label="Acciones de QvaPay">${MARKET_IC}</button>`,
+		railSwitch: () => `<button class="rail-btn rail-kind" data-kind="stocks" title="${tl('html.stkTitle')}" aria-label="${tl('html.stkTitle')}">${MARKET_IC}</button>`,
 		// El par de arriba mientras se mira una acción
 		pair() {
 			const q = quote(sel)
-			$s('pairName').textContent = q ? `${q.symbol} · ${q.name}` : 'Acciones de QvaPay'
+			$s('pairName').textContent = q ? `${q.symbol} · ${q.name}` : tl('html.stkTitle')
 			const ic = $s('pairIcon')
 			if (ic.dataset.key !== `stk:${sel}:${q?.image ?? ''}`) {
 				ic.dataset.key = `stk:${sel}:${q?.image ?? ''}`
 				ic.innerHTML = icon(sel)
 			}
-			$s('pairSub').textContent = q ? `${money(q.price)} USD · ${signed(q.change)} % hoy · acciones de QvaPay` : 'Las acciones que vende QvaPay'
+			$s('pairSub').textContent = q ? tl('stk.pairSub', { price: money(q.price), change: signed(q.change) }) : tl('stk.pairSubEmpty')
 		},
 		// El tema claro u oscuro
 		theme() {

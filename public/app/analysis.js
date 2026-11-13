@@ -13,11 +13,11 @@
 		return null
 	}
 	const hasInformal = (tick) => CUP_MARKETS.has(tick) || tick === 'BANK_MLC' || tick === 'TROPIPAY'
-	const DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+	const DOW = tl('ana.dow').split('|')
 	const PERIODS = [
-		['last7', 'Últimos 7 días'],
-		['week', 'Semana pasada'],
-		['month', 'Mes pasado'],
+		['last7', tl('ana.last7')],
+		['week', tl('ana.lastWeek')],
+		['month', tl('ana.lastMonth')],
 	]
 	const an = { tick: null, period: 'last7', cmp: null, measure: 'idx', smooth: 1, groups: new Set(), heat: 'bid', print: false, data: null }
 	// Comparar mercados: cada mercado lleva siempre el mismo color (los 8 de la paleta, en orden fijo, de más a menos
@@ -78,7 +78,7 @@
 	// Desde cuándo hay volumen en algún mercado (el registro volvió a empezar al corregir su conteo)
 	const volSince = () => {
 		const day = Object.values(an.data.coins).flatMap((c) => c.days.filter((d) => d.usd != null).slice(0, 1).map((d) => d.day)).sort()[0]
-		return day ? `El volumen se registra desde el ${dShort(day)}` : 'El volumen acaba de empezar a registrarse'
+		return day ? tl('ana.volSince', { day: dShort(day) }) : tl('ana.volJustStarted')
 	}
 
 	// Los días del periodo que se dibujan: desde el primero con datos (no se pintan días de antes de que existieran)
@@ -136,7 +136,7 @@
 	}
 
 	// ── Formato ────────────────────────────────────────────────────────
-	const dShort = (day) => new Date(noon(day)).toLocaleDateString('es', { day: 'numeric', month: 'short' })
+	const dShort = (day) => new Date(noon(day)).toLocaleDateString(TPI18N.locale, { day: 'numeric', month: 'short' })
 	const signPct = (x, digits = 1) => {
 		const s = Math.abs(x * 100).toFixed(digits)
 		return `${Number(s) === 0 ? '' : x > 0 ? '+' : '−'}${s}%`
@@ -144,16 +144,16 @@
 	const usdK = (n) => `${fmtU(Math.round(n))} USD`
 	const tone = (x) => (x > 0 ? 'up' : x < 0 ? 'down' : '')
 	const unitOf = (tick) => state.overview.find((c) => c.tick === tick)?.unit ?? ''
-	const nameOf = (tick) => state.overview.find((c) => c.tick === tick)?.name ?? tick
-	const hhmm = (t) => cubaFmt(t, { hour: '2-digit', minute: '2-digit' })
-	const waiting = (what = '') => `<div class="an-wait"><b>En espera de datos</b>${what ? `<span>${what}</span>` : ''}</div>`
+	const nameOf = (tick) => TPI18N.coin(tick, state.overview.find((c) => c.tick === tick)?.name ?? tick)
+	const hhmm = (t) => cubaFmt(t, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+	const waiting = (what = '') => `<div class="an-wait"><b>${tl('ana.waiting')}</b>${what ? `<span>${what}</span>` : ''}</div>`
 	// Un mercado con días registrados y ninguna tasa: QvaPay no la publica (USDCASH sale siempre en cero)
-	const NO_RATE = 'QvaPay no publica la tasa de este mercado'
+	const NO_RATE = tl('ana.noRate')
 	const noRate = (tick) => {
 		const days = coin(tick).days
 		return days.length > 0 && !days.some((d) => d.rate != null)
 	}
-	const noRateBox = () => `<div class="an-wait"><b>${NO_RATE}</b><span>Su volumen y su libro sí se registran</span></div>`
+	const noRateBox = () => `<div class="an-wait"><b>${NO_RATE}</b><span>${tl('ana.noRateSub')}</span></div>`
 
 	// ── Gráficos (SVG, con su tooltip) ─────────────────────────────────
 	let tipEl = null
@@ -230,7 +230,7 @@
 				cross.setAttribute('x2', x(i))
 				cross.hidden = false
 				const rows = [...series].sort((a, b) => (b.values[i] ?? -Infinity) - (a.values[i] ?? -Infinity))
-				tip(`<b>${dShort(days[i])}</b>${rows.map((s) => `<div>${swatch(s)}${esc(s.name)} <b>${s.values[i] == null ? 'sin datos' : s.tipValue ? s.tipValue(i) : fmt(s.values[i])}</b></div>`).join('')}`, e)
+				tip(`<b>${dShort(days[i])}</b>${rows.map((s) => `<div>${swatch(s)}${esc(s.name)} <b>${s.values[i] == null ? tl('ana.noData') : s.tipValue ? s.tipValue(i) : fmt(s.values[i])}</b></div>`).join('')}`, e)
 			})
 			el.querySelector('.an-hit').addEventListener('mouseleave', () => {
 				cross.hidden = true
@@ -265,7 +265,7 @@
 			${ticks.map((v) => `<line class="an-grid" x1="${P.l}" x2="${W - P.r}" y1="${base - y(v)}" y2="${base - y(v)}"/><text class="an-axis" x="${P.l - 6}" y="${base - y(v) + 4}" text-anchor="end">${fmtU(Math.round(v))}</text>`).join('')}
 			<text class="an-axis" x="${P.l}" y="${H - 6}">${dShort(days[0])}</text>${days.length > 1 ? `<text class="an-axis" x="${W - P.r}" y="${H - 6}" text-anchor="end">${dShort(days.at(-1))}</text>` : ''}
 			${bars}</svg>`
-		const legend = '<div class="an-legend"><span><i class="an-sw buy"></i>Compras de USD</span><span><i class="an-sw sell"></i>Ventas de USD</span></div>'
+		const legend = `<div class="an-legend"><span><i class="an-sw buy"></i>${tl('ana.usdBuys')}</span><span><i class="an-sw sell"></i>${tl('ana.usdSells')}</span></div>`
 		const bind = () => {
 			for (const g of document.getElementById(id).querySelectorAll('g[data-i]')) {
 				const i = Number(g.dataset.i)
@@ -273,8 +273,8 @@
 				g.addEventListener('mousemove', (e) =>
 					tip(
 						d?.usd == null
-							? `<b>${dShort(days[i])}</b><div>Sin registro de volumen</div>`
-							: `<b>${dShort(days[i])}</b><div>Total <b>${usdK(d.usd)}</b>${d.ops == null ? '' : ` · ${plural(d.ops, 'operación', 'operaciones')}`}</div><div><i class="an-sw buy"></i>Compras <b>${usdK(d.buyUsd)}</b></div><div><i class="an-sw sell"></i>Ventas <b>${usdK(d.sellUsd)}</b></div>`,
+							? `<b>${dShort(days[i])}</b><div>${tl('ana.noVolume')}</div>`
+							: `<b>${dShort(days[i])}</b><div>${tl('ana.total')} <b>${usdK(d.usd)}</b>${d.ops == null ? '' : ` · ${tl('ana.ops', { n: d.ops })}`}</div><div><i class="an-sw buy"></i>${tl('ana.buys')} <b>${usdK(d.buyUsd)}</b></div><div><i class="an-sw sell"></i>${tl('ana.sells')} <b>${usdK(d.sellUsd)}</b></div>`,
 						e,
 					),
 				)
@@ -294,13 +294,13 @@
 			.map((d) => `<span class="an-hl">${DOW[d]}</span>${heat[d].map((v, h) => (v === null ? `<i class="an-cell off" data-d="${d}" data-h="${h}"></i>` : `<i class="an-cell" style="--a:${(0.12 + (0.88 * (v - lo)) / (hi - lo || 1)).toFixed(2)}" data-d="${d}" data-h="${h}" data-v="${v}"></i>`)).join('')}`)
 			.join('')
 		const hours = `<span></span>${Array.from({ length: 24 }, (_, h) => `<span class="an-hh">${h % 3 === 0 ? h : ''}</span>`).join('')}`
-		const more = kind === 'vol' ? 'Más USD operados' : 'Pagan más sobre la media del día'
-		const html = `<div class="an-heat" id="${id}">${cells}${hours}</div><div class="an-legend"><span>Menos</span><span class="an-scale"></span><span>${more}</span><span><i class="an-cell off"></i>Sin datos</span></div>`
+		const more = kind === 'vol' ? tl('ana.heatMoreVol') : tl('ana.heatMoreBid')
+		const html = `<div class="an-heat" id="${id}">${cells}${hours}</div><div class="an-legend"><span>${tl('ana.less')}</span><span class="an-scale"></span><span>${more}</span><span><i class="an-cell off"></i>${tl('ana.noDataCap')}</span></div>`
 		const bind = () => {
 			for (const c of document.getElementById(id).querySelectorAll('.an-cell')) {
 				c.addEventListener('mousemove', (e) => {
 					const v = c.dataset.v
-					const what = v === undefined ? 'Sin datos todavía' : kind === 'vol' ? `<b>${usdK(Number(v))}</b> de media en esa hora` : `El mejor comprador pagaba <b>${signPct(Number(v) / 100, 2)}</b> sobre la media del día`
+					const what = v === undefined ? tl('ana.noDataYet') : kind === 'vol' ? tl('ana.heatTipVol', { usd: usdK(Number(v)) }) : tl('ana.heatTipBid', { pct: signPct(Number(v) / 100, 2) })
 					tip(`<b>${DOW[c.dataset.d]} · ${c.dataset.h}:00–${Number(c.dataset.h) + 1}:00</b><div>${what}</div>`, e)
 				})
 				c.addEventListener('mouseleave', () => tip(null))
@@ -318,7 +318,7 @@
 			.map((r) => ({ ...r, share: r.vol / total, prev: prevTotal && r.prevVol != null ? r.prevVol / prevTotal : null }))
 			.sort((a, b) => b.share - a.share)
 		const max = Math.max(...list.map((r) => Math.max(r.share, r.prev ?? 0))) * 1.05
-		const html = `<div class="an-legend"><span><i class="an-sw box acc"></i>Este periodo</span>${list.some((r) => r.prev !== null) ? '<span><i class="an-sw mark"></i>Periodo anterior</span>' : ''}</div>
+		const html = `<div class="an-legend"><span><i class="an-sw box acc"></i>${tl('ana.thisPeriod')}</span>${list.some((r) => r.prev !== null) ? `<span><i class="an-sw mark"></i>${tl('ana.prevPeriod')}</span>` : ''}</div>
 			<div class="an-hbars" id="${id}">${list
 				.map(
 					(r, i) => `<div class="an-hrow ${r.tick === tick ? 'on' : ''}" data-i="${i}"><span class="an-hname">${esc(r.name)}</span><span class="an-htrack"><i class="an-hfill" style="width:${((r.share / max) * 100).toFixed(1)}%"></i>${r.prev === null ? '' : `<i class="an-hmark" style="left:${((r.prev / max) * 100).toFixed(1)}%"></i>`}</span><span class="an-hval">${(r.share * 100).toFixed(r.share < 0.1 ? 1 : 0)}%</span></div>`,
@@ -328,7 +328,7 @@
 			for (const row of document.getElementById(id).querySelectorAll('.an-hrow')) {
 				const r = list[Number(row.dataset.i)]
 				row.addEventListener('mousemove', (e) =>
-					tip(`<b>${esc(r.name)}</b><div><b>${(r.share * 100).toFixed(1)}%</b> del volumen · ${usdK(r.vol)}</div>${r.prev === null ? '' : `<div>Antes ${(r.prev * 100).toFixed(1)}% · ${usdK(r.prevVol)}</div>`}`, e),
+					tip(`<b>${esc(r.name)}</b><div>${tl('ana.shareTip', { pct: (r.share * 100).toFixed(1), usd: usdK(r.vol) })}</div>${r.prev === null ? '' : `<div>${tl('ana.before', { v: `${(r.prev * 100).toFixed(1)}% · ${usdK(r.prevVol)}` })}</div>`}`, e),
 				)
 				row.addEventListener('mouseleave', () => tip(null))
 			}
@@ -341,7 +341,7 @@
 		const list = [...rows].sort((a, b) => b.cur - a.cur)
 		const max = Math.max(...list.flatMap((r) => [Math.abs(r.cur), Math.abs(r.prev ?? 0)])) * 1.1 || 0.01
 		const pos = (v) => 50 + (v / max) * 50
-		const html = `<div class="an-legend"><span><i class="an-sw box pos"></i>QvaPay paga más</span><span><i class="an-sw box neg"></i>QvaPay paga menos</span>${list.some((r) => r.prev !== null) ? '<span><i class="an-sw mark"></i>Periodo anterior</span>' : ''}</div>
+		const html = `<div class="an-legend"><span><i class="an-sw box pos"></i>${tl('ana.qpPaysMore')}</span><span><i class="an-sw box neg"></i>${tl('ana.qpPaysLess')}</span>${list.some((r) => r.prev !== null) ? `<span><i class="an-sw mark"></i>${tl('ana.prevPeriod')}</span>` : ''}</div>
 			<div class="an-hbars div" id="${id}">${list
 				.map((r, i) => {
 					const a = Math.min(50, pos(r.cur))
@@ -353,31 +353,31 @@
 			for (const row of document.getElementById(id).querySelectorAll('.an-hrow')) {
 				const r = list[Number(row.dataset.i)]
 				row.addEventListener('mousemove', (e) =>
-					tip(`<b>${esc(r.name)}</b><div>Paga <b>${signPct(r.cur)}</b> frente a ${r.ref}</div>${r.prev === null ? '' : `<div>Antes ${signPct(r.prev)}</div>`}`, e),
+					tip(`<b>${esc(r.name)}</b><div>${tl('ana.premTip', { pct: signPct(r.cur), ref: r.ref })}</div>${r.prev === null ? '' : `<div>${tl('ana.before', { v: signPct(r.prev) })}</div>`}`, e),
 				)
 				row.addEventListener('mouseleave', () => tip(null))
 			}
 		}
 		return { html, bind }
 	}
-	const REF_NAME = { BANK_MLC: 'USD/MLC de elTOQUE', TROPIPAY: 'USD/EUR de elTOQUE' }
+	const REF_NAME = { BANK_MLC: tl('ana.refMlc'), TROPIPAY: tl('ana.refEur') }
 
 	// Comparar mercados: qué se mide (todo en una misma escala), la línea diaria o su media móvil, y medias de grupos
 	const MEASURES = [
-		['idx', 'Tasa', 'la tasa de cada uno con 100 al empezar'],
-		['prem', 'Frente a elTOQUE', 'cuánto paga QvaPay sobre la calle, cada día'],
-		['vol', 'Volumen', 'USD operados al día (calculado)'],
-		['buy', 'Presión', 'qué parte del volumen fue compra de USD'],
+		['idx', tl('ana.mIdx'), tl('ana.mIdxSub')],
+		['prem', tl('ana.mPrem'), tl('ana.mPremSub')],
+		['vol', tl('ana.mVol'), tl('ana.mVolSub')],
+		['buy', tl('ana.mBuy'), tl('ana.mBuySub')],
 	]
 	const SMOOTH = [
-		[1, 'Diaria'],
-		[3, 'Media 3 días'],
-		[7, 'Media 7 días'],
+		[1, tl('ana.daily')],
+		[3, tl('ana.avg3')],
+		[7, tl('ana.avg7')],
 	]
 	// Varios mercados como uno: su media pesada por el volumen del periodo (en volumen, la suma). Van en tinta, no en color
 	const GROUPS = [
-		{ key: 'G_CUP', name: 'Media CUP', total: 'Total CUP', cls: 'g1', ticks: ['BANK_CUP', 'CUPCASH', 'BOLSATM'] },
-		{ key: 'G_USD', name: 'Media USD', total: 'Total USD', cls: 'g2', ticks: ['CLASICA', 'ZELLE', 'BANDECPREPAGO'] },
+		{ key: 'G_CUP', name: tl('ana.avgCup'), total: tl('ana.totalCup'), cls: 'g1', ticks: ['BANK_CUP', 'CUPCASH', 'BOLSATM'] },
+		{ key: 'G_USD', name: tl('ana.avgUsd'), total: tl('ana.totalUsd'), cls: 'g2', ticks: ['CLASICA', 'ZELLE', 'BANDECPREPAGO'] },
 	]
 	// Media de los días con dato dentro de la ventana; sin ninguno, null
 	const movingAvg = (xs, n) =>
@@ -409,7 +409,7 @@
 			const base = sm.find((v) => v != null)
 			return sm.map((v) => (v == null ? null : (v / base) * 100))
 		}
-		const val = (v) => (k === 'idx' ? signPct(v / 100 - 1) : k === 'prem' ? signPct(v / 100) : k === 'vol' ? usdK(v) : `${v.toFixed(0)}% compras`)
+		const val = (v) => (k === 'idx' ? signPct(v / 100 - 1) : k === 'prem' ? signPct(v / 100) : k === 'vol' ? usdK(v) : tl('ana.pctBuys', { n: v.toFixed(0) }))
 		const fmt = (v) => (k === 'idx' ? v.toFixed(1) : k === 'vol' ? fmtU(Math.round(v)) : `${v.toFixed(k === 'prem' ? 1 : 0)}%`)
 		const series = markets
 			.filter((m) => an.cmp.has(m.tick) && has(m))
@@ -441,7 +441,7 @@
 			.map((m) => {
 				const on = an.cmp.has(m.tick)
 				const off = !has(m)
-				return `<button class="an-chip ${on ? 'on' : ''}" data-an-cmp="${esc(m.tick)}" aria-pressed="${on}" ${off || (!on && an.cmp.size >= CMP_MAX) ? 'disabled' : ''} ${off ? `title="${noRate(m.tick) ? NO_RATE : 'Sin referencia en elTOQUE'}"` : ''}>${on && !off ? swatch(cmpStyle(m.tick)) : ''}${esc(m.name)}</button>`
+				return `<button class="an-chip ${on ? 'on' : ''}" data-an-cmp="${esc(m.tick)}" aria-pressed="${on}" ${off || (!on && an.cmp.size >= CMP_MAX) ? 'disabled' : ''} ${off ? `title="${noRate(m.tick) ? NO_RATE : tl('ana.noRef')}"` : ''}>${on && !off ? swatch(cmpStyle(m.tick)) : ''}${esc(m.name)}</button>`
 			})
 			.join('')
 		const groups = GROUPS.map((g) => {
@@ -452,10 +452,10 @@
 		}).join('')
 		const controls = `<div class="an-cmpbar">
 			<div class="seg-tabs an-measure" role="tablist">${MEASURES.map(([key, l]) => `<button class="seg-tab ${k === key ? 'active' : ''}" data-an-measure="${key}" role="tab">${l}</button>`).join('')}</div>
-			<select class="input an-smooth" id="anSmooth" aria-label="Línea">${SMOOTH.map(([n, l]) => `<option value="${n}" ${an.smooth === n ? 'selected' : ''}>${l}</option>`).join('')}</select>
+			<select class="input an-smooth" id="anSmooth" aria-label="${tl('ana.line')}">${SMOOTH.map(([n, l]) => `<option value="${n}" ${an.smooth === n ? 'selected' : ''}>${l}</option>`).join('')}</select>
 		</div>
 		<div class="an-chips">${chips}<span class="an-chipsep"></span>${groups}</div>`
-		const sub = `${MEASURES.find((x) => x[0] === k)[2]}${an.smooth > 1 ? ` · media de ${an.smooth} días` : ''}`
+		const sub = `${MEASURES.find((x) => x[0] === k)[2]}${an.smooth > 1 ? ` · ${tl('ana.avgOf', { n: an.smooth })}` : ''}`
 		return { html: chart.html, controls, sub, bind: chart.bind }
 	}
 
@@ -463,7 +463,7 @@
 	function bookNow(tick, lastRate) {
 		const c = coin(tick)
 		const b = c.book
-		if (!b?.ask?.best || !b?.bid?.best) return { html: waiting('La foto del libro se guarda cada 10 minutos desde el 31 oct') }
+		if (!b?.ask?.best || !b?.bid?.best) return { html: waiting(tl('ana.bookSince')) }
 		const n = c.normal
 		const spread = b.ask.best / b.bid.best - 1
 		const sellVsDone = lastRate ? b.bid.best / lastRate - 1 : null
@@ -471,42 +471,47 @@
 		const thinAsk = n?.usd1Ask ? b.ask.usd1 / n.usd1Ask : null
 		const reasons = []
 		let light = 'mid'
-		let verdict = 'Mercado sin una ventaja clara ahora'
+		let verdict = tl('ana.vNone')
 		if (sellVsDone !== null && thinAsk !== null && sellVsDone > -0.004 && thinAsk < 0.8) {
 			light = 'good'
-			verdict = 'Buen momento para vender USD'
+			verdict = tl('ana.vSell')
 		} else if (buyVsDone !== null && thinAsk !== null && buyVsDone < 0.006 && thinAsk > 1.1) {
 			light = 'good'
-			verdict = 'Buen momento para comprar USD'
+			verdict = tl('ana.vBuy')
 		} else if (spread < 0) {
 			// Cruzado no siempre es ganancia: requisitos de las ofertas y la comisión de QvaPay
-			verdict = 'Libro cruzado: mira si hay margen para arbitrar'
+			verdict = tl('ana.vCrossed')
 		} else if (n?.spread != null && n.spread > 0 && spread > n.spread * 1.6) {
 			light = 'bad'
-			verdict = 'Mejor esperar: el libro está muy abierto'
+			verdict = tl('ana.vWait')
 		}
-		if (sellVsDone !== null) reasons.push(`El que más compra paga <b>${fmtP(b.bid.best)}</b>, a ${signPct(sellVsDone)} de lo último completado (${fmtP(lastRate)}).`)
-		const normalTxt = n?.spread == null ? '' : `; lo normal${n.hour ? ' a esta hora' : ''} es ${n.spread < 0 ? `que esté cruzado un ${(-n.spread * 100).toFixed(1)}%` : `${(n.spread * 100).toFixed(1)}%`}`
+		if (sellVsDone !== null) reasons.push(tl('ana.rTopBid', { bid: fmtP(b.bid.best), pct: signPct(sellVsDone), last: fmtP(lastRate) }))
+		const normalTxt =
+			n?.spread == null
+				? ''
+				: n.spread < 0
+					? tl(n.hour ? 'ana.normalCrossedHour' : 'ana.normalCrossed', { pct: (-n.spread * 100).toFixed(1) })
+					: tl(n.hour ? 'ana.normalHour' : 'ana.normal', { pct: (n.spread * 100).toFixed(1) })
 		reasons.push(
 			spread < 0
-				? `El libro está cruzado: el mejor comprador paga <b>${signPct(b.bid.best / b.ask.best - 1).replace(/^[+−]/, '')}</b> más que el mejor vendedor${normalTxt}.`
-				: `El spread es de <b>${signPct(spread).replace(/^[+−]/, '')}</b>${normalTxt}.`,
+				? tl('ana.rCrossed', { pct: signPct(b.bid.best / b.ask.best - 1).replace(/^[+−]/, ''), normal: normalTxt })
+				: tl('ana.rSpread', { pct: signPct(spread).replace(/^[+−]/, ''), normal: normalTxt }),
 		)
-		reasons.push(`Cerca del mejor precio (1%) hay <b>${usdK(b.ask.usd1)}</b> a la venta${thinAsk === null ? '' : `, ${thinAsk < 1 ? `un ${Math.round((1 - thinAsk) * 100)}% menos` : `un ${Math.round((thinAsk - 1) * 100)}% más`} de lo normal`}.`)
+		reasons.push(tl('ana.rDepth', { usd: usdK(b.ask.usd1), vs: thinAsk === null ? '' : thinAsk < 1 ? tl('ana.thinLess', { n: Math.round((1 - thinAsk) * 100) }) : tl('ana.thinMore', { n: Math.round((thinAsk - 1) * 100) }) }))
 		const vs = vsInformal(tick, lastRate, informalOn(an.data.today))
-		if (vs !== null) reasons.push(`Frente a elTOQUE, aquí se paga un <b>${signPct(vs)}</b> ${CUP_MARKETS.has(tick) ? 'sobre el USD informal' : `sobre ${REF_NAME[tick]}`}.`)
-		if (b.stale) reasons.push('Ojo: en esa foto el libro en vivo no estaba al día.')
+		if (vs !== null) reasons.push(tl('ana.rInformal', { pct: signPct(vs), ref: CUP_MARKETS.has(tick) ? tl('ana.overInformal') : tl('ana.overRef', { ref: REF_NAME[tick] }) }))
+		if (b.stale) reasons.push(tl('ana.rStale'))
 		const fill = (v) => (v == null ? '—' : fmtP(v))
-		const over = (v) => (v == null ? 'no alcanza con lo publicado' : `${signPct(v / b.ask.best - 1, 2)} sobre la mejor`)
+		const over = (v) => (v == null ? tl('ana.notEnough') : tl('ana.overBest', { pct: signPct(v / b.ask.best - 1, 2) }))
 		return {
-			when: `foto de las ${hhmm(b.t)}`,
+			when: tl('ana.snapAt', { time: hhmm(b.t) }),
 			html: `<div class="an-light ${light}"><i></i><b>${verdict}</b></div>
 				<ul class="an-words">${reasons.map((r) => `<li>${r}</li>`).join('')}</ul>
 				<div class="an-kpis small">
-					<div class="an-kpi"><span>Comprar 100 USD</span><b>${fill(b.ask.fill100)}</b><small>${over(b.ask.fill100)}</small></div>
-					<div class="an-kpi"><span>Comprar 500 USD</span><b>${fill(b.ask.fill500)}</b><small>${over(b.ask.fill500)}</small></div>
-					<div class="an-kpi"><span>Concentración</span><b>${b.ask.top1 == null ? '—' : `${Math.round(b.ask.top1 * 100)}%`}</b><small>de los USD a la venta son de un solo usuario</small></div>
-					<div class="an-kpi"><span>Frescura</span><b>${b.ask.age == null ? '—' : `${fmtU(b.ask.age)} min`}</b><small>desde el último cambio de las 10 mejores</small></div>
+					<div class="an-kpi"><span>${tl('ana.buy100')}</span><b>${fill(b.ask.fill100)}</b><small>${over(b.ask.fill100)}</small></div>
+					<div class="an-kpi"><span>${tl('ana.buy500')}</span><b>${fill(b.ask.fill500)}</b><small>${over(b.ask.fill500)}</small></div>
+					<div class="an-kpi"><span>${tl('ana.concentration')}</span><b>${b.ask.top1 == null ? '—' : `${Math.round(b.ask.top1 * 100)}%`}</b><small>${tl('ana.concentrationSub')}</small></div>
+					<div class="an-kpi"><span>${tl('ana.freshness')}</span><b>${b.ask.age == null ? '—' : `${fmtU(b.ask.age)} min`}</b><small>${tl('ana.freshnessSub')}</small></div>
 				</div>`,
 		}
 	}
@@ -521,58 +526,58 @@
 		const cup = CUP_MARKETS.has(tick)
 		const label = PERIODS.find((x) => x[0] === an.period)[1]
 		const change = s.close == null ? null : s.prevClose ? s.close / s.prevClose - 1 : s.close / s.open - 1
-		const changeVs = s.prevClose ? 'vs. periodo anterior' : 'en el periodo'
+		const changeVs = s.prevClose ? tl('ana.vsPrev') : tl('ana.inPeriod')
 		const volChange = s.vol != null && s.prevVol ? s.vol / s.prevVol - 1 : null
 		const lastRate = [...c.days].reverse().find((d) => d.rate != null)?.rate ?? null
 		const book = bookNow(tick, lastRate)
-		const since = s.partialStart && axis.length ? ` · datos desde el ${dShort(axis[0])}` : ''
-		const wait = '<small>En espera de datos</small>'
+		const since = s.partialStart && axis.length ? tl('ana.dataSince', { day: dShort(axis[0]) }) : ''
+		const wait = `<small>${tl('ana.waiting')}</small>`
 		const rateWait = noRate(tick) ? `<small>${NO_RATE}</small>` : wait
 		const kpi = (k, v, sub, t = '', cls = '') => `<div class="an-kpi ${cls}"><span>${k}</span><b>${v}</b><small class="${t}">${sub}</small></div>`
 		const kpis = [
-			s.close == null ? kpi('Tasa al cierre', '—', rateWait) : kpi('Tasa al cierre', fmtP(s.close), `${signPct(change)} ${changeVs}`, tone(change)),
-			s.hi ? kpi('Rango', `${fmtP(s.lo.rate)}–${fmtP(s.hi.rate)}`, `Más alta el ${dShort(s.hi.day)}`, '', 'sm') : kpi('Rango', '—', rateWait),
-			s.move == null ? kpi('Movimiento diario', '—', rateWait) : kpi('Movimiento diario', `${(s.move * 100).toFixed(2)}%`, 'de media entre un día y el siguiente'),
+			s.close == null ? kpi(tl('ana.kClose'), '—', rateWait) : kpi(tl('ana.kClose'), fmtP(s.close), `${signPct(change)} ${changeVs}`, tone(change)),
+			s.hi ? kpi(tl('ana.kRange'), `${fmtP(s.lo.rate)}–${fmtP(s.hi.rate)}`, tl('ana.kRangeHi', { day: dShort(s.hi.day) }), '', 'sm') : kpi(tl('ana.kRange'), '—', rateWait),
+			s.move == null ? kpi(tl('ana.kMove'), '—', rateWait) : kpi(tl('ana.kMove'), `${(s.move * 100).toFixed(2)}%`, tl('ana.kMoveSub')),
 			s.vol == null
-				? kpi('Volumen (calculado)', '—', wait)
-				: kpi('Volumen (calculado)', usdK(s.vol), volChange === null ? `${plural(s.volDays, 'día', 'días')} con registro` : `${signPct(volChange)} vs. periodo anterior`, volChange === null ? '' : tone(volChange)),
-			s.ops == null ? kpi('Operaciones', '—', wait) : kpi('Operaciones', fmtU(s.ops), `${fmtU(Math.round(s.ops / s.opsDays))} al día`),
-			s.buyShare == null ? kpi('Presión', '—', wait) : kpi('Presión', `${Math.round(s.buyShare * 100)}% compras`, `${Math.round((1 - s.buyShare) * 100)}% ventas`, s.buyShare > 0.5 ? 'up' : 'down'),
+				? kpi(tl('ana.kVol'), '—', wait)
+				: kpi(tl('ana.kVol'), usdK(s.vol), volChange === null ? tl('ana.kVolDays', { n: s.volDays }) : `${signPct(volChange)} ${tl('ana.vsPrev')}`, volChange === null ? '' : tone(volChange)),
+			s.ops == null ? kpi(tl('ana.kOps'), '—', wait) : kpi(tl('ana.kOps'), fmtU(s.ops), tl('ana.kOpsDay', { n: fmtU(Math.round(s.ops / s.opsDays)) })),
+			s.buyShare == null ? kpi(tl('ana.mBuy'), '—', wait) : kpi(tl('ana.mBuy'), tl('ana.pctBuys', { n: Math.round(s.buyShare * 100) }), tl('ana.pctSells', { n: Math.round((1 - s.buyShare) * 100) }), s.buyShare > 0.5 ? 'up' : 'down'),
 		].join('')
 		// Las mejores horas para vender: las tres en que el mejor comprador pagaba más sobre la media del día
 		const top = c.heatBid ? c.heatBid.flatMap((row, dd) => row.map((v, h) => ({ v, d: dd, h }))).filter((x) => x.v !== null).sort((a, b) => b.v - a.v).slice(0, 3) : []
 		const words = [
 			s.close == null
 				? ''
-				: `La tasa ${change >= 0 ? 'subió' : 'bajó'} <b>${signPct(change)}</b> ${s.prevClose ? 'frente al periodo anterior' : 'en el periodo'} y cerró en <b>${fmtP(s.close)}</b> ${unit}.${s.hi && s.hi !== s.lo ? ` La más alta, <b>${fmtP(s.hi.rate)}</b> el ${dShort(s.hi.day)}; la más baja, <b>${fmtP(s.lo.rate)}</b> el ${dShort(s.lo.day)}.` : ''}`,
+				: `${tl(change >= 0 ? (s.prevClose ? 'ana.wUpPrev' : 'ana.wUp') : s.prevClose ? 'ana.wDownPrev' : 'ana.wDown', { pct: signPct(change), close: fmtP(s.close), unit })}${s.hi && s.hi !== s.lo ? tl('ana.wHiLo', { hi: fmtP(s.hi.rate), hiDay: dShort(s.hi.day), lo: fmtP(s.lo.rate), loDay: dShort(s.lo.day) }) : ''}`,
 			s.vol == null
 				? ''
-				: `Se calcula que se operaron <b>${usdK(s.vol)}</b>${volChange === null ? '' : `, un ${signPct(volChange)} frente al periodo anterior`}.${s.buyShare == null ? '' : ` ${s.buyShare > 0.5 ? 'Dominaron las compras de USD' : 'Dominaron las ventas de USD'} (${Math.round(Math.max(s.buyShare, 1 - s.buyShare) * 100)}%)${s.prevBuyShare == null ? '' : `, ${Math.abs(s.buyShare - s.prevBuyShare) < 0.03 ? 'como antes' : s.buyShare > s.prevBuyShare ? 'más que antes' : 'menos que antes'}`}.`}`,
+				: `${tl('ana.wVol', { usd: usdK(s.vol) })}${volChange === null ? '' : tl('ana.wVolChange', { pct: signPct(volChange) })}.${s.buyShare == null ? '' : ` ${s.buyShare > 0.5 ? tl('ana.wBuysWon') : tl('ana.wSellsWon')} (${Math.round(Math.max(s.buyShare, 1 - s.buyShare) * 100)}%)${s.prevBuyShare == null ? '' : `, ${Math.abs(s.buyShare - s.prevBuyShare) < 0.03 ? tl('ana.wAsBefore') : s.buyShare > s.prevBuyShare ? tl('ana.wMoreThan') : tl('ana.wLessThan')}`}.`}`,
 			s.premium == null
 				? ''
-				: `Frente a elTOQUE, QvaPay pagó de media un <b>${signPct(s.premium)}</b> ${cup ? 'sobre el USD informal' : `sobre ${REF_NAME[tick]}`}${s.prevPremium == null ? '' : `: la distancia ${s.premium > s.prevPremium ? 'se abrió' : 'se cerró'} ${Math.abs((s.premium - s.prevPremium) * 100).toFixed(1)} puntos`}.`,
-			top.length ? `Las mejores horas para vender, según el libro: ${top.map((x) => `<b>${DOW[x.d]} ${x.h}:00</b> (${signPct(x.v / 100, 2)})`).join(', ')}.` : '',
+				: `${tl('ana.wPrem', { pct: signPct(s.premium), ref: cup ? tl('ana.overInformal') : tl('ana.overRef', { ref: REF_NAME[tick] }) })}${s.prevPremium == null ? '' : tl(s.premium > s.prevPremium ? 'ana.wGapOpened' : 'ana.wGapClosed', { pts: Math.abs((s.premium - s.prevPremium) * 100).toFixed(1) })}.`,
+			top.length ? tl('ana.wBestHours', { list: top.map((x) => `<b>${DOW[x.d]} ${x.h}:00</b> (${signPct(x.v / 100, 2)})`).join(', ') }) : '',
 		].filter(Boolean)
 		const rows = axis.map((d) => c.byDay.get(d) ?? null)
 		const rateVals = rows.map((x) => x?.rate ?? null)
 		const lines = rateVals.some((v) => v != null)
 			? lineChart('anRate', axis, [
-					{ name: 'QvaPay (cierre del día)', cls: 'qp', values: rateVals },
+					{ name: tl('ana.qpClose'), cls: 'qp', values: rateVals },
 					...(cup ? [{ name: 'elTOQUE USDT', cls: 'tq', values: axis.map((d) => informalOn(d)?.usdt ?? null) }] : []),
 				])
 			: { html: noRate(tick) ? noRateBox() : waiting(), bind() {} }
 		const vols = rows.some((x) => x?.usd != null) ? volumeChart('anVol', axis, rows) : { html: waiting(volSince()), bind() {} }
 		const heatData = an.heat === 'vol' ? c.heatVol : c.heatBid
-		const heat = heatData && heatData.flat().some((v) => v !== null) ? heatmap('anHeat', heatData, an.heat) : { html: waiting(an.heat === 'vol' ? 'Hacen falta al menos 3 días de volumen' : 'Sale de la foto del libro cada 10 minutos: hacen falta al menos 3 días'), bind() {} }
+		const heat = heatData && heatData.flat().some((v) => v !== null) ? heatmap('anHeat', heatData, an.heat) : { html: waiting(an.heat === 'vol' ? tl('ana.heatNeedVol') : tl('ana.heatNeedBook')), bind() {} }
 		// Comparar mercados en el mismo periodo: la gráfica (con sus opciones), el reparto del volumen y elTOQUE
-		const markets = state.overview.map((m) => ({ tick: m.tick, name: m.name, unit: m.unit, ms: summary(m.tick, an.period) }))
+		const markets = state.overview.map((m) => ({ tick: m.tick, name: TPI18N.coin(m.tick, m.name), unit: m.unit, ms: summary(m.tick, an.period) }))
 		if (!an.cmp) {
 			const top3 = markets.filter((m) => m.tick !== tick).sort((a, b) => (b.ms.vol ?? b.ms.ops ?? 0) - (a.ms.vol ?? a.ms.ops ?? 0)).slice(0, 3).map((m) => m.tick)
 			an.cmp = new Set([tick, ...top3])
 		}
 		const cmp = axis.length ? compareChart(markets, axis) : { html: waiting(), controls: '', sub: '', bind() {} }
 		const shares = markets.some((m) => m.ms.vol) ? shareBars('anShare', markets.map((m) => ({ tick: m.tick, name: m.name, vol: m.ms.vol, prevVol: m.ms.prevVol })), tick) : { html: waiting(volSince()), bind() {} }
-		const premRows = markets.filter((m) => m.ms.premium != null).map((m) => ({ tick: m.tick, name: m.name, cur: m.ms.premium, prev: m.ms.prevPremium, ref: REF_NAME[m.tick] ?? 'el USD informal de elTOQUE' }))
+		const premRows = markets.filter((m) => m.ms.premium != null).map((m) => ({ tick: m.tick, name: m.name, cur: m.ms.premium, prev: m.ms.prevPremium, ref: REF_NAME[m.tick] ?? tl('ana.refUsd') }))
 		const prems = premRows.length ? premiumBars('anPrem', premRows, tick) : { html: waiting(), bind() {} }
 		// Entre mercados: los últimos 7 días de cada uno
 		const table = state.overview
@@ -583,40 +588,40 @@
 				const last = ms.cur.filter((x) => x.rate != null).at(-1)
 				const v = last ? vsInformal(m.tick, last.rate, informalOn(last.day)) : null
 				const cell = (x, f) => (x == null ? '<td class="num muted">—</td>' : `<td class="num ${tone(x)}">${f(x)}</td>`)
-				return `<tr class="${m.tick === tick ? 'on' : ''}"><td>${esc(m.name)}</td><td class="num">${ms.close == null ? '—' : `${fmtP(ms.close)} <small>${esc(m.unit)}</small>`}</td>${cell(ch, signPct)}<td class="num">${ms.vol == null ? '—' : usdK(ms.vol)}</td>${cell(vc, signPct)}${v == null ? '<td class="num muted">—</td>' : `<td class="num">${signPct(v)}</td>`}</tr>`
+				return `<tr class="${m.tick === tick ? 'on' : ''}"><td>${esc(TPI18N.coin(m.tick, m.name))}</td><td class="num">${ms.close == null ? '—' : `${fmtP(ms.close)} <small>${esc(m.unit)}</small>`}</td>${cell(ch, signPct)}<td class="num">${ms.vol == null ? '—' : usdK(ms.vol)}</td>${cell(vc, signPct)}${v == null ? '<td class="num muted">—</td>' : `<td class="num">${signPct(v)}</td>`}</tr>`
 			})
 			.join('')
 		const end = addDays(s.to, -1) < an.data.today ? addDays(s.to, -1) : an.data.today
 		const heatTabs = `<div class="seg-tabs an-heattabs" role="tablist">${[
-			['bid', 'Cuándo pagan más'],
-			['vol', 'Cuándo se opera más'],
+			['bid', tl('ana.heatBid')],
+			['vol', tl('ana.heatVol')],
 		]
 			.map(([k, l]) => `<button class="seg-tab ${an.heat === k ? 'active' : ''}" data-an-heat="${k}" role="tab">${l}</button>`)
 			.join('')}</div>`
 		return {
 			html: `<div class="an-head">
-				<div><p class="an-brand">Terminal P2P · terminalp2p.com</p><h3>★ Análisis de mercado<span class="an-market"> · ${esc(nameOf(tick))}</span></h3><p class="muted"><span class="an-market">${label} · </span>${dShort(axis[0] ?? s.from)} – ${dShort(end)}${since} · calculado el ${cubaFmt(an.data.at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p></div>
-				<div class="an-tools"><button class="btn an-pdfbtn" id="anPdf" title="Compartir todo en PDF">${ICON_SHARE} PDF</button><select class="input an-coin" id="anCoin" aria-label="Mercado">${state.overview.map((m) => `<option value="${esc(m.tick)}" ${m.tick === tick ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></div>
+				<div><p class="an-brand">Terminal P2P · terminalp2p.com</p><h3>${tl('ana.title')}<span class="an-market"> · ${esc(nameOf(tick))}</span></h3><p class="muted"><span class="an-market">${label} · </span>${dShort(axis[0] ?? s.from)} – ${dShort(end)}${since} · ${tl('ana.computedAt', { when: cubaFmt(an.data.at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) })}</p></div>
+				<div class="an-tools"><button class="btn an-pdfbtn" id="anPdf" title="${tl('ana.pdfTitle')}">${ICON_SHARE} PDF</button><select class="input an-coin" id="anCoin" aria-label="${tl('ana.market')}">${state.overview.map((m) => `<option value="${esc(m.tick)}" ${m.tick === tick ? 'selected' : ''}>${esc(TPI18N.coin(m.tick, m.name))}</option>`).join('')}</select></div>
 			</div>
 			<div class="seg-tabs an-periods" role="tablist">${PERIODS.map(([k, l]) => `<button class="seg-tab ${an.period === k ? 'active' : ''}" data-an-period="${k}" role="tab">${l}</button>`).join('')}</div>
-			${s.rated || s.vol != null ? `<div class="an-kpis">${kpis}</div>` : waiting(`Aún no hay datos de este periodo: el histórico empieza el ${dShort(firstDay())}`)}
-			<section class="an-box"><h4>En pocas palabras</h4>${words.length ? `<ul class="an-words">${words.map((w) => `<li>${w}</li>`).join('')}</ul>` : waiting()}</section>
-			<section class="an-box"><h4>Tasa${cup ? ' frente al USDT de elTOQUE' : ''} <small>${esc(unit)} por USD, cierre de cada día</small></h4>${lines.html}</section>
-			<section class="an-box"><h4>Volumen por día <small>calculado</small></h4>${vols.html}</section>
-			<section class="an-box"><div class="an-boxhead"><h4>Las horas del mercado <small>últimas 4 semanas, hora de Cuba</small></h4>${heatTabs}</div>${heat.html}</section>
-			<section class="an-box"><h4>El libro ahora${book.when ? ` <small>${book.when}</small>` : ''}</h4>${book.html}</section>
-			<section class="an-box an-cmp"><h4>Comparar mercados${cmp.sub ? ` <small>${cmp.sub}</small>` : ''}</h4>
+			${s.rated || s.vol != null ? `<div class="an-kpis">${kpis}</div>` : waiting(tl('ana.noPeriodData', { day: dShort(firstDay()) }))}
+			<section class="an-box"><h4>${tl('ana.hWords')}</h4>${words.length ? `<ul class="an-words">${words.map((w) => `<li>${w}</li>`).join('')}</ul>` : waiting()}</section>
+			<section class="an-box"><h4>${cup ? tl('ana.hRateVsUsdt') : tl('ana.mIdx')} <small>${tl('ana.hRateSub', { unit: esc(unit) })}</small></h4>${lines.html}</section>
+			<section class="an-box"><h4>${tl('ana.hVol')} <small>${tl('ana.estimated')}</small></h4>${vols.html}</section>
+			<section class="an-box"><div class="an-boxhead"><h4>${tl('ana.hHours')} <small>${tl('ana.hHoursSub')}</small></h4>${heatTabs}</div>${heat.html}</section>
+			<section class="an-box"><h4>${tl('ana.hBook')}${book.when ? ` <small>${book.when}</small>` : ''}</h4>${book.html}</section>
+			<section class="an-box an-cmp"><h4>${tl('ana.hCompare')}${cmp.sub ? ` <small>${cmp.sub}</small>` : ''}</h4>
 				${cmp.controls}
 				${cmp.html}
 			</section>
 			<div class="an-two">
-				<section class="an-box"><h4>Reparto del volumen</h4>${shares.html}</section>
-				<section class="an-box"><h4>Frente a elTOQUE <small>media del periodo</small></h4>${prems.html}<p class="muted small an-note">CUP frente al USD informal; MLC frente a USD/MLC; TropiPay frente a USD/EUR.</p></section>
+				<section class="an-box"><h4>${tl('ana.hShare')}</h4>${shares.html}</section>
+				<section class="an-box"><h4>${tl('ana.mPrem')} <small>${tl('ana.periodAvg')}</small></h4>${prems.html}<p class="muted small an-note">${tl('ana.premNote')}</p></section>
 			</div>
-			<section class="an-box"><h4>Entre mercados <small>últimos 7 días</small></h4>
-				<div class="an-table"><table><thead><tr><th>Mercado</th><th class="num">Tasa</th><th class="num">7 días</th><th class="num">Volumen (calculado)</th><th class="num">Vol. vs. antes</th><th class="num">vs. elTOQUE</th></tr></thead><tbody>${table}</tbody></table></div>
+			<section class="an-box"><h4>${tl('ana.hAcross')} <small>${tl('ana.last7Low')}</small></h4>
+				<div class="an-table"><table><thead><tr><th>${tl('ana.market')}</th><th class="num">${tl('ana.mIdx')}</th><th class="num">${tl('ana.th7d')}</th><th class="num">${tl('ana.kVol')}</th><th class="num">${tl('ana.thVolVs')}</th><th class="num">${tl('ana.thVsTq')}</th></tr></thead><tbody>${table}</tbody></table></div>
 			</section>
-			<p class="muted small">Con datos de QvaPay (operaciones completadas y su libro) y de elTOQUE. No es una recomendación de inversión: es una lectura del mercado con datos públicos.</p>`,
+			<p class="muted small">${tl('ana.disclaimer')}</p>`,
 			bind() {
 				lines.bind()
 				vols.bind()
@@ -691,7 +696,7 @@
 	async function open() {
 		const pro = window.TPPro
 		if (!pro?.active || !pro?.license) {
-			openModal(`<div class="stack"><h3>★ Análisis de mercado</h3><p class="muted">El análisis del mes y la semana, la comparación entre mercados y la lectura del libro son del modo Pro.</p><button class="btn primary block" id="anPro">Ver el modo Pro</button></div>`)
+			openModal(`<div class="stack"><h3>${tl('ana.title')}</h3><p class="muted">${tl('ana.proOnly')}</p><button class="btn primary block" id="anPro">${tl('ana.seePro')}</button></div>`)
 			$('anPro').onclick = () => {
 				closeModal()
 				showPro()
@@ -699,7 +704,7 @@
 			return
 		}
 		if (an.data && Date.now() - loadedAt < FRESH_MS) return view()
-		openModal('<p class="muted">Cargando el análisis…</p>', closeAn)
+		openModal(`<p class="muted">${tl('ana.loading')}</p>`, closeAn)
 		try {
 			const r = await fetch(`/data/analysis?l=${encodeURIComponent(pro.license)}`, { cache: 'no-store' })
 			if (r.status === 503) throw new Error('wait')
@@ -709,7 +714,7 @@
 			coinCache.clear()
 			infMemo.clear()
 		} catch (e) {
-			$('modalBody').innerHTML = `<div class="stack"><h3>★ Análisis de mercado</h3>${e.message === 'wait' ? waiting('El primer informe se prepara en unos minutos') : `<p class="muted">No se pudo cargar el análisis: ${esc(e.message)}</p>`}</div>`
+			$('modalBody').innerHTML = `<div class="stack"><h3>${tl('ana.title')}</h3>${e.message === 'wait' ? waiting(tl('ana.firstReport')) : `<p class="muted">${tl('ana.loadError', { error: esc(e.message) })}</p>`}</div>`
 			return
 		}
 		view()
@@ -727,7 +732,7 @@
 	async function sharePdf(btn) {
 		const label = btn.innerHTML
 		btn.disabled = true
-		btn.textContent = 'Preparando…'
+		btn.textContent = tl('ana.preparing')
 		let box = null
 		try {
 			await Promise.all([loadScript('/vendor/jspdf.js'), loadScript('/vendor/html-to-image.js')])
@@ -768,20 +773,20 @@
 				y += h + 9
 			}
 			const pages = doc.getNumberOfPages()
-			const when = cubaFmt(nowMs(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+			const when = cubaFmt(nowMs(), { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 			for (let i = 1; i <= pages; i++) {
 				doc.setPage(i)
 				doc.setFontSize(7.5)
 				doc.setTextColor(120)
-				doc.text(`Generado el ${when}`, M, PH - 16)
+				doc.text(tl('ana.generatedAt', { when }), M, PH - 16)
 				doc.text(`terminalp2p.com · ${i}/${pages}`, PW - M, PH - 16, { align: 'right' })
 			}
-			const name = `analisis-${an.tick.toLowerCase()}-${an.period}-${cubaDate(nowMs())}.pdf`
+			const name = `${tl('ana.fileName')}-${an.tick.toLowerCase()}-${an.period}-${cubaDate(nowMs())}.pdf`
 			const file = new File([doc.output('blob')], name, { type: 'application/pdf' })
 			const market = nameOf(an.tick)
 			if (navigator.canShare?.({ files: [file] })) {
 				try {
-					await navigator.share({ files: [file], title: `Análisis de mercado · ${market}`, text: `Análisis de ${market} en Terminal P2P` })
+					await navigator.share({ files: [file], title: tl('ana.shareTitle', { market }), text: tl('ana.shareText', { market }) })
 					return
 				} catch (e) {
 					if (e.name === 'AbortError') return
@@ -793,7 +798,7 @@
 			a.remove()
 			setTimeout(() => URL.revokeObjectURL(a.href), 30_000)
 		} catch (e) {
-			toast(`No se pudo crear el PDF: ${e.message ?? e}`, true)
+			toast(tl('ana.pdfError', { error: e.message ?? e }), true)
 		} finally {
 			box?.remove()
 			btn.disabled = false
@@ -804,7 +809,7 @@
 	// El botón, al final de las pestañas de la lectura del mercado
 	const tabs = document.querySelector('.area-insights .seg-tabs')
 	if (!tabs) return
-	const btn = Object.assign(document.createElement('button'), { className: 'seg-tab an-open', textContent: '★ Análisis', hidden: $('proBtn')?.hidden ?? true })
+	const btn = Object.assign(document.createElement('button'), { className: 'seg-tab an-open', textContent: tl('ana.button'), hidden: $('proBtn')?.hidden ?? true })
 	btn.addEventListener('click', () => {
 		an.tick = state.coin
 		an.cmp = null

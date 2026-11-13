@@ -48,7 +48,8 @@ body.rz-drag-h, body.rz-drag-h * { cursor: row-resize !important; }`
 		const els = handles.map((h) => {
 			const el = document.createElement('div')
 			el.className = `rz ${h.edge === 'bottom' ? 'rz-h' : 'rz-v'}`
-			el.title = 'Arrastra para cambiar el tamaño · doble clic para el tamaño original'
+			// También lo usa el simulador, que no carga i18n.js: allí, en español
+			el.title = typeof tl === 'function' ? tl('resize.handle') : 'Arrastra para cambiar el tamaño · doble clic para el tamaño original'
 			root.appendChild(el)
 			el.addEventListener('pointerdown', (e) => {
 				const panel = root.querySelector(h.panel)

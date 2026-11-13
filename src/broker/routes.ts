@@ -5,6 +5,7 @@
 import { P2P_FEE } from '../qvapay/fees.ts'
 import type { SavedMethod } from '../qvapay/types.ts'
 import { logger } from '../log.ts'
+import { locale, tl } from '../i18n.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
 import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2POrder, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
 import { COINS, type Market } from '../terminal/market.ts'
@@ -110,7 +111,7 @@ export class Broker {
 		const ctx: Ctx = { req, url, sid: parseCookies(req.headers.get('cookie')).sid }
 		const route = `${req.method} ${url.pathname.slice('/api/broker'.length)}`
 
-		if (req.method === 'POST' && !sameOrigin(req, url)) return json(403, { error: 'Origen no permitido' })
+		if (req.method === 'POST' && !sameOrigin(req, url)) return json(403, { error: tl('routes.badOrigin') })
 
 		try {
 			switch (route) {
@@ -126,7 +127,7 @@ export class Broker {
 					return await this.disconnect(ctx)
 			}
 			const acc = await this.accounts.get(ctx.sid).catch(() => null)
-			if (!acc) return json(401, { error: 'Conecta tu cuenta de QvaPay primero' })
+			if (!acc) return json(401, { error: tl('routes.connectFirst') })
 			switch (route) {
 				case 'GET /trades':
 					return await this.trades(acc)
@@ -165,7 +166,7 @@ export class Broker {
 				case 'POST /swap/buy':
 					return await this.swapBuy(ctx, acc)
 			}
-			return json(404, { error: 'Ruta desconocida' })
+			return json(404, { error: tl('routes.unknownRoute') })
 		} catch (err) {
 			const msg = friendly(err)
 			if (!(err instanceof QvaPayError)) log.error(`${route}: ${(err as Error).message}`)
@@ -222,22 +223,22 @@ export class Broker {
 	}
 
 	private async connect({ req, url, sid }: Ctx) {
-		if (!this.allowConnect(req)) return json(429, { error: 'Demasiados intentos de conexión. Espera unos minutos.' })
+		if (!this.allowConnect(req)) return json(429, { error: tl('routes.tooManyConnects') })
 		const body = await readJson(req)
 		// Solo un filtro básico: quien decide si el token vale es QvaPay
 		const token = String(body.token ?? '')
 			.trim()
 			.replace(/^Bearer\s+/i, '')
 		if (token.length < 10 || token.length > 500 || /\s/.test(token))
-			return json(400, { error: 'El token está vacío, incompleto o tiene espacios. Cópialo entero desde qvapay.com/dev/tokens.' })
+			return json(400, { error: tl('routes.tokenEmpty') })
 		const newSid = sid ?? this.accounts.newSid()
 		let acc: Account
 		try {
 			acc = await this.accounts.connect(newSid, token, { remember: body.remember === true })
 		} catch (err) {
 			if (err instanceof QvaPayError && err.code === 'INSUFFICIENT_SCOPE')
-				return json(400, { error: 'El token necesita el permiso "read" para identificar tu cuenta. Créalo con read + p2p:buy y/o p2p:sell.' })
-			if (err instanceof QvaPayError && err.status === 401) return json(400, { error: 'El token no es válido: revisa que esté completo y activo en tu cuenta de QvaPay.' })
+				return json(400, { error: tl('routes.tokenNoRead') })
+			if (err instanceof QvaPayError && err.status === 401) return json(400, { error: tl('routes.tokenInvalid') })
 			throw err
 		}
 		this.market.wake()
@@ -413,7 +414,7 @@ export class Broker {
 		const body = createBody(await readJson(req))
 		if ('error' in body) return json(400, body)
 		const r = await acc.client.createOffer(body)
-		return json(200, { ok: true, offer: r.p2p.uuid, message: r.duplicate ? 'La oferta ya estaba publicada' : 'Oferta publicada' })
+		return json(200, { ok: true, offer: r.p2p.uuid, message: r.duplicate ? tl('routes.offerDuplicate') : tl('routes.offerPosted') })
 	}
 
 	// ── Orden inteligente ───────────────────────────────────────────────
@@ -427,14 +428,14 @@ export class Broker {
 		const side: 'buy' | 'sell' | null = b.side === 'buy' || b.side === 'sell' ? b.side : null
 		const coin = String(b.coin ?? '')
 		const limit = Number(b.price)
-		if (!side || !TICKS.has(coin) || !(limit > 0)) return json(400, { error: 'Orden no válida' })
+		if (!side || !TICKS.has(coin) || !(limit > 0)) return json(400, { error: tl('routes.badOrder') })
 		const takes = (Array.isArray(b.takes) ? b.takes : []).map((t: { offer?: unknown; amount?: unknown }) => ({ offer: String(t?.offer ?? ''), amount: round2(Number(t?.amount)) }))
-		if (!takes.length || takes.length > SMART_TAKES) return json(400, { error: `La orden inteligente toma entre 1 y ${SMART_TAKES} ofertas` })
+		if (!takes.length || takes.length > SMART_TAKES) return json(400, { error: tl('routes.smartTakes', { max: SMART_TAKES }) })
 		// La oferta para el resto llega siempre (aunque sea por 0): si se salta alguna toma, su parte va ahí
 		const template = (b.offer && typeof b.offer === 'object' ? b.offer : {}) as Record<string, unknown>
 		const baseRest = round2(Math.max(0, Number(template.amount) || 0))
 		const details = side === 'sell' ? payDetails(b.details) : []
-		if (side === 'sell' && !details.length) return json(400, { error: 'Pon tus datos para recibir el pago' })
+		if (side === 'sell' && !details.length) return json(400, { error: tl('routes.needDetails') })
 		const total = round2(takes.reduce((s: number, t: { amount: number }) => s + t.amount, 0) + baseRest)
 		// El resto con su monto final, validado. Siempre entero, nunca por partes: así son como mucho tres
 		// operaciones y, comprando, como mucho tres pagos
@@ -450,7 +451,7 @@ export class Broker {
 			// Vendiendo, entre lo que tomas y lo que publicas se reserva el total
 			const me = await acc.client.me()
 			acc.me = me
-			if (total > num(me.balance) + 1e-9) return json(200, { ok: false, nothingDone: true, error: `No tienes saldo suficiente: necesitas ${total.toLocaleString('en-US')} USD y tienes ${num(me.balance).toLocaleString('en-US')}.`, steps })
+			if (total > num(me.balance) + 1e-9) return json(200, { ok: false, nothingDone: true, error: tl('routes.noBalanceNeed', { need: total, have: num(me.balance) }), steps })
 		}
 
 		let chatSent: boolean | undefined
@@ -524,16 +525,16 @@ export class Broker {
 		const held = now ? heldTake(now, flexible, before, order, acc.me.uuid) : error ? 'unknown' : { order, price: null }
 		if (held === 'unknown') {
 			// No se sabe si quedó tomada: no se cuenta como tomada ni como libre (podrías comprar de más) y se avisa
-			notes.push(`No se pudo confirmar si la oferta de @${user} quedó tomada: revísala en «Mis operaciones». Sus ${t.amount.toLocaleString('en-US')} USD no se sumaron a tu oferta.`)
-			return { step: { ...step, status: 'stuck' as const, error: `no se pudo confirmar si quedó tomada (${error})` }, notes }
+			notes.push(tl('routes.notConfirmed', { user, usd: t.amount }))
+			return { step: { ...step, status: 'stuck' as const, error: tl('routes.stepStuck', { error: String(error) }) }, notes }
 		}
-		if (!held) return { step: { ...step, status: 'failed' as const, error: error ?? 'no quedó tomada', ...(code ? { code } : {}) }, notes, applyMs }
+		if (!held) return { step: { ...step, status: 'failed' as const, error: error ?? tl('routes.stepNotTaken'), ...(code ? { code } : {}) }, notes, applyMs }
 		step.status = 'taken'
 		step.order = held.order
 		// Una de monto fijo que su dueño cambió justo antes: te llevaste otro monto
 		if (fast && !flexible && now && Math.abs(num(now.amount) - t.amount) > 0.005)
 			notes.push(
-				`@${step.user} cambió el monto justo antes: tomaste ${num(now.amount).toLocaleString('en-US')} USD en vez de ${t.amount.toLocaleString('en-US')}. Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.`,
+				tl('routes.amountChangedJust', { user: step.user, got: num(now.amount), usd: t.amount }),
 			)
 		if (side === 'buy' && now) {
 			const ord = held.order ? now.Orders?.find((x) => x.uuid === held.order) : undefined
@@ -547,7 +548,7 @@ export class Broker {
 		// cancelar tú sin disputa mientras no la hayas pagado)
 		if (held.price != null && (side === 'buy' ? held.price > limit * (1 + 1e-9) : held.price < limit * (1 - 1e-9)))
 			notes.push(
-				`@${step.user} cambió el precio justo antes: ${side === 'buy' ? 'compraste' : 'vendiste'} a ${held.price.toLocaleString('en-US')}, ${side === 'buy' ? 'por encima' : 'por debajo'} de tu ${limit.toLocaleString('en-US')}.${side === 'buy' ? ' Si no la has pagado, puedes cancelarla en «Mis operaciones» sin disputa.' : ''}`,
+				tl(side === 'buy' ? 'routes.priceChangedJustBuy' : 'routes.priceChangedJustSell', { user: step.user, price: held.price, limit }),
 			)
 		// Vendiendo, el comprador recibe tus datos por el chat
 		let chatSent: boolean | undefined
@@ -557,7 +558,7 @@ export class Broker {
 				.sendChat(t.offer, text.slice(0, 599), held.order ?? undefined, urgent)
 				.then(() => true)
 				.catch(() => false)
-			if (!chatSent) notes.push(`No se pudo mandar tus datos a @${user}: escríbeselos por el chat de la operación.`)
+			if (!chatSent) notes.push(tl('routes.chatNotSent', { user }))
 		}
 		return { step, notes, chatSent, applyMs }
 	}
@@ -570,12 +571,12 @@ export class Broker {
 		const coin = String(b.coin ?? '')
 		const limit = Number(b.price)
 		const t = { offer: String(b.offer ?? ''), amount: round2(Number(b.amount)) }
-		if (!side || !TICKS.has(coin) || !(limit > 0) || !t.offer || !(t.amount >= 0.1)) return json(400, { error: 'Toma no válida' })
+		if (!side || !TICKS.has(coin) || !(limit > 0) || !t.offer || !(t.amount >= 0.1)) return json(400, { error: tl('routes.badTake') })
 		const details = side === 'sell' ? payDetails(b.details) : []
-		if (side === 'sell' && !details.length) return json(400, { error: 'Pon tus datos para recibir el pago' })
+		if (side === 'sell' && !details.length) return json(400, { error: tl('routes.needDetails') })
 		// El radar puede probar con otra oferta si pierde esta, pero solo si QvaPay deja tomar ya: si hubiera que esperar
 		// al cupo de tomas (2 por minuto), cuando llegue ya no estaría
-		if (b.noWait && acc.client.waitMs('apply') > 1500) return json(200, { ok: false, busy: true, error: 'Sin cupo para otra toma ahora mismo' })
+		if (b.noWait && acc.client.waitMs('apply') > 1500) return json(200, { ok: false, busy: true, error: tl('routes.noSlot') })
 		const t0 = Date.now()
 		// Comprando con el libro recién leído (como mucho FAST_MS), sin la lectura previa
 		const seen = Number(b.seen) > 0 && Number(b.seen) <= Date.now() + 1000 ? Number(b.seen) : undefined
@@ -587,7 +588,7 @@ export class Broker {
 			pre = acc.client.getOffer(t.offer, true).catch(() => null)
 			const me = await acc.client.me(true)
 			acc.me = me
-			if (t.amount > num(me.balance) + 1e-9) return json(200, { ok: false, error: `No tienes saldo suficiente: necesitas ${t.amount.toLocaleString('en-US')} USD y tienes ${num(me.balance).toLocaleString('en-US')}.` })
+			if (t.amount > num(me.balance) + 1e-9) return json(200, { ok: false, error: tl('routes.noBalanceNeed', { need: t.amount, have: num(me.balance) }) })
 		}
 		const r = await this.takeStep(acc, t, side, coin, limit, details, 'radar', { fast, pre, urgent: true, seen })
 		return json(200, { ok: r.step.status === 'taken', ...r, fast: !!fast, ms: { apply: r.applyMs ?? null, total: Date.now() - t0 } })
@@ -596,8 +597,8 @@ export class Broker {
 	private async editOffer({ req }: Ctx, acc: Account) {
 		const b = await readJson(req)
 		const o = await acc.client.getOffer(String(b.offer ?? ''))
-		if (o.User?.uuid !== acc.me.uuid) return json(403, { error: 'Solo puedes editar tus ofertas' })
-		if (o.status !== 'open') return json(400, { error: 'Solo se edita una oferta publicada y sin contraparte' })
+		if (o.User?.uuid !== acc.me.uuid) return json(403, { error: tl('routes.onlyOwnEdit') })
+		if (o.status !== 'open') return json(400, { error: tl('routes.editOnlyOpen') })
 		const flexible = o.offer_kind === 'flexible'
 		// Pasar una fija a por partes: lleva sus límites por orden y se valida como al publicarla (máximo ≤ monto)
 		const toFlexible = !flexible && b.toFlexible === true
@@ -616,46 +617,46 @@ export class Broker {
 		if (typeof b.message === 'string') {
 			const message = b.message.trim().slice(0, 79)
 			if (message !== (o.message ?? '')) {
-				if (message && !acc.me.golden_check) return json(400, { error: 'El mensaje público es solo para cuentas GOLD de QvaPay' })
+				if (message && !acc.me.golden_check) return json(400, { error: tl('routes.goldOnly') })
 				body.message = message || null
 			}
 		}
 		await acc.client.editOffer(o.uuid, body)
-		return json(200, { ok: true, message: toFlexible ? 'Oferta actualizada: ahora se toma por partes' : 'Oferta actualizada' })
+		return json(200, { ok: true, message: toFlexible ? tl('routes.offerUpdatedFlexible') : tl('routes.offerUpdated') })
 	}
 
 	private async pauseOffer({ req }: Ctx, acc: Account) {
 		const b = await readJson(req)
 		const paused = b.paused === true
 		await acc.client.pauseOffer(String(b.offer ?? ''), paused)
-		return json(200, { ok: true, message: paused ? 'Oferta pausada: ya no aparece en el mercado' : 'Oferta de nuevo en el mercado' })
+		return json(200, { ok: true, message: paused ? tl('routes.offerPaused') : tl('routes.offerResumed') })
 	}
 
 	private async applyOffer({ req }: Ctx, acc: Account) {
 		const b = await readJson(req)
 		// Estado fresco antes de comprometer nada
 		const o = await acc.client.getOffer(String(b.offer ?? ''))
-		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
+		if (o.User?.uuid === acc.me.uuid) return json(400, { error: tl('routes.ownOffer') })
 		if (o.status === 'open' && o.pause) return json(409, { error: pausedError(o.pause) })
-		if (o.status !== 'open') return json(409, { error: 'Esta oferta ya no está disponible' })
+		if (o.status !== 'open') return json(409, { error: tl('routes.offerGone') })
 		// Lo que viste en la ventana: si su dueño cambió el precio (o el monto de una fija) mientras decidías, no se toma
 		// a ciegas. Solo frena si te perjudica: comprando, que suba; vendiendo, que baje
 		const cur = swapOffer(o)
 		const seenPrice = Number(b.price)
 		if (seenPrice > 0 && (o.type === 'sell' ? cur.price > seenPrice * (1 + 1e-6) : cur.price < seenPrice * (1 - 1e-6)))
-			return json(409, { error: `El precio cambió a ${cur.price.toLocaleString('en-US')} mientras decidías. Revisa la oferta antes de tomarla.`, fresh: { price: cur.price, usd: cur.usd } })
+			return json(409, { error: tl('routes.priceChangedWhile', { price: cur.price }), fresh: { price: cur.price, usd: cur.usd } })
 		const seenUsd = Number(b.usd)
 		if (o.offer_kind !== 'flexible' && seenUsd > 0 && Math.abs(round2(seenUsd) - round2(cur.usd)) >= 0.01)
-			return json(409, { error: `El monto cambió a ${cur.usd.toLocaleString('en-US')} USD mientras decidías. Revisa la oferta antes de tomarla.`, fresh: { price: cur.price, usd: cur.usd } })
+			return json(409, { error: tl('routes.amountChangedWhile', { usd: cur.usd }), fresh: { price: cur.price, usd: cur.usd } })
 		let amount: number | undefined
 		if (o.offer_kind === 'flexible') {
 			amount = Math.round(Number(b.amount) * 100) / 100
 			const min = num(o.order_min ?? 0)
 			const max = Math.min(num(o.order_max ?? Infinity), num(o.available_amount ?? o.amount))
-			if (!(amount >= min && amount <= max)) return json(400, { error: `El monto debe estar entre ${min} y ${max} USD` })
+			if (!(amount >= min && amount <= max)) return json(400, { error: tl('routes.amountBetween', { min: String(min), max: String(max) }) })
 		}
 		const r = await acc.client.applyOffer(o.uuid, amount, { coin: o.coin, side: o.type, usd: amount ?? num(o.amount) })
-		return json(200, { ok: true, offer: o.uuid, order: r.order ?? null, message: 'Tomaste la oferta' })
+		return json(200, { ok: true, offer: o.uuid, order: r.order ?? null, message: tl('routes.taken') })
 	}
 
 	// Imagen al chat de una operación (un comprobante, una captura del banco)
@@ -665,15 +666,15 @@ export class Broker {
 		const offer = String(form.get('offer') ?? '')
 		const order = form.get('order') ? String(form.get('order')) : undefined
 		const message = String(form.get('message') ?? '').trim().slice(0, 599)
-		if (!(file instanceof Blob) || !CHAT_IMAGE_TYPES.has(file.type)) return json(400, { error: 'Solo se pueden enviar imágenes JPG, PNG o GIF' })
-		if (file.size > CHAT_IMAGE_MAX) return json(413, { error: 'La imagen es demasiado grande (máximo 2 MB)' })
+		if (!(file instanceof Blob) || !CHAT_IMAGE_TYPES.has(file.type)) return json(400, { error: tl('routes.imageType') })
+		if (file.size > CHAT_IMAGE_MAX) return json(413, { error: tl('routes.imageTooBig') })
 		const ext = file.type === 'image/png' ? 'png' : file.type === 'image/gif' ? 'gif' : 'jpg'
 		try {
 			await acc.client.sendChatImage(offer, file, `imagen.${ext}`, message || undefined, order)
 		} catch (err) {
 			// Sin respuesta (se cortó la conexión o pasó el minuto): la imagen pudo llegar igual, y mandarla otra vez la repetiría
 			if (err instanceof QvaPayError) throw err
-			return json(504, { error: 'La conexión está lenta y la imagen no terminó de subir. Mira el chat antes de reintentar: puede que sí haya llegado' })
+			return json(504, { error: tl('routes.imageSlow') })
 		}
 		return json(200, { ok: true })
 	}
@@ -685,7 +686,7 @@ export class Broker {
 	// abierta, profile es null y el terminal usa la que vino con tus operaciones con él (o lo que sepa del libro)
 	private async peer({ url }: Ctx, acc: Account) {
 		const user = (url.searchParams.get('user') ?? '').replace(/^@/, '')
-		if (!/^[A-Za-z0-9._-]{1,40}$/.test(user)) return json(400, { error: 'Usuario no válido' })
+		if (!/^[A-Za-z0-9._-]{1,40}$/.test(user)) return json(400, { error: tl('routes.badUser') })
 		const res = await acc.client.listOffers({ peer: user, take: PEER_TAKE })
 		const mine = res.data.filter((o) => o.User?.username?.toLowerCase() === user.toLowerCase() && o.status === 'open')
 		return json(200, { user, profile: peerProfile(mine[0]?.User), offers: mine.map(peerOffer), total: res.total })
@@ -700,7 +701,7 @@ export class Broker {
 	// vendedor (sus USD ya están en el escrow de QvaPay y tú pagas después de tomarla)
 	private async swapQuote({ url }: Ctx, acc: Account) {
 		const coin = url.searchParams.get('coin') ?? ''
-		if (!TICKS.has(coin)) return json(400, { error: 'Mercado no válido' })
+		if (!TICKS.has(coin)) return json(400, { error: tl('routes.badMarket') })
 		const buying = url.searchParams.get('side') === 'buy'
 		const key = `${buying ? 'buy' : 'sell'}:${coin}`
 		let q = this.swapQuotes.get(key)
@@ -723,17 +724,17 @@ export class Broker {
 	private async swapBuy({ req }: Ctx, acc: Account) {
 		const b = await readJson(req)
 		const o = await acc.client.getOffer(String(b.offer ?? ''))
-		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
-		if (o.type !== 'sell') return json(400, { error: 'Comprar ya solo compra a ofertas de venta' })
-		if (o.only_vip) return json(400, { error: 'Esa oferta es solo para cuentas VIP' })
-		if (o.status === 'open' && o.pause) return json(409, { error: `${pausedError(o.pause)}. Actualizo el precio.` })
-		if (o.status !== 'open') return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
+		if (o.User?.uuid === acc.me.uuid) return json(400, { error: tl('routes.ownOffer') })
+		if (o.type !== 'sell') return json(400, { error: tl('routes.buyOnlySell') })
+		if (o.only_vip) return json(400, { error: tl('routes.vipOnly') })
+		if (o.status === 'open' && o.pause) return json(409, { error: tl('routes.pausedRefresh', { reason: pausedError(o.pause) }) })
+		if (o.status !== 'open') return json(409, { error: tl('routes.thatOfferGone') })
 		const q = swapOffer(o)
 		const maxPrice = Number(b.maxPrice)
-		if (maxPrice > 0 && q.price > maxPrice * (1 + 1e-9)) return json(409, { error: `El precio subió a ${q.price.toLocaleString('en-US')} mientras decidías. Revisa el nuevo precio.` })
+		if (maxPrice > 0 && q.price > maxPrice * (1 + 1e-9)) return json(409, { error: tl('routes.priceUp', { price: q.price }) })
 		const amount = round2(Number(b.amount))
 		if (q.kind === 'flexible' ? !(amount >= (q.orderMin ?? 0) && amount <= q.orderMax!) : amount !== q.usd)
-			return json(409, { error: 'El monto ya no cabe en esa oferta. Actualizo el precio.' })
+			return json(409, { error: tl('routes.noFit') })
 		const r = await acc.client.applyOffer(o.uuid, q.kind === 'flexible' ? amount : undefined, { coin: o.coin, side: o.type, usd: amount, via: 'swap-buy' })
 		this.swapQuotes.delete(`buy:${o.coin}`)
 		return json(200, { ok: true, offer: o.uuid, order: r.order ?? null })
@@ -744,26 +745,26 @@ export class Broker {
 	private async swap({ req }: Ctx, acc: Account) {
 		const b = await readJson(req)
 		const o = await acc.client.getOffer(String(b.offer ?? ''))
-		if (o.User?.uuid === acc.me.uuid) return json(400, { error: 'Es tu propia oferta' })
-		if (o.type !== 'buy') return json(400, { error: 'Vender ya solo vende a ofertas de compra' })
-		if (o.only_vip) return json(400, { error: 'Esa oferta es solo para cuentas VIP' })
-		if (o.status === 'open' && o.pause) return json(409, { error: `${pausedError(o.pause)}. Actualizo el precio.` })
-		if (o.status !== 'open') return json(409, { error: 'Esa oferta ya no está disponible. Actualizo el precio.' })
+		if (o.User?.uuid === acc.me.uuid) return json(400, { error: tl('routes.ownOffer') })
+		if (o.type !== 'buy') return json(400, { error: tl('routes.sellOnlyBuy') })
+		if (o.only_vip) return json(400, { error: tl('routes.vipOnly') })
+		if (o.status === 'open' && o.pause) return json(409, { error: tl('routes.pausedRefresh', { reason: pausedError(o.pause) }) })
+		if (o.status !== 'open') return json(409, { error: tl('routes.thatOfferGone') })
 		const q = swapOffer(o)
 		const minPrice = Number(b.minPrice)
-		if (minPrice > 0 && q.price < minPrice * (1 - 1e-9)) return json(409, { error: `El precio bajó a ${q.price.toLocaleString('en-US')} mientras decidías. Revisa el nuevo precio.` })
+		if (minPrice > 0 && q.price < minPrice * (1 - 1e-9)) return json(409, { error: tl('routes.priceDown', { price: q.price }) })
 		const amount = round2(Number(b.amount))
 		if (q.kind === 'flexible' ? !(amount >= (q.orderMin ?? 0) && amount <= q.orderMax!) : amount !== q.usd)
-			return json(409, { error: 'El monto ya no cabe en esa oferta. Actualizo el precio.' })
+			return json(409, { error: tl('routes.noFit') })
 		const details = (Array.isArray(b.details) ? b.details : [])
 			.map((d: { name?: unknown; label?: unknown; value?: unknown }) => ({ label: String(d?.label ?? d?.name ?? '').slice(0, 60), value: String(d?.value ?? '').trim().slice(0, 200) }))
 			.filter((d: { label: string; value: string }) => d.label && d.value)
 			.slice(0, 10)
-		if (!details.length) return json(400, { error: 'Pon tus datos para recibir el pago' })
+		if (!details.length) return json(400, { error: tl('routes.needDetails') })
 		// Saldo fresco: no se vende más de lo que tienes
 		const me = await acc.client.me()
 		acc.me = me
-		if (amount > num(me.balance)) return json(400, { error: `No tienes saldo suficiente: tienes ${num(me.balance).toLocaleString('en-US')} USD` })
+		if (amount > num(me.balance)) return json(400, { error: tl('routes.noBalanceHave', { have: num(me.balance) }) })
 		const r = await acc.client.applyOffer(o.uuid, q.kind === 'flexible' ? amount : undefined, { coin: o.coin, side: o.type, usd: amount, via: 'swap' })
 		this.swapQuotes.delete(`sell:${o.coin}`)
 		const order = r.order ?? undefined
@@ -773,7 +774,7 @@ export class Broker {
 			.sendChat(o.uuid, text.slice(0, 599), order)
 			.then(() => true)
 			.catch(() => false)
-		return json(200, { ok: true, offer: o.uuid, order: order ?? null, chatSent, message: 'Venta en marcha' })
+		return json(200, { ok: true, offer: o.uuid, order: order ?? null, chatSent, message: tl('routes.saleStarted') })
 	}
 
 	private async action({ req }: Ctx, acc: Account) {
@@ -784,13 +785,13 @@ export class Broker {
 		switch (b.action) {
 			case 'paid': {
 				const tx = String(b.txId ?? '').trim()
-				if (!tx) return json(400, { error: 'Indica la referencia de tu transferencia' })
+				if (!tx) return json(400, { error: tl('routes.needTx') })
 				await c.markPaid(offer, tx.slice(0, 120), order)
-				return json(200, { ok: true, message: 'Marcado como pagado' })
+				return json(200, { ok: true, message: tl('routes.markedPaid') })
 			}
 			case 'release': {
 				const key = `${acc.me.uuid}:${offer}:${order ?? ''}`
-				const already = json(200, { ok: true, message: 'Ya estaba liberada: QvaPay tarda unos segundos en marcarla completada.' })
+				const already = json(200, { ok: true, message: tl('routes.alreadyReleased') })
 				if (Date.now() - (this.released.get(key) ?? 0) < RELEASE_GRACE_MS) return already
 				// Estado fresco: solo se libera lo que está en "pagado"
 				const fresh = async () => {
@@ -799,7 +800,7 @@ export class Broker {
 				}
 				const { o, status } = await fresh()
 				if (status === 'completed') return already
-				if (status !== 'paid') return json(400, { error: `La operación está en «${status ?? 'desconocido'}», no en pagado. No se libera.` })
+				if (status !== 'paid') return json(400, { error: tl('routes.notPaidStatus', { status: status ?? tl('routes.unknownStatus') }) })
 				const usd = num((order ? o.Orders?.find((x) => x.uuid === order)?.amount : undefined) ?? o.amount)
 				let r: Awaited<ReturnType<typeof c.markReceived>>
 				try {
@@ -810,7 +811,7 @@ export class Broker {
 					throw e
 				}
 				this.released.set(key, Date.now())
-				return json(200, { ok: true, message: r && r.amount != null ? `Liberado: la contraparte recibe ${Number(r.amount).toLocaleString('en-US')} USD netos (comisión ${Number(r.fee ?? 0).toLocaleString('en-US')}).` : 'Liberado' })
+				return json(200, { ok: true, message: r && r.amount != null ? tl('routes.releasedNet', { net: Number(r.amount), fee: Number(r.fee ?? 0) }) : tl('routes.released') })
 			}
 			case 'cancel_offer': {
 				// Estado fresco: si alguien la tomó mientras la tenías abierta, cancelarla en QvaPay no la cancela,
@@ -818,9 +819,9 @@ export class Broker {
 				// publicada; en una por partes QvaPay ya rechaza cancelarla entera con órdenes en curso
 				const o = await c.getOffer(offer)
 				// Ya cancelada (desde otra pestaña, la web de QvaPay o un toque repetido): no hay nada que hacer
-				if (o.status === 'cancelled') return json(200, { ok: true, message: 'La oferta ya estaba cancelada' })
+				if (o.status === 'cancelled') return json(200, { ok: true, message: tl('routes.alreadyCancelled') })
 				if (o.offer_kind !== 'flexible' && o.status !== 'open')
-					return json(409, { error: 'Alguien acaba de tomar tu oferta y ya no se puede cancelar: ábrela para ver la operación.', status: o.status })
+					return json(409, { error: tl('routes.takenCantCancel'), status: o.status })
 				const r = await c.cancelOrder(offer, order)
 				return json(200, { ok: true, message: r.message })
 			}
@@ -831,17 +832,17 @@ export class Broker {
 			}
 			case 'chat': {
 				const text = String(b.message ?? '').trim()
-				if (!text) return json(400, { error: 'Mensaje vacío' })
+				if (!text) return json(400, { error: tl('routes.emptyMessage') })
 				await c.sendChat(offer, text.slice(0, 599), order)
 				return json(200, { ok: true })
 			}
 			case 'rate': {
 				const rating = Math.min(5, Math.max(1, Math.round(Number(b.rating) || 5)))
 				await c.rate(offer, order, rating, undefined, b.edit === true)
-				return json(200, { ok: true, message: 'Calificación guardada' })
+				return json(200, { ok: true, message: tl('routes.ratingSaved') })
 			}
 		}
-		return json(400, { error: 'Acción desconocida' })
+		return json(400, { error: tl('routes.unknownAction') })
 	}
 }
 
@@ -937,7 +938,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100
 function createBody(b: Record<string, unknown>): CreateOfferBody | { error: string } {
 	const type = b.type === 'buy' || b.type === 'sell' ? b.type : null
 	const coin = String(b.coin ?? '')
-	if (!type || !TICKS.has(coin)) return { error: 'Elige si compras o vendes USD y el mercado' }
+	if (!type || !TICKS.has(coin)) return { error: tl('routes.chooseSideMarket') }
 	const terms = offerTerms(b, b.kind === 'flexible')
 	if (terms.error !== undefined) return { error: terms.error }
 	const details = (Array.isArray(b.details) ? b.details : [])
@@ -1004,28 +1005,28 @@ export function heldTake(o: P2POffer, flexible: boolean, before: Set<string> | n
 
 // Por qué una oferta ya no sirve para la orden inteligente (null si sirve tal cual se planeó)
 export function takeProblem(o: P2POffer | null, amount: number, side: 'buy' | 'sell', coin: string, limit: number, me: string): string | null {
-	if (!o) return 'ya no existe'
-	if (o.coin !== coin || o.type !== (side === 'buy' ? 'sell' : 'buy')) return 'no corresponde a esta orden'
-	if (o.User?.uuid === me) return 'es tuya'
-	if (o.status === 'open' && o.pause) return o.pause.reason === 'taker_left' ? 'está en pausa unos minutos (se fue quien la tomó)' : 'su dueño la pausó'
-	if (o.status !== 'open') return 'ya no está disponible'
-	if (o.only_vip) return 'es solo para cuentas VIP'
-	if (o.requirements_met === false) return 'pide requisitos que no cumples'
+	if (!o) return tl('routes.pGone')
+	if (o.coin !== coin || o.type !== (side === 'buy' ? 'sell' : 'buy')) return tl('routes.pMismatch')
+	if (o.User?.uuid === me) return tl('routes.pMine')
+	if (o.status === 'open' && o.pause) return o.pause.reason === 'taker_left' ? tl('routes.pPausedAuto') : tl('routes.pPausedOwner')
+	if (o.status !== 'open') return tl('routes.pUnavailable')
+	if (o.only_vip) return tl('routes.pVip')
+	if (o.requirements_met === false) return tl('routes.pReqs')
 	// El detalle de una oferta no trae el historial de su dueño (solo el listado del mercado lo trae): si no
 	// viene, vale el que se comprobó al hacer el plan con el libro. Si viene, se vuelve a mirar
 	const u = o.User
 	if (u?._count || u?.rating_count != null) {
 		const ops = (u._count?.P2P ?? 0) + (u._count?.P2P_Peer ?? 0)
 		const rating = u.rating_count ? (u.rating_avg ?? 0) : 0
-		if (ops < SMART_MIN_OPS || rating < SMART_MIN_RATING) return `tiene poco historial (necesita ${SMART_MIN_OPS} operaciones y ${SMART_MIN_RATING} ★)`
+		if (ops < SMART_MIN_OPS || rating < SMART_MIN_RATING) return tl('routes.pHistory', { ops: SMART_MIN_OPS, rating: SMART_MIN_RATING })
 	}
 	const price = num(o.amount) > 0 ? num(o.receive) / num(o.amount) : 0
-	if (side === 'buy' ? price > limit * (1 + 1e-9) : price < limit * (1 - 1e-9)) return `cambió de precio (${price.toLocaleString('en-US')}) y ya no cruza con el tuyo`
+	if (side === 'buy' ? price > limit * (1 + 1e-9) : price < limit * (1 - 1e-9)) return tl('routes.pPrice', { price })
 	if (o.offer_kind === 'flexible') {
 		const min = num(o.order_min ?? 0)
 		const max = round2(Math.min(num(o.order_max ?? Infinity), num(o.available_amount ?? o.amount)))
-		if (!(amount >= min && amount <= max)) return `ahora admite entre ${min.toLocaleString('en-US')} y ${max.toLocaleString('en-US')} USD`
-	} else if (Math.abs(num(o.amount) - amount) > 0.005) return 'cambió de monto'
+		if (!(amount >= min && amount <= max)) return tl('routes.pRange', { min, max })
+	} else if (Math.abs(num(o.amount) - amount) > 0.005) return tl('routes.pAmount')
 	return null
 }
 
@@ -1035,17 +1036,17 @@ export function takeProblem(o: P2POffer | null, amount: number, side: 'buy' | 's
 export function offerTerms(b: Record<string, unknown>, flexible: boolean, editing = false) {
 	const amount = round2(Number(b.amount))
 	const price = Number(b.price)
-	if (!(amount >= 0.1 && amount <= 10_000)) return { error: 'El monto debe estar entre 0.1 y 10,000 USD' }
-	if (!(price > 0)) return { error: 'Pon el precio por cada USD' }
+	if (!(amount >= 0.1 && amount <= 10_000)) return { error: tl('routes.amountLimits') }
+	if (!(price > 0)) return { error: tl('routes.needPrice') }
 	const receive = round2(amount * price)
-	if (!(receive >= 0.1 && receive <= 100_000_000)) return { error: 'El total a recibir está fuera de los límites de QvaPay' }
+	if (!(receive >= 0.1 && receive <= 100_000_000)) return { error: tl('routes.receiveLimits') }
 	let orderMin: number | undefined
 	let orderMax: number | undefined
 	if (flexible) {
 		orderMin = round2(Number(b.orderMin))
 		orderMax = round2(Number(b.orderMax))
 		if (!(orderMin > 0 && orderMax >= orderMin && (editing || orderMax <= amount)))
-			return { error: editing ? 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo' : 'Revisa el mínimo y el máximo por orden: mínimo ≤ máximo ≤ monto' }
+			return { error: editing ? tl('routes.minMaxEdit') : tl('routes.minMax') }
 	}
 	let requirements: Requirements | undefined
 	if (b.requirements && typeof b.requirements === 'object') {
@@ -1054,7 +1055,7 @@ export function offerTerms(b: Record<string, unknown>, flexible: boolean, editin
 			const n = Number(v)
 			if (!n) continue
 			const allowed = REQUIREMENTS[k as keyof Requirements]
-			if (!allowed?.includes(n)) return { error: 'Requisito no válido' }
+			if (!allowed?.includes(n)) return { error: tl('routes.badRequirement') }
 			requirements[k as keyof Requirements] = n
 		}
 		if (!Object.keys(requirements).length) requirements = undefined
@@ -1149,7 +1150,7 @@ function sameOrigin(req: Request, url: URL) {
 
 async function readJson(req: Request): Promise<Record<string, any>> {
 	const text = await req.text()
-	if (text.length > MAX_BODY) throw new Error('Cuerpo demasiado grande')
+	if (text.length > MAX_BODY) throw new Error(tl('routes.bodyTooBig'))
 	return text ? JSON.parse(text) : {}
 }
 
@@ -1157,33 +1158,33 @@ async function readJson(req: Request): Promise<Record<string, any>> {
 export function pausedError(p: { reason?: string; until?: string | null }) {
 	if (p.reason === 'taker_left') {
 		const at = p.until ? Date.parse(p.until) : NaN
-		const hhmm = Number.isFinite(at) ? inCuba(at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) : null
-		return `La oferta está en pausa unos minutos porque se fue quien la tomó${hhmm ? `: vuelve al mercado a las ${hhmm}` : ''}`
+		const hhmm = Number.isFinite(at) ? inCuba(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }) : null
+		return hhmm ? tl('routes.pausedAutoAt', { time: hhmm }) : tl('routes.pausedAuto')
 	}
-	return 'Su dueño pausó la oferta: no se puede tomar hasta que la vuelva a publicar'
+	return tl('routes.pausedOwner')
 }
 
 // Errores de QvaPay en lenguaje claro
 function friendly(err: unknown): string {
 	if (!(err instanceof QvaPayError)) return (err as Error).message
 	const map: Record<string, string> = {
-		INSUFFICIENT_SCOPE: 'Tu token no tiene permiso para esto (revisa p2p:buy / p2p:sell en qvapay.com/dev/tokens)',
-		PEER_REQUIREMENTS_NOT_MET: 'No cumples los requisitos del anunciante',
-		OFFER_PAUSED: 'La oferta está en pausa: su dueño la sacó del mercado o se fue quien la tomó y vuelve en unos minutos',
-		FLEXIBLE_NOT_ENABLED: 'Tu cuenta todavía no puede tomar ofertas por rango',
-		ORDER_ALREADY_ACTIVE: 'Ya tienes una orden activa en esa oferta',
-		ORDER_IN_DISPUTE: 'La orden está en disputa: la resuelve un moderador',
-		KYC_REQUIRED: 'Tu cuenta necesita KYC aprobado',
-		DUPLICATE_REQUEST: 'Ya hay una petición igual en curso',
-		FLEXIBLE_OFFER_EXISTS: 'Ya tienes una oferta por rango de ese lado en este mercado: edítala o cancélala antes',
-		OFFER_HAS_OPEN_ORDERS: 'La oferta tiene órdenes en curso: termínalas o pausa la oferta',
-		OFFER_NOT_EDITABLE: 'Alguien tomó la oferta mientras la editabas',
-		FLEXIBLE_AMOUNT_REQUIRED: 'Indica cuántos USD tomas',
-		INVALID_REQUIREMENTS: 'Requisito no válido',
+		INSUFFICIENT_SCOPE: tl('routes.qpScope'),
+		PEER_REQUIREMENTS_NOT_MET: tl('routes.qpPeerReqs'),
+		OFFER_PAUSED: tl('routes.qpPaused'),
+		FLEXIBLE_NOT_ENABLED: tl('routes.qpFlexOff'),
+		ORDER_ALREADY_ACTIVE: tl('routes.qpOrderActive'),
+		ORDER_IN_DISPUTE: tl('routes.qpDispute'),
+		KYC_REQUIRED: tl('routes.qpKyc'),
+		DUPLICATE_REQUEST: tl('routes.qpDuplicate'),
+		FLEXIBLE_OFFER_EXISTS: tl('routes.qpFlexExists'),
+		OFFER_HAS_OPEN_ORDERS: tl('routes.qpOpenOrders'),
+		OFFER_NOT_EDITABLE: tl('routes.qpNotEditable'),
+		FLEXIBLE_AMOUNT_REQUIRED: tl('routes.qpNeedAmount'),
+		INVALID_REQUIREMENTS: tl('routes.badRequirement'),
 	}
 	if (err.code && map[err.code]) return map[err.code]
-	if (err.status === 409) return 'La oferta ya no está disponible (la tomó otra persona o cambió)'
-	if (err.status === 429) return 'Demasiadas acciones seguidas: espera unos segundos y vuelve a intentarlo'
+	if (err.status === 409) return tl('routes.err409')
+	if (err.status === 429) return tl('routes.err429')
 	const body = err.body as { error?: string } | undefined
 	return body?.error ?? err.message
 }

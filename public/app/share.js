@@ -16,7 +16,7 @@ const ICON_SHARE =
 
 // ── La oferta compartida, para quien abre el enlace ───────────────────
 async function showPublicOffer(uuid, amount) {
-	openModal('<p class="muted">Cargando oferta…</p>')
+	openModal(`<p class="muted">${tl('share.loadingOffer')}</p>`)
 	let o = null
 	try {
 		o = await getData(`/data/offer?id=${encodeURIComponent(uuid)}`)
@@ -29,17 +29,17 @@ async function showPublicOffer(uuid, amount) {
 	if (o?.state === 'paused') return showPaused(o.coin, o.side, uuid, o)
 	// Una privada (no sale en el libro) o una que el libro en vivo no conoce: con la cuenta conectada se lee de QvaPay
 	$('modalBody').innerHTML = `<div class="stack">
-		<h3>Te compartieron una oferta del P2P de QvaPay</h3>
-		<p class="muted">Conecta tu cuenta de QvaPay para verla y tomarla. Operas con tu propia cuenta: el dinero sigue en el escrow de QvaPay.</p>
-		<button class="btn primary block" id="puConnect">Conectar mi cuenta</button>
+		<h3>${tl('share.sharedTitle')}</h3>
+		<p class="muted">${tl('share.sharedText')}</p>
+		<button class="btn primary block" id="puConnect">${tl('share.connectMine')}</button>
 	</div>`
-	$('puConnect').onclick = () => showConnect('Conecta tu cuenta para ver la oferta', () => showTakeOfferById(uuid, amount))
+	$('puConnect').onclick = () => showConnect(tl('share.connectToSee'), () => showTakeOfferById(uuid, amount))
 }
 
 // La oferta ya no está: la tomaron o la retiró su dueño. Las mejores de ese mercado y lado, para no llegar a nada
-function showGone(coin, side, exclude, why = 'La tomaron o la retiró su dueño.') {
+function showGone(coin, side, exclude, why = tl('share.goneWhy')) {
 	$('modalBody').innerHTML = `<div class="stack">
-		<h3>Esta oferta ya no está</h3>
+		<h3>${tl('share.goneTitle')}</h3>
 		<p class="muted">${esc(why)}</p>
 		<div id="similar"></div>
 	</div>`
@@ -49,14 +49,14 @@ function showGone(coin, side, exclude, why = 'La tomaron o la retiró su dueño.
 // Sigue publicada pero en pausa (nadie la puede tomar ahora): por qué y, si es la automática, a qué hora vuelve sola
 function pausedWhy(p) {
 	if (p?.reason === 'taker_left') {
-		const until = p.until ? cubaFmt(p.until, { hour: '2-digit', minute: '2-digit' }) : null
-		return `Quien la tomó se fue y QvaPay la pausa unos minutos para que su dueño revise la tasa. ${until ? `Vuelve sola al mercado a las ${until} (hora de Cuba).` : 'Vuelve sola al mercado en unos minutos.'}`
+		const until = p.until ? cubaFmt(p.until, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : null
+		return `${tl('share.pausedLeft')} ${until ? tl('share.backAt', { time: until }) : tl('share.backSoon')}`
 	}
-	return 'Su dueño la sacó del mercado un momento, sin cancelarla. Podrás tomarla cuando la vuelva a publicar.'
+	return tl('share.pausedOwner')
 }
 function showPaused(coin, side, exclude, pause) {
 	$('modalBody').innerHTML = `<div class="stack">
-		<h3>Esta oferta está en pausa</h3>
+		<h3>${tl('share.pausedTitle')}</h3>
 		<p class="muted">${esc(pausedWhy(pause))}</p>
 		<div id="similar"></div>
 	</div>`
@@ -77,15 +77,15 @@ async function fillSimilar(coin, side, exclude) {
 	if (!$('similar')) return
 	box.innerHTML = `${
 		list.length
-			? `<p class="hint">Las mejores ${youBuy ? 'ventas' : 'compras'} de ${esc(nameOf(coin))} ahora</p>
+			? `<p class="hint">${tl(youBuy ? 'share.bestAsks' : 'share.bestBids', { market: esc(nameOf(coin)) })}</p>
 		<div class="similar">${list
 			.map(
 				(l) =>
-					`<button type="button" class="similar-row" data-similar="${l.uuid}"><b class="num ${side}">${fmtP(l.price)} ${unit}</b><span class="num">${l.kind === 'flexible' && l.orderMax ? `hasta ${fmtM(Math.min(l.orderMax, l.usd))}` : fmtM(l.usd)} USD</span><span class="muted">@${esc(l.user)}</span></button>`,
+					`<button type="button" class="similar-row" data-similar="${l.uuid}"><b class="num ${side}">${fmtP(l.price)} ${unit}</b><span class="num">${l.kind === 'flexible' && l.orderMax ? tl('share.upTo', { usd: fmtM(Math.min(l.orderMax, l.usd)) }) : fmtM(l.usd)} USD</span><span class="muted">@${esc(l.user)}</span></button>`,
 			)
 			.join('')}</div>`
 			: ''
-	}<button class="btn block" id="seeBook">Ver el libro de ${esc(nameOf(coin))}</button>`
+	}<button class="btn block" id="seeBook">${tl('share.seeBook', { market: esc(nameOf(coin)) })}</button>`
 	for (const r of box.querySelectorAll('[data-similar]')) r.onclick = () => showTakeOfferById(r.dataset.similar)
 	$('seeBook').onclick = () => {
 		closeModal()
@@ -104,8 +104,8 @@ function shareFacts(o) {
 		market: nameOf(o.coin),
 		unit: unitOf(o.coin),
 		price: fmtP(o.price),
-		amount: flex && o.orderMin ? `De ${fmtM(o.orderMin)} a ${fmtM(max)} QUSD` : `${fmtM(usd)} QUSD`,
-		extra: [o.onlyVip && 'Solo cuentas VIP', reqText(o.requirements) && `Requisitos: ${reqText(o.requirements)}`].filter(Boolean).join(' · '),
+		amount: flex && o.orderMin ? tl('share.amountRange', { min: fmtM(o.orderMin), max: fmtM(max) }) : `${fmtM(usd)} QUSD`,
+		extra: [o.onlyVip && tl('share.vipOnly'), reqText(o.requirements) && tl('share.requirements', { req: reqText(o.requirements) })].filter(Boolean).join(' · '),
 		user: owner.username ?? bk.acct.username ?? '',
 		// En tu propia oferta QvaPay no siempre trae tu reputación: la de tu perfil del P2P
 		rating: owner.rating ?? bk.acct.p2pRating ?? null,
@@ -114,29 +114,29 @@ function shareFacts(o) {
 	}
 }
 
-const shareText = (f) => `${f.sell ? 'Vendo' : 'Compro'} QUSD a ${f.price} ${f.unit} · ${f.market} · ${f.amount}\nTómala en Terminal P2P: ${f.link}`
+const shareText = (f) => tl(f.sell ? 'share.textSell' : 'share.textBuy', { price: f.price, unit: f.unit, market: f.market, amount: f.amount, link: f.link })
 
 async function showShareOffer(o) {
 	const f = shareFacts(o)
 	const text = shareText(f)
 	openModal(`<div class="stack">
-		<h3>Compartir la oferta</h3>
-		<img class="share-img" id="shImg" alt="Imagen de la oferta" />
-		<label class="share-switch">Oscura<input type="checkbox" role="switch" id="shLight" aria-label="Imagen clara" />Clara</label>
-		<label class="field">Mensaje<textarea class="input" id="shText" rows="3" readonly>${esc(text)}</textarea></label>
+		<h3>${tl('share.title')}</h3>
+		<img class="share-img" id="shImg" alt="${tl('share.imgAlt')}" />
+		<label class="share-switch">${tl('share.dark')}<input type="checkbox" role="switch" id="shLight" aria-label="${tl('share.lightAria')}" />${tl('share.light')}</label>
+		<label class="field">${tl('share.message')}<textarea class="input" id="shText" rows="3" readonly>${esc(text)}</textarea></label>
 		<div class="row-btns share-btns">
-			${navigator.share ? `<button class="btn primary" id="shNative">${ICON_SHARE} Compartir</button>` : ''}
-			${window.ClipboardItem ? '<button class="btn" id="shCopyImg">Copiar imagen</button>' : ''}
-			<button class="btn" id="shCopyText">Copiar mensaje</button>
-			<a class="btn" id="shSave" download="oferta-terminal-p2p.png">Descargar imagen</a>
+			${navigator.share ? `<button class="btn primary" id="shNative">${ICON_SHARE} ${tl('share.share')}</button>` : ''}
+			${window.ClipboardItem ? `<button class="btn" id="shCopyImg">${tl('share.copyImg')}</button>` : ''}
+			<button class="btn" id="shCopyText">${tl('share.copyText')}</button>
+			<a class="btn" id="shSave" download="${tl('share.fileName')}">${tl('share.download')}</a>
 		</div>
-		<p class="hint">La imagen no lleva tus datos de pago. El enlace abre la oferta en el terminal: quien no tenga su cuenta conectada la ve y la conecta para tomarla.</p>
-		<button type="button" class="link" id="shBack">← Volver a la oferta</button>
+		<p class="hint">${tl('share.hint')}</p>
+		<button type="button" class="link" id="shBack">${tl('share.back')}</button>
 	</div>`)
 	$('shBack').onclick = () => showManageOffer(o.offer)
 	$('shCopyText').onclick = () => {
 		navigator.clipboard?.writeText(text)
-		toast('Mensaje copiado')
+		toast(tl('share.copiedText'))
 	}
 	// La imagen del tema elegido; al cambiarlo se vuelve a pintar (lo que se copia o comparte es siempre la que se ve)
 	let blob = null
@@ -149,7 +149,7 @@ async function showShareOffer(o) {
 		const b = await new Promise((r) => canvas.toBlob(r, 'image/png'))
 		if (!$('shImg') || !b || want !== theme) return
 		blob = b
-		file = new File([b], 'oferta-terminal-p2p.png', { type: 'image/png' })
+		file = new File([b], tl('share.fileName'), { type: 'image/png' })
 		const url = canvas.toDataURL('image/png')
 		$('shImg').src = url
 		$('shSave').href = url
@@ -168,16 +168,16 @@ async function showShareOffer(o) {
 		try {
 			await navigator.share(data)
 		} catch (e) {
-			if (e?.name !== 'AbortError') toast('No se pudo abrir el menú de compartir: copia la imagen y el mensaje', true)
+			if (e?.name !== 'AbortError') toast(tl('share.nativeError'), true)
 		}
 	})
 	$('shCopyImg')?.addEventListener('click', async () => {
 		if (!blob) return
 		try {
 			await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-			toast('Imagen copiada: pégala en el chat y luego el mensaje')
+			toast(tl('share.copiedImg'))
 		} catch {
-			toast('Este navegador no deja copiar imágenes: descárgala', true)
+			toast(tl('share.copyImgError'), true)
 		}
 	})
 }
@@ -273,7 +273,7 @@ async function drawShareCard(f, theme = 'dark') {
 	ctx.fillText('Terminal P2P', PAD + 80, PAD + 31)
 
 	// Vendo o compro
-	const tag = f.sell ? 'VENDO QUSD' : 'COMPRO QUSD'
+	const tag = tl(f.sell ? 'share.tagSell' : 'share.tagBuy')
 	ctx.font = `700 30px ${SANS}`
 	const tw = ctx.measureText(tag).width + 48
 	ctx.fillStyle = `${sideBg}0.16)`
@@ -293,12 +293,12 @@ async function drawShareCard(f, theme = 'dark') {
 		ctx.fillText(text, PAD, y)
 	}
 
-	label('Mercado', 268)
+	label(tl('share.cardMarket'), 268)
 	ctx.fillStyle = P.text
 	fitFont(ctx, f.market, W, 60, 700, SANS)
 	ctx.fillText(f.market, PAD, 336)
 
-	label('Precio por QUSD', 446)
+	label(tl('share.cardPrice'), 446)
 	ctx.font = `600 52px ${MONO}`
 	const unitW = ctx.measureText(` ${f.unit}`).width
 	ctx.fillStyle = P.price
@@ -309,7 +309,7 @@ async function drawShareCard(f, theme = 'dark') {
 	ctx.font = `600 52px ${MONO}`
 	ctx.fillText(` ${f.unit}`, PAD + pw, 610)
 
-	label('Monto', 712)
+	label(tl('share.cardAmount'), 712)
 	ctx.fillStyle = P.text
 	fitFont(ctx, f.amount, W, 58, 700, SANS)
 	ctx.fillText(f.amount, PAD, 778)
@@ -337,7 +337,7 @@ async function drawShareCard(f, theme = 'dark') {
 	ctx.textBaseline = 'middle'
 	ctx.fillText((f.user || '?').slice(0, 2).toUpperCase(), PAD + 36, cy + 1)
 	ctx.textAlign = 'left'
-	const rep = [f.rating ? `★ ${f.rating.toFixed(2)}` : null, f.ops != null ? `${f.ops.toLocaleString('en-US')} operaciones` : null].filter(Boolean).join(' · ')
+	const rep = [f.rating ? `★ ${f.rating.toFixed(2)}` : null, f.ops != null ? tl('share.ops', { n: f.ops }) : null].filter(Boolean).join(' · ')
 	// Sin reputación que enseñar, el usuario va centrado con el círculo
 	ctx.fillStyle = P.text
 	fitFont(ctx, `@${f.user}`, 470, 34, 700, SANS)
@@ -350,7 +350,7 @@ async function drawShareCard(f, theme = 'dark') {
 	ctx.textAlign = 'right'
 	ctx.fillStyle = P.label
 	ctx.font = `500 26px ${SANS}`
-	ctx.fillText('Tómala en', CARD - PAD, cy - 18)
+	ctx.fillText(tl('share.takeIt'), CARD - PAD, cy - 18)
 	ctx.fillStyle = P.accent
 	ctx.font = `700 34px ${SANS}`
 	ctx.fillText(new URL(f.link).host, CARD - PAD, cy + 22)

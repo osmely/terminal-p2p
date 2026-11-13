@@ -2,6 +2,11 @@
 // (vía el relé del propio dominio, cacheado en el borde: sin token y sin datos de nadie).
 const $ = (id) => document.getElementById(id)
 
+// Textos de la portada en el idioma elegido (i18n.js, solo en la portada: el blog y la página de la tasa siguen en
+// español y no llegan a usarlo). Fechas con el locale del idioma; los números, siempre 1,050.25
+const LOCALE = () => globalThis.TPI18N?.locale ?? 'es'
+const coinName = (tick, name) => globalThis.TPI18N?.coin(tick, name) ?? name
+
 const MARKETS = [
 	['BANK_CUP', 'CUP Transferencia', 'CUP'],
 	['ETECSA', 'Saldo ETECSA', 'CUP'],
@@ -17,7 +22,7 @@ const MARKETS = [
 const decimals = (p) => (p >= 100 ? 2 : 4)
 const fmt = (p) => (p > 0 ? p.toLocaleString('en-US', { minimumFractionDigits: decimals(p), maximumFractionDigits: decimals(p) }) : '—')
 const pick = (a, median, average) => (a[median] > 0 ? a[median] : a[average] > 0 ? a[average] : 0)
-const period = (h) => (h >= 48 && h % 24 === 0 ? `${h / 24} días` : `${h} h`)
+const period = (h) => (h >= 48 && h % 24 === 0 ? tl('site.periodDays', { n: h / 24 }) : `${h} h`)
 
 async function loadRates() {
 	try {
@@ -27,18 +32,18 @@ async function loadRates() {
 		const cards = MARKETS.filter(([tick]) => data[tick]?.count > 0).map(([tick, name, unit]) => {
 			const a = data[tick]
 			return `<article class="rate">
-				<h3>${name}</h3><div class="unit">${unit} por USD de QvaPay</div>
-				<div class="px"><span>Venta</span><b class="ask">${fmt(pick(a, 'median_sell', 'average_sell'))}</b><span>Compra</span><b class="bid">${fmt(pick(a, 'median_buy', 'average_buy'))}</b></div>
-				<div class="ops">${a.count.toLocaleString('en-US')} operaciones en ${period(a.window_hours ?? 24)}</div>
+				<h3>${coinName(tick, name)}</h3><div class="unit">${tl('site.rateUnit', { unit })}</div>
+				<div class="px"><span>${tl('site.rateSell')}</span><b class="ask">${fmt(pick(a, 'median_sell', 'average_sell'))}</b><span>${tl('site.rateBuy')}</span><b class="bid">${fmt(pick(a, 'median_buy', 'average_buy'))}</b></div>
+				<div class="ops">${tl('site.rateOps', { n: a.count, period: period(a.window_hours ?? 24) })}</div>
 			</article>`
 		})
 		if (!cards.length) throw new Error('vacío')
 		$('rates').innerHTML = cards.join('')
-		$('ratesSrc').textContent = `Fuente: QvaPay · actualizado a las ${inCuba(Date.now()).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}`
+		$('ratesSrc').textContent = tl('site.ratesAt', { time: inCuba(Date.now()).toLocaleTimeString(LOCALE(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }) })
 	} catch {
 		if ($('rates').querySelector('.rate:not(.skeleton)')) return // se quedan las últimas que se vieron
 		$('rates').innerHTML = ''
-		$('ratesSrc').textContent = 'No se pudieron cargar las tasas ahora mismo. Ábrelas en el terminal.'
+		$('ratesSrc').textContent = tl('site.ratesFail')
 	}
 }
 
@@ -57,7 +62,7 @@ async function loadInformal() {
 		if (!last) return
 		const cells = INFORMAL.filter(([k]) => last[k] > 0).map(([k, label]) => {
 			const d = prev?.[k] > 0 ? last[k] / prev[k] - 1 : 0
-			const chg = Math.abs(d) >= 0.0005 ? `<i class="${d > 0 ? 'up' : 'down'}" title="Respecto al día anterior">${d > 0 ? '+' : ''}${(d * 100).toFixed(1)}%</i>` : ''
+			const chg = Math.abs(d) >= 0.0005 ? `<i class="${d > 0 ? 'up' : 'down'}" title="${tl('site.vsYesterday')}">${d > 0 ? '+' : ''}${(d * 100).toFixed(1)}%</i>` : ''
 			return `<div class="inf"><span>${label}</span>${chg}<b>${fmt(last[k])}</b></div>`
 		})
 		if (!cells.length) return
@@ -77,7 +82,7 @@ function cubaOffset(ms) {
 }
 const inCuba = (ms) => new Date(ms + cubaOffset(ms))
 const cubaDay =(ms) => inCuba(ms).toLocaleDateString('en-CA', { timeZone: 'UTC' })
-const dayName = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('es', { day: 'numeric', month: 'short' })
+const dayName = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString(LOCALE(), { day: 'numeric', month: 'short' })
 const whole = (n) => Math.round(n).toLocaleString('en-US')
 async function loadStats() {
 	let s
@@ -92,9 +97,9 @@ async function loadStats() {
 	const sec = $('numeros')
 	for (const k of ['created', 'taken', 'completed']) {
 		const n = s.day[k]
-		sec.querySelector(`[data-day="${k}"]`).innerHTML = n ? `<b>+${whole(n)}</b> en las últimas 24 h` : ''
+		sec.querySelector(`[data-day="${k}"]`).innerHTML = n ? tl('site.last24h', { n: `+${whole(n)}` }) : ''
 	}
-	sec.querySelector('[data-day="volume"]').innerHTML = s.day.volume ? `<b>+${whole(s.day.volume)} USD</b> en las últimas 24 h` : ''
+	sec.querySelector('[data-day="volume"]').innerHTML = s.day.volume ? tl('site.last24h', { n: `+${whole(s.day.volume)} USD` }) : ''
 	// Un día por barra, desde la primera acción (al menos una semana y como mucho 30 días), con los días sin nada en 0
 	const vol = new Map(s.byDay.map((d) => [d.day, d]))
 	const now = Date.now()
@@ -105,7 +110,7 @@ async function loadStats() {
 		.map((d) => {
 			const v = vol.get(d)
 			const usd = v?.volume ?? 0
-			const tip = `${dayName(d)}: ${v ? `${whole(v.completed)} ${v.completed === 1 ? 'operación' : 'operaciones'} · ${whole(usd)} USD` : 'sin operaciones'}`
+			const tip = `${dayName(d)}: ${v ? `${tl('site.dayTrades', { n: v.completed, count: whole(v.completed) })} · ${whole(usd)} USD` : tl('site.noTrades')}`
 			return `<i class="${usd ? (usd === max ? 'top' : '') : 'zero'}" style="--h:${usd ? Math.max(6, (usd / max) * 100) : 0}%" title="${tip}"></i>`
 		})
 		.join('')
@@ -252,7 +257,7 @@ for (const b of steps)
 		img.src = b.dataset.img
 		img.width = Number(b.dataset.w)
 		img.height = Number(b.dataset.h)
-		img.alt = b.dataset.alt
+		img.alt = b.dataset.altKey && typeof tl === 'function' ? tl(b.dataset.altKey) : b.dataset.alt
 	})
 
 // Las tasas solo están en la portada (el blog comparte este script)

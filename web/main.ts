@@ -11,6 +11,7 @@ import { COINS, Market, type LiveStats, type Tick, type Watch, type WatchedSide 
 import { bestCross } from '../src/terminal/arbitrage.ts'
 import { CRITERIA, positions, rank, userStats } from '../src/terminal/ranking.ts'
 import { BrowserAccounts, TOKEN_KEY } from './accounts.ts'
+import { tl } from '../src/i18n.ts'
 
 const RELAY = `${location.origin}/qp`
 // Si la próxima lectura está lejos (nadie miraba), se adelanta al abrir un mercado
@@ -205,14 +206,14 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 	const url = new URL(input, location.origin)
 
 	if (url.pathname.startsWith('/api/broker/')) {
-		const res = (await broker.handle(new Request(url, init))) ?? json(404, { error: 'Ruta desconocida' })
+		const res = (await broker.handle(new Request(url, init))) ?? json(404, { error: tl('routes.unknownRoute') })
 		if (url.pathname === '/api/broker/connect' && res.ok) wake()
 		return res
 	}
 	if (url.pathname === '/api/overview') return json(200, market.overview())
 	if (url.pathname === '/api/book') {
 		const coin = url.searchParams.get('coin')
-		if (!isTick(coin)) return json(400, { error: 'coin inválida' })
+		if (!isTick(coin)) return json(400, { error: tl('web.badCoin') })
 		market.touch(coin)
 		syncLive()
 		wake()
@@ -234,7 +235,7 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 			positions: positions(userStats(all, now)),
 		})
 	}
-	return json(404, { error: 'no encontrado' })
+	return json(404, { error: tl('web.notFound') })
 }
 
 // Lo que vigila el libro desde el módulo Pro (el radar, mantener tu oferta la primera): cada uno dice qué lados y a

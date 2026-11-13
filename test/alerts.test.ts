@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import './i18n-es.ts'
 import { EXPIRING_MS, pendingCount, tradeAlerts } from '../src/broker/alerts.ts'
 import { actionsFor, type Trade } from '../src/broker/trades.ts'
 

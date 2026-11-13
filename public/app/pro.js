@@ -21,17 +21,17 @@ let proTrialDays = 7
 const usdText = (n) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
 // Lo que suma el modo Pro, en corto: el detalle está en la entrada del blog (PRO_INFO_URL)
 const PRO_FEATURES = [
-	['⚡', 'Orden inteligente', 'toma y publica a la vez, como en un exchange'],
-	['⏱️', 'Libro al instante', 'cada oferta te llega al momento'],
-	['📡', 'Radar', 'vigila el libro, te avisa y, si quieres, toma al instante'],
-	['📈', 'Análisis de mercado', 'la semana y el mes de cada mercado, comparados y en PDF'],
-	['🎯', 'Precio automático', 'tu oferta la primera del libro, dentro de tus límites'],
-	['🔀', 'Libro cruzado', 'si lo puedes aprovechar y cuánto te queda'],
-	['💰', 'Ganancias', 'cuánto ganaste en cada mercado, con la comisión'],
-	['📲', 'Avisos de tus ofertas', 'por Telegram, aunque cierres el terminal'],
-	['🔔', 'Avisos de tasa', 'por Telegram, cuando la tasa pasa tu precio'],
-	['📊', 'Compras, ventas y USD en el gráfico', 'hacia dónde se mueve el mercado'],
-	['🕯️', 'Gráfico de velas', 'de 15 min a 1 día, con lo completado, en vivo'],
+	['⚡', tl('pro.f.smartOrder'), tl('pro.f.smartOrderSub')],
+	['⏱️', tl('pro.f.liveBook'), tl('pro.f.liveBookSub')],
+	['📡', tl('pro.f.radar'), tl('pro.f.radarSub')],
+	['📈', tl('pro.f.analysis'), tl('pro.f.analysisSub')],
+	['🎯', tl('pro.f.autoPrice'), tl('pro.f.autoPriceSub')],
+	['🔀', tl('pro.f.crossed'), tl('pro.f.crossedSub')],
+	['💰', tl('pro.f.gains'), tl('pro.f.gainsSub')],
+	['📲', tl('pro.f.offerAlerts'), tl('pro.f.offerAlertsSub')],
+	['🔔', tl('pro.f.rateAlerts'), tl('pro.f.rateAlertsSub')],
+	['📊', tl('pro.f.flow'), tl('pro.f.flowSub')],
+	['🕯️', tl('pro.f.candles'), tl('pro.f.candlesSub')],
 ]
 // La web del mismo entorno (staging.… desde app.staging.…)
 const PRO_INFO_URL = `${/\.terminalp2p\.com$/.test(location.hostname) ? location.origin.replace('://app.', '://') : 'https://terminalp2p.com'}/blog/modo-pro/`
@@ -84,11 +84,11 @@ async function proFetch(path, body, again = true) {
 	// El servidor no sabe de quién es el token: la cookie que lo dice es una por navegador y, con otra cuenta en otra
 	// pestaña, puede ser de aquella. Pedir el perfil a QvaPay la deja con esta cuenta; se reintenta una vez
 	if (r.status === 403 && d.code === 'TP_WHO' && again && bk.acct.connected) return api('/me').then(() => proFetch(path, body, false))
-	if (!r.ok) throw Object.assign(new Error(d.error || 'Algo falló. Inténtalo de nuevo.'), { status: r.status })
+	if (!r.ok) throw Object.assign(new Error(d.error || tl('pro.genericError')), { status: r.status })
 	return d
 }
 const daysLeft = () => Math.max(0, Math.ceil((pro.expiresAt - Date.now()) / 86_400_000))
-const daysText = (n) => (n === 1 ? '1 día' : `${n} días`)
+const daysText = (n) => tl('pro.days', { n })
 // A 3 días o menos del fin (y hasta una semana después de acabarse), un aviso que se queda a la vista con el botón de
 // comprar días. Muchos no conectan Telegram: sin esto, nadie les decía que se les acababa. Se cierra hasta mañana
 // (antes del fin) o para siempre (ya acabado). Y a quien usa mucho el terminal sin haber probado Pro, la invitación a
@@ -99,27 +99,27 @@ function renderProNudge() {
 	if (!pro.enabled) return
 	const today = new Date().toDateString()
 	let key, html
-	let buy = 'Comprar días'
+	let buy = tl('pro.buyDays')
 	if (pro.active && pro.expiresAt - Date.now() <= NUDGE_MS) {
 		key = `left:${pro.expiresAt}:${today}`
 		const n = daysLeft()
-		const what = pro.plan === 'trial' ? `A tus días gratis de Pro ${n === 1 ? 'les queda' : 'les quedan'}` : `A tu Pro ${n === 1 ? 'le queda' : 'le quedan'}`
-		html = `<b>⏳ ${what} ${daysText(n)}</b><span>Hasta el ${proDate(pro.expiresAt)}. Nada se cobra solo.</span>`
+		const what = tl(pro.plan === 'trial' ? 'pro.nudgeTrialLeft' : 'pro.nudgeLeft', { n, days: daysText(n) })
+		html = `<b>⏳ ${what}</b><span>${tl('pro.nudgeUntil', { date: proDate(pro.expiresAt) })}</span>`
 	} else if (!pro.active && pro.ended) {
 		key = `ended:${pro.ended.at}`
-		html = `<b>🔔 ${pro.ended.plan === 'trial' ? 'Terminaron tus días gratis de Pro' : 'Tu Pro terminó'}</b><span>El ${proDate(pro.ended.at)}. Tu cuenta sigue guardada: compra días y sigues donde lo dejaste.</span>`
+		html = `<b>🔔 ${tl(pro.ended.plan === 'trial' ? 'pro.trialEnded' : 'pro.proEnded')}</b><span>${tl('pro.endedOn', { date: proDate(pro.ended.at) })}</span>`
 	} else if (!pro.active && pro.canTrial && pro.usage) {
 		// Lo usa mucho y nunca probó Pro: la invitación, una vez por semana si la cierra
 		key = `try:${Math.floor(Date.now() / (7 * 86_400_000))}`
-		buy = `Probar ${proTrialDays} días gratis`
-		html = `<b>★ Llevas ${pro.usage.hours} horas con el terminal en ${daysText(pro.usage.days)}</b><span>Prueba Pro ${proTrialDays} días gratis: radar, precio automático, velas y más. Nada se cobra solo.</span>`
+		buy = tl('pro.tryFreeDays', { n: proTrialDays })
+		html = `<b>${tl('pro.usage', { hours: pro.usage.hours, days: daysText(pro.usage.days) })}</b><span>${tl('pro.usageSub', { n: proTrialDays })}</span>`
 	} else return
 	if (store.getMine('pro.nudgeClosed', '') === key) return
 	const el = document.createElement('div')
 	el.id = 'proNudge'
 	el.className = 'pro-nudge'
 	el.setAttribute('role', 'status')
-	el.innerHTML = `<div class="pro-nudge-text">${html}</div><button class="btn primary sm" data-nudge="buy">${buy}</button><button class="icon-btn small" data-nudge="close" title="Cerrar" aria-label="Cerrar">✕</button>`
+	el.innerHTML = `<div class="pro-nudge-text">${html}</div><button class="btn primary sm" data-nudge="buy">${buy}</button><button class="icon-btn small" data-nudge="close" title="${tl('common.close')}" aria-label="${tl('common.close')}">✕</button>`
 	el.addEventListener('click', (e) => {
 		const b = e.target.closest('[data-nudge]')
 		if (!b) return
@@ -168,7 +168,7 @@ async function refreshPro() {
 			showConnect()
 		} else if (wantsPro() && !proConnectShown && typeof showConnect === 'function') {
 			proConnectShown = true
-			showConnect('Conecta tu cuenta de QvaPay para probar Pro')
+			showConnect(tl('pro.connectToTry'))
 		}
 		return applyPro({ pro: false })
 	}
@@ -200,7 +200,7 @@ async function refreshPro() {
 		}
 		if (pro.active && pro.expiresAt - Date.now() < RENEW_SOON_MS && pro.expiresAt - Date.now() > NUDGE_MS && store.getMine('pro.renewTold', '') !== new Date().toDateString()) {
 			store.setMine('pro.renewTold', new Date().toDateString())
-			toast(`Te quedan ${daysText(daysLeft())} de Pro. Añade más desde el botón ★.`)
+			toast(tl('pro.renewToast', { days: daysText(daysLeft()) }))
 		}
 		renderProNudge()
 		resumeCheckout()
@@ -214,13 +214,13 @@ function renderProChip() {
 	if (!b) return
 	b.hidden = !bk.acct.connected || !pro.enabled
 	b.classList.toggle('on', pro.active)
-	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? daysText(daysLeft()) : pro.canTrial ? 'Probar Pro' : 'Pro'}</span>`
+	b.innerHTML = `<span aria-hidden="true">★</span><span class="pro-label">${pro.active ? daysText(daysLeft()) : pro.canTrial ? tl('pro.chipTry') : 'Pro'}</span>`
 	// El radar es del módulo Pro (TPProRadar) y el análisis, de analysis.js; sin Pro, sus botones abren la ventana de Pro
 	const r = $('radarBtn')
 	if (r) r.hidden = b.hidden
 	const an = document.querySelector('.an-open')
 	if (an) an.hidden = b.hidden
-	b.title = pro.active ? `Te quedan ${daysText(daysLeft())} de Pro (hasta el ${proDate(pro.expiresAt)})` : pro.canTrial ? `Prueba el modo Pro ${proTrialDays} días gratis` : 'Modo Pro'
+	b.title = pro.active ? tl('pro.chipActive', { days: daysText(daysLeft()), date: proDate(pro.expiresAt) }) : pro.canTrial ? tl('pro.chipTrial', { n: proTrialDays }) : tl('pro.mode')
 }
 
 // ── Ventana Pro ──────────────────────────────────────────────────────
@@ -228,31 +228,31 @@ function renderProChip() {
 const canRenew = () => !pro.active || pro.plan === 'trial' || pro.plan === 'gift' || pro.expiresAt - Date.now() <= RENEW_SOON_MS
 
 function showPro() {
-	if (!bk.acct.connected) return toast('Conecta tu cuenta de QvaPay (arriba a la derecha) para usar Pro', true)
-	const feats = `${PRO_FEATURES.map(([i, t, d]) => `<li><span class="pro-ic">${i}</span><div><b>${t}</b><p class="muted">${d}</p></div></li>`).join('')}<li class="pro-more-link"><a class="link" href="${PRO_INFO_URL}" target="_blank" rel="noopener">Saber más sobre el modo Pro →</a></li>`
-	const plans = proPlans.map((p) => `<button class="pro-plan" data-plan="${esc(p.id)}"><b>${esc(p.name)}</b><span class="mono">${usdText(p.usd)}</span><small>${usdText(p.usd / p.days)} al día</small></button>`).join('')
+	if (!bk.acct.connected) return toast(tl('pro.connectFirst'), true)
+	const feats = `${PRO_FEATURES.map(([i, t, d]) => `<li><span class="pro-ic">${i}</span><div><b>${t}</b><p class="muted">${d}</p></div></li>`).join('')}<li class="pro-more-link"><a class="link" href="${PRO_INFO_URL}" target="_blank" rel="noopener">${tl('pro.learnMore')}</a></li>`
+	const plans = proPlans.map((p) => `<button class="pro-plan" data-plan="${esc(p.id)}"><b>${esc(p.name)}</b><span class="mono">${usdText(p.usd)}</span><small>${tl('pro.perDay', { usd: usdText(p.usd / p.days) })}</small></button>`).join('')
 	const refund = NO_REFUNDS
 	openModal(
 		pro.active
-			? `<div class="stack pro-box"><h3>★ Te quedan ${daysText(daysLeft())} de Pro</h3>
-				<p class="muted">@${esc(pro.username)} · ${{ trial: 'días gratis', gift: 'días regalados' }[pro.plan] ?? 'días comprados'} · hasta el <b>${proDate(pro.expiresAt)}</b></p>
+			? `<div class="stack pro-box"><h3>${tl('pro.daysLeft', { days: daysText(daysLeft()) })}</h3>
+				<p class="muted">@${esc(pro.username)} · ${{ trial: tl('pro.planTrial'), gift: tl('pro.planGift') }[pro.plan] ?? tl('pro.planBought')} · ${tl('pro.until', { date: proDate(pro.expiresAt) })}</p>
 				<ul class="pro-feats">${feats}</ul>
 				${
 					canRenew()
-						? `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Compra más días cuando quieras: se suman a los que te quedan.</p><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. Nada se cobra solo. ${refund}</p>`
-						: `<p class="hint">Funciona en todos los dispositivos donde conectes tu cuenta. Podrás comprar más días cuando te queden 5 o menos, desde el <b>${proDate(pro.expiresAt - RENEW_SOON_MS)}</b>. Nada se cobra solo.</p>`
+						? `<p class="hint">${tl('pro.allDevices')}</p><div class="pro-plans">${plans}</div><p class="hint">${tl('pro.payWith', { refund })}</p>`
+						: `<p class="hint">${tl('pro.renewFrom', { date: proDate(pro.expiresAt - RENEW_SOON_MS) })}</p>`
 				}</div>`
 			: pro.canTrial
-				? `<div class="stack pro-box"><h3>★ Prueba el modo Pro ${proTrialDays} días gratis</h3>
+				? `<div class="stack pro-box"><h3>${tl('pro.tryTitle', { n: proTrialDays })}</h3>
 				<ul class="pro-feats">${feats}</ul>
-				<button class="btn primary block" id="proTrial">Activar mis ${proTrialDays} días gratis</button>
-				<p class="hint">Sin pagar nada. Cuando terminen, decides si compras días: nada se cobra solo. Funciona en todos los dispositivos donde conectes tu cuenta.</p>
-				<details class="pro-more"><summary>¿Prefieres comprar días ya?</summary><div class="pro-plans">${plans}</div><p class="hint">Pagas con tu saldo en QvaPay. ${refund}</p></details></div>`
-				: `<div class="stack pro-box"><h3>★ Modo Pro</h3>
+				<button class="btn primary block" id="proTrial">${tl('pro.activateTrial', { n: proTrialDays })}</button>
+				<p class="hint">${tl('pro.trialHint')}</p>
+				<details class="pro-more"><summary>${tl('pro.preferBuy')}</summary><div class="pro-plans">${plans}</div><p class="hint">${tl('pro.payWithShort', { refund })}</p></details></div>`
+				: `<div class="stack pro-box"><h3>★ ${tl('pro.mode')}</h3>
 				<ul class="pro-feats">${feats}</ul>
-				<p class="muted">${pro.trialUsed ? `Ya usaste tus ${proTrialDays} días gratis. ` : ''}Compra días de Pro:</p>
+				<p class="muted">${pro.trialUsed ? tl('pro.trialUsed', { n: proTrialDays }) : ''}${tl('pro.buyProDays')}</p>
 				<div class="pro-plans">${plans}</div>
-				<p class="hint">Pagas con tu saldo en QvaPay. Tu token no sale de este navegador. Nada se cobra solo: cada compra la haces tú. ${refund}</p></div>`,
+				<p class="hint">${tl('pro.payWithLong', { refund })}</p></div>`,
 	)
 	for (const b of $('modalBody').querySelectorAll('[data-plan]')) b.onclick = () => startCheckout(b.dataset.plan)
 	$('proTrial')?.addEventListener('click', startTrial)
@@ -272,9 +272,9 @@ async function startTrial() {
 
 // Recién activados los días gratis
 function showFreeDays() {
-	openModal(`<div class="stack pro-box"><h3>★ Activaste tus ${proTrialDays} días de Pro gratis</h3>
-		<p class="muted">Hasta el <b>${proDate(pro.expiresAt)}</b>. La orden inteligente y el resto del modo Pro ya están activos. Cuando se acaben, puedes comprar más días desde el botón ★.</p>
-		<button class="btn primary block" id="proOk">Listo</button></div>`)
+	openModal(`<div class="stack pro-box"><h3>${tl('pro.trialOn', { n: proTrialDays })}</h3>
+		<p class="muted">${tl('pro.trialOnSub', { date: proDate(pro.expiresAt) })}</p>
+		<button class="btn primary block" id="proOk">${tl('pro.done')}</button></div>`)
 	$('proOk').onclick = closeModal
 }
 
@@ -292,11 +292,11 @@ async function startCheckout(plan) {
 function showWaiting() {
 	const c = store.getMine('pro.checkout', null)
 	if (!c) return
-	openModal(`<div class="stack pro-box"><h3>Esperando tu pago</h3>
-		<p class="muted">Paga la factura en QvaPay. Cuando QvaPay lo confirme, esto se actualiza solo.</p>
-		<a class="btn primary block" href="${esc(c.url)}" target="_blank" rel="noopener">Abrir el pago en QvaPay</a>
-		<p class="hint" id="proWait">Comprobando…</p>
-		<p class="hint">¿Ya pagaste y no se activa? <a class="link" href="https://t.me/terminalp2p" target="_blank" rel="noopener">Consúltanos en el grupo de Telegram</a></p></div>`)
+	openModal(`<div class="stack pro-box"><h3>${tl('pro.waiting')}</h3>
+		<p class="muted">${tl('pro.waitingSub')}</p>
+		<a class="btn primary block" href="${esc(c.url)}" target="_blank" rel="noopener">${tl('pro.openPay')}</a>
+		<p class="hint" id="proWait">${tl('pro.checking')}</p>
+		<p class="hint">${tl('pro.paidNotActive')}</p></div>`)
 	pollCheckout()
 }
 
@@ -321,7 +321,7 @@ function pollCheckout() {
 			if (r.status === 'expired') {
 				proPolling = null
 				store.setMine('pro.checkout', null)
-				if ($('proWait')) $('proWait').textContent = 'La factura caducó sin pagarse. Puedes pedir otra.'
+				if ($('proWait')) $('proWait').textContent = tl('pro.invoiceExpired')
 				return
 			}
 		} catch (e) {
@@ -355,15 +355,15 @@ function resumeCheckout() {
 	}
 	if (back === 'cancel') {
 		store.setMine('pro.checkout', null)
-		return toast('Pago cancelado: no se cobró nada')
+		return toast(tl('pro.payCancelled'))
 	}
 	if (store.getMine('pro.checkout', null)) back === 'ok' && $('modal').hidden ? showWaiting() : pollCheckout()
 }
 
 function showWelcome() {
-	openModal(`<div class="stack pro-box"><h3>★ Días añadidos</h3>
-		<p class="muted">Ahora te quedan <b>${daysText(daysLeft())}</b> de Pro, hasta el <b>${proDate(pro.expiresAt)}</b>. Funcionan en cualquier dispositivo donde conectes tu cuenta.</p>
-		<button class="btn primary block" id="proOk">Listo</button></div>`)
+	openModal(`<div class="stack pro-box"><h3>${tl('pro.added')}</h3>
+		<p class="muted">${tl('pro.addedSub', { days: daysText(daysLeft()), date: proDate(pro.expiresAt) })}</p>
+		<button class="btn primary block" id="proOk">${tl('pro.done')}</button></div>`)
 	$('proOk').onclick = closeModal
 }
 

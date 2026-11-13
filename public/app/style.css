@@ -778,6 +778,23 @@ a.icon-btn { text-decoration: none; }
 .help-menu a span { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
 .help-menu .help-tg { border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; margin-top: 4px; padding-top: 12px; font-size: 13px; color: var(--accent); }
 
+/* ══ Selector de idioma ═══════════════════════════════════════════════ */
+.lang { position: relative; }
+.lang-btn {
+	display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 10px 0 9px; border-radius: var(--r-sm); list-style: none; cursor: pointer;
+	border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2); font: 600 12px var(--sans); letter-spacing: 0.02em; user-select: none;
+}
+.lang-btn::-webkit-details-marker { display: none; }
+.lang-btn:hover, .lang[open] .lang-btn { color: var(--text); background: var(--surface-3); }
+.lang-menu {
+	position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; min-width: 150px; display: flex; flex-direction: column; gap: 2px;
+	padding: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow);
+}
+.lang-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border: 0; border-radius: 8px; background: none; color: var(--text); font-size: 14px; text-align: left; }
+.lang-menu button:hover { background: var(--surface-2); }
+.lang-menu button[aria-checked='true'] { color: var(--accent); font-weight: 600; }
+.lang-menu button[aria-checked='true']::after { content: '✓'; }
+
 /* ══ Responsive ═══════════════════════════════════════════════════════ */
 @media (max-width: 1280px) {
 	.layout {
@@ -903,6 +920,16 @@ a.icon-btn { text-decoration: none; }
 	/* El botón no está en el borde: la lista va de lado a lado bajo la barra */
 	.help { position: static; }
 	.help-menu { left: 12px; right: 12px; width: auto; top: calc(100% + 6px); }
+	/* El idioma: el globo y el código, más estrecho; la lista sale bajo la barra, pegada a la derecha */
+	.lang-btn { padding: 0 7px; gap: 4px; }
+	.lang { position: static; }
+	.lang-menu { right: 12px; top: calc(100% + 6px); }
+}
+@media (max-width: 520px) {
+	/* Sin sitio para el código: solo el globo (la lista marca el idioma elegido) */
+	.nav { gap: 4px; }
+	.lang-btn { width: 34px; padding: 0; justify-content: center; }
+	.lang-cur { display: none; }
 }
 
 /* ══ Pro ══════════════════════════════════════════════════════════════ */

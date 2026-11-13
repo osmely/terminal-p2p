@@ -3,7 +3,7 @@
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-	<title>Terminal P2P · El P2P de QvaPay como un exchange</title>
+	<title data-i18n="site.title">Terminal P2P · El P2P de QvaPay como un exchange</title>
 	<meta name="description" content="Libro de órdenes en vivo, profundidad, histórico de la tasa y tus operaciones P2P de QvaPay paso a paso. Gratis, de código abierto y sin custodia: todo corre en tu navegador." />
 	<meta property="og:title" content="Terminal P2P · El P2P de QvaPay como un exchange" />
 	<meta property="og:description" content="Libro de órdenes en vivo, histórico de la tasa y tus operaciones P2P de QvaPay paso a paso. Código abierto y sin custodia." />
@@ -13,6 +13,7 @@
 	<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)" />
 	<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)" />
 	<script src="/theme.js"></script>
+	<script src="/i18n.js"></script>
 	<script src="/hit.js" defer></script>
 	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 	<link rel="stylesheet" href="/vendor/fonts.css" />
@@ -28,36 +29,44 @@
 				</span>
 				<span>Terminal P2P</span>
 			</a>
-			<nav class="nav-links" aria-label="Secciones">
-				<a href="#tasas">Tasas</a>
-				<a href="#operar">Operar</a>
-				<a href="#funciones">Funciones</a>
-				<a href="#privacidad">Privacidad</a>
+			<nav class="nav-links" aria-label="Secciones" data-i18n-aria-label="site.sections">
+				<a href="#tasas" data-i18n="site.navRates">Tasas</a>
+				<a href="#operar" data-i18n="site.navTrade">Operar</a>
+				<a href="#funciones" data-i18n="site.navFeatures">Funciones</a>
+				<a href="#privacidad" data-i18n="site.navPrivacy">Privacidad</a>
 				<a href="#planes" data-pro>Pro</a>
-				<a href="#preguntas">Preguntas</a>
+				<a href="#preguntas" data-i18n="site.navFaq">Preguntas</a>
 				<a href="/blog/">Blog</a>
 			</nav>
 			<div class="nav-actions">
 				<details class="help">
-					<summary class="help-btn" title="Ayuda" aria-label="Ayuda"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></g></svg><span class="help-label">Ayuda</span></summary>
+					<summary class="help-btn" title="Ayuda" aria-label="Ayuda" data-i18n-title="site.help" data-i18n-aria-label="site.help"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></g></svg><span class="help-label" data-i18n="site.help">Ayuda</span></summary>
 					<div class="help-menu">
-						<a href="/blog/guia-primeros-pasos/"><b>Primeros pasos</b><span>Guía para nuevos usuarios: la pantalla, comprar, vender y operar seguro</span></a>
-						<a href="/blog/conectar-qvapay-token/"><b>Conectar tu cuenta</b><span>Crear el token de QvaPay paso a paso</span></a>
-						<a href="/blog/modo-pro/" data-pro><b>Modo Pro</b><span>Qué incluye, cuánto cuesta y cómo funciona</span></a>
-						<a class="help-tg" href="https://t.me/terminalp2p" target="_blank" rel="noopener">¿Otra duda? Pregunta en @terminalp2p</a>
+						<a href="/blog/guia-primeros-pasos/"><b data-i18n="site.helpStart">Primeros pasos</b><span data-i18n="site.helpStartSub">Guía para nuevos usuarios: la pantalla, comprar, vender y operar seguro</span></a>
+						<a href="/blog/conectar-qvapay-token/"><b data-i18n="site.helpConnect">Conectar tu cuenta</b><span data-i18n="site.helpConnectSub">Crear el token de QvaPay paso a paso</span></a>
+						<a href="/blog/modo-pro/" data-pro><b data-i18n="site.helpPro">Modo Pro</b><span data-i18n="site.helpProSub">Qué incluye, cuánto cuesta y cómo funciona</span></a>
+						<a class="help-tg" href="https://t.me/terminalp2p" target="_blank" rel="noopener" data-i18n="site.helpTg">¿Otra duda? Pregunta en @terminalp2p</a>
 					</div>
 				</details>
-				<a class="icon-btn tg-icon" href="https://t.me/terminalp2p" target="_blank" rel="noopener" title="Grupo de Telegram @terminalp2p" aria-label="Grupo de Telegram @terminalp2p">
+				<details class="lang" id="langPick">
+					<summary class="lang-btn" title="Idioma · Language" aria-label="Idioma · Language"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c2.6 2.6 3.9 5.8 3.9 9.5s-1.3 6.9-3.9 9.5c-2.6-2.6-3.9-5.8-3.9-9.5S9.4 5.1 12 2.5z"/></g></svg><span class="lang-cur">ES</span></summary>
+					<div class="lang-menu" role="menu">
+						<button type="button" role="menuitemradio" data-lang="es" lang="es">Español</button>
+						<button type="button" role="menuitemradio" data-lang="en" lang="en">English</button>
+						<button type="button" role="menuitemradio" data-lang="pt" lang="pt">Português</button>
+					</div>
+				</details>
+				<a class="icon-btn tg-icon" href="https://t.me/terminalp2p" target="_blank" rel="noopener" title="Grupo de Telegram @terminalp2p" aria-label="Grupo de Telegram @terminalp2p" data-i18n-title="site.tgGroup" data-i18n-aria-label="site.tgGroup">
 					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
 				</a>
-				<a class="icon-btn hide-sm" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener" title="Código fuente en GitHub" aria-label="Código fuente en GitHub">
+				<a class="icon-btn hide-sm" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener" title="Código fuente en GitHub" aria-label="Código fuente en GitHub" data-i18n-title="site.github" data-i18n-aria-label="site.github">
 					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.38-3.37-1.38-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 015 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.26 10.26 0 0022 12.25C22 6.58 17.52 2 12 2z"/></svg>
 				</a>
-				<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+				<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema" data-i18n-title="site.theme" data-i18n-aria-label="site.theme">
 					<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 					<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
 				</button>
-				<a class="btn primary" href="https://app.terminalp2p.com">Abrir<span class="hide-xs"> terminal</span></a>
+				<a class="btn primary" href="https://app.terminalp2p.com"><span data-i18n="site.open">Abrir</span><span class="hide-xs" data-i18n="site.openTail"> terminal</span></a>
 			</div>
 		</div>
 	</header>
@@ -67,28 +76,28 @@
 		<section class="hero">
 			<div class="wrap hero-in">
 				<div class="hero-copy">
-					<span class="eyebrow"><i class="pulse" aria-hidden="true"></i> Código abierto · Sin custodia · Gratis</span>
-					<h1>El P2P de QvaPay,<br /><span class="grad">como un exchange.</span></h1>
-					<p class="lead">Libro de órdenes en vivo, profundidad e histórico de la tasa de cada moneda. Y opera desde aquí: publica y toma ofertas, paga, libera y califica, con avisos en cada paso.</p>
+					<span class="eyebrow"><i class="pulse" aria-hidden="true"></i> <span data-i18n="site.eyebrow">Código abierto · Sin custodia · Gratis</span></span>
+					<h1 data-i18n-html="site.h1">El P2P de QvaPay,<br /><span class="grad">como un exchange.</span></h1>
+					<p class="lead" data-i18n="site.lead">Libro de órdenes en vivo, profundidad e histórico de la tasa de cada moneda. Y opera desde aquí: publica y toma ofertas, paga, libera y califica, con avisos en cada paso.</p>
 					<div class="cta-row">
 						<a class="btn primary lg" href="https://app.terminalp2p.com">
-							Abrir terminal
+							<span data-i18n="site.openTerminal">Abrir terminal</span>
 							<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
 						</a>
-						<a class="btn ghost lg" href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener"><span class="btn-stack">Crear cuenta en QvaPay<small>(usuario referido)</small></span></a>
+						<a class="btn ghost lg" href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener"><span class="btn-stack" data-i18n-html="site.createAccount">Crear cuenta en QvaPay<small>(usuario referido)</small></span></a>
 					</div>
-					<p class="ref-note">Las tasas y el histórico se ven sin cuenta, y el libro, en la mini app de QvaPay. Para el libro en el terminal y para operar necesitas una cuenta de QvaPay.</p>
-					<a class="tg-chip" href="https://t.me/terminalp2p" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg><span>Síguenos en Telegram <b>@terminalp2p</b></span><span aria-hidden="true">→</span></a>
+					<p class="ref-note" data-i18n="site.heroNote">Las tasas y el histórico se ven sin cuenta, y el libro, en la mini app de QvaPay. Para el libro en el terminal y para operar necesitas una cuenta de QvaPay.</p>
+					<a class="tg-chip" href="https://t.me/terminalp2p" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg><span data-i18n-html="site.followTg">Síguenos en Telegram <b>@terminalp2p</b></span><span aria-hidden="true">→</span></a>
 				</div>
 
 				<!-- Ilustración del terminal (decorativa) -->
 				<div class="mock" aria-hidden="true">
 					<div class="mock-bar"><i></i><i></i><i></i><span>app.terminalp2p.com</span></div>
 					<div class="mock-head">
-						<b>QUSD / CUP Transferencia</b>
+						<b data-i18n="site.mockPair">QUSD / CUP Transferencia</b>
 						<span class="mock-stats"><em class="ask">1,135.00</em><em class="bid">1,125.00</em></span>
 					</div>
-					<div class="mock-cols"><span>Precio</span><span>USD</span><span>Acumulado</span></div>
+					<div class="mock-cols"><span data-i18n="site.mockPrice">Precio</span><span>USD</span><span data-i18n="site.mockTotal">Acumulado</span></div>
 					<div class="mock-book asks">
 						<div class="mrow" style="--w: 92%"><span>1,145.00</span><span>210</span><span>612</span></div>
 						<div class="mrow" style="--w: 58%"><span>1,142.50</span><span>95</span><span>402</span></div>
@@ -96,7 +105,7 @@
 						<div class="mrow" style="--w: 24%"><span>1,137.50</span><span>64</span><span>187</span></div>
 						<div class="mrow" style="--w: 14%"><span>1,135.00</span><span>123</span><span>123</span></div>
 					</div>
-					<div class="mock-spread"><span>Diferencial</span><span>10.00 · +0.89%</span></div>
+					<div class="mock-spread"><span data-i18n="site.mockSpread">Diferencial</span><span>10.00 · +0.89%</span></div>
 					<div class="mock-book bids">
 						<div class="mrow" style="--w: 11%"><span>1,125.00</span><span>80</span><span>80</span></div>
 						<div class="mrow" style="--w: 30%"><span>1,122.50</span><span>150</span><span>230</span></div>
@@ -117,39 +126,39 @@
 			<div class="wrap">
 				<div class="sec-head">
 					<div>
-						<h2>Terminal P2P <span class="grad">en cifras</span></h2>
-						<p>Estadísticas de operaciones realizadas en el terminal</p>
+						<h2 data-i18n-html="site.statsTitle">Terminal P2P <span class="grad">en cifras</span></h2>
+						<p data-i18n="site.statsSub">Estadísticas de operaciones realizadas en el terminal</p>
 					</div>
 				</div>
 				<div class="flow">
 					<article class="flow-step">
 						<span class="flow-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg></span>
 						<b class="flow-n" data-stat="created">0</b>
-						<span class="flow-label">Ofertas publicadas</span>
+						<span class="flow-label" data-i18n="site.statCreated">Ofertas publicadas</span>
 						<em class="flow-day" data-day="created"></em>
 					</article>
 					<article class="flow-step">
 						<span class="flow-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 12h10M13 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
 						<b class="flow-n" data-stat="taken">0</b>
-						<span class="flow-label">Operaciones tomadas</span>
+						<span class="flow-label" data-i18n="site.statTaken">Operaciones tomadas</span>
 						<em class="flow-day" data-day="taken"></em>
 					</article>
 					<article class="flow-step">
 						<span class="flow-ico done" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
 						<b class="flow-n" data-stat="completed">0</b>
-						<span class="flow-label">Operaciones completadas</span>
+						<span class="flow-label" data-i18n="site.statCompleted">Operaciones completadas</span>
 						<em class="flow-day" data-day="completed"></em>
 					</article>
 				</div>
 				<article class="vol">
 					<div class="vol-copy">
-						<span class="flow-label">Volumen completado</span>
+						<span class="flow-label" data-i18n="site.statVolume">Volumen completado</span>
 						<b class="vol-n"><span data-stat="volume">0</span><small>USD</small></b>
 						<em class="flow-day" data-day="volume"></em>
 					</div>
 					<div class="vol-chart">
-						<div class="bars" id="statsBars" role="img" aria-label="Volumen completado por día"></div>
-						<div class="bars-axis"><span id="barsFrom"></span><span>hoy</span></div>
+						<div class="bars" id="statsBars" role="img" aria-label="Volumen completado por día" data-i18n-aria-label="site.barsAria"></div>
+						<div class="bars-axis"><span id="barsFrom"></span><span data-i18n="site.today">hoy</span></div>
 					</div>
 				</article>
 			</div>
@@ -160,21 +169,21 @@
 			<div class="wrap">
 				<div class="sec-head">
 					<div>
-						<h2>Tasas de hoy en QvaPay</h2>
-						<p>Mediana de lo que realmente se completó en el P2P, por moneda. Se actualiza sola.</p>
+						<h2 data-i18n="site.ratesTitle">Tasas de hoy en QvaPay</h2>
+						<p data-i18n="site.ratesSub">Mediana de lo que realmente se completó en el P2P, por moneda. Se actualiza sola.</p>
 					</div>
-					<a class="link-arrow" href="https://app.terminalp2p.com">Ver libros en vivo →</a>
+					<a class="link-arrow" href="https://app.terminalp2p.com" data-i18n="site.liveBooks">Ver libros en vivo →</a>
 				</div>
 				<div class="rates" id="rates">
 					<div class="rate skeleton"></div><div class="rate skeleton"></div><div class="rate skeleton"></div><div class="rate skeleton"></div>
 				</div>
-				<p class="src" id="ratesSrc">Fuente: QvaPay.</p>
+				<p class="src" id="ratesSrc" data-i18n="site.ratesSrc">Fuente: QvaPay.</p>
 				<div class="informal" id="informal" hidden>
-					<h3>Mercado informal <small>CUP por unidad, mediana de las últimas 24 h</small></h3>
+					<h3 data-i18n-html="site.informalTitle">Mercado informal <small>CUP por unidad, mediana de las últimas 24 h</small></h3>
 					<div class="inf-row" id="infRow"></div>
-					<p class="src">Fuente: <a href="https://eltoque.com/tasas-de-cambio-de-moneda-en-cuba-hoy" target="_blank" rel="noopener">elTOQUE</a>, a partir de ofertas en grupos y sitios de clasificados. Tasas de referencia.</p>
+					<p class="src" data-i18n-html="site.informalSrc">Fuente: <a href="https://eltoque.com/tasas-de-cambio-de-moneda-en-cuba-hoy" target="_blank" rel="noopener">elTOQUE</a>, a partir de ofertas en grupos y sitios de clasificados. Tasas de referencia.</p>
 				</div>
-				<p class="tasa-more"><a class="link-arrow" href="/tasa-usd-qvapay-hoy/">La tasa del USD de hoy, con su gráfica de 30 días →</a></p>
+				<p class="tasa-more"><a class="link-arrow" href="/tasa-usd-qvapay-hoy/" data-i18n="site.tasaMore">La tasa del USD de hoy, con su gráfica de 30 días →</a></p>
 			</div>
 		</section>
 
@@ -184,10 +193,10 @@
 				<a class="tg-card" href="https://t.me/terminalp2p" target="_blank" rel="noopener">
 					<span class="tg-logo"><svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg></span>
 					<span class="tg-copy">
-						<b class="tg-title">Únete al grupo de Telegram</b>
-						<span class="tg-text">Novedades del terminal, la tasa del día y una comunidad que opera en el P2P. Pregunta, propone ideas y entérate antes que nadie.</span>
+						<b class="tg-title" data-i18n="site.tgTitle">Únete al grupo de Telegram</b>
+						<span class="tg-text" data-i18n="site.tgText">Novedades del terminal, la tasa del día y una comunidad que opera en el P2P. Pregunta, propone ideas y entérate antes que nadie.</span>
 					</span>
-					<span class="btn tg lg"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg> Unirme a @terminalp2p</span>
+					<span class="btn tg lg"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg> <span data-i18n="site.tgJoin">Unirme a @terminalp2p</span></span>
 				</a>
 			</div>
 		</section>
@@ -196,39 +205,39 @@
 		<section class="sec" id="funciones">
 			<div class="wrap">
 				<div class="sec-head center">
-					<h2>Todo el mercado en una pantalla</h2>
-					<p>Las ofertas del P2P de QvaPay, ordenadas y medidas para que veas el mercado de un vistazo.</p>
+					<h2 data-i18n="site.featTitle">Todo el mercado en una pantalla</h2>
+					<p data-i18n="site.featSub">Las ofertas del P2P de QvaPay, ordenadas y medidas para que veas el mercado de un vistazo.</p>
 				</div>
 				<div class="features">
 					<article class="feat">
 						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 10h14M4 14h8M4 18h16" /></svg></span>
-						<h3>Libro de órdenes</h3>
-						<p>Ventas y compras ordenadas por precio, con lo acumulado, la reputación de cada contraparte y filtros por antigüedad, monto y operaciones.</p>
+						<h3 data-i18n="site.feat1">Libro de órdenes</h3>
+						<p data-i18n="site.feat1Text">Ventas y compras ordenadas por precio, con lo acumulado, la reputación de cada contraparte y filtros por antigüedad, monto y operaciones.</p>
 					</article>
 					<article class="feat">
 						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M4 20V14l4-2 4 3 4-6 4 2v9" /></svg></span>
-						<h3>Profundidad y diferencial</h3>
-						<p>Cuánta liquidez hay cerca del precio medio, el diferencial al momento y aviso cuando el libro se cruza.</p>
+						<h3 data-i18n="site.feat2">Profundidad y diferencial</h3>
+						<p data-i18n="site.feat2Text">Cuánta liquidez hay cerca del precio medio, el diferencial al momento y aviso cuando el libro se cruza.</p>
 					</article>
 					<article class="feat">
 						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M10 20V4M15 20v-7M20 20V8" /></svg></span>
-						<h3>Operaciones completadas</h3>
-						<p>La distribución de precios de lo que de verdad se cerró en las últimas 48 h, no solo lo que se pide.</p>
+						<h3 data-i18n="site.feat3">Operaciones completadas</h3>
+						<p data-i18n="site.feat3Text">La distribución de precios de lo que de verdad se cerró en las últimas 48 h, no solo lo que se pide.</p>
 					</article>
 					<article class="feat">
 						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-5 4 3 8-8M15 7h5v5" /></svg></span>
-						<h3>Histórico de la tasa</h3>
-						<p>La tasa de compra y venta de cada moneda en el tiempo, junto a la del mercado informal de elTOQUE desde 2021.</p>
+						<h3 data-i18n="site.feat4">Histórico de la tasa</h3>
+						<p data-i18n="site.feat4Text">La tasa de compra y venta de cada moneda en el tiempo, junto a la del mercado informal de elTOQUE desde 2021.</p>
 					</article>
 					<article class="feat">
 						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2h9" /></svg></span>
-						<h3>Mis operaciones</h3>
-						<p>Todo el ciclo del P2P: publica y gestiona tus ofertas, toma las del libro y sigue cada operación con el paso que toca, hasta liberar y calificar.</p>
+						<h3 data-i18n="site.feat5">Mis operaciones</h3>
+						<p data-i18n="site.feat5Text">Todo el ciclo del P2P: publica y gestiona tus ofertas, toma las del libro y sigue cada operación con el paso que toca, hasta liberar y calificar.</p>
 					</article>
 					<article class="feat">
 						<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M12 8a4 4 0 100 8 4 4 0 000-8z" /></svg></span>
-						<h3>Lectura del mercado y ranking</h3>
-						<p>Observaciones automáticas, comparación con el mercado informal, la intención del mercado y un ranking de usuarios por liquidez, experiencia y reputación.</p>
+						<h3 data-i18n="site.feat6">Lectura del mercado y ranking</h3>
+						<p data-i18n="site.feat6Text">Observaciones automáticas, comparación con el mercado informal, la intención del mercado y un ranking de usuarios por liquidez, experiencia y reputación.</p>
 					</article>
 				</div>
 			</div>
@@ -238,28 +247,28 @@
 		<section class="sec" id="operar">
 			<div class="wrap">
 				<div class="sec-head center">
-					<h2>Opera el P2P de principio a fin</h2>
-					<p>Publica, toma y cierra tus operaciones sin salir del terminal. El dinero sigue siempre en el escrow de QvaPay.</p>
+					<h2 data-i18n="site.opTitle">Opera el P2P de principio a fin</h2>
+					<p data-i18n="site.opSub">Publica, toma y cierra tus operaciones sin salir del terminal. El dinero sigue siempre en el escrow de QvaPay.</p>
 				</div>
 				<div class="op">
-					<ol class="op-steps" role="tablist" aria-label="Pasos para operar">
-						<li><button class="op-step active" role="tab" aria-selected="true" data-img="/img/operar-1-publicar.jpg" data-w="900" data-h="1404" data-alt="Formulario para publicar una oferta de venta por partes, con referencias del mercado y el puesto que tendría en el libro">
-							<b>Publica tu oferta</b><span>Compra o venta, fija o por partes. Ves las referencias del mercado, en qué puesto del libro quedarías y un aviso si el precio parece un error.</span></button></li>
-						<li><button class="op-step" role="tab" aria-selected="false" data-img="/img/operar-2-gestionar.jpg" data-w="900" data-h="1295" data-alt="Gestión de una oferta publicada: editar precio y monto, pausar, cancelar y ver sus órdenes">
-							<b>Gestiónala</b><span>Cambia el precio o el monto, pausa o cancela, y sigue las órdenes de tus ofertas por partes.</span></button></li>
-						<li><button class="op-step" role="tab" aria-selected="false" data-img="/img/operar-3-tomar.jpg" data-w="900" data-h="771" data-alt="Tomar una oferta del libro eligiendo cuántos USD comprar">
-							<b>Toma ofertas del libro</b><span>Un clic en el libro, eliges cuánto y el terminal te explica qué pasa al tomarla.</span></button></li>
-						<li><button class="op-step" role="tab" aria-selected="false" data-img="/img/operar-4-cerrar.jpg" data-w="900" data-h="1211" data-alt="Detalle de una operación con los datos de pago para copiar, la cuenta atrás del plazo y el chat">
-							<b>Paga y libera</b><span>Datos de pago para copiar, cuenta atrás del plazo, «ya pagué» con referencia, chat, y liberar solo cuando QvaPay confirma el pago.</span></button></li>
-						<li><button class="op-step" role="tab" aria-selected="false" data-img="/img/operar-5-operaciones.jpg" data-w="700" data-h="1268" data-alt="Mis operaciones en el móvil: cada operación con su siguiente paso y la cuenta atrás del plazo">
-							<b>No te pierdas nada</b><span>Cada operación dice qué te toca, y el terminal te avisa cuando te pagan, te escriben o se acaba el plazo, aunque estés en otra pestaña.</span></button></li>
+					<ol class="op-steps" role="tablist" aria-label="Pasos para operar" data-i18n-aria-label="site.opSteps">
+						<li><button class="op-step active" role="tab" aria-selected="true" data-img="/img/operar-1-publicar.jpg" data-w="900" data-h="1404" data-alt="Formulario para publicar una oferta de venta por partes, con referencias del mercado y el puesto que tendría en el libro" data-alt-key="site.op1Alt">
+							<b data-i18n="site.op1">Publica tu oferta</b><span data-i18n="site.op1Text">Compra o venta, fija o por partes. Ves las referencias del mercado, en qué puesto del libro quedarías y un aviso si el precio parece un error.</span></button></li>
+						<li><button class="op-step" role="tab" aria-selected="false" data-img="/img/operar-2-gestionar.jpg" data-w="900" data-h="1295" data-alt="Gestión de una oferta publicada: editar precio y monto, pausar, cancelar y ver sus órdenes" data-alt-key="site.op2Alt">
+							<b data-i18n="site.op2">Gestiónala</b><span data-i18n="site.op2Text">Cambia el precio o el monto, pausa o cancela, y sigue las órdenes de tus ofertas por partes.</span></button></li>
+						<li><button class="op-step" role="tab" aria-selected="false" data-img="/img/operar-3-tomar.jpg" data-w="900" data-h="771" data-alt="Tomar una oferta del libro eligiendo cuántos USD comprar" data-alt-key="site.op3Alt">
+							<b data-i18n="site.op3">Toma ofertas del libro</b><span data-i18n="site.op3Text">Un clic en el libro, eliges cuánto y el terminal te explica qué pasa al tomarla.</span></button></li>
+						<li><button class="op-step" role="tab" aria-selected="false" data-img="/img/operar-4-cerrar.jpg" data-w="900" data-h="1211" data-alt="Detalle de una operación con los datos de pago para copiar, la cuenta atrás del plazo y el chat" data-alt-key="site.op4Alt">
+							<b data-i18n="site.op4">Paga y libera</b><span data-i18n="site.op4Text">Datos de pago para copiar, cuenta atrás del plazo, «ya pagué» con referencia, chat, y liberar solo cuando QvaPay confirma el pago.</span></button></li>
+						<li><button class="op-step" role="tab" aria-selected="false" data-img="/img/operar-5-operaciones.jpg" data-w="700" data-h="1268" data-alt="Mis operaciones en el móvil: cada operación con su siguiente paso y la cuenta atrás del plazo" data-alt-key="site.op5Alt">
+							<b data-i18n="site.op5">No te pierdas nada</b><span data-i18n="site.op5Text">Cada operación dice qué te toca, y el terminal te avisa cuando te pagan, te escriben o se acaba el plazo, aunque estés en otra pestaña.</span></button></li>
 					</ol>
 					<figure class="op-shot">
-						<img id="opImg" src="/img/operar-1-publicar.jpg" width="900" height="1404" alt="Formulario para publicar una oferta de venta por partes, con referencias del mercado y el puesto que tendría en el libro" />
-						<figcaption>Capturas del terminal con datos de ejemplo.</figcaption>
+						<img id="opImg" data-i18n-alt="site.op1Alt" src="/img/operar-1-publicar.jpg" width="900" height="1404" alt="Formulario para publicar una oferta de venta por partes, con referencias del mercado y el puesto que tendría en el libro" />
+						<figcaption data-i18n="site.opCaption">Capturas del terminal con datos de ejemplo.</figcaption>
 					</figure>
 				</div>
-				<p class="op-cta"><a class="btn primary lg" href="https://app.terminalp2p.com">Empezar a operar</a></p>
+				<p class="op-cta"><a class="btn primary lg" href="https://app.terminalp2p.com" data-i18n="site.startTrading">Empezar a operar</a></p>
 			</div>
 		</section>
 
@@ -267,26 +276,26 @@
 		<section class="sec alt">
 			<div class="wrap">
 				<div class="sec-head center">
-					<h2>Empieza en un minuto</h2>
+					<h2 data-i18n="site.startTitle">Empieza en un minuto</h2>
 				</div>
 				<ol class="steps">
 					<li>
-						<b>Crea tu cuenta de QvaPay</b>
-						<p>Es gratis. Para el P2P, QvaPay pide verificar tu identidad (KYC), tu teléfono y vincular Telegram.</p>
-						<p class="step-link"><a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crear cuenta en QvaPay →</a> <small>(usuario referido)</small></p>
+						<b data-i18n="site.step1">Crea tu cuenta de QvaPay</b>
+						<p data-i18n="site.step1Text">Es gratis. Para el P2P, QvaPay pide verificar tu identidad (KYC), tu teléfono y vincular Telegram.</p>
+						<p class="step-link" data-i18n-html="site.step1Link"><a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crear cuenta en QvaPay →</a> <small>(usuario referido)</small></p>
 					</li>
 					<li>
-						<b>Abre el terminal</b>
-						<p>Las tasas, las operaciones completadas y el histórico se ven al instante, sin cuenta.</p>
+						<b data-i18n="site.step2">Abre el terminal</b>
+						<p data-i18n="site.step2Text">Las tasas, las operaciones completadas y el histórico se ven al instante, sin cuenta.</p>
 					</li>
 					<li>
-						<b>Conecta tu token</b>
-						<p>Crea un token en qvapay.com/dev/tokens con permisos <code>read</code>, <code>p2p:read</code> y <code>p2p:buy</code> o <code>p2p:sell</code>. Nunca <code>transfer</code> ni <code>withdraw</code>.</p>
-						<p class="step-link"><a href="/blog/conectar-qvapay-token/">Ver la guía paso a paso →</a></p>
+						<b data-i18n="site.step3">Conecta tu token</b>
+						<p data-i18n-html="site.step3Text">Crea un token en qvapay.com/dev/tokens con permisos <code>read</code>, <code>p2p:read</code> y <code>p2p:buy</code> o <code>p2p:sell</code>. Nunca <code>transfer</code> ni <code>withdraw</code>.</p>
+						<p class="step-link"><a href="/blog/conectar-qvapay-token/" data-i18n="site.step3Link">Ver la guía paso a paso →</a></p>
 					</li>
 					<li>
-						<b>Mira el libro y opera</b>
-						<p>Con tu cuenta conectada ves el libro en vivo, igual que en QvaPay, y operas desde aquí.</p>
+						<b data-i18n="site.step4">Mira el libro y opera</b>
+						<p data-i18n="site.step4Text">Con tu cuenta conectada ves el libro en vivo, igual que en QvaPay, y operas desde aquí.</p>
 					</li>
 				</ol>
 			</div>
@@ -297,39 +306,39 @@
 		<section class="sec alt" id="planes" data-pro>
 			<div class="wrap">
 				<div class="sec-head center">
-					<h2>Gratis para operar. Modo Pro para ir más allá</h2>
-					<p>El terminal completo es gratis. El modo Pro le suma herramientas para el trader que quiere ganar tiempo y precio.</p>
+					<h2 data-i18n="site.plansTitle">Gratis para operar. Modo Pro para ir más allá</h2>
+					<p data-i18n="site.plansSub">El terminal completo es gratis. El modo Pro le suma herramientas para el trader que quiere ganar tiempo y precio.</p>
 				</div>
 				<div class="plans">
 					<article class="plan">
-						<h3>Gratis</h3>
+						<h3 data-i18n="site.free">Gratis</h3>
 						<p class="price">0 USD</p>
 						<ul>
-							<li>Libro en vivo, profundidad e histórico de cada tasa</li>
-							<li>Publicar, tomar, pagar y liberar desde el terminal</li>
-							<li>Vender en un toque y ficha de cada usuario</li>
-							<li>Intención y actividad del mercado, avisos</li>
+							<li data-i18n="site.free1">Libro en vivo, profundidad e histórico de cada tasa</li>
+							<li data-i18n="site.free2">Publicar, tomar, pagar y liberar desde el terminal</li>
+							<li data-i18n="site.free3">Vender en un toque y ficha de cada usuario</li>
+							<li data-i18n="site.free4">Intención y actividad del mercado, avisos</li>
 						</ul>
-						<a class="btn block" href="https://app.terminalp2p.com">Abrir terminal</a>
+						<a class="btn block" href="https://app.terminalp2p.com" data-i18n="site.openTerminal">Abrir terminal</a>
 					</article>
 					<article class="plan pro">
-						<span class="plan-tag"><span data-trial>7</span> días gratis para probarlo</span>
-						<h3>★ Modo Pro</h3>
-						<p class="price"><span data-price="month">3.99 USD</span> <small>30 días</small></p>
-						<p class="price-alt">o 7 días por <span data-price="week">1.99 USD</span> · 90 días por <span data-price="quarter">9.99 USD</span></p>
+						<span class="plan-tag" data-i18n-html="site.planTag"><span data-trial data-i18n-slot="trial">7</span> días gratis para probarlo</span>
+						<h3 data-i18n="site.proTitle">★ Modo Pro</h3>
+						<p class="price"><span data-price="month">3.99 USD</span> <small data-i18n="site.days30">30 días</small></p>
+						<p class="price-alt" data-i18n-html="site.priceAlt">o 7 días por <span data-price="week" data-i18n-slot="week">1.99 USD</span> · 90 días por <span data-price="quarter" data-i18n-slot="quarter">9.99 USD</span></p>
 						<ul>
-							<li>Todo lo gratis</li>
-							<li><b>Orden inteligente:</b> toma y publica a la vez, como en un exchange</li>
-							<li><b>Radar:</b> vigila el libro, avisa y, si quieres, toma al instante</li>
-							<li><b>Análisis de mercado:</b> la semana y el mes de cada mercado, frente a elTOQUE y en PDF</li>
-							<li><b>Precio automático:</b> tu oferta la primera, dentro de tus límites</li>
-							<li><b>Libro al instante</b> y <b>libro cruzado</b> que puedes aprovechar</li>
-							<li><b>Avisos por Telegram</b> de tus ofertas, aunque cierres el terminal, y de la tasa</li>
-							<li><b>Ganancias</b> por mercado, con la comisión</li>
-							<li><b>Compras, ventas y USD</b> en el gráfico</li>
+							<li data-i18n="site.pro1">Todo lo gratis</li>
+							<li data-i18n-html="site.pro2"><b>Orden inteligente:</b> toma y publica a la vez, como en un exchange</li>
+							<li data-i18n-html="site.pro3"><b>Radar:</b> vigila el libro, avisa y, si quieres, toma al instante</li>
+							<li data-i18n-html="site.pro4"><b>Análisis de mercado:</b> la semana y el mes de cada mercado, frente a elTOQUE y en PDF</li>
+							<li data-i18n-html="site.pro5"><b>Precio automático:</b> tu oferta la primera, dentro de tus límites</li>
+							<li data-i18n-html="site.pro6"><b>Libro al instante</b> y <b>libro cruzado</b> que puedes aprovechar</li>
+							<li data-i18n-html="site.pro7"><b>Avisos por Telegram</b> de tus ofertas, aunque cierres el terminal, y de la tasa</li>
+							<li data-i18n-html="site.pro8"><b>Ganancias</b> por mercado, con la comisión</li>
+							<li data-i18n-html="site.pro9"><b>Compras, ventas y USD</b> en el gráfico</li>
 						</ul>
-						<a class="btn primary block" href="https://app.terminalp2p.com/?pro=open">Pruébalo <span data-trial>7</span> días gratis</a>
-						<p class="plan-note">Activas tus <span data-trial>7</span> días cuando quieras; luego compras días con tu saldo de QvaPay. Nada se cobra solo y va en todos tus dispositivos. <a href="/blog/modo-pro/">Saber más sobre el modo Pro →</a></p>
+						<a class="btn primary block" href="https://app.terminalp2p.com/?pro=open" data-i18n-html="site.tryPro">Pruébalo <span data-trial data-i18n-slot="trial">7</span> días gratis</a>
+						<p class="plan-note" data-i18n-html="site.planNote">Activas tus <span data-trial data-i18n-slot="trial">7</span> días cuando quieras; luego compras días con tu saldo de QvaPay. Nada se cobra solo y va en todos tus dispositivos. <a href="/blog/modo-pro/">Saber más sobre el modo Pro →</a></p>
 					</article>
 				</div>
 			</div>
@@ -338,17 +347,17 @@
 		<section class="sec" id="privacidad">
 			<div class="wrap priv">
 				<div class="priv-copy">
-					<h2>Tu token, solo en tu navegador</h2>
-					<p>Tu token se guarda solo en tu navegador, y el dinero de cada operación se queda en el escrow de QvaPay. Al conectar tu cuenta, el servidor apunta tu usuario de QvaPay y cuánto tiempo tienes el terminal abierto, para ayudarte si algo falla y frenar abusos. Nunca lo que publicas, tomas o pagas.<span data-pro> Si activas Pro, para tus días solo se guarda tu usuario de QvaPay, hasta cuándo tienes Pro y una huella de tu token de la que no se puede sacar el token (y tu identificador de QvaPay si activas los avisos de tus ofertas). Para evitar abusos con los días gratis, se guarda también una huella cifrada de tu IP durante dos días.</span></p>
-					<a class="link-arrow" href="https://github.com/osmely/terminal-p2p#cómo-funciona" target="_blank" rel="noopener">Cómo funciona por dentro →</a>
+					<h2 data-i18n="site.privTitle">Tu token, solo en tu navegador</h2>
+					<p data-i18n-html="site.privText">Tu token se guarda solo en tu navegador, y el dinero de cada operación se queda en el escrow de QvaPay. Al conectar tu cuenta, el servidor apunta tu usuario de QvaPay y cuánto tiempo tienes el terminal abierto, para ayudarte si algo falla y frenar abusos. Nunca lo que publicas, tomas o pagas.<span data-pro data-i18n-slot="pro" data-i18n="site.privPro"> Si activas Pro, para tus días solo se guarda tu usuario de QvaPay, hasta cuándo tienes Pro y una huella de tu token de la que no se puede sacar el token (y tu identificador de QvaPay si activas los avisos de tus ofertas). Para evitar abusos con los días gratis, se guarda también una huella cifrada de tu IP durante dos días.</span></p>
+					<a class="link-arrow" href="https://github.com/osmely/terminal-p2p#cómo-funciona" target="_blank" rel="noopener" data-i18n="site.howItWorks">Cómo funciona por dentro →</a>
 				</div>
 				<ul class="checks">
-					<li><b>Sin custodia.</b> Nunca toca tu dinero: compras y ventas pasan por el escrow de QvaPay.</li>
-					<li><b>Token solo en tu navegador.</b> Se borra al cerrar la pestaña, salvo que elijas recordarlo.</li>
-					<li><b>Solo acciones del P2P.</b> El terminal no puede transferir ni retirar: solo publicar y tomar ofertas, pagar, liberar, chatear y calificar, y cada paso lo confirmas tú.</li>
-					<li><b>Nadie ve lo tuyo.</b> Tus datos no se comparten con otros usuarios.</li>
-					<li><b>Sin rastreadores.</b> Ni publicidad ni seguimiento de terceros, y las fuentes se sirven desde este dominio. Las únicas cookies son las de tu sesión: llevan, firmados, la huella de tu token y tu usuario de QvaPay, nunca el token. Las visitas (y por qué enlace llegaste) y las acciones del P2P (publicar, tomar, completar) se cuentan de forma anónima, sin usuario ni IP.</li>
-					<li><b>Código abierto.</b> Licencia Apache 2.0: puedes revisarlo, o desplegar tu propia copia.<span data-pro> Las funciones Pro van aparte, pero lo que muestra el mercado sigue en el código abierto.</span></li>
+					<li data-i18n-html="site.check1"><b>Sin custodia.</b> Nunca toca tu dinero: compras y ventas pasan por el escrow de QvaPay.</li>
+					<li data-i18n-html="site.check2"><b>Token solo en tu navegador.</b> Se borra al cerrar la pestaña, salvo que elijas recordarlo.</li>
+					<li data-i18n-html="site.check3"><b>Solo acciones del P2P.</b> El terminal no puede transferir ni retirar: solo publicar y tomar ofertas, pagar, liberar, chatear y calificar, y cada paso lo confirmas tú.</li>
+					<li data-i18n-html="site.check4"><b>Nadie ve lo tuyo.</b> Tus datos no se comparten con otros usuarios.</li>
+					<li data-i18n-html="site.check5"><b>Sin rastreadores.</b> Ni publicidad ni seguimiento de terceros, y las fuentes se sirven desde este dominio. Las únicas cookies son las de tu sesión: llevan, firmados, la huella de tu token y tu usuario de QvaPay, nunca el token. Las visitas (y por qué enlace llegaste) y las acciones del P2P (publicar, tomar, completar) se cuentan de forma anónima, sin usuario ni IP.</li>
+					<li data-i18n-html="site.check6"><b>Código abierto.</b> Licencia Apache 2.0: puedes revisarlo, o desplegar tu propia copia.<span data-pro data-i18n-slot="pro" data-i18n="site.check6Pro"> Las funciones Pro van aparte, pero lo que muestra el mercado sigue en el código abierto.</span></li>
 				</ul>
 			</div>
 		</section>
@@ -356,52 +365,52 @@
 		<!-- ── Preguntas ───────────────────────────────────────────── -->
 		<section class="sec alt" id="preguntas">
 			<div class="wrap narrow">
-				<div class="sec-head center"><h2>Preguntas frecuentes</h2></div>
+				<div class="sec-head center"><h2 data-i18n="site.faqTitle">Preguntas frecuentes</h2></div>
 				<details>
-					<summary>¿Es una web de QvaPay?</summary>
-					<p>No, es un proyecto independiente, no afiliado a QvaPay. Todas las operaciones se hacen en QvaPay, con su escrow y sus reglas.</p>
+					<summary data-i18n="site.faq1">¿Es una web de QvaPay?</summary>
+					<p data-i18n="site.faq1A">No, es un proyecto independiente, no afiliado a QvaPay. Todas las operaciones se hacen en QvaPay, con su escrow y sus reglas.</p>
 				</details>
 				<details>
-					<summary>¿Necesito una cuenta de QvaPay?</summary>
-					<p>Para ver las tasas y el histórico, no, y el libro lo puedes mirar en la mini app de QvaPay. Para el libro en el terminal y para operar, sí: el terminal trabaja con tu cuenta de QvaPay, que debe tener el P2P activo (identidad verificada, teléfono y Telegram). <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crear cuenta en QvaPay</a> <small>(usuario referido)</small></p>
+					<summary data-i18n="site.faq2">¿Necesito una cuenta de QvaPay?</summary>
+					<p data-i18n-html="site.faq2A">Para ver las tasas y el histórico, no, y el libro lo puedes mirar en la mini app de QvaPay. Para el libro en el terminal y para operar, sí: el terminal trabaja con tu cuenta de QvaPay, que debe tener el P2P activo (identidad verificada, teléfono y Telegram). <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crear cuenta en QvaPay</a> <small>(usuario referido)</small></p>
 				</details>
 				<details>
-					<summary>¿Cuánto cuesta?</summary>
-					<p>El terminal es gratis y sin comisiones propias: solo aplican las de QvaPay.<span data-pro> Con el <a href="/blog/modo-pro/">modo Pro</a> puedes activar <span data-trial>7</span> días gratis; después compras días con tu saldo de QvaPay: 7 días por <span data-price="week">1.99 USD</span>, 30 por <span data-price="month">3.99 USD</span> o 90 por <span data-price="quarter">9.99 USD</span>.</span></p>
+					<summary data-i18n="site.faq3">¿Cuánto cuesta?</summary>
+					<p data-i18n-html="site.faq3A">El terminal es gratis y sin comisiones propias: solo aplican las de QvaPay.<span data-pro data-i18n-slot="pro" data-i18n-html="site.faq3Pro"> Con el <a href="/blog/modo-pro/">modo Pro</a> puedes activar <span data-trial data-i18n-slot="trial">7</span> días gratis; después compras días con tu saldo de QvaPay: 7 días por <span data-price="week" data-i18n-slot="week">1.99 USD</span>, 30 por <span data-price="month" data-i18n-slot="month">3.99 USD</span> o 90 por <span data-price="quarter" data-i18n-slot="quarter">9.99 USD</span>.</span></p>
 				</details>
 				<details data-pro>
-					<summary>¿Cómo cancelo el modo Pro? ¿Puedo pedir que me devuelvan el dinero?</summary>
-					<p>No hay nada que cancelar: compras días, no una suscripción, y nada se cobra solo. Cuando se acaban tus días, sigues con todo lo gratis. Como tienes <span data-trial>7</span> días gratis para probarlo todo con calma antes de pagar, y luego puedes empezar comprando solo una semana, las compras no se reembolsan. Si tienes cualquier dificultad con un pago o con el terminal, consúltanos en el <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">grupo de Telegram</a> y lo vemos contigo. Y si Pro falla por nuestra culpa, te regalamos los días perdidos.</p>
+					<summary data-i18n="site.faq4">¿Cómo cancelo el modo Pro? ¿Puedo pedir que me devuelvan el dinero?</summary>
+					<p data-i18n-html="site.faq4A">No hay nada que cancelar: compras días, no una suscripción, y nada se cobra solo. Cuando se acaban tus días, sigues con todo lo gratis. Como tienes <span data-trial data-i18n-slot="trial">7</span> días gratis para probarlo todo con calma antes de pagar, y luego puedes empezar comprando solo una semana, las compras no se reembolsan. Si tienes cualquier dificultad con un pago o con el terminal, consúltanos en el <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">grupo de Telegram</a> y lo vemos contigo. Y si Pro falla por nuestra culpa, te regalamos los días perdidos.</p>
 				</details>
 				<details>
-					<summary>¿Por qué tengo que conectar mi cuenta para ver el libro en el terminal?</summary>
-					<p>En el terminal, el libro va con todo lo de operar: qué ofertas puedes tomar, tus ofertas marcadas y tomar en un clic, y eso necesita tu cuenta de QvaPay. Para solo mirarlo, la <a href="https://www.qvapay.com/apps/terminal-p2p" target="_blank" rel="noopener">mini app de Terminal P2P en QvaPay</a> lo enseña sin conectar nada. Sin cuenta, en el terminal ves las tasas, lo completado y el histórico.</p>
+					<summary data-i18n="site.faq5">¿Por qué tengo que conectar mi cuenta para ver el libro en el terminal?</summary>
+					<p data-i18n-html="site.faq5A">En el terminal, el libro va con todo lo de operar: qué ofertas puedes tomar, tus ofertas marcadas y tomar en un clic, y eso necesita tu cuenta de QvaPay. Para solo mirarlo, la <a href="https://www.qvapay.com/apps/terminal-p2p" target="_blank" rel="noopener">mini app de Terminal P2P en QvaPay</a> lo enseña sin conectar nada. Sin cuenta, en el terminal ves las tasas, lo completado y el histórico.</p>
 				</details>
 				<details>
-					<summary>¿Puede el terminal mover mi dinero?</summary>
-					<p>Con un token sin permisos de <code>transfer</code> ni <code>withdraw</code>, no se puede sacar dinero de tu cuenta. El terminal además solo puede hacer las acciones del P2P (publicar y tomar ofertas, marcar pagado, liberar, cancelar, chatear y calificar), y cada una la confirmas tú. Liberar solo se permite cuando QvaPay marca la operación como pagada.</p>
+					<summary data-i18n="site.faq6">¿Puede el terminal mover mi dinero?</summary>
+					<p data-i18n-html="site.faq6A">Con un token sin permisos de <code>transfer</code> ni <code>withdraw</code>, no se puede sacar dinero de tu cuenta. El terminal además solo puede hacer las acciones del P2P (publicar y tomar ofertas, marcar pagado, liberar, cancelar, chatear y calificar), y cada una la confirmas tú. Liberar solo se permite cuando QvaPay marca la operación como pagada.</p>
 				</details>
 				<details>
-					<summary>¿Qué datos guardan?</summary>
-					<p>Datos públicos del mercado y contadores anónimos de visitas y de operaciones hechas desde el terminal. De tu cuenta: tu usuario de QvaPay, cuándo la conectas y cuánto tiempo tienes el terminal abierto cada día (lo del terminal abierto se borra a los 90 días; las conexiones, a los 180).<span data-pro> Si te haces Pro, también hasta cuándo tienes Pro, y si conectas Telegram, tu chat con el bot.</span> Nunca tu token ni lo que haces en el P2P.</p>
+					<summary data-i18n="site.faq7">¿Qué datos guardan?</summary>
+					<p data-i18n-html="site.faq7A">Datos públicos del mercado y contadores anónimos de visitas y de operaciones hechas desde el terminal. De tu cuenta: tu usuario de QvaPay, cuándo la conectas y cuánto tiempo tienes el terminal abierto cada día (lo del terminal abierto se borra a los 90 días; las conexiones, a los 180).<span data-pro data-i18n-slot="pro" data-i18n="site.faq7Pro"> Si te haces Pro, también hasta cuándo tienes Pro, y si conectas Telegram, tu chat con el bot.</span> Nunca tu token ni lo que haces en el P2P.</p>
 				</details>
 			</div>
 		</section>
 
 		<section class="final">
 			<div class="wrap final-in">
-				<h2>Mira el mercado ahora</h2>
-				<p>Gratis y desde cualquier navegador, también en el móvil.</p>
-				<a class="btn primary lg" href="https://app.terminalp2p.com">Abrir terminal</a>
-				<p class="ref-note">¿Aún no tienes cuenta? <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crea una en QvaPay</a> <small>(usuario referido)</small></p>
+				<h2 data-i18n="site.finalTitle">Mira el mercado ahora</h2>
+				<p data-i18n="site.finalSub">Gratis y desde cualquier navegador, también en el móvil.</p>
+				<a class="btn primary lg" href="https://app.terminalp2p.com" data-i18n="site.openTerminal">Abrir terminal</a>
+				<p class="ref-note" data-i18n-html="site.finalNote">¿Aún no tienes cuenta? <a href="https://www.qvapay.com/register/osmelyf" target="_blank" rel="sponsored noopener">Crea una en QvaPay</a> <small>(usuario referido)</small></p>
 			</div>
 		</section>
 	</main>
 
 	<footer class="foot">
 		<div class="wrap foot-in">
-			<span>© 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a> · <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener">Licencia Apache 2.0</a> · <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a> · <a href="/blog/">Blog</a> · <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">Telegram</a></span>
-			<span>Proyecto independiente, no afiliado a QvaPay.</span>
+			<span>© 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a> · <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener" data-i18n="site.license">Licencia Apache 2.0</a> · <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a> · <a href="/blog/">Blog</a> · <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">Telegram</a></span>
+			<span data-i18n="site.independent">Proyecto independiente, no afiliado a QvaPay.</span>
 		</div>
 	</footer>
 </body>

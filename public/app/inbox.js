@@ -16,10 +16,10 @@
 
 	const when = (ms) => {
 		const d = Date.now() - ms
-		if (d < 60_000) return 'ahora'
-		if (d < 3_600_000) return `hace ${Math.floor(d / 60_000)} min`
-		if (d < 86_400_000) return `hace ${Math.floor(d / 3_600_000)} h`
-		return inCuba(ms).toLocaleDateString('es', { timeZone: 'UTC', day: 'numeric', month: 'short' })
+		if (d < 60_000) return tl('inbox.now')
+		if (d < 3_600_000) return tl('inbox.minAgo', { n: Math.floor(d / 60_000) })
+		if (d < 86_400_000) return tl('inbox.hAgo', { n: Math.floor(d / 3_600_000) })
+		return inCuba(ms).toLocaleDateString(TPI18N.locale, { timeZone: 'UTC', day: 'numeric', month: 'short' })
 	}
 	const TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 	const unread = () => items.filter((i) => !i.read).length
@@ -29,7 +29,7 @@
 		btn.hidden = !loadedFor
 		badge.hidden = !n
 		badge.textContent = n > 9 ? '9+' : String(n)
-		btn.title = n ? `Buzón: ${n === 1 ? '1 mensaje nuevo' : `${n} mensajes nuevos`}` : 'Buzón'
+		btn.title = n ? tl('inbox.titleNew', { n }) : tl('inbox.title')
 		btn.setAttribute('aria-label', btn.title)
 	}
 
@@ -39,7 +39,7 @@
 		window.open(it.cta, '_blank', 'noopener')
 	}
 
-	const ctaBtn = (it, cls = 'btn primary small') => (it.cta ? `<button class="${cls}" data-cta="${it.id}">${esc(it.ctaLabel || 'Abrir')}</button>` : '')
+	const ctaBtn = (it, cls = 'btn primary small') => (it.cta ? `<button class="${cls}" data-cta="${it.id}">${esc(it.ctaLabel || tl('inbox.open'))}</button>` : '')
 
 	async function load(force = false) {
 		if (typeof pro === 'undefined' || !pro.print || typeof proFetch !== 'function') return
@@ -69,9 +69,9 @@
 		el.id = 'inboxPop'
 		el.className = 'inbox-pop'
 		el.setAttribute('role', 'status')
-		el.innerHTML = `<div class="inbox-pop-head"><span class="inbox-pop-tag">${it.kind === 'system' ? 'Aviso de tu cuenta' : 'Mensaje de Terminal P2P'}</span><button class="icon-btn small" data-x aria-label="Cerrar">✕</button></div>
+		el.innerHTML = `<div class="inbox-pop-head"><span class="inbox-pop-tag">${tl(it.kind === 'system' ? 'inbox.tagSystem' : 'inbox.tagTeam')}</span><button class="icon-btn small" data-x aria-label="${tl('common.close')}">✕</button></div>
 			<b>${esc(it.title)}</b><p>${esc(it.body)}</p>
-			<div class="inbox-pop-act">${ctaBtn(it)}<button class="btn small" data-open>Ver buzón</button></div>`
+			<div class="inbox-pop-act">${ctaBtn(it)}<button class="btn small" data-open>${tl('inbox.see')}</button></div>`
 		el.addEventListener('click', (e) => {
 			const t = e.target.closest('button')
 			if (!t) return
@@ -117,10 +117,10 @@
 		const list = items.length
 			? items
 					.map(
-						(it) => `<div class="inbox-item${it.read && !fresh.has(it.id) ? '' : ' new'}"><div class="inbox-item-head"><b>${esc(it.title)}</b><span>${when(it.at)}</span><button class="inbox-del" data-del="${it.id}" title="Borrar" aria-label="Borrar este mensaje">${TRASH}</button></div><p>${esc(it.body)}</p>${it.cta ? `<div>${ctaBtn(it, 'btn small')}</div>` : ''}</div>`,
+						(it) => `<div class="inbox-item${it.read && !fresh.has(it.id) ? '' : ' new'}"><div class="inbox-item-head"><b>${esc(it.title)}</b><span>${when(it.at)}</span><button class="inbox-del" data-del="${it.id}" title="${tl('inbox.del')}" aria-label="${tl('inbox.delAria')}">${TRASH}</button></div><p>${esc(it.body)}</p>${it.cta ? `<div>${ctaBtn(it, 'btn small')}</div>` : ''}</div>`,
 					)
 					.join('')
-			: '<p class="inbox-empty">No tienes mensajes. Aquí te llegarán los avisos de tu cuenta y las novedades del terminal.</p>'
+			: `<p class="inbox-empty">${tl('inbox.empty')}</p>`
 		panel.querySelector('.inbox-list').innerHTML = list
 		panel.querySelector('[data-all]').hidden = items.length < 2
 	}
@@ -132,14 +132,14 @@
 		panel = document.createElement('div')
 		panel.className = 'inbox-panel'
 		panel.setAttribute('role', 'dialog')
-		panel.setAttribute('aria-label', 'Buzón')
-		panel.innerHTML = '<div class="inbox-panel-head"><b>Buzón</b><span class="inbox-head-act"><button class="inbox-all" data-all hidden>Borrar todos</button><button class="icon-btn small" data-x aria-label="Cerrar">✕</button></span></div><div class="inbox-list"></div>'
+		panel.setAttribute('aria-label', tl('inbox.title'))
+		panel.innerHTML = `<div class="inbox-panel-head"><b>${tl('inbox.title')}</b><span class="inbox-head-act"><button class="inbox-all" data-all hidden>${tl('inbox.delAll')}</button><button class="icon-btn small" data-x aria-label="${tl('common.close')}">✕</button></span></div><div class="inbox-list"></div>`
 		panel.addEventListener('click', (e) => {
 			const t = e.target.closest('button')
 			if (!t) return
 			if (t.dataset.x !== undefined) return closePanel()
 			if (t.dataset.del) return hide([Number(t.dataset.del)])
-			if (t.dataset.all !== undefined) return confirm('¿Borrar todos los mensajes de tu buzón?') && hide(items.map((i) => i.id))
+			if (t.dataset.all !== undefined) return confirm(tl('inbox.confirmAll')) && hide(items.map((i) => i.id))
 			const it = items.find((i) => String(i.id) === t.dataset.cta)
 			if (it) {
 				closePanel()

@@ -415,6 +415,24 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .help-menu a span { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
 .help-menu .help-tg { border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; margin-top: 4px; padding-top: 12px; font-size: 13px; color: var(--accent); }
 
+/* ══ Selector de idioma (el mismo que el del terminal) ═════════════════ */
+.lang { position: relative; border: 0 !important; }
+.lang-btn {
+	display: inline-flex; align-items: center; gap: 5px; height: 38px; padding: 0 10px 0 9px; border-radius: var(--r-sm); list-style: none; cursor: pointer;
+	border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2); font-size: 12.5px; font-weight: 600; letter-spacing: 0.02em; user-select: none;
+}
+.lang-btn::-webkit-details-marker { display: none; }
+.lang-btn::after { content: none; }
+.lang-btn:hover, .lang[open] .lang-btn { color: var(--text); background: var(--surface-3); }
+.lang-menu {
+	position: absolute; right: 0; top: calc(100% + 8px); z-index: 30; min-width: 150px; display: flex; flex-direction: column; gap: 2px;
+	padding: 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow);
+}
+.lang-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.lang-menu button:hover { background: var(--surface-2); }
+.lang-menu button[aria-checked='true'] { color: var(--accent); font-weight: 600; }
+.lang-menu button[aria-checked='true']::after { content: '✓'; }
+
 /* ══ Responsive ═══════════════════════════════════════════════════════ */
 @media (max-width: 980px) {
 	/* Barra sólida en el móvil: en el iPhone el contenido se transparentaba por detrás. Su fondo
@@ -525,6 +543,9 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 }
 /* En un teléfono estrecho, «Abrir» a secas: así la barra cabe en una fila */
 @media (max-width: 420px) { .hide-xs { display: none; } }
+/* Con el botón del idioma: la marca y los botones caben en una fila a 390 px; más estrecho, queda el logo (como en el terminal) */
+@media (max-width: 420px) { .nav-in { column-gap: 8px; } .nav-actions { gap: 5px; } }
+@media (max-width: 379px) { .nav-in .brand > span:last-child { display: none; } }
 @media (prefers-reduced-motion: reduce) {
 	* { animation: none !important; transition: none !important; }
 	html { scroll-behavior: auto; }
@@ -537,6 +558,11 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	/* El botón no está en el borde: la lista va de lado a lado bajo la barra */
 	.help { position: static; }
 	.help-menu { left: 12px; right: 12px; width: auto; top: calc(100% + 6px); }
+	/* El idioma: solo el globo; la lista, bajo la barra y pegada a la derecha */
+	.lang-btn { height: 34px; width: 34px; padding: 0; justify-content: center; }
+	.lang-cur { display: none; }
+	.lang { position: static; }
+	.lang-menu { right: 12px; top: calc(100% + 6px); }
 }
 
 /* ══ Simulador y planes ═══════════════════════════════════════════════ */
@@ -669,5 +695,7 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 	.tasa-inf .inf-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .tasa-more { margin-top: 24px; }
+/* En inglés y portugués es más largo: en el móvil puede partirse */
+.tasa-more .link-arrow { white-space: normal; }
 .prose section[data-tasa-if] > * + * { margin-top: 18px; }
 .prose section[data-tasa-if] > h2 { margin-top: 48px; }

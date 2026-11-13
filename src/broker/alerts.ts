@@ -4,6 +4,7 @@
 // guarda la lectura anterior y las claves ya avisadas.
 
 import { inCuba } from '../../worker/rates.ts'
+import { locale, tl } from '../i18n.ts'
 import { COINS } from '../terminal/market.ts'
 import type { Trade } from './trades.ts'
 
@@ -27,7 +28,7 @@ export const EXPIRING_MS = 5 * 60_000
 const ACTIVE = new Set(['processing', 'paid', 'revision'])
 const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 const unit = (coin: string) => COINS.find((c) => c.tick === coin)?.unit ?? coin
-const who = (t: Trade) => (t.counterparty ? `@${t.counterparty.username}` : 'La contraparte')
+const who = (t: Trade) => (t.counterparty ? `@${t.counterparty.username}` : tl('alerts.counterparty'))
 // Una oferta fija puede tomarse, abandonarse y volver a tomarse: cada trato es otro aviso
 const deal = (t: Trade) => `${t.id}:${t.counterparty?.username ?? ''}`
 
@@ -55,7 +56,7 @@ export function tradeAlerts(
 		if (t.payer && t.status === 'processing' && t.expiresAt) {
 			const left = Date.parse(t.expiresAt) - now
 			if (left > 0 && left <= EXPIRING_MS)
-				push(t, 'expiring', `${deal(t)}:expiring`, `Quedan ${Math.max(1, Math.round(left / 60_000))} min para pagar`, `Transfiere ${money} a ${who(t)} y marca el pago.`, true)
+				push(t, 'expiring', `${deal(t)}:expiring`, tl('alerts.expiringTitle', { min: Math.max(1, Math.round(left / 60_000)) }), tl('alerts.expiringBody', { money, who: who(t) }), true)
 		}
 
 		// Sin lectura anterior no se sabe qué es nuevo
@@ -68,22 +69,22 @@ export function tradeAlerts(
 					t,
 					'taken',
 					`${deal(t)}:taken`,
-					'Tomaron tu oferta',
-					`${who(t)} ${t.side === 'sell' ? 'te compra' : 'te vende'} ${fmt(t.usd)} USD. ${t.payer ? `Te toca pagar ${money}.` : `Espera su pago de ${money}.`}`,
+					tl('alerts.takenTitle'),
+					tl(t.side === 'sell' ? (t.payer ? 'alerts.takenBuysPay' : 'alerts.takenBuysWait') : t.payer ? 'alerts.takenSellsPay' : 'alerts.takenSellsWait', { who: who(t), usd: fmt(t.usd), money }),
 					t.payer,
 				)
 			continue
 		}
 
 		if (p.status !== t.status) {
-			if (t.status === 'paid' && !t.payer) push(t, 'paid', `${deal(t)}:paid`, 'Te pagaron: comprueba y libera', `${who(t)} marcó el pago de ${money}. Míralo en tu banco antes de liberar.`, true)
-			else if (t.status === 'completed' && t.payer) push(t, 'released', `${deal(t)}:released`, `Te liberaron ${fmt(t.usd)} USD`, `${who(t)} completó la operación.`)
-			else if (t.status === 'revision') push(t, 'dispute', `${deal(t)}:dispute`, 'La operación pasó a disputa', `Un moderador revisará el chat con ${who(t)}.`)
+			if (t.status === 'paid' && !t.payer) push(t, 'paid', `${deal(t)}:paid`, tl('alerts.paidTitle'), tl('alerts.paidBody', { who: who(t), money }), true)
+			else if (t.status === 'completed' && t.payer) push(t, 'released', `${deal(t)}:released`, tl('alerts.releasedTitle', { usd: fmt(t.usd) }), tl('alerts.releasedBody', { who: who(t) }))
+			else if (t.status === 'revision') push(t, 'dispute', `${deal(t)}:dispute`, tl('alerts.disputeTitle'), tl('alerts.disputeBody', { who: who(t) }))
 		}
 
 		const newMessage = t.chat && p.chat && (t.chat.lastId && p.chat.lastId ? t.chat.lastId !== p.chat.lastId : t.chat.count > p.chat.count)
 		if (newMessage && t.chat && !t.chat.lastMine)
-			push(t, 'chat', `${t.id}:chat:${t.chat.lastId ?? t.chat.count}`, `Mensaje de ${who(t)}`, t.chat.lastText?.trim() || 'Te envió una imagen.')
+			push(t, 'chat', `${t.id}:chat:${t.chat.lastId ?? t.chat.count}`, tl('alerts.chatTitle', { who: who(t) }), t.chat.lastText?.trim() || tl('alerts.chatImage'))
 	}
 
 	// Una oferta tuya que vuelve a estar publicada porque la contraparte se fue. Se detecta por la
@@ -98,13 +99,13 @@ export function tradeAlerts(
 			const freshPause = o.pause?.reason === 'taker_left' && !(pp?.reason === 'taker_left' && pp.until === o.pause.until)
 			if (!wasActive && !freshPause) continue
 			// En hora de Cuba, no la del navegador (puede creer que Cuba está en UTC-5)
-			const until = o.pause?.until ? inCuba(Date.parse(o.pause.until)).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) : null
+			const until = o.pause?.until ? inCuba(Date.parse(o.pause.until)).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }) : null
 			push(
 				o,
 				'left',
 				`${o.id}:left:${o.pause?.until ?? (p ? deal(p) : '')}`,
-				'La contraparte dejó tu oferta',
-				`${p ? who(p) : 'Quien la tomó'} canceló o se le venció el plazo. ${until ? `Tu oferta vuelve al mercado a las ${until}: revisa el precio mientras tanto.` : 'Tu oferta vuelve al mercado.'}`,
+				tl('alerts.leftTitle'),
+				tl(until ? 'alerts.leftBodyAt' : 'alerts.leftBody', { who: p ? who(p) : tl('alerts.whoTook'), time: until }),
 			)
 		}
 	}

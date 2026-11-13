@@ -100,7 +100,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 // cada elemento con data-online se enciende o apaga solo al cambiar, sin volver a pintar nada
 const onlineOf = (user) => (user ? (window.TPOnline?.get(String(user).toLowerCase()) ?? null) : null)
 const isOnline = (user) => !!onlineOf(user)
-const ONLINE_TITLE = { term: 'Con el terminal abierto', qp: 'En línea en QvaPay' }
+const ONLINE_TITLE = { term: tl('app.onlineTerm'), qp: tl('app.onlineQp') }
 // Gris (off) si no está en ninguno, pero solo cuando ya llegó la lista: sin ella no se sabe
 const onlineCls = (user) => (onlineOf(user) ? ` on ${onlineOf(user)}` : window.TPOnline ? ' off' : '')
 const onlineAttr = (user) => (user && user !== '—' ? ` data-online="${esc(String(user).toLowerCase())}"` : '')
@@ -111,7 +111,7 @@ function paintOnline() {
 		el.classList.toggle('off', !where && !!window.TPOnline)
 		el.classList.toggle('term', where === 'term')
 		el.classList.toggle('qp', where === 'qp')
-		if (el.classList.contains('avatar')) el.title = ONLINE_TITLE[where] ?? (window.TPOnline ? 'No está en línea' : '')
+		if (el.classList.contains('avatar')) el.title = ONLINE_TITLE[where] ?? (window.TPOnline ? tl('app.offline') : '')
 	}
 }
 window.addEventListener('tp:online', paintOnline)
@@ -155,7 +155,7 @@ async function loadBook() {
 		state.book = await getJSON(`/api/book?coin=${state.coin}`)
 		render()
 	} catch (e) {
-		setStatus('Sin conexión')
+		setStatus(tl('app.noConnection'))
 		$('dot').className = 'dot stale'
 	}
 }
@@ -296,7 +296,7 @@ function selectCoin(tick, keepSheet = false) {
 // Precio en vivo; si aún no hay, el promedio público de 24 h (atenuado)
 function price(live, avg, cls) {
 	if (live) return `<span class="num ${cls}">${fmtP(live)}</span>`
-	if (avg) return `<span class="num avg" title="Promedio de 24 h de lo completado">${fmtP(avg)}</span>`
+	if (avg) return `<span class="num avg" title="${tl('app.avg24h')}">${fmtP(avg)}</span>`
 	return '<span class="num">—</span>'
 }
 
@@ -312,13 +312,14 @@ const showingStocks = () => state.marketKind === 'stocks' && !!window.TPStocks
 function marketRows(query) {
 	if (showingStocks()) return window.TPStocks.rows(query)
 	const q = (query ?? '').trim().toLowerCase()
-	const rows = state.overview.filter((c) => !q || c.name.toLowerCase().includes(q) || c.tick.toLowerCase().includes(q) || c.unit.toLowerCase().includes(q))
-	if (!rows.length) return '<div class="empty">Sin resultados</div>'
+	// También por el nombre traducido (CUP bank transfer)
+	const rows = state.overview.filter((c) => !q || c.name.toLowerCase().includes(q) || TPI18N.coin(c.tick, c.name).toLowerCase().includes(q) || c.tick.toLowerCase().includes(q) || c.unit.toLowerCase().includes(q))
+	if (!rows.length) return `<div class="empty">${tl('app.noResults')}</div>`
 	const here = (c) => c.tick === state.coin && !window.TPStocks?.on
 	return rows
 		.map(
 			(c) => `<button class="mrow ${here(c) ? 'active' : ''}" data-tick="${c.tick}" role="option" aria-selected="${here(c)}">
-				<span class="mmeta">${coinIcon(c)}<span class="mname"><b>${esc(c.name)}</b><span>QUSD/${esc(c.unit)}${c.count24h ? ` · ${c.count24h} ops 24 h` : ''}</span></span></span>
+				<span class="mmeta">${coinIcon(c)}<span class="mname"><b>${esc(TPI18N.coin(c.tick, c.name))}</b><span>QUSD/${esc(c.unit)}${c.count24h ? ` · ${tl('app.ops24h', { n: String(c.count24h) })}` : ''}</span></span></span>
 				${price(c.bid, c.avgBuy, 'bid')}${price(c.ask, c.avgSell, 'ask')}</button>`,
 		)
 		.join('')
@@ -333,7 +334,9 @@ function renderMarkets() {
 		t.setAttribute('aria-selected', String(on))
 	}
 	$('marketKind').hidden = !window.TPStocks
-	$('marketCols').innerHTML = stocks ? '<span>Acción</span><span>Precio</span><span>Hoy</span>' : '<span>Mercado</span><span>Compra</span><span>Venta</span>'
+	$('marketCols').innerHTML = stocks
+		? `<span>${tl('app.colStock')}</span><span>${tl('app.colPrice')}</span><span>${tl('app.colToday')}</span>`
+		: `<span>${tl('app.colMarket')}</span><span>${tl('app.colBuy')}</span><span>${tl('app.colSell')}</span>`
 	$('marketList').innerHTML = marketRows($('marketSearch').value)
 	renderRail()
 }
@@ -362,12 +365,13 @@ function renderRail() {
 	const stocks = showingStocks()
 	const coin = state.overview.find((c) => c.tick === state.coin)
 	const html = stocks
-		? `${window.TPStocks.rail()}<button class="rail-btn rail-kind" data-kind="p2p" title="Mercados del P2P" aria-label="Mercados del P2P">${coinIcon(coin)}</button>`
+		? `${window.TPStocks.rail()}<button class="rail-btn rail-kind" data-kind="p2p" title="${tl('app.p2pMarkets')}" aria-label="${tl('app.p2pMarkets')}">${coinIcon(coin)}</button>`
 		: state.overview
 				.map((c) => {
 					const here = c.tick === state.coin && !window.TPStocks?.on
-					const tip = `${c.name}${c.bid ? ` · compra ${fmtP(c.bid)}` : ''}${c.ask ? ` · venta ${fmtP(c.ask)}` : ''}`
-					return `<button class="rail-btn ${here ? 'active' : ''}" data-tick="${c.tick}" title="${esc(tip)}" aria-label="${esc(c.name)}" aria-pressed="${here}">${coinIcon(c)}</button>`
+					const name = TPI18N.coin(c.tick, c.name)
+					const tip = `${name}${c.bid ? ` · ${tl('app.railBid', { p: fmtP(c.bid) })}` : ''}${c.ask ? ` · ${tl('app.railAsk', { p: fmtP(c.ask) })}` : ''}`
+					return `<button class="rail-btn ${here ? 'active' : ''}" data-tick="${c.tick}" title="${esc(tip)}" aria-label="${esc(name)}" aria-pressed="${here}">${coinIcon(c)}</button>`
 				})
 				.join('') + (window.TPStocks?.railSwitch() ?? '')
 	if (html === railKey) return
@@ -407,17 +411,17 @@ function showView(name) {
 function render() {
 	const b = state.book
 	const meta = b?.coin ?? state.overview.find((c) => c.tick === state.coin) ?? { name: state.coin, unit: '' }
-	$('pairName').textContent = `QUSD / ${meta.name}`
+	$('pairName').textContent = `QUSD / ${TPI18N.coin(state.coin, meta.name)}`
 	// Se rehace al cambiar de mercado o al llegar su icono (al arrancar aún no está la lista de mercados)
 	const iconOf = state.overview.find((c) => c.tick === state.coin) ?? meta
 	if ($('pairIcon').dataset.key !== `${state.coin}:${iconOf.logo ?? ''}`) {
 		$('pairIcon').dataset.key = `${state.coin}:${iconOf.logo ?? ''}`
 		$('pairIcon').innerHTML = coinIcon(iconOf)
 	}
-	$('pairSub').textContent = `Precio en ${meta.unit} por cada USD de saldo QvaPay`
+	$('pairSub').textContent = tl('app.pairSub', { unit: meta.unit })
 	if (window.TPStocks?.on) window.TPStocks.pair()
 	if (!b) {
-		$('asks').innerHTML = $('bids').innerHTML = '<div class="empty">Cargando…</div>'
+		$('asks').innerHTML = $('bids').innerHTML = `<div class="empty">${tl('app.loading')}</div>`
 		return
 	}
 	const asks = filtered(b.ask.levels, 'ask')
@@ -425,12 +429,12 @@ function render() {
 	const offline = !b.live && !b.ask.levels.length && !b.bid.levels.length
 	document.querySelector('.area-book').classList.toggle('offline', offline)
 	if (offline) {
-		const msg = '<div class="empty">Las ofertas del libro se ven con tu cuenta de QvaPay conectada.</div>'
+		const msg = `<div class="empty">${tl('app.bookNeedsAccount')}</div>`
 		$('asks').innerHTML = msg
 		$('bids').innerHTML = ''
 		$('spread').className = 'spread'
-		$('spread').textContent = 'Sin libro en vivo'
-		setStatus('Conecta tu cuenta para ver el libro en vivo')
+		$('spread').textContent = tl('app.noLiveBook')
+		setStatus(tl('app.connectForLive'))
 		$('dot').className = 'dot stale'
 		renderStats(b, asks, bids)
 		renderInsight(b, asks, bids)
@@ -455,24 +459,24 @@ function setStatus(text) {
 function renderStatus(b) {
 	// Si QvaPay rechaza la lectura de los dos lados, no es "actualizado": no hay libro
 	if (b.ask.error && b.bid.error) {
-		setStatus('Sin acceso al libro con esta cuenta')
+		setStatus(tl('app.noBookAccess'))
 		$('dot').className = 'dot stale'
 		return
 	}
 	const times = [b.ask.updatedAt, b.bid.updatedAt].filter(Boolean)
 	if (!times.length) {
-		setStatus('Leyendo el libro…')
+		setStatus(tl('app.readingBook'))
 		$('dot').className = 'dot'
 		return
 	}
 	// El libro llega empujado por el servidor (con Pro, en cuanto cambia; sin Pro, cada 10 s): para el usuario, «en vivo»
 	if (b.realtime) {
-		setStatus('En vivo')
+		setStatus(tl('app.live'))
 		$('dot').className = 'dot live'
 		return
 	}
 	const age = b.serverTime - Math.min(...times)
-	setStatus(`Actualizado hace ${ago(age)}`)
+	setStatus(tl('app.updatedAgo', { ago: ago(age) }))
 	$('dot').className = `dot ${age < 30_000 ? 'live' : 'stale'}`
 }
 
@@ -486,13 +490,13 @@ function renderStats(b, asks, bids) {
 		mid ? levels.filter((l) => (side === 'ask' ? l.price <= mid * 1.02 : l.price >= mid * 0.98)).reduce((s, l) => s + l.usd, 0) : 0
 	const crossed = ask && bid && bid > ask
 	const items = [
-		['Mejor venta', fmtP(ask), 'ask'],
-		['Mejor compra', fmtP(bid), 'bid'],
-		['Diferencial', ask && bid ? pct(ask / bid - 1) : '—', crossed ? 'warn' : ''],
-		['Medio', fmtP(mid), ''],
-		['Mediana completadas', fmtP(doneMedian), '', 'Mediana cerradas'],
-		[`Operaciones ${done?.window_hours ?? 48} h`, done ? done.count.toLocaleString('en-US') : '—', ''],
-		['Profundidad ±2%', mid ? `${fmtU(within(bids, 'bid'))} / ${fmtU(within(asks, 'ask'))}<small class="unit"> USD</small>` : '—', '', 'Prof. ±2% (USD)'],
+		[tl('app.statBestAsk'), fmtP(ask), 'ask'],
+		[tl('app.statBestBid'), fmtP(bid), 'bid'],
+		[tl('app.statSpread'), ask && bid ? pct(ask / bid - 1) : '—', crossed ? 'warn' : ''],
+		[tl('app.statMid'), fmtP(mid), ''],
+		[tl('app.statMedian'), fmtP(doneMedian), '', tl('app.statMedianShort')],
+		[tl('app.statOps', { h: done?.window_hours ?? 48 }), done ? done.count.toLocaleString('en-US') : '—', ''],
+		[tl('app.statDepth'), mid ? `${fmtU(within(bids, 'bid'))} / ${fmtU(within(asks, 'ask'))}<small class="unit"> USD</small>` : '—', '', tl('app.statDepthShort')],
 	]
 	$('stats').innerHTML = items
 		// En el móvil, una etiqueta más corta si la hay (con tres columnas no caben las largas)
@@ -511,7 +515,7 @@ function renderStats(b, asks, bids) {
 // tiempo (cada oferta trae su última actividad) más las que salieron del libro mientras lo miras.
 // Se compara con el ritmo normal, las operaciones completadas por hora en la ventana de QvaPay.
 // Si nada se movió en 30 minutos, el mercado está quieto
-const PULSE = ['Quieto', 'Baja', 'Normal', 'Alta', 'Muy alta']
+const PULSE = tl('app.pulseLevels').split('|')
 function pulseScore(b) {
 	const levels = [...b.ask.levels, ...b.bid.levels].filter((l) => !l.outlier)
 	if (!levels.length) return null
@@ -546,7 +550,7 @@ function opsPerMin(b) {
 	return r < 0.01 ? 0 : r
 }
 // o/m: operaciones por minuto
-const opsText = (r) => `${r >= 10 ? Math.round(r) : r.toLocaleString('en-US', { minimumFractionDigits: r ? 2 : 0, maximumFractionDigits: 2 })} o/m`
+const opsText = (r) => tl('app.opsPerMin', { n: `${r >= 10 ? Math.round(r) : r.toLocaleString('en-US', { minimumFractionDigits: r ? 2 : 0, maximumFractionDigits: 2 })}` })
 
 function renderPulse(b) {
 	const el = $('pulse')
@@ -554,10 +558,10 @@ function renderPulse(b) {
 	el.classList.toggle('off', !r)
 	el.dataset.level = r ? String(r.level) : ''
 	const label = r ? opsText(r.ops) : '—'
-	el.setAttribute('aria-label', r ? `Actividad del mercado: ${label} (${PULSE[r.level].toLowerCase()})` : 'Actividad del mercado: sin libro en vivo')
+	el.setAttribute('aria-label', r ? tl('app.pulseAria', { label, level: PULSE[r.level].toLowerCase() }) : tl('app.pulseAriaOff'))
 	// Se arma una vez; luego solo cambian las barras encendidas y el número
 	if (!el.querySelector('.pulse-body'))
-		el.innerHTML = `<label>Actividad</label><div class="pulse-body" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<i style="height:${6 + i * 4}px"></i>`).join('')}<span></span></div>`
+		el.innerHTML = `<label>${tl('app.pulseLabel')}</label><div class="pulse-body" aria-hidden="true">${[1, 2, 3, 4].map((i) => `<i style="height:${6 + i * 4}px"></i>`).join('')}<span></span></div>`
 	el.querySelectorAll('.pulse-body i').forEach((bar, i) => bar.classList.toggle('on', !!r && r.level >= i + 1))
 	el.querySelector('.pulse-body span').textContent = label
 	el.removeAttribute('title')
@@ -591,7 +595,7 @@ function renderIntent(bidUsd, askUsd, mid, doneMedian, given) {
 	const el = $('intent')
 	const r = given ?? intentScore(bidUsd, askUsd, mid, doneMedian)
 	const s = r?.score ?? 50
-	const [label, cls] = !r ? ['—', ''] : s >= 60 ? ['Más compran', 'bid'] : s <= 40 ? ['Más venden', 'ask'] : ['Equilibrio', '']
+	const [label, cls] = !r ? ['—', ''] : s >= 60 ? [tl('app.intentBuy'), 'bid'] : s <= 40 ? [tl('app.intentSell'), 'ask'] : [tl('app.intentEven'), '']
 	const arc = (from, to) => {
 		const p = (t) => [(23 + 19 * Math.cos(Math.PI * (1 - t))).toFixed(1), (23 - 19 * Math.sin(Math.PI * (1 - t))).toFixed(1)]
 		const [x1, y1] = p(from)
@@ -601,15 +605,15 @@ function renderIntent(bidUsd, askUsd, mid, doneMedian, given) {
 	el.classList.toggle('off', !r)
 	el.dataset.side = cls
 	el.dataset.score = r ? String(s) : ''
-	el.setAttribute('aria-label', r ? `Intención del mercado: ${label}, ${s} de 100` : 'Intención del mercado: sin libro en vivo')
-	el.innerHTML = `<label>Intención</label><div class="intent-body">
+	el.setAttribute('aria-label', r ? tl('app.intentAria', { label, s }) : tl('app.intentAriaOff'))
+	el.innerHTML = `<label>${tl('app.intentLabel')}</label><div class="intent-body">
 		<svg class="gauge" viewBox="0 0 46 27" width="46" height="27" aria-hidden="true">
 			<path class="g-ask" d="${arc(0, 0.39)}"/><path class="g-mid" d="${arc(0.41, 0.59)}"/><path class="g-bid" d="${arc(0.61, 1)}"/>
 			<line class="g-needle" x1="23" y1="23" x2="23" y2="8" style="transform:${needleDeg(s)}"/><circle class="g-hub" cx="23" cy="23" r="2.6"/>
 		</svg></div>`
 	el.title = r
-		? `Intención del mercado: ${s} de 100 (0 = más venden, 100 = más compran). ${label} según el libro y las operaciones recientes.`
-		: 'Conecta tu cuenta de QvaPay para ver la intención del mercado.'
+		? tl('app.intentTitle', { s, label })
+		: tl('app.intentTitleOff')
 }
 
 // Lo que cambió desde el último libro pintado destella: verde si la oferta es nueva o sube su monto, rojo si baja,
@@ -661,7 +665,7 @@ function levelRow(l, side, cum, maxCum) {
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? '<b class="you">tú</b>' : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="Ver la ficha de ${esc(l.user)}"`}>${esc(l.user)}</em> ${l.ops}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? `<b class="you">${tl('app.you')}</b>` : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="${tl('app.seeProfileOf', { user: esc(l.user) })}"`}>${esc(l.user)}</em> ${l.ops}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 // ── Libro agrupado por rangos de precio ───────────────────────────────
@@ -709,7 +713,7 @@ function groupRow(g, side, cum, maxCum) {
 	return `<div class="lvl grp ${dim ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${best.uuid}" data-side="${side}" data-group="${g.key}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(g.price)}</span><span class="u">${fmtU(g.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${n} ${n === 1 ? 'oferta' : 'ofertas'}${mine ? ' · <b class="you">tú</b>' : ''} · <em${best.user === '—' ? ' class="anon"' : ` title="Ver la ficha de ${esc(best.user)}"`}>${esc(best.user)}</em></span></div>`
+		<span class="who">${tl('app.nOffers', { n })}${mine ? ` · <b class="you">${tl('app.you')}</b>` : ''} · <em${best.user === '—' ? ' class="anon"' : ` title="${tl('app.seeProfileOf', { user: esc(best.user) })}"`}>${esc(best.user)}</em></span></div>`
 }
 
 function groupTip(g, side) {
@@ -720,19 +724,19 @@ function groupTip(g, side) {
 	const best = g.members[0]
 	return [
 		`<div><b>${fmtP(lo)} – ${fmtP(hi)}</b> ${unit}/USD</div>`,
-		`<div>${g.members.length} ${g.members.length === 1 ? 'oferta' : 'ofertas'} que ${side === 'ask' ? 'venden' : 'compran'} ${fmtU(g.usd)} USD en total</div>`,
-		g.members.length > 1 ? `<div>Precios de ${fmtP(Math.min(...prices))} a ${fmtP(Math.max(...prices))}</div>` : '',
-		`<div>La mejor: @${esc(best.user)} a ${fmtP(best.price)} · ${fmtU(best.usd)} USD</div>`,
-		'<div class="muted">Clic para ver y tomar la mejor oferta del rango</div>',
+		`<div>${tl(side === 'ask' ? 'app.grpAsk' : 'app.grpBid', { n: g.members.length, usd: fmtU(g.usd) })}</div>`,
+		g.members.length > 1 ? `<div>${tl('app.grpPrices', { lo: fmtP(Math.min(...prices)), hi: fmtP(Math.max(...prices)) })}</div>` : '',
+		`<div>${tl('app.grpBest', { user: esc(best.user), price: fmtP(best.price), usd: fmtU(best.usd) })}</div>`,
+		`<div class="muted">${tl('app.grpClick')}</div>`,
 	].join('')
 }
 
 function renderGroupBtn(price) {
 	$('groupBtn').setAttribute('aria-pressed', String(state.grouped))
 	// Solo el icono: el tamaño del rango va en la descripción del botón
-	const step = price ? ` de ${fmtStep(stepOf(price))} ${state.book?.coin.unit ?? ''}`.trimEnd() : ''
-	$('groupBtn').title = state.grouped ? `Libro agrupado en rangos${step}: clic para ver cada oferta` : 'Agrupar el libro por rangos de precio'
-	$('bookWho').textContent = state.grouped ? 'Ofertas · mejor' : 'Contraparte'
+	const step = price ? `${fmtStep(stepOf(price))} ${state.book?.coin.unit ?? ''}`.trimEnd() : ''
+	$('groupBtn').title = state.grouped ? tl(step ? 'app.groupedStep' : 'app.grouped', { step }) : tl('app.groupTitle')
+	$('bookWho').textContent = state.grouped ? tl('app.whoGrouped') : tl('app.whoPeer')
 }
 
 function renderBook(b, asks, bids) {
@@ -743,7 +747,7 @@ function renderBook(b, asks, bids) {
 	const goneOf = (s) => filtered([...marks.values()].filter((m) => m.kind === 'gone' && m.side === s && Date.now() - m.t < FLASH_MS).map((m) => m.l), s)
 	const side = (levels, s) => {
 		if (!levels.length)
-			return `<div class="empty">${b[s].error ? `QvaPay no deja leer el libro con tu cuenta:<br><b>${esc(b[s].error)}</b>` : 'Sin ofertas con estos filtros'}</div>`
+			return `<div class="empty">${b[s].error ? `${tl('app.bookRefused')}<br><b>${esc(b[s].error)}</b>` : tl('app.noOffersFiltered')}</div>`
 		let cum = 0
 		if (state.grouped) {
 			// Agrupado y sin agrupar enseñan las mismas ofertas: todas las que hay leídas de ese lado (hasta 60)
@@ -766,8 +770,8 @@ function renderBook(b, asks, bids) {
 	$('bids').innerHTML = side(bids, 'bid')
 	renderGroupBtn(asks[0]?.price ?? bids[0]?.price)
 	const hidden = b.ask.levels.length + b.bid.levels.length - asks.length - bids.length
-	$('bookCount').textContent = `${b.ask.total} / ${b.bid.total} ofertas${hidden ? ` · ${hidden} ocultas` : ''}`
-	$('bookCount').title = `${b.ask.total} ventas y ${b.bid.total} compras en QvaPay`
+	$('bookCount').textContent = `${tl('app.bookCount', { ask: String(b.ask.total), bid: String(b.bid.total) })}${hidden ? ` · ${tl('app.bookHidden', { n: String(hidden) })}` : ''}`
+	$('bookCount').title = tl('app.bookCountTitle', { ask: String(b.ask.total), bid: String(b.bid.total) })
 
 	const ask = asks[0]?.price
 	const bid = bids[0]?.price
@@ -783,16 +787,16 @@ function renderBook(b, asks, bids) {
 		const crossed = bid > ask
 		el.className = `spread ${crossed ? 'crossed' : ''} ${flash?.cls ?? ''}`
 		el.innerHTML = crossed
-			? `<span class="lbl">Libro cruzado</span><span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>`
-			: `<span class="lbl">Diferencial</span><span>${(ask - bid).toLocaleString('en-US', { minimumFractionDigits: decimals(ask), maximumFractionDigits: decimals(ask) })} · ${pct(ask / bid - 1)}</span>`
+			? `<span class="lbl">${tl('app.crossed')}</span><span>${fmtP(bid)} &gt; ${fmtP(ask)} · ${pct(bid / ask - 1)}</span>`
+			: `<span class="lbl">${tl('app.statSpread')}</span><span>${(ask - bid).toLocaleString('en-US', { minimumFractionDigits: decimals(ask), maximumFractionDigits: decimals(ask) })} · ${pct(ask / bid - 1)}</span>`
 	} else {
 		el.className = `spread ${flash?.cls ?? ''}`
-		el.textContent = 'Sin cotización en uno de los lados'
+		el.textContent = tl('app.oneSided')
 	}
 }
 
 // Un usuario nombrado en Actividad o en la lectura del mercado: al tocarlo se abre su ficha
-const peerLink = (user) => (user && user !== '—' ? `<button type="button" class="link peer-link" data-peer="${esc(user)}" title="Ver su ficha">@${esc(user)}</button>` : '@—')
+const peerLink = (user) => (user && user !== '—' ? `<button type="button" class="link peer-link" data-peer="${esc(user)}" title="${tl('app.seeProfile')}">@${esc(user)}</button>` : '@—')
 
 function renderInsight(b, asks, bids) {
 	const out = []
@@ -804,18 +808,18 @@ function renderInsight(b, asks, bids) {
 	const pro = window.TPPro
 	if (ask && bid && bid.price > ask.price && !window.TPProCross) {
 		const net = bid.price / ask.price - 1 - 0.0025
-		const legs = `comprar a <b>${fmtP(ask.price)}</b> (${peerLink(ask.user)}, ${ask.ops} ops) y vender a <b>${fmtP(bid.price)}</b> (${peerLink(bid.user)}, ${bid.ops} ops)`
-		const more = pro?.enabled ? ' Con <b>Pro</b> ves si puedes aprovecharlo, cuántos USD encajan y cuánto te quedaría.' : ''
+		const legs = tl('app.crossLegs', { ask: fmtP(ask.price), askUser: peerLink(ask.user), askOps: String(ask.ops), bid: fmtP(bid.price), bidUser: peerLink(bid.user), bidOps: String(bid.ops) })
+		const more = pro?.enabled ? ` ${tl('app.crossPro')}` : ''
 		out.push(
 			net > 0
-				? `<li class="warn">Libro cruzado: ${legs} deja <b>${pct(net)}</b> tras la comisión de 0.25%.${more}</li>`
-				: `<li>Libro cruzado, pero no compensa: ${legs} da <b>${pct(net)}</b> tras la comisión de 0.25%.</li>`,
+				? `<li class="warn">${tl('app.crossGain', { legs, net: pct(net) })}${more}</li>`
+				: `<li>${tl('app.crossLoss', { legs, net: pct(net) })}</li>`,
 		)
 	} else if (ask && bid && bid.price > ask.price) out.push(window.TPProCross(b, asks, bids))
 	const done = b.completed
 	const m = done ? median(done.offers) : null
-	if (m && ask) out.push(`<li>La mejor venta está a <b>${pct(ask.price / m - 1)}</b> de la mediana de lo que realmente se completó (${fmtP(m)} ${unit}).</li>`)
-	if (m && bid) out.push(`<li>La mejor compra está a <b>${pct(bid.price / m - 1)}</b> de esa mediana.</li>`)
+	if (m && ask) out.push(`<li>${tl('app.askVsMedian', { pct: pct(ask.price / m - 1), median: fmtP(m), unit })}</li>`)
+	if (m && bid) out.push(`<li>${tl('app.bidVsMedian', { pct: pct(bid.price / m - 1) })}</li>`)
 	const top = (levels) => {
 		const total = levels.reduce((s, l) => s + l.usd, 0)
 		if (!total) return null
@@ -825,13 +829,13 @@ function renderInsight(b, asks, bids) {
 		return { user, share: usd / total }
 	}
 	const ta = top(asks)
-	if (ta && ta.share > 0.3) out.push(`<li>${peerLink(ta.user)} concentra el <b>${Math.round(ta.share * 100)}%</b> de la liquidez vendedora visible.</li>`)
+	if (ta && ta.share > 0.3) out.push(`<li>${tl('app.topSeller', { user: peerLink(ta.user), share: String(Math.round(ta.share * 100)) })}</li>`)
 	const outliers = [...b.ask.levels, ...b.bid.levels].filter((l) => l.outlier).length
-	if (outliers) out.push(`<li><b>${outliers}</b> oferta(s) con precio atípico (probable error de tipeo), ocultas por defecto.</li>`)
+	if (outliers) out.push(`<li>${tl('app.outliers', { n: String(outliers) })}</li>`)
 	const ref = m ?? (ask && bid ? (ask.price + bid.price) / 2 : (b.averages24h?.average ?? null))
 	out.push(...informalInsight(b.coin.tick, ref))
 	// Solo si cambió: repintar con cada repaso del libro haría perder el toque en un nombre
-	const html = out.length ? `<ul class="insight-list">${out.join('')}</ul>` : '<div class="empty">Sin observaciones destacables por ahora.</div>'
+	const html = out.length ? `<ul class="insight-list">${out.join('')}</ul>` : `<div class="empty">${tl('app.noInsights')}</div>`
 	if ($('insight').dataset.html !== html) {
 		$('insight').dataset.html = html
 		$('insight').innerHTML = html
@@ -850,38 +854,38 @@ function informalInsight(tick, ref) {
 	const inf = state.informal
 	const now = inf?.last
 	if (!now?.usd) return []
-	const out = [`<li class="head">Mercado informal · <a href="${esc(inf.url)}" target="_blank" rel="noopener">elTOQUE</a></li>`]
+	const out = [`<li class="head">${tl('app.infHead')} · <a href="${esc(inf.url)}" target="_blank" rel="noopener">elTOQUE</a></li>`]
 	const ratio = (a, b) => (a > 0 && b > 0 ? a / b : null)
 
 	// Este mercado frente al informal
 	if (ref && INFORMAL_MARKETS.has(tick) && now.usdt)
-		out.push(`<li>Aquí se cotiza a <b>${pct(ref / now.usd - 1)}</b> del USD informal (<b>${fmtP(now.usd)}</b> CUP) y a <b>${pct(ref / now.usdt - 1)}</b> del USDT (<b>${fmtP(now.usdt)}</b> CUP).</li>`)
+		out.push(`<li>${tl('app.infHere', { usdPct: pct(ref / now.usd - 1), usd: fmtP(now.usd), usdtPct: pct(ref / now.usdt - 1), usdt: fmtP(now.usdt) })}</li>`)
 	const usdMlc = ratio(now.usd, now.mlc)
 	if (ref && tick === 'BANK_MLC' && usdMlc)
-		out.push(`<li>En el informal 1 USD equivale a <b>${fmtP(usdMlc)}</b> MLC: aquí se cotiza a <b>${pct(ref / usdMlc - 1)}</b> de esa relación.</li>`)
+		out.push(`<li>${tl('app.infRel', { v: fmtP(usdMlc), cur: 'MLC', pct: pct(ref / usdMlc - 1) })}</li>`)
 	const usdEur = ratio(now.usd, now.eur)
 	if (ref && tick === 'TROPIPAY' && usdEur)
-		out.push(`<li>En el informal 1 USD equivale a <b>${fmtP(usdEur)}</b> EUR: aquí se cotiza a <b>${pct(ref / usdEur - 1)}</b> de esa relación.</li>`)
+		out.push(`<li>${tl('app.infRel', { v: fmtP(usdEur), cur: 'EUR', pct: pct(ref / usdEur - 1) })}</li>`)
 
 	// Tasas de hoy y tendencia: 7 y 30 días o, mientras no estén guardados, desde ayer
-	out.push(`<li>Hoy: ${INFORMAL_CURS.filter(([k]) => now[k] > 0).map(([k, l]) => `${l} <b>${fmtP(now[k])}</b>`).join(' · ')} CUP.</li>`)
+	out.push(`<li>${tl('app.infToday', { list: INFORMAL_CURS.filter(([k]) => now[k] > 0).map(([k, l]) => `${l} <b>${fmtP(now[k])}</b>`).join(' · ') })}</li>`)
 	const trend = (past, label) => {
 		const parts = INFORMAL_CURS.filter(([k]) => now[k] > 0 && past?.[k] > 0).map(([k, l]) => `${l} <b>${pct(now[k] / past[k] - 1)}</b>`)
 		return parts.length ? `${label}: ${parts.join(' · ')}` : null
 	}
-	const lines = [trend(inf.d7, 'En 7 días'), trend(inf.d30, 'en 30 días')].filter(Boolean)
-	if (!lines.length && inf.prev) lines.push(trend(inf.prev, 'Desde ayer'))
+	const lines = [trend(inf.d7, tl('app.in7d')), trend(inf.d30, tl('app.in30d'))].filter(Boolean)
+	if (!lines.length && inf.prev) lines.push(trend(inf.prev, tl('app.sinceYesterday')))
 	const fast = inf.d7?.usd > 0 && Math.abs(now.usd / inf.d7.usd - 1) >= 0.03
-	if (lines.length) out.push(`<li${fast ? ' class="warn"' : ''}>${lines.filter(Boolean).join('; ')}.${fast ? ` El USD se movió más de un 3% en una semana.` : ''}</li>`)
+	if (lines.length) out.push(`<li${fast ? ' class="warn"' : ''}>${lines.filter(Boolean).join('; ')}.${fast ? ` ${tl('app.infFast')}` : ''}</li>`)
 
 	// El dólar digital frente al efectivo y la relación entre divisas
 	const digital = ratio(now.usdt, now.usd)
 	if (digital)
-		out.push(`<li>El USDT vale <b>${pct(digital - 1)}</b> ${digital >= 1 ? 'más' : 'menos'} que el USD en efectivo: el dólar digital cotiza ${digital >= 1 ? 'por encima' : 'por debajo'} del físico.</li>`)
+		out.push(`<li>${tl(digital >= 1 ? 'app.infDigitalUp' : 'app.infDigitalDown', { pct: pct(digital - 1) })}</li>`)
 	const eurUsd = ratio(now.eur, now.usd)
 	if (eurUsd || usdMlc)
 		out.push(
-			`<li>${[eurUsd ? `1 EUR = <b>${fmtP(eurUsd)}</b> USD` : '', usdMlc ? `1 USD = <b>${fmtP(usdMlc)}</b> MLC (el MLC vale <b>${pct(1 / usdMlc - 1)}</b> frente al USD)` : ''].filter(Boolean).join(' y ')}.</li>`,
+			`<li>${[eurUsd ? `1 EUR = <b>${fmtP(eurUsd)}</b> USD` : '', usdMlc ? tl('app.infMlc', { v: fmtP(usdMlc), pct: pct(1 / usdMlc - 1) }) : ''].filter(Boolean).join(tl('app.and'))}.</li>`,
 		)
 	return out
 }
@@ -901,19 +905,20 @@ const ACT_PATH = {
 }
 const actIcon = (d) => `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="${d}" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 // [icono, texto («una venta» o «una compra» va en {s}), explicación al pasar el ratón]
+const actText = (kind) => [tl(`app.act.${kind}`), tl(`app.act.${kind}Tip`)]
 const ACT = {
-	new: ['plus', 'Entra {s}', 'Oferta nueva'],
-	reopened: ['plus', 'Vuelve {s}', 'La contraparte se retiró o se le venció el plazo de pago: la oferta vuelve al libro'],
-	taken: ['hand', 'Toman {s}', 'Alguien la tomó entera'],
-	partial: ['part', 'Toman parte de {s}', 'Alguien tomó una parte de esta oferta por rango'],
-	returned: ['back', 'Vuelve parte a {s}', 'Una parte tomada volvió (se canceló o se venció el plazo)'],
-	cancelled: ['out', 'Retiran {s}', 'Su dueño la retiró del libro'],
-	edited: ['edit', 'Cambia {s}', 'Su dueño cambió el precio o el monto'],
-	done: ['done', 'Se completa {s}', 'Operación terminada a este precio'],
-	paused: ['pause', 'Pausan {s}', 'Su dueño la sacó del libro sin cancelarla: nadie la puede tomar hasta que la vuelva a publicar'],
-	autopaused: ['pause', 'Pausa automática a {s}', 'Quien la tomó se fue: QvaPay la pausa unos minutos para que su dueño revise la tasa y luego vuelve sola'],
-	resumed: ['plus', 'Vuelve {s}', 'Terminó la pausa: la oferta vuelve al libro'],
-	gone: ['out', 'Sale {s}', 'La tomó alguien o la retiró su dueño; QvaPay no indica cuál'],
+	new: ['plus', ...actText('new')],
+	reopened: ['plus', ...actText('reopened')],
+	taken: ['hand', ...actText('taken')],
+	partial: ['part', ...actText('partial')],
+	returned: ['back', ...actText('returned')],
+	cancelled: ['out', ...actText('cancelled')],
+	edited: ['edit', ...actText('edited')],
+	done: ['done', ...actText('done')],
+	paused: ['pause', ...actText('paused')],
+	autopaused: ['pause', ...actText('autopaused')],
+	resumed: ['plus', ...actText('resumed')],
+	gone: ['out', ...actText('gone')],
 }
 const ACT_OUT = new Set(['gone', 'taken', 'partial', 'cancelled', 'paused', 'autopaused'])
 function renderActivity(b) {
@@ -924,8 +929,8 @@ function renderActivity(b) {
 	$('activity').dataset.key = key
 	const note =
 		b.activitySource === 'feed'
-			? '<li class="act-note">Lo que pasa en el libro según QvaPay: ofertas nuevas, tomadas (enteras o en parte), retiradas, pausadas y operaciones completadas.</li>'
-			: '<li class="act-note">Ofertas que entran y salen del libro. Las que salen las tomó alguien o las retiró su dueño: QvaPay no indica cuál.</li>'
+			? `<li class="act-note">${tl('app.actNoteFeed')}</li>`
+			: `<li class="act-note">${tl('app.actNoteDiff')}</li>`
 	$('activity').innerHTML = items.length
 		? note +
 			items
@@ -933,12 +938,12 @@ function renderActivity(b) {
 					const [icon, text, tip] = ACT[a.kind] ?? ACT.gone
 					// Con milisegundos: lo que pasa en el libro va a ritmo de bots
 					const t = `${cubaFmt(a.t, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}.${String(new Date(a.t).getUTCMilliseconds()).padStart(3, '0')}`
-					const what = text.replace('{s}', a.side === 'ask' ? 'una venta' : 'una compra')
+					const what = text.replace('{s}', tl(a.side === 'ask' ? 'app.actSell' : 'app.actBuy'))
 					const who = a.user && a.user !== '—' ? ` · ${peerLink(a.user)}` : ''
 					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} USD${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
 				})
 				.join('')
-		: '<li><span></span><span class="muted">Esperando cambios en el libro…</span><span></span></li>'
+		: `<li><span></span><span class="muted">${tl('app.actWaiting')}</span><span></span></li>`
 }
 
 // ── Gráficos ──────────────────────────────────────────────────────────
@@ -966,7 +971,7 @@ function drawDepth() {
 	if (!b) return
 	const asks = filtered(b.ask.levels, 'ask')
 	const bids = filtered(b.bid.levels, 'bid')
-	if (!asks.length && !bids.length) return emptyChart(ctx, width, height, 'Sin ofertas')
+	if (!asks.length && !bids.length) return emptyChart(ctx, width, height, tl('app.noOffers'))
 	const mid = asks[0] && bids[0] ? (asks[0].price + bids[0].price) / 2 : (asks[0] ?? bids[0]).price
 	const range = 0.06
 	const lo = mid * (1 - range)
@@ -1033,15 +1038,15 @@ function drawDepth() {
 	ctx.stroke()
 	ctx.setLineDash([])
 	ctx.fillStyle = css('--text')
-	ctx.fillText(`medio ${fmtP(mid)}`, x(mid), pad.t - 2)
-	$('chartNote').textContent = `USD acumulados a ±${range * 100}% del precio medio`
+	ctx.fillText(tl('app.depthMid', { p: fmtP(mid) }), x(mid), pad.t - 2)
+	$('chartNote').textContent = tl('app.depthNote', { r: range * 100 })
 	$('chartNote').title = $('chartNote').textContent
 }
 
 function drawCompleted() {
 	const { ctx, width, height } = setupCanvas($('completed'))
 	const done = state.book?.completed
-	if (!done?.offers?.length) return emptyChart(ctx, width, height, 'Sin operaciones completadas recientes')
+	if (!done?.offers?.length) return emptyChart(ctx, width, height, tl('app.noRecentDone'))
 	const m = median(done.offers)
 	const lo = m * 0.9
 	const hi = m * 1.1
@@ -1086,10 +1091,10 @@ function drawCompleted() {
 	}
 	const asks = filtered(state.book.ask.levels, 'ask')
 	const bids = filtered(state.book.bid.levels, 'bid')
-	vline(m, css('--text'), `mediana ${fmtP(m)}`, 0)
-	vline(bids[0]?.price, css('--bid'), `mejor compra ${fmtP(bids[0]?.price)}`, 1)
-	vline(asks[0]?.price, css('--ask'), `mejor venta ${fmtP(asks[0]?.price)}`, 2)
-	$('chartNote').textContent = `${done.count.toLocaleString('en-US')} operaciones completadas en ${done.window_hours} h`
+	vline(m, css('--text'), tl('app.lineMedian', { p: fmtP(m) }), 0)
+	vline(bids[0]?.price, css('--bid'), tl('app.lineBestBid', { p: fmtP(bids[0]?.price) }), 1)
+	vline(asks[0]?.price, css('--ask'), tl('app.lineBestAsk', { p: fmtP(asks[0]?.price) }), 2)
+	$('chartNote').textContent = tl('app.doneNote', { n: done.count, h: String(done.window_hours) })
 	$('chartNote').title = $('chartNote').textContent
 }
 
@@ -1117,15 +1122,15 @@ function cubaOffset(ms) {
 }
 // Un instante pasado a la hora de Cuba, para formatearlo con timeZone: 'UTC'
 const inCuba = (ms) => new Date(ms + cubaOffset(ms))
-const shortDay =(ms) => inCuba(ms).toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const shortDay =(ms) => inCuba(ms).toLocaleDateString(TPI18N.locale, { day: 'numeric', month: 'short', timeZone: 'UTC' })
 
 const showInformal = () => INFORMAL_MARKETS.has(state.coin) && (state.history?.informal?.length ?? 0) > 0
 
 // Leyenda: operaciones y tasa informal del día bajo el cursor o, si no, del último día
-const cubaTime = (ms) => inCuba(ms).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
+const cubaTime = (ms) => inCuba(ms).toLocaleTimeString(TPI18N.locale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' })
 // Cualquier fecha u hora del terminal, en hora de Cuba (opciones de toLocaleString): no con la zona del navegador, que
-// puede ser otra o creer que Cuba está en UTC-5
-const cubaFmt = (t, opts) => inCuba(new Date(t).getTime()).toLocaleString('es', { ...opts, timeZone: 'UTC' })
+// puede ser otra o creer que Cuba está en UTC-5. En el idioma elegido y, si lleva la hora, en 24 h (también en inglés)
+const cubaFmt = (t, opts) => inCuba(new Date(t).getTime()).toLocaleString(TPI18N.locale, { ...(opts?.hour || opts?.timeStyle ? { hourCycle: 'h23' } : {}), ...opts, timeZone: 'UTC' })
 function opsLegend(ms) {
 	const el = $('opsLegend')
 	const daily = state.history?.daily ?? []
@@ -1138,16 +1143,20 @@ function opsLegend(ms) {
 	const i = ms == null ? informal.at(-1) : near(informal)
 	const parts = []
 	if (bar) {
-		const split = proSplit() && bar.buy != null ? ` · ${plural(bar.buy, 'compra', 'compras')} · ${plural(bar.sell, 'venta', 'ventas')}` : ''
+		const split = proSplit() && bar.buy != null ? ` · ${tl('app.nBuys', { n: bar.buy })} · ${tl('app.nSells', { n: bar.sell })}` : ''
 		// Los USD operados son de Pro, como su línea
-		const usd = proSplit() && bar.usd != null ? ` · <b>${Math.round(bar.usd).toLocaleString('en-US')}</b> USD operados` : ''
-		parts.push(`<b>${bar.ops.toLocaleString('en-US')}</b> ${bar.ops === 1 ? 'operación' : 'operaciones'}${usd} de ${cubaTime(bar.t)} a ${cubaTime(bar.t + vol.bucketMs)}${ms == null ? '' : ` del ${shortDay(bar.t)}`}${split}`)
+		const usd = proSplit() && bar.usd != null ? ` · ${tl('app.usdTraded', { usd: Math.round(bar.usd) })}` : ''
+		const span = { n: bar.ops, usd, from: cubaTime(bar.t), to: cubaTime(bar.t + vol.bucketMs) }
+		parts.push(`${ms == null ? tl('app.legBar', span) : tl('app.legBarDay', { ...span, day: shortDay(bar.t) })}${split}`)
 	}
 	if (d && !(bar && ms == null)) {
-		const split = d.buy != null && d.sell != null ? ` · ${plural(d.buy, 'compra', 'compras')} · ${plural(d.sell, 'venta', 'ventas')}` : ''
-		parts.push(`<b>${d.ops.toLocaleString('en-US')}</b> operaciones ${d.partial ? 'en las últimas 24 h' : `el ${shortDay(d.t)}`}${split}`)
+		const split = d.buy != null && d.sell != null ? ` · ${tl('app.nBuys', { n: d.buy })} · ${tl('app.nSells', { n: d.sell })}` : ''
+		parts.push(`${d.partial ? tl('app.legDay24', { n: d.ops }) : tl('app.legDayOn', { n: d.ops, day: shortDay(d.t) })}${split}`)
 	}
-	if (i && (i.usd || i.usdt)) parts.push(`informal ${i.final ? `el ${shortDay(i.t)}` : 'hoy'}: USD <b>${fmtP(i.usd)}</b> · USDT <b>${fmtP(i.usdt)}</b>`)
+	if (i && (i.usd || i.usdt)) {
+		const rates = { usd: fmtP(i.usd), usdt: fmtP(i.usdt) }
+		parts.push(i.final ? tl('app.legInfDay', { ...rates, day: shortDay(i.t) }) : tl('app.legInfToday', rates))
+	}
 	el.hidden = !parts.length || state.chart !== 'history'
 	el.innerHTML = parts.join(' · ')
 }
@@ -1162,10 +1171,10 @@ function drawHistory() {
 			rightPriceScale: { borderColor: css('--line') },
 			timeScale: { borderColor: css('--line'), timeVisible: true, secondsVisible: false },
 			// La franja de las barras amplía la escala hacia abajo: sin etiquetas de precios negativos
-			localization: { locale: 'es', priceFormatter: (p) => (p < 0 ? '' : fmtP(p)) },
+			localization: { locale: TPI18N.locale, priceFormatter: (p) => (p < 0 ? '' : fmtP(p)) },
 		})
-		bidSeries = historyChart.addLineSeries({ color: css('--bid'), lineWidth: 2, title: 'compra' })
-		askSeries = historyChart.addLineSeries({ color: css('--ask'), lineWidth: 2, title: 'venta' })
+		bidSeries = historyChart.addLineSeries({ color: css('--bid'), lineWidth: 2, title: tl('app.seriesBid') })
+		askSeries = historyChart.addLineSeries({ color: css('--ask'), lineWidth: 2, title: tl('app.seriesAsk') })
 		// Operaciones por día: barras en una escala propia, en la franja de abajo
 		opsSeries = historyChart.addCustomSeries(new DayBars(), { priceScaleId: 'ops', lastValueVisible: false, priceLineVisible: false })
 		// Volumen en USD de cada hora (Pro): una línea sobre las barras, en su propia escala dentro de la misma franja
@@ -1173,7 +1182,7 @@ function drawHistory() {
 		// Referencia del mercado informal (elTOQUE): una mediana por día, en líneas discontinuas. No mueven la escala si
 		// hay tasa de QvaPay (suele estar lejos y aplastaría las líneas de compra y venta); se ven si caen dentro
 		const ownScale = (original) => (bidSeries.data().length || askSeries.data().length ? null : original())
-		usdSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USD informal', autoscaleInfoProvider: ownScale })
+		usdSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: tl('app.seriesInformal'), autoscaleInfoProvider: ownScale })
 		usdtSeries = historyChart.addLineSeries({ lineWidth: 2, lineStyle: 2, priceLineVisible: false, title: 'USDT', autoscaleInfoProvider: ownScale })
 		// Las barras, bajas (el 15 % de abajo), y las tasas en el resto del alto
 		historyChart.priceScale('ops').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
@@ -1210,22 +1219,26 @@ function drawHistory() {
 	drawChartLines()
 	requestAnimationFrame(() => volTags(null))
 	const first = state.history?.firstPoint
-	const src = informal.length ? ' · discontinuas: mercado informal (elTOQUE)' : ''
+	const src = informal.length ? ` · ${tl('app.histSrc')}` : ''
 	const vol = state.history?.volume
-	const bars = vol ? `operaciones ${vol.bucketMs === 3600000 ? 'por hora' : 'cada 6 h'}` : 'operaciones por día'
+	const bars = tl(vol ? (vol.bucketMs === 3600000 ? 'app.barsHour' : 'app.bars6h') : 'app.barsDay')
 	$('chartNote').textContent = first
-		? `Tasa de lo completado · barras: ${bars}${proSplit() ? ' (compras en verde, ventas en rojo)' : ''}${volLine() ? ' · línea: USD operados' : ''}${src} · hora de Cuba · desde el ${inCuba(first).toLocaleDateString('es', { timeZone: 'UTC' })}`
+		? tl('app.histNote', {
+				bars,
+				split: proSplit() ? ` ${tl('app.histSplit')}` : '',
+				line: volLine() ? ` · ${tl('app.histLine')}` : '',
+				src,
+				since: inCuba(first).toLocaleDateString(TPI18N.locale, { timeZone: 'UTC' }),
+			})
 		: informal.length
-			? 'Mercado informal según elTOQUE, por día · aún no hay histórico de QvaPay en este mercado'
-			: 'Aún no hay histórico de este mercado'
+			? tl('app.histInformalOnly')
+			: tl('app.histNone')
 	$('chartNote').title =
-		'Líneas continuas: tasa de las operaciones completadas en QvaPay en las últimas 24 h. Horas y días, en hora de Cuba, se abra desde donde se abra. ' +
-		(vol
-			? `Barras: operaciones ${vol.bucketMs === 3600000 ? 'de cada hora' : 'de cada 6 horas'} desde el ${shortDay(vol.since)}; antes, el promedio de cada día, más tenue. La más clara es la que está en curso.`
-			: 'Barras: operaciones completadas por día (hora de Cuba); la más clara es el día en curso.') +
-		(proSplit() ? ' Con Pro, cada barra se parte en compras (verde) y ventas (rojo).' : '') +
-		(volLine() ? ' La línea sobre las barras son los USD operados en cada periodo.' : '') +
-		(informal.length ? ' Líneas discontinuas: tasa del USD y del USDT en el mercado informal cubano según elTOQUE (eltoque.com), una mediana por día.' : '')
+		`${tl('app.histTip')} ` +
+		(vol ? tl(vol.bucketMs === 3600000 ? 'app.histTipHour' : 'app.histTip6h', { since: shortDay(vol.since) }) : tl('app.histTipDay')) +
+		(proSplit() ? ` ${tl('app.histTipSplit')}` : '') +
+		(volLine() ? ` ${tl('app.histTipLine')}` : '') +
+		(informal.length ? ` ${tl('app.histTipInformal')}` : '')
 }
 
 // Líneas de precio en la gráfica de la tasa, cada pieza con su nombre: set(nombre, [{ coin, price, tone: 'ask' | 'bid',
@@ -1298,7 +1311,7 @@ function drawCandles(fresh) {
 			// Con un ancho mínimo: medido solo, a veces se quedaba corto y las etiquetas salían cortadas
 			rightPriceScale: { borderColor: css('--line'), scaleMargins: { top: 0.08, bottom: 0.2 }, minimumWidth: 84 },
 			timeScale: { borderColor: css('--line'), timeVisible: true, secondsVisible: false, rightOffset: 3 },
-			localization: { locale: 'es', priceFormatter: (p) => (p < 0 ? '' : fmtP(p)) },
+			localization: { locale: TPI18N.locale, priceFormatter: (p) => (p < 0 ? '' : fmtP(p)) },
 		})
 		// El precio de la vela en curso: línea discontinua y su etiqueta en el eje, del color de la vela
 		candleSeries = candleChart.addCandlestickSeries({ borderVisible: false, priceLineVisible: true, lastValueVisible: true, priceLineWidth: 1, priceLineStyle: 2 })
@@ -1337,8 +1350,9 @@ function candleNote(over) {
 	const note = $('chartNote')
 	if (over) {
 		const when = cubaFmt(over.t, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-		const ops = `${over.ops} ${over.ops === 1 ? 'operación' : 'operaciones'}`
-		const prices = over.o == null ? 'sin foto del libro' : `${over.book ? 'mejor venta del libro: ' : ''}A ${fmtP(over.o)} · Máx ${fmtP(over.h)} · Mín ${fmtP(over.l)} · C ${fmtP(over.c)}`
+		const ops = tl('app.nTradesRaw', { n: over.ops, raw: String(over.ops) })
+		const ohlc = tl('app.ohlc', { o: fmtP(over.o), h: fmtP(over.h), l: fmtP(over.l), c: fmtP(over.c) })
+		const prices = over.o == null ? tl('app.noBookShot') : over.book ? tl('app.bookBestAskOhlc', { ohlc }) : ohlc
 		note.textContent = `${when} · ${prices}${over.ops || over.usd ? ` · ${ops} · ${fmtU(over.usd)} USD` : ''}`
 		return
 	}
@@ -1413,10 +1427,10 @@ function volTags(ms) {
 	if (!bar) return void (box.innerHTML = '')
 	const tags = proSplit() && bar.buy != null
 		? [
-				{ v: bar.buy, s: opsSeries, text: plural(bar.buy, 'compra', 'compras'), cls: 'bid' },
-				{ v: bar.buy + bar.sell, s: opsSeries, text: plural(bar.sell, 'venta', 'ventas'), cls: 'ask' },
+				{ v: bar.buy, s: opsSeries, text: tl('app.nBuys', { n: bar.buy }), cls: 'bid' },
+				{ v: bar.buy + bar.sell, s: opsSeries, text: tl('app.nSells', { n: bar.sell }), cls: 'ask' },
 			]
-		: [{ v: bar.ops, s: opsSeries, text: `${bar.ops.toLocaleString('en-US')} op.`, cls: 'ops' }]
+		: [{ v: bar.ops, s: opsSeries, text: tl('app.nOpsShort', { n: bar.ops }), cls: 'ops' }]
 	if (volLine() && bar.usd != null) tags.push({ v: bar.usd, s: volSeries, text: `${fmtU(bar.usd)} USD`, cls: 'usd' })
 	const el = $('history')
 	const axis = historyChart.priceScale('right').width()
@@ -1495,7 +1509,7 @@ const volLine = () => proSplit() && !!state.history.volume?.bars?.some((b) => b.
 
 let candlesLicensed = null
 function candlesUpsell() {
-	openModal(`<div class="stack"><h3>★ Gráfico de velas</h3><p class="muted">Las velas de 15 min a 1 día, con el precio de lo completado y la última formándose en vivo, son del modo Pro.</p><button class="btn primary block" id="candlesPro">Ver el modo Pro</button></div>`)
+	openModal(`<div class="stack"><h3>${tl('app.candlesTitle')}</h3><p class="muted">${tl('app.candlesText')}</p><button class="btn primary block" id="candlesPro">${tl('app.candlesBtn')}</button></div>`)
 	$('candlesPro').onclick = () => {
 		closeModal()
 		showPro()
@@ -1585,8 +1599,9 @@ function showChart(name, quiet = false) {
 // ── Ranking de usuarios ───────────────────────────────────────────────
 // Lo calcula el navegador con los libros que ha leído con tu cuenta (data.js, /api/ranking):
 // no se guarda ni se comparte. Los puestos de las insignias son de todos los mercados
-const RANK_NAMES = { liquidity: 'liquidez', experience: 'experiencia', reputation: 'reputación', best: 'mejor precio', maker: 'ambos lados', active: 'actividad' }
-const ordinal = (n) => `${n}.º`
+const RANK_NAMES = { liquidity: tl('app.rkLiquidity'), experience: tl('app.rkExperience'), reputation: tl('app.rkReputation'), best: tl('app.rkBest'), maker: tl('app.rkMaker'), active: tl('app.rkActive') }
+// «1.º en liquidez»
+const rankPos = (c, r) => tl('app.rankPos', { n: r, crit: RANK_NAMES[c] })
 
 async function loadRanking() {
 	try {
@@ -1617,35 +1632,35 @@ function rankTop(user, max = 10) {
 function rankText(user, n = 3) {
 	return rankTop(user)
 		.slice(0, n)
-		.map(([c, r]) => `${ordinal(r)} en ${RANK_NAMES[c]}`)
+		.map(([c, r]) => rankPos(c, r))
 		.join(' · ')
 }
 // Medalla discreta en el libro para el top 3 de experiencia o reputación
 function rankMedal(user) {
 	const top = rankTop(user, 3).filter(([c]) => c === 'experience' || c === 'reputation')
 	if (!top.length) return ''
-	const title = top.map(([c, r]) => `${ordinal(r)} en ${RANK_NAMES[c]}`).join(' · ')
+	const title = top.map(([c, r]) => rankPos(c, r)).join(' · ')
 	return `<span class="medal" title="Top 3: ${title}" aria-label="Top 3: ${title}"><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><circle cx="6" cy="7" r="4.2"/><path d="M3.6 1h1.8L6 2.6 6.6 1h1.8L7.2 3.6H4.8z"/></svg></span>`
 }
 
 function rankValue(c, u) {
 	switch (c) {
 		case 'liquidity':
-			return [`${fmtU(u.usdAsk + u.usdBid)} USD`, `${plural(u.offers, 'oferta', 'ofertas')} · ${plural(u.markets.length, 'mercado', 'mercados')}`]
+			return [`${fmtU(u.usdAsk + u.usdBid)} USD`, `${tl('app.nOffers', { n: u.offers })} · ${tl('app.nMarkets', { n: u.markets.length })}`]
 		case 'experience':
-			return [plural(u.ops, 'operación', 'operaciones'), u.rating ? `⭐ ${u.rating.toFixed(2)}` : 'sin valoraciones']
+			return [tl('app.nTrades', { n: u.ops }), u.rating ? `⭐ ${u.rating.toFixed(2)}` : tl('app.noRatings')]
 		case 'reputation':
-			return [`⭐ ${u.rating.toFixed(2)}`, `${plural(u.ops, 'operación', 'operaciones')} · ajustada ${u.score.toFixed(2)}`]
+			return [`⭐ ${u.rating.toFixed(2)}`, `${tl('app.nTrades', { n: u.ops })} · ${tl('app.adjusted', { s: u.score.toFixed(2) })}`]
 		case 'best':
-			return [plural(u.best, 'lado', 'lados'), u.markets.map(nameOfTick).join(', ')]
+			return [tl('app.nSides', { n: u.best }), u.markets.map(nameOfTick).join(', ')]
 		case 'maker':
-			return [`${fmtU(u.usdBid)} / ${fmtU(u.usdAsk)} USD`, 'compra / venta']
+			return [`${fmtU(u.usdBid)} / ${fmtU(u.usdAsk)} USD`, tl('app.bidAsk')]
 		case 'active':
-			return [`${plural(u.recent, 'oferta', 'ofertas')} en 24 h`, u.lastUpdate ? `la última hace ${ago(nowMs() - u.lastUpdate)}` : '']
+			return [tl('app.nOffers24h', { n: u.recent }), u.lastUpdate ? tl('app.lastAgo', { ago: ago(nowMs() - u.lastUpdate) }) : '']
 	}
 	return ['', '']
 }
-const nameOfTick = (t) => state.overview.find((c) => c.tick === t)?.name ?? t
+const nameOfTick = (t) => TPI18N.coin(t, state.overview.find((c) => c.tick === t)?.name ?? t)
 
 function renderRanking() {
 	for (const b of document.querySelectorAll('[data-crit]')) {
@@ -1658,8 +1673,8 @@ function renderRanking() {
 	const list = $('rankList')
 	if (!data || !data.markets.read) {
 		list.innerHTML = data?.connected
-			? '<li class="empty">Leyendo los libros: el ranking aparece en unos segundos.</li>'
-			: '<li class="empty">Conecta tu cuenta de QvaPay para ver el ranking.</li>'
+			? `<li class="empty">${tl('app.rankReading')}</li>`
+			: `<li class="empty">${tl('app.rankConnect')}</li>`
 		$('rankNote').textContent = ''
 		return
 	}
@@ -1671,15 +1686,15 @@ function renderRanking() {
 					const [main, sub] = rankValue(state.rank.crit, u)
 					// KYC no se muestra: QvaPay lo exige a todos para el P2P
 					const badges = [u.gold ? 'GOLD' : '', u.vip ? 'VIP' : ''].filter(Boolean).map((b) => `<span class="chip">${b}</span>`).join('')
-					return `<li class="${rank <= 3 ? `top top${rank}` : ''} ${u.user === me ? 'mine' : ''}" data-user="${esc(u.user)}" title="Ver la ficha de ${esc(u.user)}">
+					return `<li class="${rank <= 3 ? `top top${rank}` : ''} ${u.user === me ? 'mine' : ''}" data-user="${esc(u.user)}" title="${tl('app.seeProfileOf', { user: esc(u.user) })}">
 						<span class="rk">${rank}</span>
-						<span class="ru"><b>${u.user === me ? '<em class="you">tú</em> ' : ''}${esc(u.user)}</b>${badges}</span>
+						<span class="ru"><b>${u.user === me ? `<em class="you">${tl('app.you')}</em> ` : ''}${esc(u.user)}</b>${badges}</span>
 						<span class="rv"><b>${main}</b><small>${esc(sub)}</small></span></li>`
 				})
 				.join('')
-		: '<li class="empty">Nadie cumple este criterio con los libros leídos.</li>'
-	const scope = state.rank.scope === 'coin' ? nameOfTick(state.coin) : `${data.markets.read} de ${data.markets.total} mercados leídos`
-	$('rankNote').textContent = `Con las ofertas publicadas ahora (${scope}). No se guarda ni se comparte.`
+		: `<li class="empty">${tl('app.rankNobody')}</li>`
+	const scope = state.rank.scope === 'coin' ? nameOfTick(state.coin) : tl('app.rankRead', { read: String(data.markets.read), total: String(data.markets.total) })
+	$('rankNote').textContent = tl('app.rankNote', { scope })
 }
 
 // ── Tooltip de cada oferta ────────────────────────────────────────────
@@ -1687,23 +1702,23 @@ function tooltip(l, side) {
 	const unit = state.book.coin.unit
 	const req = l.requirements
 		? Object.entries(l.requirements)
-				.map(([k, v]) => ({ min_completed: `${v}+ ops`, min_rating: `⭐${v}+`, min_account_days: `${v}+ días`, min_trustscore: `trust ${v}+` })[k] ?? `${k} ${v}`)
+				.map(([k, v]) => ({ min_completed: `${v}+ ops`, min_rating: `⭐${v}+`, min_account_days: tl('app.reqDays', { v: String(v) }), min_trustscore: `trust ${v}+` })[k] ?? `${k} ${v}`)
 				.join(', ')
 		: null
 	return [
-		`<div><b>${fmtP(l.price)}</b> ${unit}/USD · ${side === 'ask' ? 'vende' : 'compra'} ${fmtU(l.usd)} USD</div>`,
-		l.kind === 'flexible' ? `<div>↔ Por rango: órdenes de ${fmtU(l.orderMin ?? 0)} a ${fmtU(l.orderMax ?? l.usd)} USD</div>` : '<div>Oferta fija: se toma entera</div>',
-		`<div>@${esc(l.user)} · ${l.ops} operaciones · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : 'sin valoraciones'}</div>`,
-		`<div>${[l.kyc ? 'KYC ✓' : 'sin KYC', l.vip ? 'VIP' : '', l.gold ? 'GOLD' : ''].filter(Boolean).join(' · ')}</div>`,
+		`<div>${tl(side === 'ask' ? 'app.tipAsk' : 'app.tipBid', { price: fmtP(l.price), unit, usd: fmtU(l.usd) })}</div>`,
+		l.kind === 'flexible' ? `<div>${tl('app.tipRange', { min: fmtU(l.orderMin ?? 0), max: fmtU(l.orderMax ?? l.usd) })}</div>` : `<div>${tl('app.tipFixed')}</div>`,
+		`<div>@${esc(l.user)} · ${tl('app.tipOps', { n: String(l.ops) })} · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : tl('app.noRatings')}</div>`,
+		`<div>${[l.kyc ? 'KYC ✓' : tl('app.noKyc'), l.vip ? 'VIP' : '', l.gold ? 'GOLD' : ''].filter(Boolean).join(' · ')}</div>`,
 		rankText(l.user) ? `<div>🏆 Ranking: ${rankText(l.user)}</div>` : '',
 		l.createdAt != null
-			? `<div class="muted">Publicada hace ${ago(state.book.serverTime - l.createdAt)}${l.updatedAt && l.updatedAt - l.createdAt > 60_000 ? ` · actualizada hace ${ago(state.book.serverTime - l.updatedAt)}` : ''}</div>`
+			? `<div class="muted">${tl('app.postedAgo', { ago: ago(state.book.serverTime - l.createdAt) })}${l.updatedAt && l.updatedAt - l.createdAt > 60_000 ? ` · ${tl('app.updatedAgoLc', { ago: ago(state.book.serverTime - l.updatedAt) })}` : ''}</div>`
 			: '',
-		req ? `<div>🔒 Requisitos: ${esc(req)}</div>` : '',
-		l.vipOnly ? '<div>👑 Solo cuentas VIP</div>' : '',
-		l.promoted ? '<div>★ Puesto promocionado</div>' : '',
-		l.outlier ? '<div style="color:var(--warn)">⚠️ Precio atípico: probable error</div>' : '',
-		'<div class="muted">Clic para ver y tomar la oferta</div>',
+		req ? `<div>${tl('app.tipReq', { req: esc(req) })}</div>` : '',
+		l.vipOnly ? `<div>${tl('app.tipVipOnly')}</div>` : '',
+		l.promoted ? `<div>${tl('app.tipPromoted')}</div>` : '',
+		l.outlier ? `<div style="color:var(--warn)">${tl('app.tipOutlier')}</div>` : '',
+		`<div class="muted">${tl('app.tipClick')}</div>`,
 	].join('')
 }
 
@@ -1751,7 +1766,7 @@ function renderMarketsPanel() {
 	const panel = document.querySelector('.area-markets')
 	if (closed) panel.dataset.collapsed = ''
 	else delete panel.dataset.collapsed
-	const label = closed ? 'Mostrar la lista de mercados' : 'Ocultar la lista de mercados'
+	const label = tl(closed ? 'app.marketsShow' : 'app.marketsHide')
 	$('marketsToggle').setAttribute('aria-expanded', String(!closed))
 	$('marketsToggle').setAttribute('aria-label', label)
 	$('marketsToggle').title = label

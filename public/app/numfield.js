@@ -80,7 +80,9 @@
 		// ¿Hay alguna tarjeta a medias entre estos campos? El aviso para el usuario, o '' si están bien (o vacías)
 		cardError(els) {
 			const bad = [...els].some((el) => el.dataset?.num === 'card' && el.value.replace(/\D/g, '').length && el.value.replace(/\D/g, '').length !== CARD_MAX)
-			return bad ? `El número de tarjeta lleva ${CARD_MAX} cifras: revísalo` : ''
+			if (!bad) return ''
+			// También lo usa el simulador, que no carga i18n.js: allí, en español
+			return typeof tl === 'function' ? tl('numfield.cardDigits', { n: CARD_MAX }) : `El número de tarjeta lleva ${CARD_MAX} cifras: revísalo`
 		},
 		// El valor que se manda: la tarjeta sin espacios, lo demás tal cual (sin espacios a los lados)
 		val(el) {
