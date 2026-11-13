@@ -25,6 +25,7 @@
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
     "lightweight-charts": "^4.2.0",
+    "nostr-tools": "2.25.2",
     "typescript": "^7.0.2",
     "wrangler": "^4.152.0"
   },

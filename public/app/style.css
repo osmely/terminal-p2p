@@ -362,6 +362,8 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .lvl .who { font: 11.5px var(--sans); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lvl .who em { font-style: normal; color: var(--text-2); }
 .flag { font-size: 10px; margin-left: 3px; }
+/* Ofertas de la tesorería de QvaPay */
+.plat { font-size: 9px; line-height: 1; padding: 1px 4px; border-radius: 3px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); vertical-align: 1px; }
 .lvl.dim { opacity: 0.45; }
 /* Lo que cambió en el libro destella (app.js, diffBook); --fd retoma la animación si el libro se repinta a mitad */
 .lvl.flash-up::after, .lvl.flash-down::after, .lvl.flash-edit::after, .spread.flash-edit::after {

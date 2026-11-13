@@ -1,0 +1,212 @@
+{
+	"tradeCup": {
+		"tags": [
+			[
+				"d",
+				"ccdfe68c-66be-4055-aa99-8c37a937c8ff"
+			],
+			[
+				"a",
+				"35353:3444e923ee5bf41e9ba8607be3608c96bddc5242b32a05bcd73739343851ccb6:ca9e7266-acaa-4675-92ef-241d611d4e49"
+			],
+			[
+				"k",
+				"buy"
+			],
+			[
+				"c",
+				"qusd"
+			],
+			[
+				"layer",
+				"internal"
+			],
+			[
+				"network",
+				"mainnet"
+			],
+			[
+				"f",
+				"CUP"
+			],
+			[
+				"amt",
+				"18.51"
+			],
+			[
+				"fa",
+				"20361"
+			],
+			[
+				"executed_at",
+				"1794537943"
+			],
+			[
+				"pm",
+				"bank transfer"
+			],
+			[
+				"y",
+				"qvapay"
+			],
+			[
+				"z",
+				"trade"
+			]
+		],
+		"content": "",
+		"sig": "0c7d93dae909b79bbadd8d43529a31947c456c01de678f4c0230f8fb5ddffb853493675110c9df485a1932ab2b56205cb8d0445eb988f7a6f74da01aff87ef3e",
+		"id": "c63cd477839fc424093d5415f57b535f91363a9daf025224d5218d11ec673a6a",
+		"pubkey": "3444e923ee5bf41e9ba8607be3608c96bddc5242b32a05bcd73739343851ccb6",
+		"created_at": 1794537966,
+		"kind": 35353
+	},
+	"tradePlat": {
+		"tags": [
+			[
+				"d",
+				"0f1ec9f6-203d-5bab-af16-9456cc67262b"
+			],
+			[
+				"a",
+				"35353:3444e923ee5bf41e9ba8607be3608c96bddc5242b32a05bcd73739343851ccb6:9165573f-ec94-4f17-949e-4d0a0706f95b"
+			],
+			[
+				"k",
+				"sell"
+			],
+			[
+				"c",
+				"qusd"
+			],
+			[
+				"layer",
+				"internal"
+			],
+			[
+				"network",
+				"mainnet"
+			],
+			[
+				"f",
+				"USD"
+			],
+			[
+				"amt",
+				"0.99"
+			],
+			[
+				"fa",
+				"1.05"
+			],
+			[
+				"executed_at",
+				"1794537390"
+			],
+			[
+				"pm",
+				"clasica card"
+			],
+			[
+				"y",
+				"qvapay"
+			],
+			[
+				"z",
+				"trade"
+			],
+			[
+				"maker",
+				"platform"
+			]
+		],
+		"content": "",
+		"sig": "27a4ebb9ff0ecadaa26416c1f8daeda89130d645276d1773eafcb980139c60337e45fd57beab60c6478f93e47026769f0d9058107a8c8114befc7e19c13f25fb",
+		"id": "fc945bcc09f5fc394280144839d91c2dedb03c65f8d6b895e5e28eabe4cd8bec",
+		"pubkey": "3444e923ee5bf41e9ba8607be3608c96bddc5242b32a05bcd73739343851ccb6",
+		"created_at": 1794537426,
+		"kind": 35353
+	},
+	"orderPlat": {
+		"tags": [
+			[
+				"d",
+				"94fb46a7-7636-4793-a8e5-14a4389c6fb4"
+			],
+			[
+				"k",
+				"sell"
+			],
+			[
+				"c",
+				"qusd"
+			],
+			[
+				"layer",
+				"internal"
+			],
+			[
+				"network",
+				"mainnet"
+			],
+			[
+				"f",
+				"EUR"
+			],
+			[
+				"s",
+				"pending"
+			],
+			[
+				"amt",
+				"97.02"
+			],
+			[
+				"fa",
+				"87.91"
+			],
+			[
+				"price",
+				"0.90610183"
+			],
+			[
+				"pm",
+				"tropipay"
+			],
+			[
+				"source",
+				"https://www.qvapay.com/p2p-pub/94fb46a7-7636-4793-a8e5-14a4389c6fb4"
+			],
+			[
+				"name",
+				"skymind"
+			],
+			[
+				"expires_at",
+				"1794751929"
+			],
+			[
+				"y",
+				"qvapay"
+			],
+			[
+				"z",
+				"order"
+			],
+			[
+				"maker",
+				"platform"
+			],
+			[
+				"expiration",
+				"1795356729"
+			]
+		],
+		"content": "",
+		"sig": "1d30095ee3ba3c89b6ff8559f3c4087a57e04893677e785a043ac8548cdbff5c0a9e8ea9d86c2fe253edd36f399d4cacd95e48ec0870d0b4f3b807e348de6540",
+		"id": "9189c211f9149ab39b038dfcf702da32a829544d7b30c45883685fe38ab86b51",
+		"pubkey": "3444e923ee5bf41e9ba8607be3608c96bddc5242b32a05bcd73739343851ccb6",
+		"created_at": 1794535986,
+		"kind": 35353
+	}
+}

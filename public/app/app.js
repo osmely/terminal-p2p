@@ -116,6 +116,24 @@ function paintOnline() {
 }
 window.addEventListener('tp:online', paintOnline)
 
+// La tesorería de QvaPay: sus ofertas salen marcadas. Quién es lo dice QvaPay en lo que firma en Nostr (["maker",
+// "platform"]); el servidor lo deja en /data/platform (worker/qpnostr.ts) y aquí se lee al entrar y cada 10 minutos
+let platformUsers = new Set()
+const isPlatform = (user) => !!user && platformUsers.has(String(user).toLowerCase())
+async function loadPlatform() {
+	try {
+		const r = await fetch('/data/platform')
+		if (!r.ok) return
+		const users = (await r.json()).users
+		const next = new Set(Array.isArray(users) ? users.map((u) => String(u).toLowerCase()) : [])
+		const changed = next.size !== platformUsers.size || [...next].some((u) => !platformUsers.has(u))
+		platformUsers = next
+		if (changed && state.book) render()
+	} catch {
+		// sin la lista, nada sale marcado
+	}
+}
+
 // Con el lado, también «Solo las que puedo tomar» (canTake, en broker.js); sin él (referencias de precio, puesto de una
 // oferta tuya), ese filtro no aplica
 function filtered(levels, side) {
@@ -665,7 +683,7 @@ function levelRow(l, side, cum, maxCum) {
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? `<b class="you">${tl('app.you')}</b>` : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="${tl('app.seeProfileOf', { user: esc(l.user) })}"`}>${esc(l.user)}</em> ${l.ops}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? `<b class="you">${tl('app.you')}</b>` : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="${tl('app.seeProfileOf', { user: esc(l.user) })}"`}>${esc(l.user)}</em>${isPlatform(l.user) ? ` <span class="plat" title="${tl('app.platTitle')}">${tl('app.plat')}</span>` : ''} ${l.ops}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 // ── Libro agrupado por rangos de precio ───────────────────────────────
@@ -1710,6 +1728,7 @@ function tooltip(l, side) {
 		l.kind === 'flexible' ? `<div>${tl('app.tipRange', { min: fmtU(l.orderMin ?? 0), max: fmtU(l.orderMax ?? l.usd) })}</div>` : `<div>${tl('app.tipFixed')}</div>`,
 		`<div>@${esc(l.user)} · ${tl('app.tipOps', { n: String(l.ops) })} · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : tl('app.noRatings')}</div>`,
 		`<div>${[l.kyc ? 'KYC ✓' : tl('app.noKyc'), l.vip ? 'VIP' : '', l.gold ? 'GOLD' : ''].filter(Boolean).join(' · ')}</div>`,
+		isPlatform(l.user) ? `<div>🏦 ${tl('app.platTitle')}</div>` : '',
 		rankText(l.user) ? `<div>🏆 Ranking: ${rankText(l.user)}</div>` : '',
 		l.createdAt != null
 			? `<div class="muted">${tl('app.postedAgo', { ago: ago(state.book.serverTime - l.createdAt) })}${l.updatedAt && l.updatedAt - l.createdAt > 60_000 ? ` · ${tl('app.updatedAgoLc', { ago: ago(state.book.serverTime - l.updatedAt) })}` : ''}</div>`
@@ -1999,6 +2018,8 @@ every(60_000, loadHistory)
 every(10_000, pollCandles)
 loadInformal()
 every(600_000, loadInformal)
+loadPlatform()
+every(600_000, loadPlatform)
 document.addEventListener('visibilitychange', () => {
 	if (document.hidden) return
 	loadBook()

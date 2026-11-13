@@ -39,6 +39,7 @@ import { LiveBook } from './livebook-do.ts'
 import { cleanupPush, pushApi, refreshLive, relayTaken, type PushEnv } from './push.ts'
 import { licenseOfPrint, ownedBy, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 import { TASA_KEY, TASA_PATH, tasaData, tasaPage, type TasaData } from './tasa.ts'
+import { PLATFORM_KEEP_MS, readPlatform, syncQvaPayNostr } from './qpnostr.ts'
 
 // El libro en tiempo real de Pro (un Durable Object)
 export { LiveBook }
@@ -214,6 +215,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	// La hora del servidor, para que el terminal corrija un reloj desviado (public/app/clock.js)
 	if (url.pathname === '/data/now' && req.method === 'GET') return secure(Response.json({ now: await serverNow(url) }, { headers: { 'Cache-Control': 'no-store' } }))
 	if (url.pathname === '/data/stats' && req.method === 'GET') return secure(await stats(url, env, ctx))
+	if (url.pathname === '/data/platform' && req.method === 'GET') return secure(await platform(url, env, ctx))
 	if (url.pathname === '/data/offer' && req.method === 'GET') return secure(await offer(req, url, env, ctx))
 	if (url.pathname === '/data/online' && req.method === 'POST') return secure(await online(req, env))
 	if (url.pathname === '/data/peer-stats' && req.method === 'GET') return secure(await peerStatsRoute(req, url, env, ctx))
@@ -376,6 +378,13 @@ export default {
 		} catch (err) {
 			console.error(`histórico: ${(err as Error).message}`)
 		}
+		// Lo que QvaPay publica del P2P en Nostr: quién es su tesorería y las operaciones completadas (para comparar el volumen)
+		if (env.PRO)
+			try {
+				await syncQvaPayNostr(env.DB, env.PRO as KVNamespace, at)
+			} catch (err) {
+				console.error(`QvaPay en Nostr: ${(err as Error).message}`)
+			}
 		// Los números de la página de la tasa de hoy, ya calculados para que sus visitas no lean la base
 		try {
 			const t = await tasaData(env.DB, at)
@@ -568,6 +577,23 @@ async function stats(url: URL, env: Env, ctx: ExecutionContext) {
 		return jsonError(503, 'Las cifras no están disponibles ahora mismo')
 	}
 	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${STATS_TTL_S}` } })
+	ctx.waitUntil(caches.default.put(key, res.clone()))
+	return res
+}
+
+// Los usuarios de la tesorería de QvaPay (los que publican sus ofertas con ["maker", "platform"] en Nostr, ver
+// worker/qpnostr.ts), para marcarlos en el libro. Lo deja el cron cada 10 minutos; se cachea lo mismo
+async function platform(url: URL, env: Env, ctx: ExecutionContext) {
+	const key = new Request(`${url.origin}/data/platform`)
+	const hit = await caches.default.match(key)
+	if (hit) return fromCache(hit, `public, max-age=${STATS_TTL_S}`)
+	const p = await readPlatform(env.PRO as KVNamespace | undefined)
+	const now = Date.now()
+	const users = Object.entries(p?.users ?? {})
+		.filter(([, t]) => now - t < PLATFORM_KEEP_MS)
+		.map(([u]) => u)
+		.sort()
+	const res = new Response(JSON.stringify({ at: p?.at ?? null, users }), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${STATS_TTL_S}` } })
 	ctx.waitUntil(caches.default.put(key, res.clone()))
 	return res
 }

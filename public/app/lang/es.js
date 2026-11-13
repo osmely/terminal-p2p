@@ -176,6 +176,8 @@
 	'app.intentTitleOff': 'Conecta tu cuenta de QvaPay para ver la intención del mercado.',
 	'app.you': 'tú',
 	'app.seeProfileOf': 'Ver la ficha de {user}',
+	'app.plat': 'Tesorería',
+	'app.platTitle': 'Tesorería de QvaPay: una oferta de la propia QvaPay (así la marca QvaPay en Nostr)',
 	'app.nOffers': ['{n} oferta', '{n} ofertas'],
 	'app.grpAsk': ['{n} oferta que venden {usd} USD en total', '{n} ofertas que venden {usd} USD en total'],
 	'app.grpBid': ['{n} oferta que compran {usd} USD en total', '{n} ofertas que compran {usd} USD en total'],
