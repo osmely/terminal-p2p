@@ -504,7 +504,8 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 /* Confirmación sobre el detalle abierto */
 .confirm-layer { position: fixed; inset: 0; z-index: 45; display: flex; align-items: center; justify-content: center; padding: 18px; background: var(--overlay); backdrop-filter: blur(1px); }
 .confirm-box { width: 100%; max-width: 420px; padding: 20px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow); }
-.confirm-box h3 { margin: 0; }
+.confirm-box h3 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+.confirm-box p { margin: 6px 0; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
 .row-btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .row-btns .btn { flex: 1; }
@@ -562,7 +563,7 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .proofs { display: flex; flex-direction: column; gap: 8px; }
 .proofs .hint, .proofs .notice { margin: 0; }
 .proofs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.proof-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.proof-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
 .proof-tile { display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; color: var(--text); cursor: pointer; text-align: left; min-width: 0; }
 .proof-tile:hover { border-color: var(--line-strong); }
 .proof-thumb { display: grid; place-items: center; height: 84px; border-radius: 5px; overflow: hidden; background: var(--bg); color: var(--muted); }

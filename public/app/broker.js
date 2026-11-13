@@ -151,23 +151,26 @@ function closeModal() {
 }
 
 // Confirmación encima del detalle abierto: no lo sustituye, así que al volver sigue igual.
-// Va sobre la tarjeta y no dentro de #modalBody, para que el refresco periódico no la borre
-function askConfirm(title, html, okText, cls = 'primary') {
+// Va fuera de #modalBody, para que el refresco periódico no la borre, y fuera de la ventana: su desenfoque
+// (backdrop-filter) haría que la capa fija se desplazara con ella y, con el detalle bajado, no tapara toda la pantalla
+// Con `alt`, un tercer botón entre los dos que resuelve 'alt' (cerrar o «Volver» siguen siendo false)
+function askConfirm(title, html, okText, cls = 'primary', alt = null) {
 	return new Promise((resolve) => {
 		document.querySelector('.confirm-layer')?.remove()
 		const layer = document.createElement('div')
 		layer.className = 'confirm-layer'
 		layer.setAttribute('role', 'alertdialog')
 		layer.innerHTML = `<div class="confirm-box stack"><h3>${title}</h3><div>${html}</div>
-			<div class="row-btns"><button class="btn" data-c="no">${tl('broker.back')}</button><button class="btn ${cls}" data-c="ok">${okText}</button></div></div>`
+			<div class="row-btns"><button class="btn" data-c="no">${tl('broker.back')}</button>${alt ? `<button class="btn" data-c="alt">${alt}</button>` : ''}<button class="btn ${cls}" data-c="ok">${okText}</button></div></div>`
 		const done = (ok) => {
 			layer.remove()
 			resolve(ok)
 		}
 		layer.querySelector('[data-c="ok"]').onclick = () => done(true)
+		if (alt) layer.querySelector('[data-c="alt"]').onclick = () => done('alt')
 		layer.querySelector('[data-c="no"]').onclick = () => done(false)
 		layer.addEventListener('click', (e) => e.target === layer && done(false))
-		document.querySelector('.modal-card').appendChild(layer)
+		document.body.appendChild(layer)
 		layer.querySelector('[data-c="ok"]').focus()
 	})
 }
@@ -627,7 +630,8 @@ function renderDetail(t) {
 		action = `<div class="stack">
 			<p>${tl('broker.payTransfer', { amount: `${fmtM(t.coinAmount)} ${unit}` })}</p>${clock ? `<p class="hint">${tl('broker.payDeadlineIn')} ${clock}</p>` : ''}
 			${t.isOwner ? `<p class="notice">${tl('broker.payDetailsByChat', { user: esc(t.counterparty) })}</p>` : ''}
-			<label class="field">${tl('broker.txRefLabel')}<input class="input" id="txRef" placeholder="${tl('broker.txRefPh')}" /></label>
+			${t.parts ? '' : '<div id="proofs" class="proofs"></div>'}
+			<label class="field"><span id="txRefLbl">${tl('broker.stepRef')}</span><input class="input" id="txRef" placeholder="${tl('broker.txRefPh')}" /></label>
 			<div class="row-btns"><button class="btn danger" data-act="cancel">${tl('common.cancel')}</button><button class="btn primary" data-act="paid" disabled title="${tl('broker.txRefFirst')}">${tl('broker.iPaid')}</button></div></div>`
 	else if (status === 'processing')
 		action = `<p>${tl('broker.waitingPay', { user: esc(t.counterparty), amount: `${fmtM(t.coinAmount)} ${unit}` })}</p>${clock ? `<p class="hint">${tl('broker.payDeadlineIn')} ${clock}</p>` : ''}
@@ -669,7 +673,8 @@ function renderDetail(t) {
 	}
 
 	if (t.counterpartyUuid) watchOnline([{ id: t.counterpartyUuid, u: t.counterparty }])
-	// Los comprobantes van en su propio bloque, que se redibuja solo cuando cambian (ver paintProofs)
+	// Los comprobantes van en su propio bloque, que se redibuja solo cuando cambian (ver paintProofs). A quien debe pagar
+	// le sale dentro de su paso, antes del número de transacción: es el camino de QvaPay (el número sobra con comprobante)
 	pf.ctx = t.parts ? null : { key: `${d.offer}:${d.order ?? ''}`, payer, status, counterparty: t.counterparty ?? '—' }
 	$('modalBody').innerHTML = `<div class="stack">
 		${d.parent ? `<button type="button" class="link" id="backParts">${tl('broker.backParts')}</button>` : ''}
@@ -683,7 +688,7 @@ function renderDetail(t) {
 				: ''
 		}
 		${action}
-		${t.parts ? '' : '<div id="proofs" class="proofs"></div>'}
+		${t.parts || (status === 'processing' && payer) ? '' : '<div id="proofs" class="proofs"></div>'}
 		${t.parts ? '' : `<div><p class="hint">${tl('broker.chat')}</p><div class="chatbox" id="chatbox">${chatHtml(t.chat)}</div>
 		<form class="chatform" id="chatform"><label class="btn icon-only chat-attach" title="${tl('broker.attachTitle')}" aria-label="${tl('broker.attachAria')}"><input type="file" id="chatFile" accept="image/*" hidden /><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.5 3.5 0 015 5l-8.6 8.6a2 2 0 01-2.8-2.8l7.9-7.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label><input class="input" id="chatInput" maxlength="599" placeholder="${tl('broker.chatPh')}" /><button class="btn">${tl('broker.send')}</button></form></div>`}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${t.offer}" target="_blank" rel="noopener">${tl('broker.openInQvaPay')}</a></p>
@@ -852,6 +857,14 @@ function bindDetail(t) {
 		const d = bk.detail
 		input.value = ''
 		if (!file || !d) return
+		// Quien paga y aún puede subir comprobantes: si la foto es el del pago, va mejor como comprobante (privado, sin
+		// URL pública, y es la prueba que QvaPay tiene en cuenta). Se pregunta; no se le quita mandarla al chat
+		const c = pf.ctx
+		if (c?.payer && c.key === pf.key && pf.limits?.canUpload) {
+			const pick = await askConfirm(tl('broker.chatProofAsk'), `<p class="muted">${tl('broker.chatProofBody', { user: esc(c.counterparty) })}</p>`, tl('broker.chatProofYes'), 'primary', tl('broker.chatProofNo'))
+			if (pick === true) return void uploadProof(file)
+			if (pick !== 'alt') return
+		}
 		const label = $('chatFile')?.closest('label')
 		label?.classList.add('busy')
 		toast(tl('broker.sendingImage'))
@@ -970,7 +983,8 @@ function paintProofs() {
 	} else if (live || list.length) {
 		const l = pf.limits
 		const max = l?.maxPerParty || 5
-		const head = c.payer ? tl('broker.proofsMine') : tl('broker.proofsOf', { user: who })
+		const step = c.payer && c.status === 'processing'
+		const head = step ? tl('broker.stepProof') : c.payer ? tl('broker.proofsMine') : tl('broker.proofsOf', { user: who })
 		const left = c.payer && live && l ? `<span class="hint">${tl('broker.proofsLeft', { n: l.remaining, max })}</span>` : ''
 		const grid = list.length
 			? `<div class="proof-grid">${list.map(proofTile).join('')}</div>`
@@ -978,7 +992,8 @@ function paintProofs() {
 		let foot = ''
 		if (c.payer && live) {
 			if (l?.canUpload)
-				foot = `<label class="btn proof-up${pf.uploading ? ' busy' : ''}">${ICON_UP}<span>${pf.uploading ? tl('broker.proofUploading') : tl('broker.proofUpload')}</span><input type="file" id="proofFile" accept="image/*,application/pdf" hidden ${pf.uploading ? 'disabled' : ''} /></label>
+				// Mientras debe pagar y aún no hay ninguno suyo es lo primero que toca: va como botón principal
+				foot = `<label class="btn proof-up${step && !list.some((p) => p.mine) ? ' primary' : ''}${pf.uploading ? ' busy' : ''}">${ICON_UP}<span>${pf.uploading ? tl('broker.proofUploading') : tl('broker.proofUpload')}</span><input type="file" id="proofFile" accept="image/*,application/pdf" hidden ${pf.uploading ? 'disabled' : ''} /></label>
 				<p class="hint">${tl('broker.proofUploadHint', { user: who })}</p>`
 			else if (l && l.remaining <= 0) foot = `<p class="hint">${tl('broker.proofsMax', { max })}</p>`
 			// Aún sin comprobante y sin marcar el pago: por qué conviene subirlo
@@ -1014,6 +1029,8 @@ function updPaid() {
 	const byProof = proofPays()
 	btn.disabled = tx.value.trim().length < 4 && !byProof
 	tx.placeholder = byProof ? tl('broker.txRefOptional') : tl('broker.txRefPh')
+	const lbl = $('txRefLbl')
+	if (lbl) lbl.textContent = pf.limits?.proofReplacesTx ? tl('broker.stepRefOpt') : tl('broker.stepRef')
 }
 
 // El archivo, pedido con el token (por el relé, en la cabecera) y guardado en memoria mientras la operación está abierta
@@ -1085,7 +1102,7 @@ async function openProof(id) {
 	const close = () => layer.remove()
 	layer.querySelector('[data-c="close"]').onclick = close
 	layer.addEventListener('click', (e) => e.target === layer && close())
-	document.querySelector('.modal-card').appendChild(layer)
+	document.body.appendChild(layer)
 	layer.querySelector('[data-c="close"]').focus()
 	try {
 		const v = await proofBlob(id)
