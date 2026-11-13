@@ -112,6 +112,8 @@
 	'html.stkViews': 'What to show',
 	'html.stkChart': 'Chart',
 	'html.stkPortfolio': 'My portfolio',
+	'html.stkRegionTitle': 'Buying and selling: not available in every region',
+	'html.stkRegion': 'You can see the prices, but buying and selling tokenized stocks is not available in the US, Cuba or other countries restricted by the issuer.',
 	'html.loading': 'Loading…',
 	'html.interval': 'Interval',
 	'html.stkAlert': 'Alert me',

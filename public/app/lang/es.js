@@ -112,6 +112,8 @@
 	'html.stkViews': 'Qué ver',
 	'html.stkChart': 'Gráfico',
 	'html.stkPortfolio': 'Mi cartera',
+	'html.stkRegionTitle': 'Comprar y vender: no disponible en todas las regiones',
+	'html.stkRegion': 'Puedes ver los precios, pero comprar y vender acciones tokenizadas no está disponible en EE. UU., Cuba ni en otros países con restricciones del emisor.',
 	'html.loading': 'Cargando…',
 	'html.interval': 'Intervalo',
 	'html.stkAlert': 'Avísame',

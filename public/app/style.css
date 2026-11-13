@@ -1202,6 +1202,8 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 .stk-note a { color: var(--accent); }
 /* Tu cartera de acciones (con la cuenta conectada) */
 .stk-views { margin-left: 4px; }
+.stk-region { display: flex; flex-direction: column; gap: 3px; margin: 14px 16px 0; line-height: 1.5; }
+.stk-region b { color: var(--text); font-weight: 600; }
 .stk-pf { display: flex; flex-direction: column; gap: 16px; padding: 14px 16px 16px; min-width: 0; }
 .stk-pf section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .stk-h4 { margin: 0; font-size: 13px; font-weight: 600; }
@@ -1235,5 +1237,6 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 	.stk-chart-wrap { min-height: 260px; }
 	.stk-alert { margin-left: 0; }
 	.stk-pf { padding: 12px; }
+	.stk-region { margin: 12px 12px 0; }
 	.stk-pf-sum { grid-template-columns: 1fr; }
 }
