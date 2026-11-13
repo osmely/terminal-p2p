@@ -683,7 +683,7 @@ function levelRow(l, side, cum, maxCum) {
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? `<b class="you">${tl('app.you')}</b>` : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="${tl('app.seeProfileOf', { user: esc(l.user) })}"`}>${esc(l.user)}</em>${isPlatform(l.user) ? ` <span class="plat" title="${tl('app.platTitle')}">${tl('app.plat')}</span>` : ''} ${l.ops}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? `<b class="you">${tl('app.you')}</b>` : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="${tl('app.seeProfileOf', { user: esc(l.user) })}"`}>${esc(l.user)}</em>${isPlatform(l.user) ? ` <span class="plat" title="${tl('app.platTitle')}">🏦</span>` : ''} ${l.ops}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 // ── Libro agrupado por rangos de precio ───────────────────────────────
