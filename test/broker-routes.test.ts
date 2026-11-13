@@ -317,3 +317,91 @@ test('mi cartera de acciones: solo lectura, con números limpios, y sin el permi
 	// Sin cuenta conectada, nada
 	assert.equal((await get('/stocks/portfolio', { 'X-Broker': '1' })).status, 401)
 })
+
+test('comprobantes: la lista, subir solo fotos o PDF hasta 4 MB, el archivo y los errores en claro', async () => {
+	const { fake } = await setup()
+	const A = '1f0c6b1e-5d7a-4d2e-9a53-4a2f0a0d9a11'
+	const seen: string[] = []
+	const c = fake.client as unknown as Record<string, unknown>
+	c.attachments = async (uuid: string, order?: string) => (
+		seen.push(`list:${uuid}:${order ?? ''}`),
+		{
+			attachments: [
+				{ uuid: A, kind: 'pdf', mime: 'application/pdf', size: 245120, mine: true, created_at: '2026-11-06T15:04:05.000Z' },
+				{ uuid: '../../withdraw', kind: 'image', mime: 'image/jpeg', size: 1, mine: true, created_at: '2026-11-06T15:04:05.000Z' },
+			],
+			limits: { max_bytes: 4194304, max_per_party: 5, remaining: 4, can_upload: true, proof_replaces_tx_id: true },
+		}
+	)
+	c.uploadAttachment = async (uuid: string, file: Blob, name: string, order?: string) => (seen.push(`up:${uuid}:${file.size}:${name}:${order ?? ''}`), { attachment: {} })
+	c.attachmentFile = async (uuid: string, id: string, order?: string) => (seen.push(`file:${uuid}:${id}:${order ?? ''}`), new Blob([new Uint8Array([1, 2, 3])], { type: 'text/html' }))
+	const acc = { sid: 'sid1', me: await fake.client.me(), client: fake.client }
+	const broker = new Broker({ accounts: { get: async () => acc } as unknown as AccountStore, market: { wake() {} }, dryRun: false })
+	const H = { 'X-Broker': '1', Cookie: 'sid=sid1' }
+
+	// La lista, con la orden de la oferta por rango y sin lo que no es un comprobante de verdad
+	let res = (await broker.handle(new Request(BASE + '/trade/proofs?offer=a1&order=o1', { headers: H })))!
+	const list = (await res.json()) as { proofs: { id: string; pdf: boolean; mine: boolean }[]; limits: Record<string, unknown> }
+	assert.deepEqual(list.proofs.map((p) => [p.id, p.pdf, p.mine]), [[A, true, true]])
+	assert.deepEqual(list.limits, { maxBytes: 4194304, maxPerParty: 5, remaining: 4, canUpload: true, proofReplacesTx: true })
+
+	const send = async (blob: Blob, order?: string) => {
+		const form = new FormData()
+		form.append('offer', 'a1')
+		if (order) form.append('order', order)
+		form.append('file', blob)
+		return (await broker.handle(new Request(BASE + '/trade/proof', { method: 'POST', headers: H, body: form })))!
+	}
+	assert.equal((await send(new Blob([new Uint8Array(1000)], { type: 'application/pdf' }), 'o1')).status, 200)
+	assert.equal((await send(new Blob([new Uint8Array(1000)], { type: 'image/webp' }))).status, 200)
+	assert.equal((await send(new Blob(['<svg/>'], { type: 'image/svg+xml' }))).status, 400)
+	assert.equal((await send(new Blob([new Uint8Array(1000)], { type: 'image/gif' }))).status, 400)
+	assert.equal((await send(new Blob([new Uint8Array(4 * 1024 * 1024 + 1)], { type: 'image/jpeg' }))).status, 413)
+
+	// El archivo: lo que no es un tipo admitido nunca llega como algo que el navegador interprete
+	res = (await broker.handle(new Request(BASE + `/trade/proof?offer=a1&order=o1&id=${A}`, { headers: H })))!
+	assert.equal(res.status, 200)
+	assert.equal(res.headers.get('content-type'), 'application/octet-stream')
+	assert.equal((await res.arrayBuffer()).byteLength, 3)
+	assert.equal((await broker.handle(new Request(BASE + '/trade/proof?offer=a1&id=../../withdraw', { headers: H })))!.status, 400)
+	assert.deepEqual(seen, ['list:a1:o1', 'up:a1:1000:comprobante.pdf:o1', 'up:a1:1000:comprobante.webp:', `file:a1:${A}:o1`])
+
+	// Errores de QvaPay en palabras claras
+	c.uploadAttachment = async () => {
+		throw new QvaPayError(403, 'Forbidden', 'ATTACHMENT_PAYER_ONLY')
+	}
+	res = await send(new Blob([new Uint8Array(10)], { type: 'image/png' }))
+	assert.equal(res.status, 400)
+	assert.match(((await res.json()) as { error: string }).error, /Solo quien paga/)
+	c.uploadAttachment = async () => {
+		throw new QvaPayError(409, 'Conflict', 'ATTACHMENT_LIMIT')
+	}
+	assert.match(((await (await send(new Blob([new Uint8Array(10)], { type: 'image/png' }))).json()) as { error: string }).error, /todos los comprobantes/)
+	// Sin respuesta: pudo subirse, y como no se puede borrar, no se manda otra vez a ciegas
+	c.uploadAttachment = async () => {
+		throw new DOMException('signal timed out', 'TimeoutError')
+	}
+	res = await send(new Blob([new Uint8Array(10)], { type: 'image/png' }))
+	assert.equal(res.status, 504)
+	assert.match(((await res.json()) as { error: string }).error, /Mira la lista antes de reintentar/)
+	c.attachmentFile = async () => {
+		throw new QvaPayError(404, 'Not found')
+	}
+	assert.equal((await broker.handle(new Request(BASE + `/trade/proof?offer=a1&id=${A}`, { headers: H })))!.status, 404)
+})
+
+test('marcar pagado: sin referencia solo con tu comprobante', async () => {
+	const { fake, post } = await setup()
+	assert.equal((await post('/trade/action', { offer: 'a1', action: 'paid', txId: '' })).status, 400)
+	assert.equal(fake.offers.a1.status, 'processing')
+	const r = await post('/trade/action', { offer: 'a1', action: 'paid', txId: '', proof: true })
+	assert.equal(r.status, 200)
+	assert.ok(fake.calls.includes('paid:a1:'))
+	// Sin comprobante válido QvaPay lo rechaza: se dice qué falta
+	fake.client.markPaid = async () => {
+		throw new QvaPayError(400, 'Bad request', 'PAYMENT_PROOF_REQUIRED')
+	}
+	const e = await post('/trade/action', { offer: 'a1', action: 'paid', txId: '', proof: true })
+	assert.equal(e.status, 400)
+	assert.match(e.body.error, /referencia de tu transferencia o sube antes el comprobante/)
+})

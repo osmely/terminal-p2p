@@ -18,6 +18,8 @@ const UPSTREAM = 'https://api.qvapay.com'
 const MAX_BODY = 64 * 1024
 // Una imagen del chat va como formulario con archivo: el terminal la reduce antes, así que 3 MB sobran
 const MAX_IMAGE_BODY = 3 * 1024 * 1024
+// Un comprobante del pago (imagen o PDF): QvaPay admite hasta 4 MB por archivo, más lo que ocupa el formulario
+const MAX_PROOF_BODY = 4 * 1024 * 1024 + 64 * 1024
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const PUBLIC_TTL_S = 60
 const PUBLIC_PATHS = new Set(['/p2p/averages', '/p2p/completed_pairs_average', '/coins'])
@@ -41,6 +43,10 @@ const RULES: [method: string, path: RegExp][] = [
 	['POST', new RegExp(`^/p2p/${UUID}/(paid|received|cancel|chat|rate|edit|pause|apply)$`)],
 	// Cambiar una calificación ya dada (QvaPay lo permite 72 h)
 	['PATCH', new RegExp(`^/p2p/${UUID}/rate$`)],
+	// Los comprobantes de pago de una operación: verlos, subir uno (solo quien paga) y bajar el archivo. Nunca borrar
+	['GET', new RegExp(`^/p2p/${UUID}/attachments$`)],
+	['POST', new RegExp(`^/p2p/${UUID}/attachments$`)],
+	['GET', new RegExp(`^/p2p/${UUID}/attachments/${UUID}$`)],
 	// Tus acciones en QvaPay (posiciones e historial): solo leer, nunca comprar ni vender
 	['GET', /^\/stocks\/portfolio$/],
 ]
@@ -75,17 +81,25 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 	if (req.method !== 'GET' && req.headers.get('origin') !== url.origin) return text(403, 'Origen no permitido')
 
 	const stream = /\/chat\/stream$/.test(path)
-	const headers = new Headers({ Accept: stream ? 'text/event-stream' : 'application/json' })
+	// El archivo de un comprobante llega tal cual (imagen o PDF), no en JSON
+	const file = /\/attachments\/[^/]+$/.test(path)
+	const headers = new Headers({ Accept: stream ? 'text/event-stream' : file ? '*/*' : 'application/json' })
 	for (const h of ['authorization', 'content-type']) {
 		const v = req.headers.get(h)
 		if (v) headers.set(h, v)
 	}
 
 	let body: string | ArrayBuffer | undefined
-	const image = req.method === 'POST' && /\/chat$/.test(path) && (req.headers.get('content-type') ?? '').startsWith('multipart/form-data')
-	if (image) {
+	const multipart = req.method === 'POST' && (req.headers.get('content-type') ?? '').startsWith('multipart/form-data')
+	const image = multipart && /\/chat$/.test(path)
+	const proof = multipart && /\/attachments$/.test(path)
+	if (image || proof) {
+		// Se mira el tamaño declarado antes de leerlo entero; el leído vale igual por si no lo declara o miente
+		const max = proof ? MAX_PROOF_BODY : MAX_IMAGE_BODY
+		const tooBig = text(413, proof ? 'Comprobante demasiado grande (máximo 4 MB)' : 'Imagen demasiado grande')
+		if (Number(req.headers.get('content-length')) > max) return tooBig
 		body = await req.arrayBuffer()
-		if (body.byteLength > MAX_IMAGE_BODY) return text(413, 'Imagen demasiado grande')
+		if (body.byteLength > max) return tooBig
 	} else if (req.method !== 'GET') {
 		body = await req.text()
 		if (body.length > MAX_BODY) return text(413, 'Cuerpo demasiado grande')
@@ -109,6 +123,11 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 	})
 	const retryAfter = upstream.headers.get('retry-after')
 	if (retryAfter) out.set('Retry-After', retryAfter)
+	// El archivo de un comprobante solo lo lee el terminal (fetch con el token): si se abriera directamente, nunca como página
+	if (file) {
+		out.set('X-Content-Type-Options', 'nosniff')
+		out.set('Content-Security-Policy', "default-src 'none'; sandbox")
+	}
 	if (onWrite && req.method !== 'GET') {
 		const note = onWrite({ method: req.method, path, query: url.searchParams, body: typeof body === 'string' ? body : undefined, meta: req.headers.get('x-tp-meta'), response: upstream.clone() }).catch(() => {})
 		if (ctx) ctx.waitUntil(note)

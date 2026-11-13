@@ -1,6 +1,8 @@
 import { logger } from '../log.ts'
 import { QVAPAY_BUCKETS, RateLimiter, type BucketName } from '../ratelimit.ts'
 import type {
+	Attachment,
+	AttachmentLimits,
 	Averages,
 	ChatMessage,
 	CoinCategory,
@@ -56,6 +58,8 @@ interface RequestOpts {
 const REQUEST_TIMEOUT_MS = 20_000
 // Subir una imagen con la conexión lenta de la noche puede pasar de 20 s: se le da un minuto
 export const CHAT_IMAGE_TIMEOUT_MS = 60_000
+// Un comprobante llega a 4 MB: subirlo o bajarlo con la conexión lenta tiene dos minutos
+export const PROOF_TIMEOUT_MS = 120_000
 
 export interface OpMeta {
 	coin?: string
@@ -194,6 +198,30 @@ export class QvaPayClient {
 		}
 	}
 
+	// Los comprobantes de pago de una operación y lo que te queda por subir (en una por rango, los de esa orden)
+	async attachments(uuid: string, order?: string) {
+		const res = await this.request<{ attachments?: Attachment[]; limits?: AttachmentLimits }>('GET', `/p2p/${uuid}/attachments`, { bucket: 'general', query: { order } })
+		return { attachments: res?.attachments ?? [], limits: res?.limits ?? null }
+	}
+
+	// El archivo de un comprobante, tal cual (imagen o PDF). No pasa por request(): la respuesta no es JSON
+	async attachmentFile(uuid: string, id: string, order?: string) {
+		const url = new URL(`${this.baseUrl}/p2p/${uuid}/attachments/${id}`)
+		if (order) url.searchParams.set('order', order)
+		const res = await this.limiter.run('general', () =>
+			fetch(url, {
+				headers: { ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}), Accept: '*/*' },
+				cache: 'no-store',
+				signal: AbortSignal.timeout(PROOF_TIMEOUT_MS),
+			}),
+		)
+		if (!res.ok) {
+			const data = (await res.json().catch(() => null)) as { error?: string; message?: string; code?: string } | null
+			throw new QvaPayError(res.status, String(data?.error ?? data?.message ?? res.statusText), data?.code, data)
+		}
+		return res.blob()
+	}
+
 	// Monedas y sus campos de pago (público)
 	coins() {
 		return this.request<CoinCategory[]>('GET', '/coins', { bucket: 'coins' })
@@ -240,9 +268,10 @@ export class QvaPayClient {
 		})
 	}
 
+	// Sin referencia (txId vacío) solo vale si ya subiste un comprobante en esta operación y QvaPay lo admite
 	async markPaid(uuid: string, txId: string, order?: string) {
 		if (this.dryRun) return void log.info(`[DRY] POST /p2p/${uuid}/paid${order ? `?order=${order}` : ''}`)
-		await this.request('POST', `/p2p/${uuid}/paid`, { bucket: 'paid', query: { order }, body: { tx_id: txId }, write: true })
+		await this.request('POST', `/p2p/${uuid}/paid`, { bucket: 'paid', query: { order }, body: txId ? { tx_id: txId } : {}, write: true })
 	}
 
 	async markReceived(uuid: string, order?: string, meta?: OpMeta) {
@@ -302,6 +331,17 @@ export class QvaPayClient {
 		form.append('file', file, name)
 		if (message) form.append('message', message)
 		await this.request('POST', `/p2p/${uuid}/chat`, { bucket: 'general', query: { order }, form, write: true, timeoutMs: CHAT_IMAGE_TIMEOUT_MS })
+	}
+
+	// Comprobante del pago (JPG, PNG, WEBP o PDF, hasta 4 MB). Solo quien paga; no se puede borrar ni reemplazar
+	async uploadAttachment(uuid: string, file: Blob, name: string, order?: string) {
+		if (this.dryRun) {
+			log.info(`[DRY] POST /p2p/${uuid}/attachments${order ? `?order=${order}` : ''}`)
+			return { attachment: null as Attachment | null }
+		}
+		const form = new FormData()
+		form.append('file', file, name)
+		return this.request<{ attachment?: Attachment }>('POST', `/p2p/${uuid}/attachments`, { bucket: 'general', query: { order }, form, write: true, timeoutMs: PROOF_TIMEOUT_MS })
 	}
 
 	async sendChat(uuid: string, message: string, order?: string, urgent = false) {

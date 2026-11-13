@@ -59,3 +59,40 @@ test('si el cambio no vale y tampoco se puede calificar de nuevo, el error es el
 	const c = new QvaPayClient({ token: 'x', dryRun: false, baseUrl: 'https://qp.test' })
 	await assert.rejects(c.rate('7c9e6679-7425-40de-944b-e07fc1f90ae7', undefined, 2, undefined, true), /RATING_LOCKED/)
 })
+
+test('comprobantes: con la orden en la URL, pagado sin tx_id con comprobante y el archivo tal cual', async (t) => {
+	const real = globalThis.fetch
+	t.after(() => (globalThis.fetch = real))
+	const U = '7c9e6679-7425-40de-944b-e07fc1f90ae7'
+	const A = '1f0c6b1e-5d7a-4d2e-9a53-4a2f0a0d9a11'
+	const calls: { url: string; method: string; body: unknown; auth: string | null }[] = []
+	globalThis.fetch = (async (url: URL | string, init: RequestInit = {}) => {
+		calls.push({ url: String(url), method: init.method ?? 'GET', body: init.body, auth: new Headers(init.headers).get('authorization') })
+		if (String(url).includes(`/attachments/${A}`)) return new Response(new Uint8Array([37, 80, 68, 70]), { status: 200, headers: { 'content-type': 'application/pdf' } })
+		if (String(url).includes('/attachments/')) return new Response(JSON.stringify({ error: 'No encontrado' }), { status: 404 })
+		if (init.method === 'POST' && String(url).includes('/attachments')) return new Response(JSON.stringify({ attachment: { uuid: A } }), { status: 201 })
+		if (String(url).includes('/attachments')) return new Response(JSON.stringify({ attachments: [], limits: { max_bytes: 4194304, max_per_party: 5, remaining: 5, can_upload: true, proof_replaces_tx_id: true } }), { status: 200 })
+		return new Response('{"message":"ok"}', { status: 200 })
+	}) as typeof fetch
+	const c = new QvaPayClient({ token: 'x', dryRun: false, baseUrl: 'https://qp.test' })
+
+	assert.equal((await c.attachments(U, 'o1')).limits?.remaining, 5)
+	assert.equal(calls.at(-1)!.url, `https://qp.test/p2p/${U}/attachments?order=o1`)
+
+	await c.uploadAttachment(U, new Blob([new Uint8Array(10)], { type: 'image/png' }), 'comprobante.png', 'o1')
+	assert.equal(calls.at(-1)!.url, `https://qp.test/p2p/${U}/attachments?order=o1`)
+	assert.ok(calls.at(-1)!.body instanceof FormData)
+	assert.equal(((calls.at(-1)!.body as FormData).get('file') as File).name, 'comprobante.png')
+
+	// El token va en la cabecera, nunca en la URL
+	const blob = await c.attachmentFile(U, A, 'o1')
+	assert.equal(calls.at(-1)!.url, `https://qp.test/p2p/${U}/attachments/${A}?order=o1`)
+	assert.equal(calls.at(-1)!.auth, 'Bearer x')
+	assert.equal(blob.type, 'application/pdf')
+	await assert.rejects(c.attachmentFile(U, '00000000-0000-0000-0000-000000000000'), (e: { status?: number }) => e.status === 404)
+
+	await c.markPaid(U, '', 'o1')
+	assert.equal(calls.at(-1)!.body, '{}')
+	await c.markPaid(U, 'REF-1')
+	assert.equal(calls.at(-1)!.body, '{"tx_id":"REF-1"}')
+})

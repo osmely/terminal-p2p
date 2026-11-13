@@ -166,6 +166,26 @@ export interface ChatMessage {
 	moderator_name?: string | null
 }
 
+// Un comprobante de pago de una operación (GET /p2p/:uuid/attachments). QvaPay nunca devuelve el nombre del archivo
+export interface Attachment {
+	uuid: string
+	kind: string
+	mime: string
+	size: number
+	// Lo subiste tú
+	mine: boolean
+	created_at: string
+}
+
+export interface AttachmentLimits {
+	max_bytes: number
+	max_per_party: number
+	remaining: number
+	can_upload: boolean
+	// Un comprobante tuyo basta para marcar el pago sin referencia
+	proof_replaces_tx_id: boolean
+}
+
 export interface Averages {
 	[coin: string]: {
 		name: string

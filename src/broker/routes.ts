@@ -56,6 +56,10 @@ const TICKS = new Set<string>(COINS.map((c) => c.tick))
 // Imágenes del chat: los tipos que acepta QvaPay y un tope (el terminal las reduce antes de enviarlas)
 const CHAT_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif'])
 export const CHAT_IMAGE_MAX = 2 * 1024 * 1024
+// Comprobantes de pago: lo que admite QvaPay (lo comprueba por el contenido; aquí, por el tipo, para avisar antes)
+const PROOF_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf' }
+export const PROOF_MAX = 4 * 1024 * 1024
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const REQUIREMENTS: Record<keyof Requirements, number[]> = {
 	min_completed: [5, 10, 25, 50, 100],
@@ -139,6 +143,12 @@ export class Broker {
 					return await this.action(ctx, acc)
 				case 'POST /trade/image':
 					return await this.chatImage(ctx, acc)
+				case 'GET /trade/proofs':
+					return await this.proofs(ctx, acc)
+				case 'POST /trade/proof':
+					return await this.uploadProof(ctx, acc)
+				case 'GET /trade/proof':
+					return await this.proofFile(ctx, acc)
 				case 'GET /coins':
 					return await this.coins(acc)
 				case 'GET /payment-methods':
@@ -696,6 +706,64 @@ export class Broker {
 		return json(200, { ok: true })
 	}
 
+	// ── Comprobantes de pago ────────────────────────────────────────────
+	// Los guarda QvaPay, privados entre las dos partes y soporte. Aquí solo se piden con el token de quien mira:
+	// el terminal no los guarda en ningún sitio
+
+	private async proofs({ url }: Ctx, acc: Account) {
+		const offer = url.searchParams.get('offer') ?? ''
+		const order = url.searchParams.get('order') || undefined
+		const { attachments, limits } = await acc.client.attachments(offer, order)
+		return json(200, {
+			proofs: attachments
+				.filter((a) => a && ID.test(String(a.uuid)))
+				.map((a) => ({ id: a.uuid, pdf: a.kind === 'pdf' || a.mime === 'application/pdf', size: Number(a.size) || 0, mine: !!a.mine, at: a.created_at })),
+			limits: limits && {
+				maxBytes: Number(limits.max_bytes) || PROOF_MAX,
+				maxPerParty: Number(limits.max_per_party) || 0,
+				remaining: Number(limits.remaining) || 0,
+				canUpload: !!limits.can_upload,
+				proofReplacesTx: !!limits.proof_replaces_tx_id,
+			},
+		})
+	}
+
+	private async uploadProof({ req }: Ctx, acc: Account) {
+		const form = await req.formData()
+		const file = form.get('file')
+		const offer = String(form.get('offer') ?? '')
+		const order = form.get('order') ? String(form.get('order')) : undefined
+		const ext = file instanceof Blob ? PROOF_TYPES[file.type] : undefined
+		if (!(file instanceof Blob) || !ext) return json(400, { error: tl('routes.proofType') })
+		if (file.size > PROOF_MAX) return json(413, { error: tl('routes.proofTooBig') })
+		try {
+			await acc.client.uploadAttachment(offer, file, `comprobante.${ext}`, order)
+		} catch (err) {
+			// Sin respuesta: pudo subirse igual, y como no se puede borrar, mandarlo otra vez lo duplicaría
+			if (err instanceof QvaPayError) throw err
+			return json(504, { error: tl('routes.proofSlow') })
+		}
+		return json(200, { ok: true, message: tl('routes.proofSent') })
+	}
+
+	// El archivo, para verlo en el terminal (nunca con una URL pública ni con el token en la URL)
+	private async proofFile({ url }: Ctx, acc: Account) {
+		const offer = url.searchParams.get('offer') ?? ''
+		const order = url.searchParams.get('order') || undefined
+		const id = url.searchParams.get('id') ?? ''
+		if (!ID.test(id)) return json(400, { error: tl('routes.proofGone') })
+		let blob: Blob
+		try {
+			blob = await acc.client.attachmentFile(offer, id, order)
+		} catch (err) {
+			if (err instanceof QvaPayError && err.status === 404) return json(404, { error: tl('routes.proofGone') })
+			throw err
+		}
+		// Solo los tipos que admite QvaPay; cualquier otra cosa se baja como archivo, nunca se interpreta
+		const type = (blob.type || '').split(';')[0].trim().toLowerCase()
+		return new Response(blob, { status: 200, headers: { 'Content-Type': PROOF_TYPES[type] ? type : 'application/octet-stream', 'Cache-Control': 'no-store' } })
+	}
+
 	// ── Ficha de un usuario ─────────────────────────────────────────────
 
 	// Su perfil y sus ofertas abiertas en todos los mercados. QvaPay no da el historial de otro
@@ -802,7 +870,8 @@ export class Broker {
 		switch (b.action) {
 			case 'paid': {
 				const tx = String(b.txId ?? '').trim()
-				if (!tx) return json(400, { error: tl('routes.needTx') })
+				// Sin referencia solo con tu comprobante ya subido (QvaPay lo comprueba igual: si no, PAYMENT_PROOF_REQUIRED)
+				if (!tx && b.proof !== true) return json(400, { error: tl('routes.needTx') })
 				await c.markPaid(offer, tx.slice(0, 120), order)
 				return json(200, { ok: true, message: tl('routes.markedPaid') })
 			}
@@ -1198,6 +1267,17 @@ function friendly(err: unknown): string {
 		OFFER_NOT_EDITABLE: tl('routes.qpNotEditable'),
 		FLEXIBLE_AMOUNT_REQUIRED: tl('routes.qpNeedAmount'),
 		INVALID_REQUIREMENTS: tl('routes.badRequirement'),
+		// Comprobantes de pago
+		ORDER_REQUIRED: tl('routes.qpOrderRequired'),
+		MULTIPART_REQUIRED: tl('routes.proofType'),
+		ATTACHMENT_MISSING: tl('routes.proofType'),
+		ATTACHMENT_PAYER_ONLY: tl('routes.qpProofPayerOnly'),
+		ATTACHMENT_STATE: tl('routes.qpProofState'),
+		ATTACHMENT_LIMIT: tl('routes.qpProofLimit'),
+		ATTACHMENT_TOO_LARGE: tl('routes.proofTooBig'),
+		ATTACHMENT_TYPE: tl('routes.proofType'),
+		ATTACHMENTS_UNAVAILABLE: tl('routes.qpProofsOff'),
+		PAYMENT_PROOF_REQUIRED: tl('routes.qpProofRequired'),
 	}
 	if (err.code && map[err.code]) return map[err.code]
 	if (err.status === 409) return tl('routes.err409')

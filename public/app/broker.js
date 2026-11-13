@@ -87,11 +87,12 @@ function watchOnline(list) {
 
 // Antes de enviarla, la imagen se reduce a 1000 px como mucho y a JPG, lo mismo que deja QvaPay: se ve igual en el
 // chat y sube antes con la conexión lenta. Un GIF pequeño va tal cual para no perder la animación
+// Un comprobante se reduce a 2000 px, lo mismo que guarda QvaPay (px), y nunca como GIF (gif: false)
 const CHAT_IMAGE_PX = 1000
-async function shrinkImage(file) {
-	if (file.type === 'image/gif' && file.size <= 2 * 1024 * 1024) return file
+async function shrinkImage(file, { px = CHAT_IMAGE_PX, gif = true } = {}) {
+	if (gif && file.type === 'image/gif' && file.size <= 2 * 1024 * 1024) return file
 	const bmp = await createImageBitmap(file)
-	const k = Math.min(1, CHAT_IMAGE_PX / Math.max(bmp.width, bmp.height))
+	const k = Math.min(1, px / Math.max(bmp.width, bmp.height))
 	const canvas = document.createElement('canvas')
 	canvas.width = Math.round(bmp.width * k)
 	canvas.height = Math.round(bmp.height * k)
@@ -144,6 +145,7 @@ function closeModal() {
 	$('modalBody').innerHTML = ''
 	bk.detail = null
 	stopChatLive()
+	dropProofs()
 	onModalClose?.()
 	onModalClose = null
 }
@@ -506,6 +508,7 @@ async function refreshDetail({ periodic = false } = {}) {
 	} else t.chat = bk.chat ?? []
 	bk.detailKey = `${d.offer}:${d.order ?? ''}`
 	syncChatLive(t)
+	syncProofs(t)
 	// El refresco periódico no debe borrar lo que el usuario está escribiendo ni moverle el scroll:
 	// el chat sigue al final solo si ya estaba al final (si subió a leer, se queda donde estaba)
 	const cb0 = $('chatbox')
@@ -666,6 +669,8 @@ function renderDetail(t) {
 	}
 
 	if (t.counterpartyUuid) watchOnline([{ id: t.counterpartyUuid, u: t.counterparty }])
+	// Los comprobantes van en su propio bloque, que se redibuja solo cuando cambian (ver paintProofs)
+	pf.ctx = t.parts ? null : { key: `${d.offer}:${d.order ?? ''}`, payer, status, counterparty: t.counterparty ?? '—' }
 	$('modalBody').innerHTML = `<div class="stack">
 		${d.parent ? `<button type="button" class="link" id="backParts">${tl('broker.backParts')}</button>` : ''}
 		<div><h3>${tl(buy ? 'broker.youBuy' : 'broker.youSell', { usd: fmtM(t.usd), amount: `${fmtM(t.coinAmount)} ${unit}` })}</h3>
@@ -678,12 +683,14 @@ function renderDetail(t) {
 				: ''
 		}
 		${action}
+		${t.parts ? '' : '<div id="proofs" class="proofs"></div>'}
 		${t.parts ? '' : `<div><p class="hint">${tl('broker.chat')}</p><div class="chatbox" id="chatbox">${chatHtml(t.chat)}</div>
 		<form class="chatform" id="chatform"><label class="btn icon-only chat-attach" title="${tl('broker.attachTitle')}" aria-label="${tl('broker.attachAria')}"><input type="file" id="chatFile" accept="image/*" hidden /><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7.1-7.1l8.6-8.6a3.5 3.5 0 015 5l-8.6 8.6a2 2 0 01-2.8-2.8l7.9-7.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></label><input class="input" id="chatInput" maxlength="599" placeholder="${tl('broker.chatPh')}" /><button class="btn">${tl('broker.send')}</button></form></div>`}
 		<p class="hint"><a class="link" href="https://www.qvapay.com/p2p/${t.offer}" target="_blank" rel="noopener">${tl('broker.openInQvaPay')}</a></p>
 	</div>`
 	tickClocks()
 	bindDetail(t)
+	paintProofs()
 }
 
 // Botones de copiar (datos de pago, referencias) dentro de un bloque
@@ -739,14 +746,9 @@ function bindDetail(t) {
 	bindCopy(body)
 	const seen = $('seenMoney')
 	if (seen) seen.onchange = () => (body.querySelector('[data-act="release"]').disabled = !seen.checked)
-	// "Ya pagué" solo con la referencia de la transferencia escrita
-	const tx = $('txRef')
-	const paidBtn = body.querySelector('[data-act="paid"]')
-	if (tx && paidBtn) {
-		const upd = () => (paidBtn.disabled = tx.value.trim().length < 4)
-		tx.addEventListener('input', upd)
-		upd()
-	}
+	// "Ya pagué" solo con la referencia de la transferencia escrita (o con tu comprobante, ver updPaid)
+	$('txRef')?.addEventListener('input', updPaid)
+	updPaid()
 	for (const b of body.querySelectorAll('[data-act]'))
 		b.onclick = async () => {
 			const a = b.dataset.act
@@ -754,13 +756,16 @@ function bindDetail(t) {
 			const who = `@${esc(t.counterparty ?? '—')}`
 			if (a === 'paid') {
 				const tx = $('txRef').value.trim()
-				if (tx.length < 4) return toast(tl('broker.txRefNeeded'), true)
+				const byProof = tx.length < 4 && proofPays()
+				if (tx.length < 4 && !byProof) return toast(tl('broker.txRefNeeded'), true)
+				// Sin comprobante subido se le recuerda que le protege si se pasa el plazo
+				const remind = pf.list?.some((p) => p.mine) ? '' : `<p class="notice warn">${tl('broker.paidNoProof')}</p>`
 				const ok = await askConfirm(
 					tl('broker.paidAsk', { amount: `${fmtM(t.coinAmount)} ${unit}` }),
-					`<p class="muted">${tl('broker.paidAskBody', { who, ref: esc(tx) })}</p>`,
+					`<p class="muted">${byProof ? tl('broker.paidAskProof', { who }) : tl('broker.paidAskBody', { who, ref: esc(tx) })}</p>${remind}`,
 					tl('broker.paidYes'),
 				)
-				return ok && act('paid', { txId: tx })
+				return ok && act('paid', byProof ? { txId: '', proof: true } : { txId: tx })
 			}
 			if (a === 'release') {
 				const ok = await askConfirm(
@@ -867,6 +872,274 @@ function bindDetail(t) {
 			if (e.status === 504) refreshDetail()
 		} finally {
 			$('chatFile')?.closest('label').classList.remove('busy')
+		}
+	}
+}
+
+// ── Comprobantes de pago ──────────────────────────────────────────────
+// Los guarda QvaPay, privados entre las dos partes y su soporte: no tienen URL pública. El terminal los pide con tu
+// token (por el relé, en la cabecera, nunca en la URL) y los enseña desde la memoria del navegador (blob:), que se
+// suelta al cerrar o cambiar de operación. Solo sube quien paga; se ven los dos lados
+const PROOF_LIVE = new Set(['processing', 'paid', 'revision'])
+// Aunque no llegue nada por el chat, con la operación en curso se vuelven a mirar cada minuto
+const PROOF_SAFETY_MS = 60_000
+const PROOF_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+const PROOF_MAX = 4 * 1024 * 1024
+// Una foto grande se reduce antes de subirla (QvaPay la deja igual en 2000 px): sube antes con la conexión lenta
+const PROOF_IMAGE_PX = 2000
+const PROOF_SHRINK_OVER = 1.5 * 1024 * 1024
+const pf = { key: null, ctx: null, list: null, limits: null, err: null, at: 0, mark: '', loading: false, again: false, uploading: false, thumbs: null, urls: new Map(), pending: new Map() }
+
+const proofQuery = (key) => {
+	const [offer, order] = key.split(':')
+	return `offer=${encodeURIComponent(offer)}${order ? `&order=${encodeURIComponent(order)}` : ''}`
+}
+// Ya subiste uno y QvaPay deja marcar el pago con él, sin referencia
+const proofPays = () => !!pf.limits?.proofReplacesTx && !!pf.list?.some((p) => p.mine)
+
+function dropProofs() {
+	for (const v of pf.urls.values()) URL.revokeObjectURL(v.url)
+	Object.assign(pf, { key: null, ctx: null, list: null, limits: null, err: null, at: 0, mark: '', loading: false, again: false, uploading: false, thumbs: null, urls: new Map(), pending: new Map() })
+}
+
+// Se leen al abrir la operación, cuando llega algo al chat (QvaPay avisa allí de cada comprobante nuevo), cuando cambia
+// el estado y, con la operación en curso, cada PROOF_SAFETY_MS
+function syncProofs(t) {
+	const d = bk.detail
+	if (!d || t.parts || t.status === 'open') return
+	const key = `${d.offer}:${d.order ?? ''}`
+	if (pf.key !== key) {
+		dropProofs()
+		pf.key = key
+	}
+	const mark = `${t.status}|${t.chat?.at(-1)?.id ?? ''}`
+	if (mark !== pf.mark || (PROOF_LIVE.has(t.status) && Date.now() - pf.at > PROOF_SAFETY_MS)) {
+		pf.mark = mark
+		loadProofs()
+	}
+}
+
+async function loadProofs() {
+	const key = pf.key
+	if (!key) return
+	if (pf.loading) return void (pf.again = true)
+	pf.loading = true
+	try {
+		const r = await api(`/trade/proofs?${proofQuery(key)}`)
+		if (pf.key !== key) return
+		pf.list = r.proofs ?? []
+		pf.limits = r.limits ?? null
+		pf.err = null
+	} catch (e) {
+		if (pf.key !== key) return
+		pf.err = e.message
+	}
+	pf.loading = false
+	pf.at = Date.now()
+	paintProofs()
+	if (pf.again) {
+		pf.again = false
+		loadProofs()
+	}
+}
+
+const proofSize = (n) => (n >= 1024 * 1024 ? `${fmtM(Math.round((n / 1024 / 1024) * 10) / 10)} MB` : `${fmtM(Math.max(1, Math.round(n / 1024)))} KB`)
+const ICON_PDF = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3v5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>'
+const ICON_UP = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 16V4m0 0l-5 5m5-5l5 5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+function proofTile(p) {
+	const url = pf.urls.get(p.id)?.url
+	const when = cubaFmt(p.at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+	const label = tl(p.pdf ? 'broker.proofOpenPdf' : 'broker.proofOpenImg', { when })
+	return `<button type="button" class="proof-tile${p.pdf ? ' pdf' : ''}" data-proof="${esc(p.id)}" title="${label}" aria-label="${label}">
+		<span class="proof-thumb">${p.pdf ? `${ICON_PDF}<b>PDF</b>` : url ? `<img src="${esc(url)}" alt="" />` : '<span class="proof-wait"></span>'}</span>
+		<span class="proof-meta">${cubaFmt(p.at, { hour: '2-digit', minute: '2-digit' })} · ${proofSize(p.size)}</span></button>`
+}
+
+function paintProofs() {
+	const box = $('proofs')
+	const c = pf.ctx
+	if (!box || !c || c.key !== pf.key) return
+	const live = PROOF_LIVE.has(c.status)
+	const list = pf.list
+	const who = esc(c.counterparty)
+	let html = ''
+	if (!list) {
+		// Cargando, o no se pudieron leer: con la operación terminada no se dice nada
+		if (live) html = pf.err ? `<p class="hint">${tl('broker.proofsFail', { error: esc(pf.err) })} <button type="button" class="link" data-proof-retry>${tl('broker.proofRetry')}</button></p>` : `<p class="hint">${tl('broker.proofsLoading')}</p>`
+	} else if (live || list.length) {
+		const l = pf.limits
+		const max = l?.maxPerParty || 5
+		const head = c.payer ? tl('broker.proofsMine') : tl('broker.proofsOf', { user: who })
+		const left = c.payer && live && l ? `<span class="hint">${tl('broker.proofsLeft', { n: l.remaining, max })}</span>` : ''
+		const grid = list.length
+			? `<div class="proof-grid">${list.map(proofTile).join('')}</div>`
+			: `<p class="hint">${c.payer ? tl('broker.proofsNoneMine') : tl('broker.proofsNoneOf', { user: who })}</p>`
+		let foot = ''
+		if (c.payer && live) {
+			if (l?.canUpload)
+				foot = `<label class="btn proof-up${pf.uploading ? ' busy' : ''}">${ICON_UP}<span>${pf.uploading ? tl('broker.proofUploading') : tl('broker.proofUpload')}</span><input type="file" id="proofFile" accept="image/*,application/pdf" hidden ${pf.uploading ? 'disabled' : ''} /></label>
+				<p class="hint">${tl('broker.proofUploadHint', { user: who })}</p>`
+			else if (l && l.remaining <= 0) foot = `<p class="hint">${tl('broker.proofsMax', { max })}</p>`
+			// Aún sin comprobante y sin marcar el pago: por qué conviene subirlo
+			if (c.status === 'processing' && l?.canUpload && !list.some((p) => p.mine)) foot += `<p class="notice">${tl('broker.proofProtects')}</p>`
+			else if (c.status === 'processing' && l?.canUpload) foot += `<p class="hint">${tl('broker.proofNotPaid')}</p>`
+		}
+		// Quien cobra lo ve siempre: un comprobante no es el pago
+		if (!c.payer && live) foot += `<p class="notice warn">${tl('broker.proofNotPayment')}</p>`
+		html = `<div class="proofs-head"><p class="hint">${head}</p>${left}</div>${grid}${foot}`
+	}
+	box.innerHTML = html
+	box.hidden = !html
+	for (const b of box.querySelectorAll('[data-proof]')) b.onclick = () => openProof(b.dataset.proof)
+	const retry = box.querySelector('[data-proof-retry]')
+	if (retry) retry.onclick = () => loadProofs()
+	const input = $('proofFile')
+	// Como en la imagen del chat: se lee del campo que recibió el archivo, que ya puede no ser el de la pantalla
+	if (input)
+		input.onchange = (ev) => {
+			const file = ev.currentTarget.files?.[0]
+			ev.currentTarget.value = ''
+			if (file) uploadProof(file)
+		}
+	updPaid()
+	loadThumbs()
+}
+
+// «Ya pagué» se activa con la referencia escrita, o sin ella si ya subiste comprobante y QvaPay lo admite
+function updPaid() {
+	const tx = $('txRef')
+	const btn = $('modalBody')?.querySelector('[data-act="paid"]')
+	if (!tx || !btn) return
+	const byProof = proofPays()
+	btn.disabled = tx.value.trim().length < 4 && !byProof
+	tx.placeholder = byProof ? tl('broker.txRefOptional') : tl('broker.txRefPh')
+}
+
+// El archivo, pedido con el token (por el relé, en la cabecera) y guardado en memoria mientras la operación está abierta
+function proofBlob(id) {
+	const key = pf.key
+	const have = pf.urls.get(id)
+	if (have) return Promise.resolve(have)
+	if (pf.pending.has(id)) return pf.pending.get(id)
+	const pending = pf.pending
+	const p = (async () => {
+		const r = await TPApi.fetch(`/api/broker/trade/proof?${proofQuery(key)}&id=${encodeURIComponent(id)}`)
+		if (!r.ok) {
+			const data = await r.json().catch(() => ({}))
+			throw new Error(data.error || `Error ${r.status}`)
+		}
+		const blob = await r.blob()
+		const url = URL.createObjectURL(blob)
+		// Mientras bajaba se cerró la operación: no se guarda
+		if (pf.key !== key) {
+			URL.revokeObjectURL(url)
+			throw new Error(tl('broker.proofGone'))
+		}
+		const v = { url, type: blob.type }
+		pf.urls.set(id, v)
+		return v
+	})().finally(() => pending.delete(id))
+	pending.set(id, p)
+	return p
+}
+
+// Las miniaturas de las imágenes, de una en una (los PDF solo al abrirlos)
+async function loadThumbs() {
+	const key = pf.key
+	if (!key || pf.thumbs === key) return
+	pf.thumbs = key
+	try {
+		for (const p of pf.list ?? []) {
+			if (pf.key !== key) return
+			if (p.pdf || pf.urls.has(p.id)) continue
+			try {
+				const v = await proofBlob(p.id)
+				const img = $('proofs')?.querySelector(`[data-proof="${p.id}"] .proof-thumb`)
+				if (img) img.innerHTML = `<img src="${esc(v.url)}" alt="" />`
+			} catch {
+				const img = $('proofs')?.querySelector(`[data-proof="${p.id}"] .proof-thumb`)
+				if (img) img.innerHTML = `<span class="proof-err">!</span>`
+			}
+		}
+	} finally {
+		if (pf.thumbs === key) pf.thumbs = null
+	}
+}
+
+// Verlo en grande, encima de la operación (como las confirmaciones): imagen, o el PDF para abrir o descargar
+async function openProof(id) {
+	const p = pf.list?.find((x) => x.id === id)
+	if (!p) return
+	const c = pf.ctx
+	document.querySelector('.confirm-layer')?.remove()
+	const layer = document.createElement('div')
+	layer.className = 'confirm-layer'
+	layer.setAttribute('role', 'dialog')
+	layer.setAttribute('aria-label', tl('broker.proofTitle'))
+	const when = cubaFmt(p.at, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+	const warn = c && !c.payer ? `<p class="notice warn">${tl('broker.proofNotPayment')}</p>` : ''
+	layer.innerHTML = `<div class="confirm-box proof-view stack"><h3>${tl('broker.proofTitle')}</h3><p class="hint">${when} · ${proofSize(p.size)}${p.mine ? ` · ${tl('broker.proofYours')}` : ''}</p>
+		<div class="proof-big"><p class="hint">${tl('broker.proofLoading')}</p></div>${warn}
+		<div class="row-btns"><button class="btn" data-c="close">${tl('common.close')}</button></div></div>`
+	const close = () => layer.remove()
+	layer.querySelector('[data-c="close"]').onclick = close
+	layer.addEventListener('click', (e) => e.target === layer && close())
+	document.querySelector('.modal-card').appendChild(layer)
+	layer.querySelector('[data-c="close"]').focus()
+	try {
+		const v = await proofBlob(id)
+		if (!layer.isConnected) return
+		const ext = p.pdf ? 'pdf' : v.type === 'image/png' ? 'png' : v.type === 'image/webp' ? 'webp' : 'jpg'
+		const name = `comprobante-${id.slice(0, 8)}.${ext}`
+		layer.querySelector('.proof-big').innerHTML = p.pdf
+			? `<div class="proof-pdf">${ICON_PDF}<span>${tl('broker.proofPdf')}</span></div>`
+			: `<a href="${esc(v.url)}" target="_blank" rel="noopener"><img src="${esc(v.url)}" alt="${tl('broker.proofTitle')}" /></a>`
+		layer.querySelector('.row-btns').insertAdjacentHTML(
+			'beforeend',
+			`<a class="btn" href="${esc(v.url)}" download="${name}">${tl('broker.proofDownload')}</a>${p.pdf ? `<a class="btn primary" href="${esc(v.url)}" target="_blank" rel="noopener">${tl('broker.proofOpen')}</a>` : ''}`,
+		)
+	} catch (e) {
+		if (layer.isConnected) layer.querySelector('.proof-big').innerHTML = `<p class="hint">${esc(e.message)}</p>`
+	}
+}
+
+// Subir un comprobante: una foto se pasa a JPG (y se reduce si es grande); un PDF va tal cual
+async function uploadProof(file) {
+	const key = pf.key
+	if (!key || pf.uploading) return
+	const max = pf.limits?.maxBytes || PROOF_MAX
+	let blob = file
+	try {
+		if (file.type === 'application/pdf') {
+			if (file.size > max) return toast(tl('broker.proofTooBig'), true)
+		} else if (file.type && !file.type.startsWith('image/')) return toast(tl('broker.proofType'), true)
+		// Otro formato de foto (HEIC del iPhone, GIF…) o una grande: a JPG de 2000 px como mucho
+		if (file.type !== 'application/pdf' && (!PROOF_TYPES.has(file.type) || file.size > PROOF_SHRINK_OVER)) blob = await shrinkImage(file, { px: PROOF_IMAGE_PX, gif: false })
+		// El resto se copia a memoria ya: un archivo del disco (o de la nube, en el móvil) puede no dejarse leer otra vez al enviarlo
+		else blob = new Blob([await file.arrayBuffer()], { type: file.type })
+	} catch {
+		return toast(tl('broker.proofPrepFail'), true)
+	}
+	if (blob.size > max) return toast(tl('broker.proofTooBig'), true)
+	const [offer, order] = key.split(':')
+	pf.uploading = true
+	paintProofs()
+	try {
+		const form = new FormData()
+		form.append('offer', offer)
+		if (order) form.append('order', order)
+		form.append('file', blob)
+		await apiForm('/trade/proof', form)
+		toast(tl('broker.proofSent', { user: pf.ctx?.counterparty ?? '—' }))
+	} catch (e) {
+		toast(e.message || tl('broker.proofFail'), true)
+	} finally {
+		pf.uploading = false
+		if (pf.key === key) {
+			paintProofs()
+			// Subido o no (sin respuesta pudo llegar), se vuelve a leer la lista
+			loadProofs()
 		}
 	}
 }

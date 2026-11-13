@@ -71,3 +71,69 @@ test('imagen del chat: el formulario con archivo pasa entero a QvaPay, con tope 
 	assert.ok(sent!.bytes > 200_000)
 	assert.equal((await post(3_200_000)).status, 413)
 })
+
+test('comprobantes: listar, subir y bajar, con ?order= de las ofertas por rango y tope de 4 MB', async (t) => {
+	const O = '0b8f2c1e-5a7d-4e3b-9c61-2f4d8a9e7b10'
+	const A = '1f0c6b1e-5d7a-4d2e-9a53-4a2f0a0d9a11'
+	assert.ok(allowed('GET', `/p2p/${U}/attachments`))
+	assert.ok(allowed('POST', `/p2p/${U}/attachments`))
+	assert.ok(allowed('GET', `/p2p/${U}/attachments/${A}`))
+	// Ni borrar ni reemplazar, ni otra cosa colgada de la ruta
+	for (const [m, p] of [
+		['DELETE', `/p2p/${U}/attachments/${A}`],
+		['PUT', `/p2p/${U}/attachments/${A}`],
+		['POST', `/p2p/${U}/attachments/${A}`],
+		['GET', `/p2p/${U}/attachments/${A}/../../../withdraw`],
+		['GET', `/p2p/${U}/attachments/nombre.jpg`],
+		['GET', `/p2p/attachments`],
+	])
+		assert.ok(!allowed(m, p), `${m} ${p}`)
+
+	const real = globalThis.fetch
+	t.after(() => (globalThis.fetch = real))
+	let sent: { url: string; accept: string | null; type: string | null; bytes: number } | undefined
+	globalThis.fetch = (async (url: string, init: RequestInit) => {
+		const h = new Headers(init.headers)
+		sent = { url, accept: h.get('accept'), type: h.get('content-type'), bytes: (init.body as ArrayBuffer | undefined)?.byteLength ?? 0 }
+		if (/attachments\/[^/?]+/.test(url)) return new Response(new Uint8Array([0xff, 0xd8, 0xff]), { status: 200, headers: { 'content-type': 'image/jpeg', 'set-cookie': 'x=1' } })
+		return new Response('{"attachment":{}}', { status: 201, headers: { 'content-type': 'application/json' } })
+	}) as typeof fetch
+
+	// Subir: el formulario con archivo pasa entero, con la orden
+	const up = new URL(`https://terminalp2p.com/qp/p2p/${U}/attachments?order=${O}`)
+	const post = (bytes: number) => {
+		const form = new FormData()
+		form.append('file', new Blob([new Uint8Array(bytes).fill(255)], { type: 'application/pdf' }), 'comprobante.pdf')
+		return relay(new Request(up, { method: 'POST', headers: { Origin: up.origin, Authorization: 'Bearer t' }, body: form }), up)
+	}
+	// 3.5 MB: más que el tope de las imágenes del chat (3 MB), dentro de los 4 MB de un comprobante
+	assert.equal((await post(3_500_000)).status, 201)
+	assert.equal(sent!.url, `https://api.qvapay.com/p2p/${U}/attachments?order=${O}`)
+	assert.match(sent!.type ?? '', /^multipart\/form-data; boundary=/)
+	assert.ok(sent!.bytes > 3_500_000)
+	sent = undefined
+	assert.equal((await post(4 * 1024 * 1024 + 70_000)).status, 413)
+	assert.equal(sent, undefined, 'lo que pasa del tope no llega a QvaPay')
+	// Desde otra página, no
+	const evil = await relay(new Request(up, { method: 'POST', headers: { Origin: 'https://evil.example', Authorization: 'Bearer t' }, body: new FormData() }), up)
+	assert.equal(evil.status, 403)
+
+	// Bajar: el archivo tal cual, sin cookies de QvaPay, sin caché y sin que el navegador lo interprete
+	const file = new URL(`https://terminalp2p.com/qp/p2p/${U}/attachments/${A}?order=${O}`)
+	const res = await relay(new Request(file, { headers: { Authorization: 'Bearer t' } }), file)
+	assert.equal(res.status, 200)
+	assert.equal(sent!.url, `https://api.qvapay.com/p2p/${U}/attachments/${A}?order=${O}`)
+	assert.equal(sent!.accept, '*/*')
+	assert.equal(res.headers.get('content-type'), 'image/jpeg')
+	assert.equal(res.headers.get('set-cookie'), null)
+	assert.equal(res.headers.get('cache-control'), 'no-store')
+	assert.equal(res.headers.get('x-content-type-options'), 'nosniff')
+	assert.match(res.headers.get('content-security-policy') ?? '', /sandbox/)
+	assert.deepEqual([...new Uint8Array(await res.arrayBuffer())], [0xff, 0xd8, 0xff])
+
+	// Listar
+	const list = new URL(`https://terminalp2p.com/qp/p2p/${U}/attachments?order=${O}`)
+	await relay(new Request(list, { headers: { Authorization: 'Bearer t' } }), list)
+	assert.equal(sent!.url, `https://api.qvapay.com/p2p/${U}/attachments?order=${O}`)
+	assert.equal(sent!.accept, 'application/json')
+})
