@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
-import { coinOf, isQvaPay, mergePlatform, parseTrade, platformNames, PLATFORM_KEEP_MS, PLATFORM_KEY, readPlatform, SINCE_KEY, syncQvaPayNostr, type Connect, type NostrEvent, type SocketLike } from '../worker/qpnostr.ts'
+import { verifyEvent } from 'nostr-tools/pure'
+import { coinOf, isQvaPay, mergePlatform, nostrSyncOn, parseTrade, platformNames, PLATFORM_KEEP_MS, PLATFORM_KEY, readPlatform, SINCE_KEY, syncQvaPayNostr, type Connect, type NostrEvent, type SocketLike } from '../worker/qpnostr.ts'
 
 // Eventos reales, firmados por QvaPay (2026-11-12): una operación de CUP Transferencia, una de la tesorería y una oferta
 // de la tesorería
@@ -138,4 +139,39 @@ test('QvaPay en Nostr: sin ningún relay, la tesorería que se tenía se queda',
 	const r = await syncQvaPayNostr(d1, kv, t0 + 600_000, down)
 	assert.equal(r.relays.every((x) => !x.ok), true)
 	assert.deepEqual((await readPlatform(kv))!.users, { skymind: t0 })
+})
+
+test('QvaPay en Nostr: cada firma se verifica una sola vez, aunque llegue de los dos relays o en la vuelta siguiente', async () => {
+	const { d1 } = memD1()
+	const kv = memKV()
+	const now = (FX.tradeCup.created_at + 600) * 1000
+	let checks = 0
+	const verify: typeof verifyEvent = (e) => (checks++, verifyEvent(e))
+	// Misma id que una de verdad pero otro contenido: no pasa, y sin gastar una verificación de firma
+	const forged = clone(FX.tradeCup)
+	forged.tags = forged.tags.map((t) => (t[0] === 'd' ? ['d', 'falsa'] : t))
+	const first = await syncQvaPayNostr(d1, kv, now, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat, forged]), verify)
+	assert.equal(first.trades, 2)
+	assert.deepEqual(first.platform, ['skymind'])
+	assert.equal(checks, 3)
+	// La vuelta siguiente trae lo mismo: nada que verificar, el mismo resultado
+	checks = 0
+	const again = await syncQvaPayNostr(d1, kv, now + 600_000, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat]), verify)
+	assert.equal(checks, 0)
+	assert.deepEqual(again.platform, ['skymind'])
+	// Una oferta ya vista con el nombre cambiado (misma id y firma) no cuela
+	const tampered = clone(FX.orderPlat)
+	tampered.tags = tampered.tags.map((t) => (t[0] === 'name' ? ['name', 'intruso'] : t))
+	const third = await syncQvaPayNostr(d1, kv, now + 1_200_000, fakeRelay([FX.tradeCup, FX.tradePlat, tampered]), verify)
+	assert.deepEqual(third.platform, [])
+	assert.equal(checks, 0)
+	// Solo se recuerda lo de la última vuelta: lo que dejó de verse se vuelve a verificar si reaparece
+	await syncQvaPayNostr(d1, kv, now + 1_800_000, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat]), verify)
+	assert.equal(checks, 1)
+})
+
+test('QvaPay en Nostr: staging no lo sincroniza (los mismos relays ya los lee producción)', () => {
+	assert.equal(nostrSyncOn({ PRO: {} }), true)
+	assert.equal(nostrSyncOn({ PRO: {}, STAGING: '1' }), false)
+	assert.equal(nostrSyncOn({}), false)
 })

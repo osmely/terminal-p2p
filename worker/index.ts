@@ -39,7 +39,7 @@ import { LiveBook } from './livebook-do.ts'
 import { cleanupPush, pushApi, refreshLive, relayTaken, type PushEnv } from './push.ts'
 import { licenseOfPrint, ownedBy, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 import { TASA_KEY, TASA_PATH, tasaData, tasaPage, type TasaData } from './tasa.ts'
-import { PLATFORM_KEEP_MS, readPlatform, syncQvaPayNostr } from './qpnostr.ts'
+import { nostrSyncOn, PLATFORM_KEEP_MS, readPlatform, syncQvaPayNostr } from './qpnostr.ts'
 
 // El libro en tiempo real de Pro (un Durable Object)
 export { LiveBook }
@@ -379,7 +379,7 @@ export default {
 			console.error(`histórico: ${(err as Error).message}`)
 		}
 		// Lo que QvaPay publica del P2P en Nostr: quién es su tesorería y las operaciones completadas (para comparar el volumen)
-		if (env.PRO)
+		if (nostrSyncOn(env))
 			try {
 				await syncQvaPayNostr(env.DB, env.PRO as KVNamespace, at)
 			} catch (err) {

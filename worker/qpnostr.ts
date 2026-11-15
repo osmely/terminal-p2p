@@ -8,7 +8,7 @@
 //
 // Vale solo lo que firma la clave de QvaPay: un relay puede mandar cualquier cosa, y la etiqueta «y» la pone quien quiera
 
-import { verifyEvent } from 'nostr-tools/pure'
+import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { D1 } from './rates.ts'
 
 // La de qvapay@qvapay.com (https://qvapay.com/.well-known/nostr.json?name=qvapay)
@@ -29,6 +29,8 @@ export const PLATFORM_KEEP_MS = 7 * 86400_000
 
 export const SINCE_KEY = 'qpnostr:since'
 export const PLATFORM_KEY = 'qpnostr:platform'
+// Las ids cuya firma se verificó en la última vuelta (ver qvapayChecker)
+export const VERIFIED_KEY = 'qpnostr:verified'
 
 export interface NostrEvent {
 	id: string
@@ -72,16 +74,33 @@ const COIN_OF: Record<string, string> = {
 }
 export const coinOf = (f: string, pm: string) => COIN_OF[`${f} ${pm.toLowerCase()}`] ?? null
 
-// Firmado por QvaPay y con su forma
-export function isQvaPay(e: unknown): e is NostrEvent {
-	const x = e as NostrEvent
-	if (!x || typeof x !== 'object' || x.pubkey !== QVAPAY_PUBKEY || x.kind !== KIND || !Array.isArray(x.tags)) return false
-	try {
-		return verifyEvent(x as Parameters<typeof verifyEvent>[0])
-	} catch {
-		return false
+type Verify = (e: Parameters<typeof verifyEvent>[0]) => boolean
+
+// Firmado por QvaPay y con su forma. Verificar una firma cuesta ~1,5 ms de CPU y cada vuelta trae ~700 eventos (los dos relays
+// mandan los mismos y las ofertas pendientes casi no cambian de una vuelta a otra), así que la firma se verifica una vez por id:
+// la id es el resumen (sha256) del contenido, y con el resumen comprobado, una id ya verificada (en esta vuelta o en la anterior,
+// «known») no necesita repetirla. «seen» junta las ids buenas de esta vuelta, para la siguiente
+export function qvapayChecker(known: ReadonlySet<string> = new Set(), verify: Verify = verifyEvent) {
+	const seen = new Set<string>()
+	const check = (e: unknown): e is NostrEvent => {
+		const x = e as NostrEvent
+		if (!x || typeof x !== 'object' || x.pubkey !== QVAPAY_PUBKEY || x.kind !== KIND || !Array.isArray(x.tags) || typeof x.id !== 'string') return false
+		try {
+			if (getEventHash(x as Parameters<typeof getEventHash>[0]) !== x.id) return false
+			if (!seen.has(x.id) && !known.has(x.id) && !verify(x as Parameters<typeof verifyEvent>[0])) return false
+		} catch {
+			return false
+		}
+		seen.add(x.id)
+		return true
 	}
+	return { check, seen }
 }
+
+export const isQvaPay = (e: unknown): e is NostrEvent => qvapayChecker().check(e)
+
+// Producción ya lee los mismos relays; en staging la vuelta solo gastaría CPU
+export const nostrSyncOn = (env: { PRO?: unknown; STAGING?: string }) => Boolean(env.PRO) && env.STAGING !== '1'
 
 export interface QpTrade {
 	id: string
@@ -195,11 +214,11 @@ export async function query(url: string, filter: Record<string, unknown>, connec
 }
 
 // Las operaciones desde «since», de página en página hacia atrás (cada relay da como mucho PAGE por consulta)
-async function tradesFrom(url: string, since: number, connect: Connect): Promise<NostrEvent[]> {
+async function tradesFrom(url: string, since: number, connect: Connect, check: (e: unknown) => e is NostrEvent): Promise<NostrEvent[]> {
 	const out: NostrEvent[] = []
 	let until: number | undefined
 	for (let i = 0; i < MAX_PAGES; i++) {
-		const got = (await query(url, { kinds: [KIND], authors: [QVAPAY_PUBKEY], '#z': ['trade'], since, ...(until ? { until } : {}), limit: PAGE }, connect)).filter(isQvaPay)
+		const got = (await query(url, { kinds: [KIND], authors: [QVAPAY_PUBKEY], '#z': ['trade'], since, ...(until ? { until } : {}), limit: PAGE }, connect)).filter(check)
 		out.push(...got)
 		if (got.length < PAGE) break
 		until = Math.min(...got.map((e) => e.created_at)) - 1
@@ -215,9 +234,16 @@ export interface SyncResult {
 }
 
 // Cada 10 minutos (el cron): lo nuevo de los relays de QvaPay
-export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: Connect = connectWorker): Promise<SyncResult> {
+export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: Connect = connectWorker, verify: Verify = verifyEvent): Promise<SyncResult> {
 	const nowS = Math.floor(now / 1000)
 	const saved = Number(await kv.get(SINCE_KEY))
+	let known: string[] = []
+	try {
+		known = JSON.parse((await kv.get(VERIFIED_KEY)) ?? '[]')
+	} catch {
+		// sin la lista, se verifica todo
+	}
+	const { check, seen } = qvapayChecker(new Set(Array.isArray(known) ? known : []), verify)
 	const since = saved > 0 ? saved - OVERLAP_S : nowS - FIRST_WINDOW_S
 	const relays: SyncResult['relays'] = []
 	const trades = new Map<string, QpTrade>()
@@ -227,7 +253,7 @@ export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: 
 		QP_RELAYS.map(async (url) => {
 			try {
 				const [t, o] = await Promise.all([
-					tradesFrom(url, since, connect),
+					tradesFrom(url, since, connect, check),
 					query(url, { kinds: [KIND], authors: [QVAPAY_PUBKEY], '#z': ['order'], '#s': ['pending'], limit: PAGE * 2 }, connect),
 				])
 				for (const e of t) {
@@ -235,7 +261,7 @@ export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: 
 					if (p) trades.set(p.id, p)
 					newest = Math.max(newest, e.created_at)
 				}
-				orders.push(...o.filter(isQvaPay))
+				orders.push(...o.filter(check))
 				relays.push({ url, ok: true })
 			} catch (err) {
 				relays.push({ url, ok: false, why: String((err as Error)?.message ?? err).slice(0, 60) })
@@ -260,6 +286,7 @@ export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: 
 	const names = platformNames(orders)
 	// Sin respuesta de ningún relay, los de antes se quedan como estaban
 	if (relays.some((r) => r.ok)) {
+		await kv.put(VERIFIED_KEY, JSON.stringify([...seen]))
 		const prev = await readPlatform(kv)
 		await kv.put(PLATFORM_KEY, JSON.stringify(mergePlatform(prev, names, now)))
 	}
