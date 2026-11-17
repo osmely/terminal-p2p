@@ -263,6 +263,8 @@ details p { padding: 0 0 20px; color: var(--text-2); }
 .foot { border-top: 1px solid var(--line); padding: 28px 0 36px; font-size: 13.5px; color: var(--muted); }
 .foot-in { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .foot a { color: var(--text-2); }
+.foot-games { white-space: nowrap; }
+.foot-games img { vertical-align: -2px; margin-right: 5px; }
 
 .informal { margin-top: 32px; }
 .informal h3 { font-size: 16px; font-weight: 650; }
