@@ -1440,11 +1440,11 @@ test('en vivo: el historial del día guarda quién estuvo (primera y última vez
 	// Ese día en el panel: cuántas, el pico y quién (aquí no hay libro en vivo: «Ahora» dice que no responde)
 	const day = cubaDate(t0)
 	const page = await admin(`?view=envivo&d=${day}`)
-	assert.match(page, /Cuentas distintas<\/span><b>2</)
-	assert.match(page, /Pico a la vez<\/span><b>2<\/b><small>a las 08:00/)
+	assert.match(page, /Cuentas hoy<\/span><b class="kpi-v">2</)
+	assert.match(page, /Pico a la vez<\/span><b class="kpi-v">2<\/b>[\s\S]*?a las 08:00/)
 	assert.match(page, /<a href="\/admin\/pro\?u=Ana"><b>@Ana<\/b><\/a>[\s\S]*?2 min/)
 	// Un día que no existe o del futuro: hoy
-	assert.match(await admin('?view=envivo&d=2099-01-01'), /<h2 class="sec-title">Hoy<\/h2>/)
+	assert.match(await admin('?view=envivo&d=2099-01-01'), /<h1>En vivo<\/h1>/)
 })
 
 test('avisos de tasa por Telegram: solo con Pro, hasta 5; avisan una vez al cruzar y se rearman al volver con margen; nunca con una tasa vieja', async () => {

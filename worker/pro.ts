@@ -9,6 +9,7 @@
 import { hex, hmac, sign, unb64url, verify } from './crypto.ts'
 import { adminPage, askKey, pageHead, panel, searchIcon, type AdminTab } from './admin.ts'
 import { authorized } from './metrics.ts'
+import { chart, delta, GROWTH_CSS, GROWTH_JS, legend } from './growth.ts'
 import { cubaOffset, inCuba, type D1 } from './rates.ts'
 import { clearWho, clientIp, readWho, sessionCookie, sessionToken } from './session.ts'
 import { alertsReady, notify, panelUrl, tgEsc, type AlertEnv } from './alerts.ts'
@@ -2573,24 +2574,63 @@ function cubaDayRange(day: string) {
 const hHM = (ms: number) => inCuba(ms).toLocaleTimeString('es', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' })
 const minutesText = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`)
 
-// La gráfica del día: el máximo de cuentas conectadas a la vez en cada franja de 10 minutos
-function liveChart(slots: LiveDay['slots'], from: number) {
+// La gráfica del día: el máximo de cuentas conectadas a la vez en cada franja de 10 minutos, con el día anterior
+// detrás para comparar. Lo que aún no ha pasado hoy queda vacío (no a cero)
+function liveChartData(slots: LiveDay['slots'], from: number, upto: number | null) {
 	const n = 86_400_000 / SLOT_MS
-	const max = Math.max(1, ...slots.map((x) => x.accounts))
-	const W = 1440
-	const H = 140
-	const bw = W / n
-	const bars = slots
-		.map((x) => {
-			const i = Math.round((x.slot - from) / SLOT_MS)
-			if (i < 0 || i >= n || !x.accounts) return ''
-			const h = Math.max(2, (x.accounts / max) * (H - 18))
-			return `<rect x="${(i * bw + 1).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="var(--accent)"><title>${hHM(x.slot)}–${hHM(x.slot + SLOT_MS)} · ${count(x.accounts, 'cuenta', 'cuentas')}${x.pro ? ` (${x.pro} con Pro)` : ''} · ${count(x.tabs, 'pestaña', 'pestañas')}</title></rect>`
-		})
-		.join('')
-	const ticks = [0, 3, 6, 9, 12, 15, 18, 21].map((h) => `<text x="${(h * 6 * bw).toFixed(0)}" y="${H + 30}" font-size="24" fill="var(--muted)">${String(h).padStart(2, '0')}:00</text>`).join('')
-	return `<svg viewBox="0 -28 ${W} ${H + 64}" width="100%" style="width:100%;height:auto;display:block" role="img" aria-label="Cuentas conectadas a lo largo del día"><line x1="0" x2="${W}" y1="${H}" y2="${H}" stroke="var(--line)"/>${bars}${ticks}<text x="${W}" y="-6" font-size="24" fill="var(--muted)" text-anchor="end">máx. ${max}</text></svg>`
+	const values: (number | null)[] = Array.from({ length: n }, (_, i) => (upto != null && from + i * SLOT_MS > upto ? null : 0))
+	for (const x of slots) {
+		const i = Math.round((x.slot - from) / SLOT_MS)
+		if (i >= 0 && i < n && values[i] != null) values[i] = x.accounts
+	}
+	return values
 }
+
+// Iniciales para el círculo de cada cuenta
+const initials = (u: string) => (u.replace(/[^a-z0-9]/gi, '').slice(0, 2) || '?').toUpperCase()
+const avatar = (u: string) => `<span class="av" aria-hidden="true">${escHtml(initials(u))}</span>`
+const proBadge = '<span class="probadge">Pro</span>'
+
+const LIVE_CSS = `
+.livebadge{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:8px;border:1px solid color-mix(in srgb,var(--bid) 35%,transparent);background:color-mix(in srgb,var(--bid) 10%,transparent);color:var(--text);font-size:13px;font-weight:500;white-space:nowrap}
+.livebadge i,.pulse{position:relative;width:8px;height:8px;border-radius:50%;background:var(--bid);flex:none}
+.livebadge i::after,.pulse::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--bid);opacity:0;animation:ping 1.8s ease-out infinite}
+@keyframes ping{0%{transform:scale(.6);opacity:.7}100%{transform:scale(1.6);opacity:0}}
+@media (prefers-reduced-motion:reduce){.livebadge i::after,.pulse::after{animation:none}}
+.livebadge span{color:var(--muted)}
+.kpis.live{grid-template-columns:1.3fr 1fr 1fr 1fr}
+.kpi.hero{background:linear-gradient(160deg,color-mix(in srgb,var(--bid) 12%,var(--surface)),var(--surface) 60%);border-color:color-mix(in srgb,var(--bid) 30%,var(--line))}
+.kpi.hero .kpi-l{display:flex;align-items:center;gap:8px;color:var(--text2)}.kpi.hero .kpi-v{font-size:44px;line-height:1.05}
+.sec-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px;margin:26px 0 10px}.sec-h h2{white-space:nowrap}.sec-h h2{font-size:15px;font-weight:600}.sec-h p{margin:0;color:var(--muted);font-size:12.5px}
+.who{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.who-c{display:grid;grid-template-columns:auto 1fr auto;gap:2px 12px;align-items:center;padding:14px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+.who-c:hover{border-color:var(--line2)}
+.who-c .av{grid-row:1/3}.who-c a{color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.who-c a b{font-weight:600}
+.who-c small{grid-column:2/4;color:var(--muted);font-size:12px}
+.who-c .chips{grid-column:1/4;display:flex;flex-wrap:wrap;gap:4px;margin-top:10px}
+.chip{padding:2px 8px;border-radius:6px;background:var(--raised);border:1px solid var(--line);color:var(--text2);font-size:11.5px;font-weight:500}.chip.idle{border-style:dashed;color:var(--muted)}
+.sig{width:8px;height:8px;border-radius:50%;background:var(--bid);justify-self:end}.sig.late{background:var(--warn)}
+.av{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:50%;background:color-mix(in srgb,var(--s1) 16%,var(--raised));color:var(--s1);font-size:11.5px;font-weight:700;letter-spacing:.02em;flex:none}
+.probadge{display:inline-block;padding:0 6px;border-radius:5px;background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn);font-size:10.5px;font-weight:700;letter-spacing:.04em;line-height:17px;vertical-align:1px}
+.empty-state{display:flex;flex-direction:column;align-items:center;gap:6px;padding:34px 16px;border:1px dashed var(--line2);border-radius:12px;color:var(--muted);text-align:center}.empty-state b{color:var(--text2);font-weight:600}
+table.seen td{vertical-align:middle}.seen .acct{display:flex;align-items:center;gap:10px}.seen .acct a{color:var(--text)}.seen .acct .probadge,.who-c a+.probadge{margin-left:6px}.who-c small .probadge{margin-right:4px}
+.tl{position:relative;width:100%;min-width:200px;height:20px}
+.tl::before{content:'';position:absolute;left:0;right:0;top:9px;height:2px;border-radius:2px;background:var(--line)}
+.tl i{position:absolute;top:5px;height:10px;border-radius:5px;background:var(--s1);min-width:4px}
+.tl i.on{background:var(--bid)}.tl i.on::after{content:'';position:absolute;right:-3px;top:-2px;width:14px;height:14px;border-radius:50%;background:var(--bid);box-shadow:0 0 0 3px color-mix(in srgb,var(--bid) 25%,transparent)}
+.tl-axis{display:flex;justify-content:space-between;min-width:200px;font-weight:500}
+.meter{display:inline-block;width:56px;height:6px;margin-right:8px;border-radius:999px;background:color-mix(in srgb,var(--s1) 14%,var(--surface));vertical-align:middle;overflow:hidden}.meter i{display:block;height:100%;border-radius:999px;background:var(--s1)}
+th.tlh{width:42%}
+@media (max-width:1000px){.kpis.live{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:860px){.kpi.hero .kpi-v{font-size:34px}.who{grid-template-columns:minmax(0,1fr)}th.tlh{width:auto}.livebadge{width:100%;justify-content:center}}
+`
+
+// Recarga solo el contenido cada LIVE_REFRESH_S segundos (sin parpadeo ni perder la posición), y dice hace cuánto
+const liveScript = (every: number) => `<script>(()=>{let t0=Date.now()
+setInterval(()=>{const l=document.getElementById('upd');if(l){const s=Math.round((Date.now()-t0)/1000);l.textContent=s<3?'ahora':'hace '+s+' s'}},1000)
+setInterval(async()=>{if(document.hidden)return;try{const r=await fetch(location.href,{credentials:'same-origin'});if(!r.ok)return
+const doc=new DOMParser().parseFromString(await r.text(),'text/html'),nu=doc.querySelector('[data-live]'),old=document.querySelector('[data-live]')
+if(nu&&old){old.replaceWith(nu);t0=Date.now();window.drawCharts&&window.drawCharts()}}catch(e){}},${every * 1000})})()</script>`
 
 async function livePage(env: ProEnv, flash: string, now: number, url: URL) {
 	const today = cubaDate(now)
@@ -2598,50 +2638,109 @@ async function livePage(env: ProEnv, flash: string, now: number, url: URL) {
 	const day = /^\d{4}-\d{2}-\d{2}$/.test(asked) && asked <= today ? asked : today
 	const isToday = day === today
 	const { from, to } = cubaDayRange(day)
-	const [clients, hist] = await Promise.all([isToday ? liveClients(env as unknown as LiveEnv) : Promise.resolve(null), liveDay(env.DB, day, from, to)])
+	const shift = (d: number) => cubaDate(from + 12 * 3600_000 + d * 86_400_000)
+	const before = cubaDayRange(shift(-1))
+	const [clients, hist, prev] = await Promise.all([
+		isToday ? liveClients(env as unknown as LiveEnv) : Promise.resolve(null),
+		liveDay(env.DB, day, from, to),
+		liveDay(env.DB, shift(-1), before.from, before.to),
+	])
 	const rows = clients ? liveRows(clients) : []
 	const known = rows.filter((r) => r.u)
 	const online = new Set(known.map((r) => r.u!.toLowerCase()))
-	const table = !clients
-		? '<p class="empty">El libro en vivo no responde ahora mismo.</p>'
-		: rows.length
-			? `<div class="wrap"><table class="left"><thead><tr><th>Cuenta</th><th>Pro</th><th>Mirando</th><th class="num">Pestañas</th><th>Conectada desde</th><th>Última señal</th></tr></thead><tbody>${rows
-					.map(
-						(r) =>
-							`<tr><td>${r.u ? userLink(r.u) : '<span class="note">sin identificar</span>'}</td><td>${r.pro ? '<span class="pill approved-ok">Pro</span>' : '<span class="note">—</span>'}</td><td style="white-space:normal">${[...r.subs].map((s) => escHtml(COIN_NAME.get(s) ?? s)).join(', ') || '<span class="note">ningún mercado (pestaña en segundo plano)</span>'}</td><td class="num">${r.tabs}</td><td>${Number.isFinite(r.at) ? `${hWhenS(r.at)} <span class="note">(${agoText(now - r.at).replace('hace ', '')})</span>` : '—'}</td><td>${r.seen ? agoText(Math.max(0, now - r.seen)) : '—'}</td></tr>`,
-					)
-					.join('')}</tbody></table></div>`
-			: '<p class="empty">Nadie tiene el terminal abierto con su cuenta conectada ahora mismo.</p>'
 
-	// El día: la gráfica y quién estuvo
-	const peak = hist.slots.reduce((m, x) => (x.accounts > (m?.accounts ?? 0) ? x : m), null as LiveDay['slots'][number] | null)
+	// Hoy se compara con ayer hasta la misma hora; un día pasado, con el día anterior entero
+	const cut = isToday ? now - from : 86_400_000
+	const prevUpTo = (ms: number, start: number) => ms - start <= cut
+	const peakOf = (slots: LiveDay['slots'], start: number) =>
+		slots.filter((x) => prevUpTo(x.slot, start)).reduce((m, x) => (x.accounts > (m?.accounts ?? 0) ? x : m), null as LiveDay['slots'][number] | null)
+	const peak = peakOf(hist.slots, from)
+	const prevPeak = peakOf(prev.slots, before.from)
+	const prevSeen = prev.seen.filter((x) => prevUpTo(x.first_at, before.from))
+	const vsLabel = isToday ? 'ayer a esta hora' : 'el día anterior'
+	const vs = (cur: number, was: number) => delta({ cur, prev: prev.seen.length || prev.slots.length ? was : null, spark: [] }, vsLabel)
 	const dayName = inCuba(from + 12 * 3600_000).toLocaleDateString('es', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' })
-	const shift = (d: number) => cubaDate(from + 12 * 3600_000 + d * 86_400_000)
-	const nav = `<a class="btn" href="/admin/pro?view=envivo&d=${shift(-1)}">← ${escHtml(shift(-1).slice(5).split('-').reverse().join('/'))}</a>${isToday ? '' : `<a class="btn" href="/admin/pro?view=envivo&d=${shift(1)}">${escHtml(shift(1).slice(5).split('-').reverse().join('/'))} →</a><a class="btn" href="/admin/pro?view=envivo">Hoy</a>`}`
-	const seenTable = hist.seen.length
-		? `<div class="wrap"><table class="left"><thead><tr><th>Cuenta</th><th>Pro</th><th>Primera vez</th><th>Última vez</th><th class="num">Tiempo conectada</th><th class="num">A la vista</th></tr></thead><tbody>${hist.seen
-				.map(
-					(x) =>
-						`<tr><td>${userLink(x.name)}</td><td>${x.pro ? '<span class="pill approved-ok">Pro</span>' : '<span class="note">—</span>'}</td><td>${hHM(x.first_at)}</td><td>${isToday && online.has(x.account) ? '<span class="pill approved-ok">ahora</span>' : hHM(x.last_at)}</td><td class="num">${minutesText(x.minutes)}</td><td class="num">${x.active == null ? '<span class="note">—</span>' : `${minutesText(x.active)}${x.minutes ? ` <span class="note">(${Math.round((x.active / x.minutes) * 100)}%)</span>` : ''}`}</td></tr>`,
-				)
+	const fmtN = (v: number) => v.toLocaleString('en-US')
+
+	const tiles = `<div class="kpis${isToday ? ' live' : ''}">
+${isToday ? `<div class="kpi hero"><span class="kpi-l"><span class="pulse" aria-hidden="true"></span>Conectadas ahora</span><b class="kpi-v">${fmtN(known.length)}</b><div class="kpi-d"><small>${fmtN(clients?.length ?? 0)} pestañas · ${fmtN(known.filter((r) => r.pro).length)} con Pro</small></div></div>` : ''}
+<div class="kpi"><span class="kpi-l">Cuentas ${isToday ? 'hoy' : 'ese día'}</span><b class="kpi-v">${fmtN(hist.seen.length)}</b><div class="kpi-d">${vs(hist.seen.length, prevSeen.length)}<small>distintas</small></div></div>
+<div class="kpi"><span class="kpi-l">Pico a la vez</span><b class="kpi-v">${fmtN(peak?.accounts ?? 0)}</b><div class="kpi-d">${vs(peak?.accounts ?? 0, prevPeak?.accounts ?? 0)}<small>${peak ? `a las ${hHM(peak.slot)}` : '—'}</small></div></div>
+<div class="kpi"><span class="kpi-l">Con Pro</span><b class="kpi-v">${fmtN(hist.seen.filter((x) => x.pro).length)}</b><div class="kpi-d">${vs(hist.seen.filter((x) => x.pro).length, prevSeen.filter((x) => x.pro).length)}<small>de las cuentas ${isToday ? 'de hoy' : 'del día'}</small></div></div>
+</div>`
+
+	// Quién está ahora: una tarjeta por cuenta
+	const nowCards = !clients
+		? '<div class="empty-state"><b>El libro en vivo no responde ahora mismo</b>Vuelve a mirar en unos segundos.</div>'
+		: rows.length
+			? `<div class="who">${rows
+					.map((r) => {
+						const subs = [...r.subs].map((s) => `<span class="chip">${escHtml(COIN_NAME.get(s) ?? s)}</span>`).join('') || '<span class="chip idle">en segundo plano</span>'
+						const late = r.seen && now - r.seen > 60_000
+						return `<div class="who-c">${avatar(r.u ?? '?')}${r.u ? userLink(r.u) : '<span class="note">sin identificar</span>'}<span class="sig${late ? ' late' : ''}" title="Última señal ${r.seen ? agoText(Math.max(0, now - r.seen)) : '—'}"></span><small>${r.pro ? `${proBadge} ` : ''}${Number.isFinite(r.at) ? `desde las ${hHM(r.at)} · ${agoText(now - r.at).replace('hace ', '')}` : ''}${r.tabs > 1 ? ` · ${r.tabs} pestañas` : ''}</small><div class="chips">${subs}</div></div>`
+					})
+					.join('')}</div>`
+			: '<div class="empty-state"><b>Nadie conectado ahora mismo</b>Cuando alguien abra el terminal con su cuenta, aparece aquí al momento.</div>'
+
+	// El día en gráfica, con el anterior detrás
+	const n = 86_400_000 / SLOT_MS
+	const labels = Array.from({ length: n }, (_, i) => `${hHM(from + i * SLOT_MS)} – ${hHM(from + (i + 1) * SLOT_MS)}`)
+	const ticks = Array.from({ length: 8 }, (_, k) => k * 18)
+	const short = Object.fromEntries(ticks.map((i) => [i, hHM(from + i * SLOT_MS)]))
+	const curName = isToday ? 'Hoy' : 'Este día'
+	const prevName = isToday ? 'Ayer' : 'Día anterior'
+	const dayChart = `<section class="panel"><div class="panel-h"><div><h2>A lo largo del día</h2><p>Cuentas conectadas a la vez (el máximo de cada 10 minutos), hora de Cuba</p></div>${legend([
+		[curName, 'var(--s1)', 'line'],
+		[prevName, 'var(--muted)', 'line'],
+	])}</div><div class="panel-b">${chart(
+		'ch-live',
+		{
+			labels,
+			fmt: 'int',
+			ticks,
+			short,
+			series: [
+				{ name: prevName, kind: 'line', color: 'var(--muted)', width: 1.5, values: liveChartData(prev.slots, before.from, null) },
+				{ name: curName, kind: 'area', color: 'var(--s1)', values: liveChartData(hist.slots, from, isToday ? now : null) },
+			],
+		},
+		'Cuentas conectadas a lo largo del día',
+	)}</div></section>`
+
+	// Quién estuvo: su franja del día en una línea de 24 h
+	const pctOfDay = (ms: number) => Math.max(0, Math.min(100, ((ms - from) / 86_400_000) * 100))
+	const seen = [...hist.seen].sort((a, b) => Number(isToday && online.has(b.account)) - Number(isToday && online.has(a.account)) || b.minutes - a.minutes)
+	const seenTable = seen.length
+		? `<div class="wrap"><table class="left seen"><thead><tr><th>Cuenta</th><th class="tlh"><div class="tl-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div></th><th class="num">Conectada</th><th class="num">A la vista</th></tr></thead><tbody>${seen
+				.map((x) => {
+					const on = isToday && online.has(x.account)
+					const end = on ? now : x.last_at
+					const share = x.active != null && x.minutes ? x.active / x.minutes : null
+					return `<tr><td><div class="acct">${avatar(x.name)}<span>${userLink(x.name)}${x.pro ? proBadge : ''}</span></div></td><td><div class="tl" title="${hHM(x.first_at)} – ${on ? 'ahora' : hHM(x.last_at)}"><i class="${on ? 'on' : ''}" style="left:${pctOfDay(x.first_at).toFixed(2)}%;width:${Math.max(0.6, pctOfDay(end) - pctOfDay(x.first_at)).toFixed(2)}%"></i></div></td><td class="num">${minutesText(x.minutes)}</td><td class="num">${
+						share == null ? '<span class="note">—</span>' : `<span class="meter"><i style="width:${Math.round(share * 100)}%"></i></span>${Math.round(share * 100)}%`
+					}</td></tr>`
+				})
 				.join('')}</tbody></table></div>`
 		: '<p class="empty">Nadie se conectó este día (o aún no se guardaba).</p>'
-	const dayCards = `<div class="cards"><div class="card"><span>Cuentas distintas</span><b>${hist.seen.length.toLocaleString('en-US')}</b><small>${isToday ? 'hoy, hasta ahora' : 'ese día'}</small></div><div class="card"><span>Pico a la vez</span><b>${(peak?.accounts ?? 0).toLocaleString('en-US')}</b><small>${peak ? `a las ${hHM(peak.slot)}` : '—'}</small></div><div class="card"><span>Con Pro</span><b>${hist.seen.filter((x) => x.pro).length.toLocaleString('en-US')}</b><small>de las que se conectaron</small></div></div>`
+
+	const nav = `${isToday ? `<span class="livebadge"><i aria-hidden="true"></i>En directo <span id="upd">ahora</span></span>` : ''}<a class="btn" href="/admin/pro?view=envivo&d=${shift(-1)}">← ${escHtml(shift(-1).slice(5).split('-').reverse().join('/'))}</a>${isToday ? '' : `<a class="btn" href="/admin/pro?view=envivo&d=${shift(1)}">${escHtml(shift(1).slice(5).split('-').reverse().join('/'))} →</a><a class="btn" href="/admin/pro?view=envivo">Hoy</a>`}`
 
 	return proPage(
 		env,
 		'live',
 		'En vivo',
-		`${isToday ? `<meta http-equiv="refresh" content="${LIVE_REFRESH_S}">` : ''}${pageHead('En vivo', `Quién tiene el terminal abierto con su cuenta de QvaPay conectada${isToday ? `, ahora y a lo largo del día. Se actualiza cada ${LIVE_REFRESH_S} s` : ''}. Del día se guarda solo quién estuvo y cuánto (nunca qué miraba), 90 días.`, nav)}${flash}
-		${
-			isToday
-				? `<h2 class="sec-title">Ahora</h2><div class="cards"><div class="card"><span>Cuentas conectadas</span><b>${known.length.toLocaleString('en-US')}</b><small>ahora mismo</small></div><div class="card"><span>Pestañas abiertas</span><b>${(clients?.length ?? 0).toLocaleString('en-US')}</b><small>con el libro en vivo</small></div><div class="card"><span>Con Pro</span><b>${known.filter((r) => r.pro).length.toLocaleString('en-US')}</b><small>de las conectadas</small></div></div>
-		${panel('Terminales abiertos', table, { flush: !!rows.length, sub: 'Solo los que tienen su cuenta conectada (reciben el libro en vivo). Quien mira sin conectar no sale aquí: eso lo cuentan las visitas de Métricas. La última señal llega cada 25 s mientras la pestaña sigue abierta.' })}`
-				: ''
-		}
-		<h2 class="sec-title">${isToday ? 'Hoy' : escHtml(dayName)}</h2>${dayCards}
-		${panel('A lo largo del día', liveChart(hist.slots, from), { sub: 'Cuántas cuentas había conectadas a la vez: el máximo de cada 10 minutos, en hora de Cuba. Pasa el ratón por una barra para ver la franja.' })}
-		${panel('Quién se conectó', seenTable, { flush: !!hist.seen.length, sub: 'La primera y la última vez que se la vio con el terminal abierto, cuánto tiempo en total y cuánto de él con la pestaña a la vista o el radar encendido (se mira cada minuto; una pestaña en segundo plano deja de contar a los 90 s). «—» en los días de antes de contarlo.' })}`,
+		`<style>${GROWTH_CSS}${LIVE_CSS}</style>${pageHead(isToday ? 'En vivo' : escHtml(dayName[0].toUpperCase() + dayName.slice(1)), 'Quién tiene el terminal abierto con su cuenta de QvaPay conectada. Del día se guarda solo quién estuvo y cuánto (nunca qué miraba), 90 días.', nav)}${flash}
+<div data-live>
+${tiles}
+${
+	isToday
+		? `<div class="sec-h"><h2>Ahora mismo</h2><p>Solo cuentas conectadas · punto amarillo: más de 1 min sin señal</p></div>${nowCards}`
+		: ''
+}
+${dayChart}
+${panel(isToday ? 'Quién se conectó hoy' : 'Quién se conectó', seenTable, { flush: !!seen.length, sub: 'Su franja del día, el tiempo con el terminal abierto y cuánto de él lo tuvo a la vista (o con el radar encendido).' })}
+</div>
+<script>${GROWTH_JS}</script>${isToday ? liveScript(LIVE_REFRESH_S) : ''}`,
 	)
 }
 

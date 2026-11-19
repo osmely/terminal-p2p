@@ -8,7 +8,8 @@
 // Todo lo que depende de la cuenta del usuario corre en su navegador.
 
 import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
-import { authorized, clientEvent, loadPublicStats, loadSummary, panelHtml, relayEvent, saveEvent, stagingGate, startedHere } from './metrics.ts'
+import { actionsHtml, authorized, clientEvent, loadPublicStats, loadSummary, rangesNav, relayEvent, saveEvent, stagingGate, startedHere } from './metrics.ts'
+import { GROWTH_CSS, GROWTH_JS, growthHtml, loadGrowth } from './growth.ts'
 import { collect, inCuba, isCoin, query, RANGES, withoutPro, type RatesData } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
 import { clientIp, readWho, tokenPrint, whoCookie } from './session.ts'
@@ -16,7 +17,7 @@ import { cleanupLog, hourKey, logUser } from './userlog.ts'
 import { accessOf, profileAccess, relayAccess } from './blocks.ts'
 import { cleanupIncidents, relayIncident } from './incidents.ts'
 import { sha256, verify } from './crypto.ts'
-import { adminPage, askKey, panel } from './admin.ts'
+import { adminPage, askKey, pageHead, panel } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
 import { expiryReminders } from './userbot.ts'
@@ -560,8 +561,19 @@ async function hit(req: Request, url: URL, env: Env) {
 async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
-	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 30
-	return adminPage('metrics', 'Métricas', panelHtml(await loadSummary(env.DB, days), hitsHtml(await loadHits(env.DB, days)) + botHtml(await loadBot(env.DB, days)) + otherHtml(await loadOther(env.DB), panel)))
+	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 7
+	const [growth, summary, hits, bot, other] = await Promise.all([loadGrowth(env.DB, days), loadSummary(env.DB, days), loadHits(env.DB, days), loadBot(env.DB, days), loadOther(env.DB)])
+	const more = (title: string, sub: string, body: string) => `<details class="more"><summary>${title} <small>${sub}</small></summary>${body}</details>`
+	return adminPage(
+		'metrics',
+		'Métricas',
+		`${pageHead('Métricas', 'Cómo crece el terminal: cuentas, operaciones, de dónde llega la gente y Pro.', rangesNav(days))}<style>${GROWTH_CSS}</style>
+${growthHtml(growth)}
+${more('Acciones del P2P en detalle', 'por mercado, por día, embudos y errores de QvaPay', actionsHtml(summary))}
+${more('Visitas en detalle', 'web, terminal y simulador, por enlace y por día', hitsHtml(hits))}
+${more('Bot del dólar y otros mercados', '', botHtml(bot) + otherHtml(other, panel))}
+<script>${GROWTH_JS}</script>`,
+	)
 }
 
 // Las cifras públicas del terminal (para la landing): lo publicado, tomado y completado desde aquí, cacheadas 10 minutos

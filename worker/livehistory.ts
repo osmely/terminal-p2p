@@ -44,6 +44,8 @@ export async function recordLive(db: D1, clients: LiveClient[], at: number) {
 }
 
 export async function cleanupLive(db: D1, now: number) {
+	// Antes de borrar, el primer día de cada cuenta queda guardado para siempre (cuentas nuevas en las métricas)
+	await db.prepare('INSERT OR IGNORE INTO account_first (account, day) SELECT account, MIN(day) FROM live_seen GROUP BY account').run()
 	await db.prepare('DELETE FROM live_slots WHERE slot < ?').bind(now - KEEP_MS).run()
 	await db.prepare('DELETE FROM live_seen WHERE day < ?').bind(cubaDate(now - KEEP_MS)).run()
 }
