@@ -1443,8 +1443,34 @@ test('en vivo: el historial del día guarda quién estuvo (primera y última vez
 	assert.match(page, /Cuentas hoy<\/span><b class="kpi-v">2</)
 	assert.match(page, /Pico a la vez<\/span><b class="kpi-v">2<\/b>[\s\S]*?a las 08:00/)
 	assert.match(page, /<a href="\/admin\/pro\?u=Ana"><b>@Ana<\/b><\/a>[\s\S]*?2 min/)
+	// Sin radar: ningún tramo naranja
+	assert.doesNotMatch(page, /class="rd"/)
 	// Un día que no existe o del futuro: hoy
 	assert.match(await admin('?view=envivo&d=2099-01-01'), /<h1>En vivo<\/h1>/)
+})
+
+test('en vivo: los tramos con el radar encendido se guardan por franjas de 10 min y se pintan en la barra del día', async () => {
+	const s = setup()
+	const { recordLive, cubaDate, SLOT_MS } = await import('../worker/livehistory.ts')
+	const admin = (query: string) =>
+		proAdmin(new Request(`https://app.terminalp2p.com/admin/pro${query}`, { headers: { Authorization: `Basic ${btoa('x:panel')}` } }), s.env, s.now()).then((r) => r.text())
+	const t0 = Math.floor(T0 / SLOT_MS) * SLOT_MS
+	// @ana: radar en una pestaña (cuenta para la cuenta) durante dos franjas seguidas, luego lo apaga; @leo nunca
+	for (const i of [0, 1, 2, 3])
+		await recordLive(s.env.DB, [
+			{ u: 'ana', pro: true, subs: ['BANK_CUP'], radar: i < 2, at: t0, seen: t0 },
+			{ u: 'Ana', pro: true, subs: [], at: t0, seen: t0 },
+			{ u: 'leo', pro: false, subs: [], at: t0, seen: t0 },
+		], t0 + i * SLOT_MS)
+	assert.deepEqual(s.db.prepare('SELECT account, slot FROM live_radar ORDER BY slot').all().map((r) => ({ ...r })), [
+		{ account: 'ana', slot: t0 },
+		{ account: 'ana', slot: t0 + SLOT_MS },
+	])
+	const page = await admin(`?view=envivo&d=${cubaDate(t0)}`)
+	// Las dos franjas seguidas son un solo tramo, de 20 min
+	assert.equal(page.match(/class="rd"/g)?.length, 1)
+	assert.match(page, /radar 20 min/)
+	assert.match(page, /Radar encendido/)
 })
 
 test('avisos de tasa por Telegram: solo con Pro, hasta 5; avisan una vez al cruzar y se rearman al volver con margen; nunca con una tasa vieja', async () => {

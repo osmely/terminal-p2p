@@ -89,6 +89,7 @@ let livePrint: string | null = null
 let livePro = false
 let liveRetry = 0
 let liveSubs = ''
+let liveRadar = false
 let liveFeed = false
 // Mercados pedidos de los que ya llegó el libro completo: esos dejan de leerse con el token
 let liveReady = new Set<string>()
@@ -97,6 +98,7 @@ function liveConnect() {
 	const s = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/live?p=${encodeURIComponent(livePrint)}`)
 	ws = s
 	liveSubs = ''
+	liveRadar = false
 	s.onopen = () => {
 		liveRetry = 0
 		syncLive()
@@ -162,9 +164,12 @@ function syncLive() {
 	if (ws?.readyState !== WebSocket.OPEN) return
 	const subs = market.wanted()
 	const key = subs.join()
-	if (key === liveSubs) return
+	// También si el radar está encendido (para el panel: cuándo lo tuvo cada cuenta)
+	const radarOn = watchers.has('radar')
+	if (key === liveSubs && radarOn === liveRadar) return
 	liveSubs = key
-	ws.send(JSON.stringify({ sub: subs }))
+	liveRadar = radarOn
+	ws.send(JSON.stringify({ sub: subs, radar: radarOn }))
 	liveReady = new Set([...liveReady].filter((c) => subs.includes(c)))
 	market.setLiveCoins([...liveReady])
 }

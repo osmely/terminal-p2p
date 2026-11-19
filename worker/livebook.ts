@@ -678,6 +678,7 @@ export interface LiveClient {
 	u: string | null
 	pro: boolean
 	subs: string[]
+	radar?: boolean
 	at: number | null
 	seen: number | null
 }

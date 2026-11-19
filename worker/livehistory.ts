@@ -12,13 +12,13 @@ export const cubaDate = (ms: number) => inCuba(ms).toLocaleDateString('en-CA', {
 
 // Lo que hay conectado ahora, por cuenta (una cuenta con dos pestañas cuenta una vez)
 export function presence(clients: LiveClient[]) {
-	const by = new Map<string, { name: string; pro: boolean; active: boolean }>()
+	const by = new Map<string, { name: string; pro: boolean; active: boolean; radar: boolean }>()
 	for (const c of clients) {
 		if (!c.u) continue
 		const k = c.u.toLowerCase()
 		const was = by.get(k)
 		// A la vista: alguna de sus pestañas pide mercados (en segundo plano deja de pedirlos, salvo con el radar)
-		by.set(k, { name: was?.name ?? c.u, pro: !!was?.pro || c.pro, active: !!was?.active || c.subs.length > 0 })
+		by.set(k, { name: was?.name ?? c.u, pro: !!was?.pro || c.pro, active: !!was?.active || c.subs.length > 0, radar: !!was?.radar || !!c.radar })
 	}
 	return by
 }
@@ -40,6 +40,8 @@ export async function recordLive(db: D1, clients: LiveClient[], at: number) {
 				)
 				.bind(day, account, x.name, at, at, x.pro ? 1 : 0, x.active ? 1 : 0),
 		),
+		// Con el radar encendido: su franja de 10 min queda marcada
+		...[...by].filter(([, x]) => x.radar).map(([account]) => db.prepare('INSERT OR IGNORE INTO live_radar (account, slot) VALUES (?, ?)').bind(account, slot)),
 	])
 }
 
@@ -47,19 +49,23 @@ export async function cleanupLive(db: D1, now: number) {
 	// Antes de borrar, el primer día de cada cuenta queda guardado para siempre (cuentas nuevas en las métricas)
 	await db.prepare('INSERT OR IGNORE INTO account_first (account, day) SELECT account, MIN(day) FROM live_seen GROUP BY account').run()
 	await db.prepare('DELETE FROM live_slots WHERE slot < ?').bind(now - KEEP_MS).run()
+	await db.prepare('DELETE FROM live_radar WHERE slot < ?').bind(now - KEEP_MS).run()
 	await db.prepare('DELETE FROM live_seen WHERE day < ?').bind(cubaDate(now - KEEP_MS)).run()
 }
 
 export interface LiveDay {
 	slots: { slot: number; accounts: number; tabs: number; pro: number }[]
 	seen: { account: string; name: string; first_at: number; last_at: number; minutes: number; active: number | null; pro: number }[]
+	// Las franjas de 10 min con el radar encendido, por cuenta
+	radar: { account: string; slot: number }[]
 }
 
 // Un día (en Cuba): sus franjas y quién estuvo. from/to: el día en epoch ms (lo calcula quien llama, con la hora de Cuba)
 export async function liveDay(db: D1, day: string, from: number, to: number): Promise<LiveDay> {
-	const [slots, seen] = await Promise.all([
+	const [slots, seen, radar] = await Promise.all([
 		db.prepare('SELECT slot, accounts, tabs, pro FROM live_slots WHERE slot >= ? AND slot < ? ORDER BY slot').bind(from, to).all<LiveDay['slots'][number]>(),
 		db.prepare('SELECT account, name, first_at, last_at, minutes, active, pro FROM live_seen WHERE day = ? ORDER BY first_at').bind(day).all<LiveDay['seen'][number]>(),
+		db.prepare('SELECT account, slot FROM live_radar WHERE slot >= ? AND slot < ? ORDER BY account, slot').bind(from, to).all<LiveDay['radar'][number]>(),
 	])
-	return { slots: slots.results, seen: seen.results }
+	return { slots: slots.results, seen: seen.results, radar: radar.results }
 }

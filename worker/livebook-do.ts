@@ -33,6 +33,8 @@ interface Sock {
 	// De qué cuenta es y desde cuándo está conectado (para el panel: quién tiene el terminal abierto ahora)
 	u?: string | null
 	at?: number
+	// Si tiene el radar encendido (lo dice el terminal con cada lista de mercados)
+	radar?: boolean
 }
 
 export class LiveBook {
@@ -182,7 +184,7 @@ export class LiveBook {
 	private clients() {
 		return this.ctx.getWebSockets().map((ws) => {
 			const s = ws.deserializeAttachment() as Sock | null
-			return { u: s?.u ?? null, pro: !!s?.pro, subs: s?.subs ?? [], at: s?.at ?? null, seen: this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null }
+			return { u: s?.u ?? null, pro: !!s?.pro, subs: s?.subs ?? [], radar: !!s?.radar, at: s?.at ?? null, seen: this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? null }
 		})
 	}
 
@@ -370,7 +372,7 @@ export class LiveBook {
 	// El terminal dice qué mercados quiere (el que mira y los del radar): se le manda su libro y desde entonces cada cambio
 	async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer) {
 		if (typeof msg !== 'string' || msg.length > 1000) return
-		let m: { sub?: unknown }
+		let m: { sub?: unknown; radar?: unknown }
 		try {
 			m = JSON.parse(msg)
 		} catch {
@@ -380,7 +382,7 @@ export class LiveBook {
 		const subs = [...new Set(m.sub.map(String).filter((c) => TICKS.has(c)))].slice(0, TICKS.size)
 		const was = ws.deserializeAttachment() as Sock | null
 		const before = new Set(was?.subs ?? [])
-		ws.serializeAttachment({ ...was, subs, pro: !!was?.pro } satisfies Sock)
+		ws.serializeAttachment({ ...was, subs, pro: !!was?.pro, radar: m.radar === true } satisfies Sock)
 		// La lista de mercados siempre va al día (el mejor precio de cada uno)
 		if (!before.size) ws.send(this.topMsg())
 		for (const coin of subs) {

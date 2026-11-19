@@ -2551,12 +2551,13 @@ const COIN_NAME = new Map(COINS.map((c) => [c.tick as string, c.name]))
 const agoText = (ms: number) => (ms < 60_000 ? `hace ${Math.max(1, Math.round(ms / 1000))} s` : ms < 3_600_000 ? `hace ${Math.round(ms / 60_000)} min` : `hace ${(ms / 3_600_000).toFixed(1)} h`)
 
 export function liveRows(clients: LiveClient[]) {
-	const by = new Map<string, { u: string | null; tabs: number; pro: boolean; subs: Set<string>; at: number; seen: number }>()
+	const by = new Map<string, { u: string | null; tabs: number; pro: boolean; radar: boolean; subs: Set<string>; at: number; seen: number }>()
 	for (const c of clients) {
 		const k = c.u?.toLowerCase() ?? '—'
-		const x = by.get(k) ?? { u: c.u, tabs: 0, pro: false, subs: new Set<string>(), at: Infinity, seen: 0 }
+		const x = by.get(k) ?? { u: c.u, tabs: 0, pro: false, radar: false, subs: new Set<string>(), at: Infinity, seen: 0 }
 		x.tabs++
 		x.pro ||= c.pro
+		x.radar ||= !!c.radar
 		for (const s of c.subs) x.subs.add(s)
 		if (c.at) x.at = Math.min(x.at, c.at)
 		x.seen = Math.max(x.seen, c.seen ?? c.at ?? 0)
@@ -2617,6 +2618,8 @@ table.seen td{vertical-align:middle}.seen .acct{display:flex;align-items:center;
 .tl{position:relative;width:100%;min-width:200px;height:20px}
 .tl::before{content:'';position:absolute;left:0;right:0;top:9px;height:2px;border-radius:2px;background:var(--line)}
 .tl i{position:absolute;top:5px;height:10px;border-radius:5px;background:var(--s1);min-width:4px}
+.tl b.rd{position:absolute;top:5px;height:10px;border-radius:5px;background:var(--s2);min-width:4px;z-index:1}
+.chip.radar{background:color-mix(in srgb,var(--s2) 18%,transparent);color:var(--text);border-color:color-mix(in srgb,var(--s2) 45%,transparent)}
 .tl i.on{background:var(--bid)}.tl i.on::after{content:'';position:absolute;right:-3px;top:-2px;width:14px;height:14px;border-radius:50%;background:var(--bid);box-shadow:0 0 0 3px color-mix(in srgb,var(--bid) 25%,transparent)}
 .tl-axis{display:flex;justify-content:space-between;min-width:200px;font-weight:500}
 .meter{display:inline-block;width:56px;height:6px;margin-right:8px;border-radius:999px;background:color-mix(in srgb,var(--s1) 14%,var(--surface));vertical-align:middle;overflow:hidden}.meter i{display:block;height:100%;border-radius:999px;background:var(--s1)}
@@ -2675,7 +2678,7 @@ ${isToday ? `<div class="kpi hero"><span class="kpi-l"><span class="pulse" aria-
 		: rows.length
 			? `<div class="who">${rows
 					.map((r) => {
-						const subs = [...r.subs].map((s) => `<span class="chip">${escHtml(COIN_NAME.get(s) ?? s)}</span>`).join('') || '<span class="chip idle">en segundo plano</span>'
+						const subs = (r.radar ? '<span class="chip radar">Radar</span>' : '') + ([...r.subs].map((s) => `<span class="chip">${escHtml(COIN_NAME.get(s) ?? s)}</span>`).join('') || '<span class="chip idle">en segundo plano</span>')
 						const late = r.seen && now - r.seen > 60_000
 						return `<div class="who-c">${avatar(r.u ?? '?')}${r.u ? userLink(r.u) : '<span class="note">sin identificar</span>'}<span class="sig${late ? ' late' : ''}" title="Última señal ${r.seen ? agoText(Math.max(0, now - r.seen)) : '—'}"></span><small>${r.pro ? `${proBadge} ` : ''}${Number.isFinite(r.at) ? `desde las ${hHM(r.at)} · ${agoText(now - r.at).replace('hace ', '')}` : ''}${r.tabs > 1 ? ` · ${r.tabs} pestañas` : ''}</small><div class="chips">${subs}</div></div>`
 					})
@@ -2709,6 +2712,16 @@ ${isToday ? `<div class="kpi hero"><span class="kpi-l"><span class="pulse" aria-
 
 	// Quién estuvo: su franja del día en una línea de 24 h
 	const pctOfDay = (ms: number) => Math.max(0, Math.min(100, ((ms - from) / 86_400_000) * 100))
+	// Los tramos con el radar encendido, por cuenta: franjas de 10 min seguidas se juntan en uno
+	const radarRuns = new Map<string, [number, number][]>()
+	for (const r of hist.radar) {
+		const runs = radarRuns.get(r.account) ?? []
+		const last = runs.at(-1)
+		if (last && r.slot <= last[1]) last[1] = r.slot + SLOT_MS
+		else runs.push([r.slot, r.slot + SLOT_MS])
+		radarRuns.set(r.account, runs)
+	}
+	const radarMin = (runs: [number, number][]) => Math.round(runs.reduce((t, [a, b]) => t + b - a, 0) / 60_000)
 	const seen = [...hist.seen].sort((a, b) => Number(isToday && online.has(b.account)) - Number(isToday && online.has(a.account)) || b.minutes - a.minutes)
 	const seenTable = seen.length
 		? `<div class="wrap"><table class="left seen"><thead><tr><th>Cuenta</th><th class="tlh"><div class="tl-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div></th><th class="num">Conectada</th><th class="num">A la vista</th></tr></thead><tbody>${seen
@@ -2716,7 +2729,16 @@ ${isToday ? `<div class="kpi hero"><span class="kpi-l"><span class="pulse" aria-
 					const on = isToday && online.has(x.account)
 					const end = on ? now : x.last_at
 					const share = x.active != null && x.minutes ? x.active / x.minutes : null
-					return `<tr><td><div class="acct">${avatar(x.name)}<span>${userLink(x.name)}${x.pro ? proBadge : ''}</span></div></td><td><div class="tl" title="${hHM(x.first_at)} – ${on ? 'ahora' : hHM(x.last_at)}"><i class="${on ? 'on' : ''}" style="left:${pctOfDay(x.first_at).toFixed(2)}%;width:${Math.max(0.6, pctOfDay(end) - pctOfDay(x.first_at)).toFixed(2)}%"></i></div></td><td class="num">${minutesText(x.minutes)}</td><td class="num">${
+					const runs = radarRuns.get(x.account) ?? []
+					const radarBars = runs
+						.map(([a, b]) => {
+							const l = pctOfDay(Math.max(a, x.first_at))
+							const r = pctOfDay(Math.min(b, end))
+							return `<b class="rd" style="left:${l.toFixed(2)}%;width:${Math.max(0.6, r - l).toFixed(2)}%" title="Radar ${hHM(a)} – ${hHM(b)}"></b>`
+						})
+						.join('')
+					const radarTip = runs.length ? ` · radar ${minutesText(radarMin(runs))}` : ''
+					return `<tr><td><div class="acct">${avatar(x.name)}<span>${userLink(x.name)}${x.pro ? proBadge : ''}</span></div></td><td><div class="tl" title="${hHM(x.first_at)} – ${on ? 'ahora' : hHM(x.last_at)}${radarTip}"><i class="${on ? 'on' : ''}" style="left:${pctOfDay(x.first_at).toFixed(2)}%;width:${Math.max(0.6, pctOfDay(end) - pctOfDay(x.first_at)).toFixed(2)}%"></i>${radarBars}</div></td><td class="num">${minutesText(x.minutes)}</td><td class="num">${
 						share == null ? '<span class="note">—</span>' : `<span class="meter"><i style="width:${Math.round(share * 100)}%"></i></span>${Math.round(share * 100)}%`
 					}</td></tr>`
 				})
@@ -2738,7 +2760,7 @@ ${
 		: ''
 }
 ${dayChart}
-${panel(isToday ? 'Quién se conectó hoy' : 'Quién se conectó', seenTable, { flush: !!seen.length, sub: 'Su franja del día, el tiempo con el terminal abierto y cuánto de él lo tuvo a la vista (o con el radar encendido).' })}
+${panel(isToday ? 'Quién se conectó hoy' : 'Quién se conectó', seenTable, { flush: !!seen.length, sub: 'Su franja del día, el tiempo con el terminal abierto y cuánto de él lo tuvo a la vista (o con el radar encendido).', actions: legend([['Conectada', 'var(--s1)', 'bar'], ['En línea ahora', 'var(--bid)', 'bar'], ['Radar encendido', 'var(--s2)', 'bar']]) })}
 </div>
 <script>${GROWTH_JS}</script>${isToday ? liveScript(LIVE_REFRESH_S) : ''}`,
 	)
