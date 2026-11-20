@@ -1,15 +1,14 @@
 // Lo que QvaPay publica del P2P en Nostr (https://www.qvapay.com/docs/p2p/nostr): sus ofertas públicas y cada
 // operación completada, firmadas con su clave (kind 35353), cada minuto. Se leen sin cuenta ni token, como cualquiera.
 //
-// De aquí sale:
-//  - quién es la tesorería de QvaPay: sus ofertas llevan ["maker", "platform"] (precio por debajo del mercado para su
-//    bolsa de retiros). El libro del terminal las marca por el usuario que las publica (hoy, una sola cuenta)
-//  - las operaciones completadas (tabla qp_nostr_trades), para comparar con el volumen que suma el feed (tabla volume)
+// De aquí sale quién es la tesorería de QvaPay: sus ofertas llevan ["maker", "platform"] (precio por debajo del mercado
+// para su bolsa de retiros). El libro del terminal las marca por el usuario que las publica (hoy, una sola cuenta).
+// Las operaciones ya no se leen: sirvieron para comprobar que el volumen del feed cuadra con lo que firma QvaPay
+// (12–20 nov 2026: +0,2 % en operaciones sin USDT BSC, que QvaPay no publica ahí)
 //
 // Vale solo lo que firma la clave de QvaPay: un relay puede mandar cualquier cosa, y la etiqueta «y» la pone quien quiera
 
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
-import type { D1 } from './rates.ts'
 
 // La de qvapay@qvapay.com (https://qvapay.com/.well-known/nostr.json?name=qvapay)
 export const QVAPAY_PUBKEY = '3444e923ee5bf41e9ba8607be3608c96bddc5242b32a05bcd73739343851ccb6'
@@ -17,17 +16,11 @@ export const QVAPAY_PUBKEY = '3444e923ee5bf41e9ba8607be3608c96bddc5242b32a05bcd7
 export const QP_RELAYS = ['wss://relay.mostro.network', 'wss://relay.primal.net']
 const KIND = 35353
 const RELAY_TIMEOUT_MS = 8000
-// Lo más que da un relay por consulta: con menos, ya no hay más
-const PAGE = 500
-const MAX_PAGES = 10
-// La primera vez, las operaciones de los últimos días (QvaPay empezó a publicarlas el 2026-11-12)
-const FIRST_WINDOW_S = 3 * 86400
-// Cada lectura vuelve un poco atrás, por si un evento llegó tarde al relay
-const OVERLAP_S = 15 * 60
+// Las ofertas abiertas que se piden a cada relay
+const ORDERS_LIMIT = 1000
 // Un usuario de tesorería se sigue marcando un tiempo después de su última oferta vista
 export const PLATFORM_KEEP_MS = 7 * 86400_000
 
-export const SINCE_KEY = 'qpnostr:since'
 export const PLATFORM_KEY = 'qpnostr:platform'
 // Las ids cuya firma se verificó en la última vuelta (ver qvapayChecker)
 export const VERIFIED_KEY = 'qpnostr:verified'
@@ -54,25 +47,6 @@ export interface PlatformUsers {
 }
 
 const tag = (e: NostrEvent, k: string) => e.tags.find((t) => Array.isArray(t) && t[0] === k)
-
-// El mercado del terminal de cada moneda y método de pago de QvaPay. Lo que no está (EUR banco, RUB, Cash App…) queda
-// sin mercado, pero se guarda igual
-const COIN_OF: Record<string, string> = {
-	'CUP bank transfer': 'BANK_CUP',
-	'CUP etecsa mobile balance': 'ETECSA',
-	'CUP cash': 'CUPCASH',
-	'CUP bolsa tm': 'BOLSATM',
-	'USD clasica card': 'CLASICA',
-	'USD zelle': 'ZELLE',
-	'USD tropical card': 'BANDECPREPAGO',
-	'USD cash': 'USDCASH',
-	'USD paypal': 'PAYPAL',
-	'MLC bank transfer': 'BANK_MLC',
-	'EUR tropipay': 'TROPIPAY',
-	'EUR cash': 'EURCASH',
-	'BRL pix': 'PIX',
-}
-export const coinOf = (f: string, pm: string) => COIN_OF[`${f} ${pm.toLowerCase()}`] ?? null
 
 type Verify = (e: Parameters<typeof verifyEvent>[0]) => boolean
 
@@ -101,31 +75,6 @@ export const isQvaPay = (e: unknown): e is NostrEvent => qvapayChecker().check(e
 
 // Producción ya lee los mismos relays; en staging la vuelta solo gastaría CPU
 export const nostrSyncOn = (env: { PRO?: unknown; STAGING?: string }) => Boolean(env.PRO) && env.STAGING !== '1'
-
-export interface QpTrade {
-	id: string
-	coin: string | null
-	f: string
-	pm: string
-	side: 'buy' | 'sell'
-	at: number
-	usd: number
-	fiat: number
-	plat: boolean
-}
-
-export function parseTrade(e: NostrEvent): QpTrade | null {
-	if (tag(e, 'z')?.[1] !== 'trade' || tag(e, 'c')?.[1] !== 'qusd') return null
-	const id = tag(e, 'd')?.[1]
-	const side = tag(e, 'k')?.[1]
-	const f = tag(e, 'f')?.[1]
-	const pm = tag(e, 'pm')?.[1]
-	const usd = Number(tag(e, 'amt')?.[1])
-	const fiat = Number(tag(e, 'fa')?.[1])
-	const at = Number(tag(e, 'executed_at')?.[1] ?? e.created_at) * 1000
-	if (!id || (side !== 'buy' && side !== 'sell') || !f || !pm || !(usd > 0) || !(fiat > 0) || !Number.isFinite(at)) return null
-	return { id, coin: coinOf(f, pm), f, pm, side, at, usd, fiat, plat: tag(e, 'maker')?.[1] === 'platform' }
-}
 
 // Los usuarios que publican ofertas de tesorería, de la versión más reciente de cada oferta
 export function platformNames(events: NostrEvent[]): string[] {
@@ -213,30 +162,13 @@ export async function query(url: string, filter: Record<string, unknown>, connec
 	})
 }
 
-// Las operaciones desde «since», de página en página hacia atrás (cada relay da como mucho PAGE por consulta)
-async function tradesFrom(url: string, since: number, connect: Connect, check: (e: unknown) => e is NostrEvent): Promise<NostrEvent[]> {
-	const out: NostrEvent[] = []
-	let until: number | undefined
-	for (let i = 0; i < MAX_PAGES; i++) {
-		const got = (await query(url, { kinds: [KIND], authors: [QVAPAY_PUBKEY], '#z': ['trade'], since, ...(until ? { until } : {}), limit: PAGE }, connect)).filter(check)
-		out.push(...got)
-		if (got.length < PAGE) break
-		until = Math.min(...got.map((e) => e.created_at)) - 1
-	}
-	return out
-}
-
 export interface SyncResult {
-	trades: number
-	added: number
 	platform: string[]
 	relays: { url: string; ok: boolean; why?: string }[]
 }
 
-// Cada 10 minutos (el cron): lo nuevo de los relays de QvaPay
-export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: Connect = connectWorker, verify: Verify = verifyEvent): Promise<SyncResult> {
-	const nowS = Math.floor(now / 1000)
-	const saved = Number(await kv.get(SINCE_KEY))
+// Cada 10 minutos (el cron): las ofertas abiertas de QvaPay, para saber quién es su tesorería
+export async function syncQvaPayNostr(kv: KVLike, now: number, connect: Connect = connectWorker, verify: Verify = verifyEvent): Promise<SyncResult> {
 	let known: string[] = []
 	try {
 		known = JSON.parse((await kv.get(VERIFIED_KEY)) ?? '[]')
@@ -244,23 +176,12 @@ export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: 
 		// sin la lista, se verifica todo
 	}
 	const { check, seen } = qvapayChecker(new Set(Array.isArray(known) ? known : []), verify)
-	const since = saved > 0 ? saved - OVERLAP_S : nowS - FIRST_WINDOW_S
 	const relays: SyncResult['relays'] = []
-	const trades = new Map<string, QpTrade>()
 	const orders: NostrEvent[] = []
-	let newest = saved > 0 ? saved : 0
 	await Promise.all(
 		QP_RELAYS.map(async (url) => {
 			try {
-				const [t, o] = await Promise.all([
-					tradesFrom(url, since, connect, check),
-					query(url, { kinds: [KIND], authors: [QVAPAY_PUBKEY], '#z': ['order'], '#s': ['pending'], limit: PAGE * 2 }, connect),
-				])
-				for (const e of t) {
-					const p = parseTrade(e)
-					if (p) trades.set(p.id, p)
-					newest = Math.max(newest, e.created_at)
-				}
+				const o = await query(url, { kinds: [KIND], authors: [QVAPAY_PUBKEY], '#z': ['order'], '#s': ['pending'], limit: ORDERS_LIMIT }, connect)
 				orders.push(...o.filter(check))
 				relays.push({ url, ok: true })
 			} catch (err) {
@@ -268,21 +189,6 @@ export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: 
 			}
 		}),
 	)
-	let added = 0
-	const list = [...trades.values()]
-	for (let i = 0; i < list.length; i += 50) {
-		const res = (await db.batch(
-			list
-				.slice(i, i + 50)
-				.map((t) =>
-					db
-						.prepare('INSERT OR IGNORE INTO qp_nostr_trades (id, coin, f, pm, side, at, usd, fiat, plat) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-						.bind(t.id, t.coin, t.f, t.pm, t.side, t.at, t.usd, t.fiat, t.plat ? 1 : 0),
-				),
-		)) as { meta?: { changes?: number } }[] | undefined
-		for (const r of res ?? []) added += r?.meta?.changes ?? 0
-	}
-	if (newest > 0) await kv.put(SINCE_KEY, String(newest))
 	const names = platformNames(orders)
 	// Sin respuesta de ningún relay, los de antes se quedan como estaban
 	if (relays.some((r) => r.ok)) {
@@ -290,7 +196,7 @@ export async function syncQvaPayNostr(db: D1, kv: KVLike, now: number, connect: 
 		const prev = await readPlatform(kv)
 		await kv.put(PLATFORM_KEY, JSON.stringify(mergePlatform(prev, names, now)))
 	}
-	return { trades: list.length, added, platform: names, relays }
+	return { platform: names, relays }
 }
 
 export async function readPlatform(kv: KVLike | undefined): Promise<PlatformUsers | null> {

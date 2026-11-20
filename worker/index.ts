@@ -379,10 +379,10 @@ export default {
 		} catch (err) {
 			console.error(`histórico: ${(err as Error).message}`)
 		}
-		// Lo que QvaPay publica del P2P en Nostr: quién es su tesorería y las operaciones completadas (para comparar el volumen)
+		// Lo que QvaPay publica del P2P en Nostr: quién es su tesorería (para marcarla en el libro)
 		if (nostrSyncOn(env))
 			try {
-				await syncQvaPayNostr(env.DB, env.PRO as KVNamespace, at)
+				await syncQvaPayNostr(env.PRO as KVNamespace, at)
 			} catch (err) {
 				console.error(`QvaPay en Nostr: ${(err as Error).message}`)
 			}

@@ -1,26 +1,13 @@
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
-import { DatabaseSync } from 'node:sqlite'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { verifyEvent } from 'nostr-tools/pure'
-import { coinOf, isQvaPay, mergePlatform, nostrSyncOn, parseTrade, platformNames, PLATFORM_KEEP_MS, PLATFORM_KEY, readPlatform, SINCE_KEY, syncQvaPayNostr, type Connect, type NostrEvent, type SocketLike } from '../worker/qpnostr.ts'
+import { isQvaPay, mergePlatform, nostrSyncOn, platformNames, PLATFORM_KEEP_MS, PLATFORM_KEY, readPlatform, syncQvaPayNostr, type Connect, type NostrEvent, type SocketLike } from '../worker/qpnostr.ts'
 
 // Eventos reales, firmados por QvaPay (2026-11-12): una operación de CUP Transferencia, una de la tesorería y una oferta
 // de la tesorería
 const FX = JSON.parse(readFileSync('test/fixtures/qvapay-nostr.json', 'utf8')) as Record<'tradeCup' | 'tradePlat' | 'orderPlat', NostrEvent>
 const clone = (e: NostrEvent): NostrEvent => JSON.parse(JSON.stringify(e))
-
-function memD1() {
-	const db = new DatabaseSync(':memory:')
-	for (const f of readdirSync('migrations').sort()) db.exec(readFileSync(`migrations/${f}`, 'utf8'))
-	const stmt = (sql: string, args: unknown[] = []) => ({
-		bind: (...a: unknown[]) => stmt(sql, a),
-		all: async () => ({ results: db.prepare(sql).all(...(args as never[])) as never[] }),
-		first: async () => (db.prepare(sql).get(...(args as never[])) ?? null) as never,
-		run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...(args as never[])).changes) } }),
-	})
-	return { db, d1: { prepare: (sql: string) => stmt(sql), batch: async (ss: { run: () => Promise<unknown> }[]) => Promise.all(ss.map((s) => s.run())) } }
-}
 
 function memKV() {
 	const m = new Map<string, string>()
@@ -65,24 +52,6 @@ test('QvaPay en Nostr: solo vale lo firmado por su clave', () => {
 	assert.equal(isQvaPay(null), false)
 })
 
-test('QvaPay en Nostr: cada moneda y método a su mercado del terminal', () => {
-	assert.equal(coinOf('CUP', 'bank transfer'), 'BANK_CUP')
-	assert.equal(coinOf('CUP', 'etecsa mobile balance'), 'ETECSA')
-	assert.equal(coinOf('USD', 'tropical card'), 'BANDECPREPAGO')
-	assert.equal(coinOf('BRL', 'pix'), 'PIX')
-	assert.equal(coinOf('MLC', 'bank transfer'), 'BANK_MLC')
-	assert.equal(coinOf('RUB', 'sberbank'), null)
-})
-
-test('QvaPay en Nostr: la operación con su mercado, cantidad, precio y si es de la tesorería', () => {
-	const t = parseTrade(FX.tradeCup)
-	assert.deepEqual(t, { id: 'ccdfe68c-66be-4055-aa99-8c37a937c8ff', coin: 'BANK_CUP', f: 'CUP', pm: 'bank transfer', side: 'buy', at: 1794537943000, usd: 18.51, fiat: 20361, plat: false })
-	assert.equal(parseTrade(FX.tradePlat)?.plat, true)
-	assert.equal(parseTrade(FX.tradePlat)?.coin, 'CLASICA')
-	// Una oferta no es una operación
-	assert.equal(parseTrade(FX.orderPlat), null)
-})
-
 test('QvaPay en Nostr: los usuarios de tesorería salen de la versión más reciente de cada oferta', () => {
 	assert.deepEqual(platformNames([FX.orderPlat, FX.tradePlat]), ['skymind'])
 	// Una versión más nueva de la misma oferta sin la marca manda
@@ -100,73 +69,57 @@ test('QvaPay en Nostr: un usuario de tesorería se sigue marcando unos días des
 	assert.deepEqual(mergePlatform(b, ['otra'], t0 + PLATFORM_KEEP_MS).users, { otra: t0 + PLATFORM_KEEP_MS })
 })
 
-test('QvaPay en Nostr: el cron guarda cada operación una vez, la tesorería y desde dónde seguir', async () => {
-	const { db, d1 } = memD1()
+test('QvaPay en Nostr: el cron solo pide las ofertas abiertas y guarda la tesorería (las operaciones ya no)', async () => {
 	const kv = memKV()
 	const now = (FX.tradeCup.created_at + 600) * 1000
 	const seen: unknown[] = []
-	const forged = clone(FX.tradeCup)
-	forged.tags = forged.tags.map((t) => (t[0] === 'd' ? ['d', 'falsa'] : t))
-	const r = await syncQvaPayNostr(d1, kv, now, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat, forged], seen))
-	// Los dos relays mandan lo mismo: cuenta una vez; la falsificada no entra
-	assert.equal(r.trades, 2)
-	assert.equal(r.added, 2)
+	const forged = clone(FX.orderPlat)
+	forged.tags = forged.tags.map((t) => (t[0] === 'name' ? ['name', 'intruso'] : t))
+	const r = await syncQvaPayNostr(kv, now, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat, forged], seen))
+	// La falsificada no entra; de los dos relays sale lo mismo
 	assert.deepEqual(r.platform, ['skymind'])
-	const rows = db.prepare('SELECT id, coin, side, usd, plat FROM qp_nostr_trades ORDER BY usd').all()
-	assert.deepEqual(rows.map((x) => ({ ...x })), [
-		{ id: parseTrade(FX.tradePlat)!.id, coin: 'CLASICA', side: parseTrade(FX.tradePlat)!.side, usd: 0.99, plat: 1 },
-		{ id: 'ccdfe68c-66be-4055-aa99-8c37a937c8ff', coin: 'BANK_CUP', side: 'buy', usd: 18.51, plat: 0 },
-	])
-	assert.equal(kv.m.get(SINCE_KEY), String(Math.max(FX.tradeCup.created_at, FX.tradePlat.created_at)))
 	assert.deepEqual(Object.keys((await readPlatform(kv))!.users), ['skymind'])
-	// La siguiente vuelta pide desde ahí (con un margen) y no repite nada
-	seen.length = 0
-	const again = await syncQvaPayNostr(d1, kv, now + 600_000, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat], seen))
-	assert.equal(again.added, 0)
-	const since = (seen.find((f) => (f as { '#z': string[] })['#z'][0] === 'trade') as { since: number }).since
-	assert.equal(since, Math.max(FX.tradeCup.created_at, FX.tradePlat.created_at) - 15 * 60)
+	assert.ok(seen.length > 0 && seen.every((f) => (f as { '#z': string[] })['#z'][0] === 'order'))
 	assert.ok(kv.m.has(PLATFORM_KEY))
 })
 
 test('QvaPay en Nostr: sin ningún relay, la tesorería que se tenía se queda', async () => {
-	const { d1 } = memD1()
 	const kv = memKV()
 	const t0 = Date.parse('2026-11-12T20:00:00Z')
 	await kv.put(PLATFORM_KEY, JSON.stringify({ at: t0, users: { skymind: t0 } }))
 	const down: Connect = async () => {
 		throw new Error('HTTP 502')
 	}
-	const r = await syncQvaPayNostr(d1, kv, t0 + 600_000, down)
+	const r = await syncQvaPayNostr(kv, t0 + 600_000, down)
 	assert.equal(r.relays.every((x) => !x.ok), true)
 	assert.deepEqual((await readPlatform(kv))!.users, { skymind: t0 })
 })
 
 test('QvaPay en Nostr: cada firma se verifica una sola vez, aunque llegue de los dos relays o en la vuelta siguiente', async () => {
-	const { d1 } = memD1()
 	const kv = memKV()
 	const now = (FX.tradeCup.created_at + 600) * 1000
 	let checks = 0
 	const verify: typeof verifyEvent = (e) => (checks++, verifyEvent(e))
-	// Misma id que una de verdad pero otro contenido: no pasa, y sin gastar una verificación de firma
-	const forged = clone(FX.tradeCup)
+	// Misma id que una de verdad pero otro contenido: no pasa, y sin gastar una verificación de firma. Los dos relays
+	// mandan la misma oferta: se verifica una vez
+	const forged = clone(FX.orderPlat)
 	forged.tags = forged.tags.map((t) => (t[0] === 'd' ? ['d', 'falsa'] : t))
-	const first = await syncQvaPayNostr(d1, kv, now, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat, forged]), verify)
-	assert.equal(first.trades, 2)
+	const first = await syncQvaPayNostr(kv, now, fakeRelay([FX.orderPlat, forged]), verify)
 	assert.deepEqual(first.platform, ['skymind'])
-	assert.equal(checks, 3)
+	assert.equal(checks, 1)
 	// La vuelta siguiente trae lo mismo: nada que verificar, el mismo resultado
 	checks = 0
-	const again = await syncQvaPayNostr(d1, kv, now + 600_000, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat]), verify)
+	const again = await syncQvaPayNostr(kv, now + 600_000, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat]), verify)
 	assert.equal(checks, 0)
 	assert.deepEqual(again.platform, ['skymind'])
 	// Una oferta ya vista con el nombre cambiado (misma id y firma) no cuela
 	const tampered = clone(FX.orderPlat)
 	tampered.tags = tampered.tags.map((t) => (t[0] === 'name' ? ['name', 'intruso'] : t))
-	const third = await syncQvaPayNostr(d1, kv, now + 1_200_000, fakeRelay([FX.tradeCup, FX.tradePlat, tampered]), verify)
+	const third = await syncQvaPayNostr(kv, now + 1_200_000, fakeRelay([FX.tradeCup, FX.tradePlat, tampered]), verify)
 	assert.deepEqual(third.platform, [])
 	assert.equal(checks, 0)
 	// Solo se recuerda lo de la última vuelta: lo que dejó de verse se vuelve a verificar si reaparece
-	await syncQvaPayNostr(d1, kv, now + 1_800_000, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat]), verify)
+	await syncQvaPayNostr(kv, now + 1_800_000, fakeRelay([FX.tradeCup, FX.tradePlat, FX.orderPlat]), verify)
 	assert.equal(checks, 1)
 })
 
