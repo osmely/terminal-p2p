@@ -520,7 +520,7 @@ export class Broker {
 		limit: number,
 		details: { label: string; value: string }[],
 		via: string,
-		opts: { fast?: { kind: 'fixed' | 'flexible'; user: string }; pre?: Promise<P2POffer | null>; urgent?: boolean; seen?: number } = {},
+		opts: { fast?: { kind: 'fixed' | 'flexible'; user: string }; pre?: Promise<P2POffer | null>; urgent?: boolean; seen?: number; timing?: { sent?: number; pub?: number } } = {},
 	) {
 		const step: TakeStep = { offer: t.offer, user: '—', status: 'pending', order: null }
 		const notes: string[] = []
@@ -541,7 +541,7 @@ export class Broker {
 		let order: string | null = null
 		const t0 = Date.now()
 		try {
-			order = (await acc.client.applyOffer(t.offer, flexible ? t.amount : undefined, { coin, side: side === 'buy' ? 'sell' : 'buy', usd: t.amount, via, ms: opts.seen ? Math.max(0, Date.now() - opts.seen) : undefined })).order ?? null
+			order = (await acc.client.applyOffer(t.offer, flexible ? t.amount : undefined, { coin, side: side === 'buy' ? 'sell' : 'buy', usd: t.amount, via, ms: opts.seen ? Math.max(0, Date.now() - opts.seen) : undefined, ...opts.timing })).order ?? null
 		} catch (e) {
 			error = friendly(e)
 			code = e instanceof QvaPayError ? e.code : undefined
@@ -607,6 +607,9 @@ export class Broker {
 		const t0 = Date.now()
 		// Comprando con el libro recién leído (como mucho FAST_MS), sin la lectura previa
 		const seen = Number(b.seen) > 0 && Number(b.seen) <= Date.now() + 1000 ? Number(b.seen) : undefined
+		// Para medir la toma: cuándo mandó el servidor ese libro y cuándo publicó QvaPay la oferta
+		const epoch = (v: unknown) => (Number.isInteger(v) && (v as number) > 1.6e12 ? (v as number) : undefined)
+		const timing = { sent: epoch(b.sent), pub: epoch(b.pub) }
 		const fresh = seen != null && Date.now() - seen <= FAST_MS
 		const fast = side === 'buy' && fresh && (b.kind === 'fixed' || b.kind === 'flexible') ? { kind: b.kind as 'fixed' | 'flexible', user: String(b.user ?? '—').slice(0, 40) } : undefined
 		// Vendiendo, el saldo y la oferta se leen a la vez
@@ -617,7 +620,7 @@ export class Broker {
 			acc.me = me
 			if (t.amount > num(me.balance) + 1e-9) return json(200, { ok: false, error: tl('routes.noBalanceNeed', { need: t.amount, have: num(me.balance) }) })
 		}
-		const r = await this.takeStep(acc, t, side, coin, limit, details, 'radar', { fast, pre, urgent: true, seen })
+		const r = await this.takeStep(acc, t, side, coin, limit, details, 'radar', { fast, pre, urgent: true, seen, timing })
 		return json(200, { ok: r.step.status === 'taken', ...r, fast: !!fast, ms: { apply: r.applyMs ?? null, total: Date.now() - t0 } })
 	}
 

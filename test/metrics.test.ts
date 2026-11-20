@@ -48,14 +48,40 @@ test('clave del panel: comparación en tiempo constante y HTTP Basic', async () 
 })
 
 test('X-TP-Meta: solo valores válidos', () => {
-	assert.deepEqual(parseMeta('coin=BANK_CUP&side=sell&usd=50.555'), { coin: 'BANK_CUP', side: 'sell', usd: 50.56, via: '', ms: null })
-	assert.deepEqual(parseMeta('coin=BANK_CUP&side=buy&usd=20&via=swap'), { coin: 'BANK_CUP', side: 'buy', usd: 20, via: 'swap', ms: null })
-	assert.deepEqual(parseMeta('coin=<script>&side=x&usd=9999999&via=<b>'), { coin: '', side: '', usd: 0, via: '', ms: null })
-	assert.deepEqual(parseMeta(null), { coin: '', side: '', usd: 0, via: '', ms: null })
+	assert.deepEqual(parseMeta('coin=BANK_CUP&side=sell&usd=50.555'), { coin: 'BANK_CUP', side: 'sell', usd: 50.56, via: '', ms: null, sent: null, pub: null })
+	assert.deepEqual(parseMeta('coin=BANK_CUP&side=buy&usd=20&via=swap'), { coin: 'BANK_CUP', side: 'buy', usd: 20, via: 'swap', ms: null, sent: null, pub: null })
+	assert.deepEqual(parseMeta('coin=<script>&side=x&usd=9999999&via=<b>'), { coin: '', side: '', usd: 0, via: '', ms: null, sent: null, pub: null })
+	assert.deepEqual(parseMeta(null), { coin: '', side: '', usd: 0, via: '', ms: null, sent: null, pub: null })
 	// Las tomas del radar: cuánto tardó desde que vio la oferta (un número raro no se guarda)
 	assert.equal(parseMeta('via=radar&ms=840').ms, 840)
 	assert.equal(parseMeta('via=radar&ms=-3').ms, null)
 	assert.equal(parseMeta('via=radar&ms=9999999').ms, null)
+})
+
+test('tomas del radar: de dónde sale el tiempo (feed, viaje por internet, teléfono y QvaPay)', async () => {
+	const pub = 1_795_000_000_000
+	const sent = pub + 900
+	// El relé recibió la toma 1.3 s después de que el servidor mandó el libro; el teléfono pensó 40 ms; QvaPay tardó 700 ms
+	const e = await relayEvent(
+		{ method: 'POST', path: '/p2p/0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9/apply', query: new URLSearchParams(), body: '{}', meta: `coin=BANK_CUP&side=sell&usd=20&via=radar&ms=40&sent=${sent}&pub=${pub}`, response: new Response('{}'), inAt: sent + 1300, upMs: 700 },
+		'sal',
+	)
+	assert.deepEqual([e?.feed_ms, e?.net_ms, e?.ms, e?.qp_ms], [900, 1260, 40, 700])
+	// Sin la hora del servidor (libro leído con el token) no hay viaje que medir; una oferta vieja no mide el feed
+	const old = await relayEvent(
+		{ method: 'POST', path: '/p2p/0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9/apply', query: new URLSearchParams(), body: '{}', meta: `via=radar&ms=40&pub=${pub - 3_600_000}`, response: new Response('{}'), inAt: sent, upMs: 650 },
+		'sal',
+	)
+	assert.deepEqual([old?.feed_ms, old?.net_ms, old?.qp_ms], [null, null, 650])
+	// Lo que no es del radar no lleva tramos
+	const other = await relayEvent({ method: 'POST', path: '/p2p/0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9/apply', query: new URLSearchParams(), body: '{}', meta: 'via=smart', response: new Response('{}'), inAt: sent, upMs: 650 }, 'sal')
+	assert.equal(other?.qp_ms, undefined)
+	// En el resumen: un tramo por fila y las perdidas aparte
+	const ev = (x: Partial<MetricEvent>): MetricEvent => ({ t: pub, event: 'take', status: 'ok', offer: 'o', ord: '', coin: 'BANK_CUP', side: 'sell', usd: 10, source: 'relay', via: 'radar', err: '', ms: 40, ...x })
+	const s = summarize([ev({ feed_ms: 900, net_ms: 1260, qp_ms: 700 }), ev({ status: 'error', err: '400: La oferta no está disponible para aplicar', offer: 'p' })], 7)
+	assert.equal(s.radar.lost, 1)
+	assert.equal(s.radar.measured, 1)
+	assert.deepEqual(s.radar.steps.map((x) => [x.key, x.p50]), [['feed', 900], ['net', 1260], ['phone', 40], ['qp', 700]])
 })
 
 test('evento de publicar y de liberar, sin datos de usuario', async () => {

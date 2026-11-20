@@ -36,6 +36,10 @@ export interface MetricEvent {
 	err?: string
 	// Tomas del radar: ms desde que el terminal vio la oferta hasta que pidió tomarla
 	ms?: number | null
+	// Y el resto del camino (ver migrations/0059): QvaPay → servidor, el viaje por internet y la respuesta de QvaPay
+	feed_ms?: number | null
+	net_ms?: number | null
+	qp_ms?: number | null
 }
 
 // El motivo de un rechazo de QvaPay, sin nada que identifique a nadie: su código si lo da (OFFER_PAUSED) o el estado
@@ -93,7 +97,14 @@ const cleanUsd = (v: unknown) => {
 export function parseMeta(header: string | null) {
 	const p = new URLSearchParams(header ?? '')
 	const ms = Number(p.get('ms'))
+	// sent: cuándo mandó nuestro servidor ese libro al terminal; pub: cuándo la publicó o cambió QvaPay (epoch ms)
+	const epoch = (k: string) => {
+		const v = Number(p.get(k))
+		return p.has(k) && Number.isInteger(v) && v > 1.6e12 && v < 4e12 ? v : null
+	}
 	return {
+		sent: epoch('sent'),
+		pub: epoch('pub'),
 		coin: cleanCoin(p.get('coin')),
 		side: cleanSide(p.get('side')),
 		usd: cleanUsd(p.get('usd')),
@@ -123,7 +134,7 @@ export function feeMismatch(res: Record<string, unknown>): string | null {
 
 // Evento de una escritura que pasó por el relé: la petición, la respuesta de QvaPay y X-TP-Meta
 export async function relayEvent(
-	a: { method: string; path: string; query: URLSearchParams; body?: string; meta: string | null; response: Response },
+	a: { method: string; path: string; query: URLSearchParams; body?: string; meta: string | null; response: Response; inAt?: number; upMs?: number },
 	salt: string,
 	now = Date.now(),
 ): Promise<MetricEvent | null> {
@@ -162,7 +173,22 @@ export async function relayEvent(
 		source: 'relay',
 		via: meta.via,
 		err: ok ? '' : errorOf(a.response.status, res),
-		...(action.event === 'take' ? { ms: meta.ms } : {}),
+		...(action.event === 'take' ? { ms: meta.ms, ...radarTiming(meta, a.inAt, a.upMs) } : {}),
+	}
+}
+
+// De dónde sale el tiempo de una toma del radar. Solo valores creíbles (0 a 10 min): si los relojes no cuadran o el
+// libro no llegó del servidor (se leyó con el token), queda sin medir
+const MAX_STEP_MS = 600_000
+const MAX_FEED_MS = 120_000
+const inRange = (v: number | null) => (v != null && Number.isFinite(v) && v >= 0 && v <= MAX_STEP_MS ? Math.round(v) : null)
+export function radarTiming(meta: { ms: number | null; sent: number | null; pub: number | null; via: string }, inAt?: number, upMs?: number) {
+	if (meta.via !== 'radar') return {}
+	return {
+		// Solo si la oferta era nueva de verdad (una que ya estaba al encender el radar no dice nada del feed)
+		feed_ms: meta.sent != null && meta.pub != null && meta.sent - meta.pub <= MAX_FEED_MS ? inRange(meta.sent - meta.pub) : null,
+		net_ms: meta.sent != null && inAt != null ? inRange(inAt - meta.sent - (meta.ms ?? 0)) : null,
+		qp_ms: inRange(upMs ?? null),
 	}
 }
 
@@ -203,8 +229,8 @@ export async function startedHere(db: D1, e: MetricEvent) {
 
 export async function saveEvent(db: D1, e: MetricEvent) {
 	await db
-		.prepare('INSERT INTO events (t, event, status, offer, ord, coin, side, usd, source, via, err, ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-		.bind(e.t, e.event, e.status, e.offer, e.ord, e.coin, e.side, e.usd, e.source, e.via, e.err ?? '', e.ms ?? null)
+		.prepare('INSERT INTO events (t, event, status, offer, ord, coin, side, usd, source, via, err, ms, feed_ms, net_ms, qp_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+		.bind(e.t, e.event, e.status, e.offer, e.ord, e.coin, e.side, e.usd, e.source, e.via, e.err ?? '', e.ms ?? null, e.feed_ms ?? null, e.net_ms ?? null, e.qp_ms ?? null)
 		.all()
 }
 
@@ -232,7 +258,19 @@ export interface Summary {
 	byCoin: { coin: string; created: number; taken: number; completed: number; volume: number }[]
 	byDay: { day: string; created: number; taken: number; paid: number; completed: number; volume: number }[]
 	// Tomas automáticas del radar: intentadas, logradas y ms desde que vio la oferta hasta pedirla (mediana y 90 %)
-	radar: { tries: number; ok: number; p50: number | null; p90: number | null }
+	radar: { tries: number; ok: number; p50: number | null; p90: number | null; lost: number; paused: number; steps: RadarStep[]; measured: number }
+}
+
+// Un tramo de una toma del radar: mediana y 90 % (ms) de las tomas en que se pudo medir
+export interface RadarStep {
+	key: 'feed' | 'net' | 'phone' | 'qp'
+	n: number
+	p50: number | null
+	p90: number | null
+}
+const quantile = (list: number[], f: number) => {
+	const s = [...list].sort((a, b) => a - b)
+	return s.length ? s[Math.min(s.length - 1, Math.floor(f * s.length))] : null
 }
 
 // Se calcula en memoria: son pocas filas (una por acción) y así no hay consultas costosas en D1
@@ -305,8 +343,13 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 	}
 
 	const radarTries = rows.filter((e) => e.source === 'relay' && e.event === 'take' && e.via === 'radar')
-	const radarMs = radarTries.map((e) => e.ms).filter((v): v is number => v != null).sort((a, b) => a - b)
-	const q = (f: number) => (radarMs.length ? radarMs[Math.min(radarMs.length - 1, Math.floor(f * radarMs.length))] : null)
+	const radarMs = radarTries.map((e) => e.ms).filter((v): v is number => v != null)
+	const step = (key: RadarStep['key'], pick: (e: MetricEvent) => number | null | undefined): RadarStep => {
+		const v = radarTries.map(pick).filter((x): x is number => x != null)
+		return { key, n: v.length, p50: quantile(v, 0.5), p90: quantile(v, 0.9) }
+	}
+	// Perdidas: otro llegó antes (QvaPay dice que ya no está disponible)
+	const lostErr = (e: MetricEvent) => e.status === 'error' && /disponible|NOT_AVAILABLE|TAKEN/i.test(e.err ?? '')
 
 	return {
 		days,
@@ -327,13 +370,22 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 		errors,
 		byCoin: [...coins.values()].sort((a, b) => b.completed - a.completed || b.created - a.created),
 		byDay: [...byDayMap.values()].sort((a, b) => (a.day < b.day ? 1 : -1)),
-		radar: { tries: radarTries.length, ok: radarTries.filter((e) => e.status === 'ok').length, p50: q(0.5), p90: q(0.9) },
+		radar: {
+			tries: radarTries.length,
+			ok: radarTries.filter((e) => e.status === 'ok').length,
+			p50: quantile(radarMs, 0.5),
+			p90: quantile(radarMs, 0.9),
+			lost: radarTries.filter(lostErr).length,
+			paused: radarTries.filter((e) => e.err === 'OFFER_PAUSED').length,
+			steps: [step('feed', (e) => e.feed_ms), step('net', (e) => e.net_ms), step('phone', (e) => e.ms), step('qp', (e) => e.qp_ms)],
+			measured: radarTries.filter((e) => e.net_ms != null && e.qp_ms != null).length,
+		},
 	}
 }
 
 // Como mucho tantas acciones en memoria. Si alguna vez se llega, cuentan las más recientes (y el panel lo dice)
 const MAX_EVENTS = 100_000
-const EVENT_COLS = 't, event, status, offer, ord, coin, side, usd, source, via, err, ms'
+const EVENT_COLS = 't, event, status, offer, ord, coin, side, usd, source, via, err, ms, feed_ms, net_ms, qp_ms'
 
 export async function loadSummary(db: D1, days: number, now = Date.now()) {
 	const { results } = await db.prepare(`SELECT ${EVENT_COLS} FROM events WHERE t >= ? ORDER BY t DESC LIMIT ${MAX_EVENTS}`).bind(now - days * 86_400_000).all<MetricEvent>()
@@ -467,6 +519,33 @@ ${actionsHtml(s)}`
 }
 
 // Las acciones del P2P en detalle (cifras, embudos, por mercado, por día y errores), sin cabecera
+// Tomas del radar: de dónde sale el tiempo, tramo a tramo (mediana y 90 %), y cuántas se perdieron
+const RADAR_STEP: Record<RadarStep['key'], [string, string]> = {
+	feed: ['QvaPay → nuestro servidor', 'de que se publica la oferta a que la mandamos al terminal'],
+	net: ['Viaje por internet', 'del servidor al teléfono y del teléfono de vuelta (ida y vuelta)'],
+	phone: ['El teléfono decide', 'de ver la oferta a pedir la toma'],
+	qp: ['QvaPay toma la oferta', 'lo que tarda QvaPay en contestar la toma'],
+}
+function radarPanel(r: Summary['radar']) {
+	const ms = (v: number | null) => (v == null ? '<span class="note">—</span>' : v < 1000 ? `${n(v)} ms` : `${(v / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 })} s`)
+	const total = r.steps.reduce((t, x) => t + (x.p50 ?? 0), 0)
+	const rows = r.steps
+		.map((x) => {
+			const [name, sub] = RADAR_STEP[x.key]
+			const share = total && x.p50 != null ? Math.round((x.p50 / total) * 100) : null
+			return `<tr><td><b>${name}</b><br><small class="note">${sub}</small></td><td class="num">${ms(x.p50)}</td><td class="num">${ms(x.p90)}</td><td class="num">${share == null ? '<span class="note">—</span>' : `${share} %`}</td><td class="num">${n(x.n)}</td></tr>`
+		})
+		.join('')
+	return panel(
+		'Tomas del radar: de dónde sale el tiempo',
+		`<div class="wrap"><table><thead><tr><th>Tramo</th><th class="num">La mitad, en menos de</th><th class="num">9 de cada 10</th><th class="num">Parte del total</th><th class="num">Medidas</th></tr></thead><tbody>${rows}</tbody></table></div>`,
+		{
+			sub: `${n(r.ok)} tomadas de ${n(r.tries)} intentos · ${n(r.lost)} perdidas (otro llegó antes) · ${n(r.paused)} en pausa. Los tramos se miden desde el 20 nov (${n(r.measured)} tomas con todo medido); «El teléfono decide», desde antes.`,
+			flush: true,
+		},
+	)
+}
+
 export function actionsHtml(s: Summary & { truncated?: boolean }) {
 	const card = (label: string, value: string, sub = '') => `<div class="card"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
 	const step = (label: string, value: number, of: number | null) => `<li><b>${n(value)}</b><span>${label}</span>${of != null ? `<em>${pct(value, of)}</em>` : ''}</li>`
@@ -493,6 +572,7 @@ ${step('ventas empezadas', s.swaps, null)}${step('completadas', s.swapsCompleted
 <div class="funnel"><h3>Comprar ya</h3><p>Compras de USD a la oferta de venta más barata hechas con «Comprar» del botón de la cabecera, y cuántas se completaron.</p><ol>
 ${step('compras empezadas', s.buys, null)}${step('completadas', s.buysCompleted, s.buys)}</ol></div>
 </div>
+${s.radar.tries ? radarPanel(s.radar) : ''}
 ${panel(
 	'Por mercado',
 	table(['Mercado', 'Publicadas', 'Tomadas', 'Completadas', 'Volumen (USD)'], s.byCoin.map((c) => `<tr><td>${esc(coinName(c.coin))}</td><td>${n(c.created)}</td><td>${n(c.taken)}</td><td>${n(c.completed)}</td><td>${n(c.volume)}</td></tr>`).join('')),

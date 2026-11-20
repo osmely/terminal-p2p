@@ -88,6 +88,8 @@ interface SideState {
 	total: number
 	updatedAt: number | null
 	error: string | null
+	// Del servidor: cuándo lo mandó (su reloj, epoch ms). Para medir las tomas del radar
+	sentAt?: number | null
 }
 
 interface CoinState {
@@ -131,6 +133,8 @@ export interface WatchedSide extends Watch {
 	reference: number | null
 	// true: ese mercado llega en vivo desde el servidor (no se lee con tu cuenta)
 	live: boolean
+	// Si llegó del servidor: cuándo lo mandó (su reloj). null si se leyó con tu cuenta
+	sentAt: number | null
 }
 
 // Lo que manda el servidor de cada mercado para los indicadores: la intención (con el libro completo), la hora de cada
@@ -255,19 +259,19 @@ export class Market {
 	}
 
 	// Un lado entero recién llegado del servidor. Se marca lo atípico con la referencia de aquí, como al leerlo
-	setLive(tick: Tick, side: 'ask' | 'bid', levels: Level[], total: number) {
+	setLive(tick: Tick, side: 'ask' | 'bid', levels: Level[], total: number, sentAt?: number) {
 		const c = this.coins.get(tick)
 		if (!c || !Array.isArray(levels)) return
 		const ref = this.reference(tick)?.[side === 'ask' ? 'sell' : 'buy'] ?? null
 		const next = levels.map((l) => ({ ...l, outlier: isOutlier(l.price, ref, side) }))
 		this.diffActivity(c, side, c[side].levels, next)
-		c[side] = { levels: next, total, updatedAt: Date.now(), error: null }
+		c[side] = { levels: next, total, updatedAt: Date.now(), error: null, sentAt: Number.isFinite(sentAt) ? sentAt : null }
 		this.tellRadar(tick, side)
 	}
 
 	watchedSide(w: Watch): WatchedSide {
 		const c = this.coins.get(w.tick)![w.side]
-		return { ...w, levels: c.levels, updatedAt: c.updatedAt, error: c.error, reference: this.reference(w.tick)?.[w.side === 'ask' ? 'sell' : 'buy'] ?? null, live: this.liveCoins.has(w.tick) }
+		return { ...w, levels: c.levels, updatedAt: c.updatedAt, error: c.error, reference: this.reference(w.tick)?.[w.side === 'ask' ? 'sell' : 'buy'] ?? null, live: this.liveCoins.has(w.tick), sentAt: c.sentAt ?? null }
 	}
 
 	// Alguien acaba de conectar su cuenta: el libro puede leerse ya

@@ -71,9 +71,13 @@ export interface WriteInfo {
 	body?: string
 	meta: string | null
 	response: Response
+	// Cuándo llegó la petición al relé (epoch ms) y cuánto tardó QvaPay en contestar (ms): para medir las tomas del radar
+	inAt?: number
+	upMs?: number
 }
 
 export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (w: WriteInfo) => Promise<void>): Promise<Response> {
+	const inAt = Date.now()
 	const path = url.pathname.slice(RELAY_PREFIX.length)
 	if (!allowed(req.method, path)) return text(404, 'Ruta no permitida')
 
@@ -114,7 +118,9 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 	}
 
 	// QvaPay no responde (caído, sin red): un error claro en vez de que el Worker falle entero
+	const t1 = Date.now()
 	const upstream = await fetch(UPSTREAM + path + url.search, { method: req.method, headers, body }).catch((e: Error) => e)
+	const upMs = Date.now() - t1
 	if (upstream instanceof Error) return text(502, 'QvaPay no responde ahora mismo: prueba en unos segundos')
 	// Solo el cuerpo y el estado: ni cookies ni otras cabeceras de QvaPay
 	const out = new Headers({
@@ -129,7 +135,7 @@ export async function relay(req: Request, url: URL, ctx?: WaitUntil, onWrite?: (
 		out.set('Content-Security-Policy', "default-src 'none'; sandbox")
 	}
 	if (onWrite && req.method !== 'GET') {
-		const note = onWrite({ method: req.method, path, query: url.searchParams, body: typeof body === 'string' ? body : undefined, meta: req.headers.get('x-tp-meta'), response: upstream.clone() }).catch(() => {})
+		const note = onWrite({ method: req.method, path, query: url.searchParams, body: typeof body === 'string' ? body : undefined, meta: req.headers.get('x-tp-meta'), response: upstream.clone(), inAt, upMs }).catch(() => {})
 		if (ctx) ctx.waitUntil(note)
 		else await note
 	}

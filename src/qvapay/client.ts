@@ -67,8 +67,11 @@ export interface OpMeta {
 	usd?: number
 	// Desde qué parte del terminal se hizo (p. ej. 'swap' para «Vender ya»)
 	via?: string
-	// Tomas del radar: ms desde que el terminal vio la oferta
+	// Tomas del radar: ms desde que el terminal vio la oferta, cuándo mandó el servidor ese libro y cuándo publicó o
+	// cambió QvaPay la oferta (epoch ms): para ver de dónde sale el tiempo de cada toma (worker/metrics.ts)
 	ms?: number
+	sent?: number
+	pub?: number
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))

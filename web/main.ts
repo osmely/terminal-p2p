@@ -104,7 +104,7 @@ function liveConnect() {
 		syncLive()
 	}
 	s.onmessage = (e) => {
-		let m: { t?: string; coin?: Tick; side?: 'ask' | 'bid'; ready?: boolean; levels?: []; total?: number; feed?: boolean; pro?: boolean; items?: []; top?: Record<string, { ask: []; bid: [] }> }
+		let m: { t?: string; at?: number; coin?: Tick; side?: 'ask' | 'bid'; ready?: boolean; levels?: []; total?: number; feed?: boolean; pro?: boolean; items?: []; top?: Record<string, { ask: []; bid: [] }> }
 		try {
 			m = JSON.parse(String(e.data))
 		} catch {
@@ -145,7 +145,7 @@ function liveConnect() {
 		}
 		// Un lado que el servidor aún no tiene completo no se usa: se sigue leyendo con el token
 		if (m.t !== 'side' || !m.ready || !isTick(m.coin ?? null) || (m.side !== 'ask' && m.side !== 'bid') || !liveSubs.split(',').includes(m.coin!)) return
-		market.setLive(m.coin!, m.side, m.levels ?? [], m.total ?? 0)
+		market.setLive(m.coin!, m.side, m.levels ?? [], m.total ?? 0, m.at)
 		liveReady.add(m.coin!)
 		market.setLiveCoins([...liveReady])
 		// El terminal lo pinta ya, sin esperar a su repaso de cada 5 s
