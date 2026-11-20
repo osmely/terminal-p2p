@@ -90,3 +90,49 @@ test('crecimiento: el periodo empieza donde empiezan los datos (no cuenta ceros 
 	assert.equal(g.series[0].day, '2026-11-10')
 	assert.equal(g.kpi.active.prev, null)
 })
+
+test('crecimiento: el radar (tomas, perdidas, avisos y quién lo usa)', () => {
+	const now = at('2026-11-18')
+	const ev = (day: string, status: 'ok' | 'error', err = '', x = {}) => ({ t: at(day), event: 'take', status, offer: 'o' + day + err, ord: '', coin: 'BANK_CUP', side: 'sell', usd: 10, source: 'relay', via: 'radar', err, ms: 20, ...x })
+	const g = growthOf(
+		{
+			days: 7,
+			today: '2026-11-18',
+			cur: { from: '2026-11-11', to: '2026-11-17' },
+			prev: { from: '2026-11-04', to: '2026-11-10' },
+			hits: rows([]),
+			seen: rows([{ day: '2026-11-12', account: 'ana' }]),
+			firsts: rows([{ account: 'ana', day: '2026-11-01' }]),
+			events: rows([
+				ev('2026-11-05', 'ok'),
+				ev('2026-11-12', 'ok', '', { feed_ms: 600, net_ms: 1500, qp_ms: 800 }),
+				ev('2026-11-13', 'ok'),
+				ev('2026-11-13', 'error', '400: La oferta no está disponible para aplicar'),
+			] as never[]),
+			trials: rows([]),
+			paid: rows([]),
+			pending: rows([]),
+			active: rows([]),
+			bounds: { hits: '2026-11-01', accounts: '2026-11-01', live: '2026-11-01', events: at('2026-11-01') },
+			radarLog: rows([
+				{ at: at('2026-11-02'), account: 'leo', k: 'Enco' },
+				{ at: at('2026-11-12'), account: 'ana', k: 'Enco' },
+				{ at: at('2026-11-12'), account: 'ana', k: 'Enco' },
+				{ at: at('2026-11-12'), account: 'ana', k: 'Tomó' },
+			]),
+			radarOn: rows([{ account: 'ana', slot: at('2026-11-12') }, { account: 'ana', slot: at('2026-11-12') + 600_000 }]),
+		},
+		now,
+	)
+	const r = g.radar
+	assert.deepEqual([r.kpi.taken.cur, r.kpi.taken.prev, r.tries, r.lost], [2, 1, 3, 1])
+	assert.equal(r.kpi.volume.cur, 20)
+	assert.deepEqual([r.kpi.alerts.cur, r.kpi.users.cur], [2, 1])
+	assert.deepEqual(r.users, [{ user: 'ana', alerts: 2, taken: 1, minutes: 20, last: at('2026-11-12') + 1_200_000 }])
+	assert.equal(r.measured, 1)
+	assert.equal(r.series.find((d) => d.day === '2026-11-13')?.lost, 1)
+	const html = growthHtml(g)
+	assert.match(html, /<h2>Radar<\/h2>/)
+	assert.match(html, /Viaje por internet/)
+	assert.match(html, /@ana/)
+})

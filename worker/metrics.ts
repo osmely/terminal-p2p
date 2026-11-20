@@ -520,7 +520,7 @@ ${actionsHtml(s)}`
 
 // Las acciones del P2P en detalle (cifras, embudos, por mercado, por día y errores), sin cabecera
 // Tomas del radar: de dónde sale el tiempo, tramo a tramo (mediana y 90 %), y cuántas se perdieron
-const RADAR_STEP: Record<RadarStep['key'], [string, string]> = {
+export const RADAR_STEP: Record<RadarStep['key'], [string, string]> = {
 	feed: ['QvaPay → nuestro servidor', 'de que se publica la oferta a que la mandamos al terminal'],
 	net: ['Viaje por internet', 'del servidor al teléfono y del teléfono de vuelta (ida y vuelta)'],
 	phone: ['El teléfono decide', 'de ver la oferta a pedir la toma'],

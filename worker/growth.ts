@@ -4,11 +4,14 @@
 //   · visitas y enlaces: hits (contadores anónimos por día)
 //   · operaciones y volumen: events (métricas anónimas del P2P, ver metrics.ts)
 //   · Pro: pruebas, pagos y compras sin terminar (pro_days, pro_checkouts, pro_licenses)
+//   · radar: sus tomas (events, anónimas, con el tiempo de cada tramo), sus avisos por cuenta (user_log) y cuánto lo
+//     tuvo encendido cada una (live_radar)
 // Los periodos son días completos (hasta ayer, hora de Cuba) y se comparan con los mismos días justo antes. Hoy, que va
 // en curso, sale aparte
 
 import { cubaDate } from './informal.ts'
-import { summarize, type MetricEvent } from './metrics.ts'
+import { RADAR_STEP, summarize, type MetricEvent, type RadarStep } from './metrics.ts'
+import { SLOT_MS } from './livehistory.ts'
 import type { D1 } from './rates.ts'
 
 const DAY_MS = 86_400_000
@@ -79,6 +82,21 @@ export interface Growth {
 		trialsPaid: number
 		pending: { user: string; plans: string[]; tries: number; last: number; proUntil: number | null; proPlan: string | null }[]
 	}
+	radar: RadarGrowth
+}
+
+// El radar del modo Pro en el periodo
+export interface RadarGrowth {
+	kpi: { taken: Kpi; volume: Kpi; users: Kpi; alerts: Kpi }
+	tries: number
+	lost: number
+	paused: number
+	// Por día del periodo: tomadas, perdidas (otro llegó antes) y avisos
+	series: { day: string; taken: number; lost: number; alerts: number }[]
+	steps: RadarStep[]
+	measured: number
+	// Quién lo usó: avisos, tomas, minutos encendido (desde que se guarda) y su último uso
+	users: { user: string; alerts: number; taken: number; minutes: number; last: number }[]
 }
 
 type Row<T> = { results: T[] }
@@ -91,14 +109,14 @@ export async function loadGrowth(db: D1, days: number, now = Date.now()): Promis
 	const seenFrom = prev.from < cohortFrom ? prev.from : cohortFrom
 	const evFrom = Date.parse(`${prev.from}T00:00:00Z`) - DAY_MS
 
-	const [hits, seen, firsts, events, trials, paid, pending, active, bounds] = await Promise.all([
+	const [hits, seen, firsts, events, trials, paid, pending, active, bounds, radarLog, radarOn] = await Promise.all([
 		db.prepare("SELECT day, site, kind, ref, n FROM hits WHERE day >= ? AND site != 'bot'").bind(prev.from).all<{ day: string; site: string; kind: string; ref: string; n: number }>(),
 		db.prepare('SELECT day, account FROM live_seen WHERE day >= ?').bind(seenFrom).all<{ day: string; account: string }>(),
 		db
 			.prepare('SELECT account, MIN(day) AS day FROM (SELECT account, day FROM account_first UNION ALL SELECT account, MIN(day) AS day FROM live_seen GROUP BY account) GROUP BY account')
 			.all<{ account: string; day: string }>(),
 		db
-			.prepare('SELECT t, event, status, offer, ord, coin, side, usd, source, via, err, ms FROM events WHERE t >= ? ORDER BY t')
+			.prepare('SELECT t, event, status, offer, ord, coin, side, usd, source, via, err, ms, feed_ms, net_ms, qp_ms FROM events WHERE t >= ? ORDER BY t')
 			.bind(evFrom)
 			.all<MetricEvent>(),
 		db.prepare("SELECT LOWER(l.username) AS user, d.created_at AS at, d.days FROM pro_days d JOIN pro_licenses l ON l.uuid = d.license WHERE d.kind = 'trial'").all<{ user: string; at: number; days: number }>(),
@@ -116,8 +134,14 @@ export async function loadGrowth(db: D1, days: number, now = Date.now()): Promis
 		db
 			.prepare("SELECT (SELECT MIN(day) FROM hits WHERE site != 'bot') AS hits, (SELECT MIN(day) FROM account_first) AS accounts, (SELECT MIN(day) FROM live_seen) AS live, (SELECT MIN(t) FROM events) AS events")
 			.first<{ hits: string | null; accounts: string | null; live: string | null; events: number | null }>(),
+		// Avisos y tomas del radar por cuenta (lo anota el aviso por Telegram, salga o no): «Encontró …» o «Tomó …»
+		db
+			.prepare("SELECT at, LOWER(account) AS account, SUBSTR(detail, 1, 4) AS k FROM user_log WHERE kind = 'radar' AND at >= ? AND account IS NOT NULL")
+			.bind(evFrom)
+			.all<{ at: number; account: string; k: string }>(),
+		db.prepare('SELECT account, slot FROM live_radar WHERE slot >= ?').bind(Date.parse(`${cur.from}T00:00:00Z`) - DAY_MS).all<{ account: string; slot: number }>(),
 	])
-	return growthOf({ days, today, cur, prev, hits, seen, firsts, events, trials, paid, pending, active, bounds }, now)
+	return growthOf({ days, today, cur, prev, hits, seen, firsts, events, trials, paid, pending, active, bounds, radarLog, radarOn }, now)
 }
 
 interface Raw {
@@ -134,6 +158,8 @@ interface Raw {
 	pending: Row<{ user: string | null; plan: string; at: number }>
 	active: Row<{ user: string; plan: string; expires_at: number }>
 	bounds: { hits: string | null; accounts: string | null; live: string | null; events: number | null } | null
+	radarLog?: Row<{ at: number; account: string; k: string }>
+	radarOn?: Row<{ account: string; slot: number }>
 }
 
 // Todo el cálculo, aparte de las consultas (así se prueba con filas a mano)
@@ -282,6 +308,61 @@ export function growthOf(r: Raw, now: number): Growth {
 		stuck.set(p.user, s)
 	}
 
+	// Radar: sus tomas (anónimas) y, por cuenta, sus avisos y tomas y cuánto lo tuvo encendido
+	const inWin = (w: Window, ms: number) => {
+		const d = cubaDate(ms)
+		return d >= w.from && d <= w.to
+	}
+	const radarEv = r.events.results.filter((e) => e.source === 'relay' && e.event === 'take' && e.via === 'radar')
+	const rCur = summarize(radarEv.filter((e) => inWin(cur, e.t)), days).radar
+	const rPrev = summarize(radarEv.filter((e) => inWin(prev, e.t)), days).radar
+	const takenUsd = (w: Window) => Math.round(radarEv.filter((e) => e.status === 'ok' && inWin(w, e.t)).reduce((t, e) => t + e.usd, 0) * 100) / 100
+	const log = r.radarLog?.results ?? []
+	const found = (x: { k: string }) => x.k === 'Enco'
+	const usersIn = (w: Window) => new Set(log.filter((x) => inWin(w, x.at)).map((x) => x.account)).size
+	const alertsIn = (w: Window) => log.filter((x) => found(x) && inWin(w, x.at)).length
+	const lostErr = (e: MetricEvent) => e.status === 'error' && /disponible|NOT_AVAILABLE|TAKEN/i.test(e.err ?? '')
+	const rDays = new Map(series.map((d) => [d.day, { day: d.day, taken: 0, lost: 0, alerts: 0 }]))
+	for (const e of radarEv) {
+		const d = rDays.get(cubaDate(e.t))
+		if (!d) continue
+		if (e.status === 'ok') d.taken++
+		else if (lostErr(e)) d.lost++
+	}
+	for (const x of log) if (found(x)) { const d = rDays.get(cubaDate(x.at)); if (d) d.alerts++ }
+	const radarUsers = new Map<string, RadarGrowth['users'][number]>()
+	const userOf = (u: string) => radarUsers.get(u) ?? (radarUsers.set(u, { user: u, alerts: 0, taken: 0, minutes: 0, last: 0 }), radarUsers.get(u)!)
+	for (const x of log) {
+		if (!inWin(cur, x.at)) continue
+		const u = userOf(x.account)
+		if (found(x)) u.alerts++
+		else if (x.k === 'Tomó') u.taken++
+		u.last = Math.max(u.last, x.at)
+	}
+	for (const x of r.radarOn?.results ?? []) {
+		if (!inWin(cur, x.slot)) continue
+		const u = userOf(x.account)
+		u.minutes += SLOT_MS / 60_000
+		u.last = Math.max(u.last, x.slot + SLOT_MS)
+	}
+	// El historial de avisos por cuenta empieza el 1 nov: antes no hay con qué comparar
+	const logSince = log.length ? cubaDate(Math.min(...log.map((x) => x.at))) : null
+	const radar: RadarGrowth = {
+		kpi: {
+			taken: { cur: rCur.ok, prev: full(since.events) ? rPrev.ok : null, spark: [...rDays.values()].map((d) => d.taken) },
+			volume: { cur: takenUsd(cur), prev: full(since.events) ? takenUsd(prev) : null, spark: [] },
+			users: { cur: usersIn(cur), prev: full(logSince) ? usersIn(prev) : null, spark: [] },
+			alerts: { cur: alertsIn(cur), prev: full(logSince) ? alertsIn(prev) : null, spark: [...rDays.values()].map((d) => d.alerts) },
+		},
+		tries: rCur.tries,
+		lost: rCur.lost,
+		paused: rCur.paused,
+		series: [...rDays.values()],
+		steps: rCur.steps,
+		measured: rCur.measured,
+		users: [...radarUsers.values()].sort((a, b) => b.taken - a.taken || b.alerts - a.alerts || b.minutes - a.minutes),
+	}
+
 	return {
 		days,
 		today,
@@ -311,6 +392,7 @@ export function growthOf(r: Raw, now: number): Growth {
 			trialsPaid: ended.filter((x) => payers.has(x.user)).length,
 			pending: [...stuck.values()].sort((a, b) => b.last - a.last),
 		},
+		radar,
 	}
 }
 
@@ -518,9 +600,79 @@ ${today}
 ${tiles}
 ${usersChart}
 ${opsChart}
+${radarHtml(g, compare)}
 <div class="grid-2">${funnel}${cohorts}</div>
 ${channels}
 ${pro}`
+}
+
+// El radar: lo que más distingue a Pro. Sus tomas, de dónde sale su tiempo y quién lo usa
+function radarHtml(g: Growth, compare: string) {
+	const r = g.radar
+	const perWeek = g.days >= 365
+	const pts = perWeek
+		? [...r.series.reduce((m, d) => {
+				const w = weekOf(d.day)
+				const x = m.get(w) ?? (m.set(w, { day: w, taken: 0, lost: 0, alerts: 0 }), m.get(w)!)
+				x.taken += d.taken
+				x.lost += d.lost
+				x.alerts += d.alerts
+				return m
+			}, new Map<string, RadarGrowth['series'][number]>()).values()].map((x) => ({ ...x, label: shortDay(x.day), long: `semana del ${shortDay(x.day)}` }))
+		: r.series.map((d) => ({ ...d, label: shortDay(d.day), long: longDay(d.day) }))
+	const rate = r.tries ? `${num((r.kpi.taken.cur / r.tries) * 100)}% de ${num(r.tries)} intentos` : 'sin intentos en el periodo'
+	const tiles = `<div class="kpis k4">
+${tile('Tomas del radar', num(r.kpi.taken.cur), r.kpi.taken, `${rate} · ${num(r.lost)} perdidas`, compare)}
+${tile('Volumen tomado', usd(Math.round(r.kpi.volume.cur)), r.kpi.volume, 'con el radar, solo', compare)}
+${tile('Cuentas que lo usaron', num(r.kpi.users.cur), r.kpi.users, 'con algún aviso o toma, o encendido', compare)}
+${tile('Avisos', num(r.kpi.alerts.cur), r.kpi.alerts, 'ofertas que cumplieron una regla', compare)}
+</div>`
+	const daily = `<section class="panel"><div class="panel-h"><div><h2>Día a día</h2><p>Tomas logradas y perdidas (otro llegó antes), ${perWeek ? 'por semana' : 'por día'}</p></div>${legend([
+		['Tomadas', 'var(--s1)', 'bar'],
+		['Perdidas', 'var(--s2)', 'line'],
+	])}</div><div class="panel-b">${chart(
+		'ch-radar',
+		{
+			labels: pts.map((d) => d.long),
+			fmt: 'int',
+			series: [
+				{ name: 'Tomadas', kind: 'bar', color: 'var(--s1)', values: pts.map((d) => d.taken) },
+				{ name: 'Perdidas', kind: 'line', color: 'var(--s2)', values: pts.map((d) => d.lost) },
+			],
+		},
+		'Tomas del radar por día',
+	)}${dataTable(
+		[perWeek ? 'Semana' : 'Día', 'Tomadas', 'Perdidas', 'Avisos'],
+		pts.map((d) => [d.long, num(d.taken), num(d.lost), num(d.alerts)]),
+	)}</div></section>`
+	// De dónde sale el tiempo: una barra por tramo (la mediana), en el orden en que pasa
+	const ms = (v: number | null) => (v == null ? '—' : v < 1000 ? `${num(v)} ms` : `${num(v / 1000, 1)} s`)
+	const total = r.steps.reduce((t, x) => t + (x.p50 ?? 0), 0)
+	const top = Math.max(...r.steps.map((x) => x.p50 ?? 0), 1)
+	const timing = `<section class="panel"><div class="panel-h"><div><h2>De dónde sale el tiempo de una toma</h2><p>La mitad de las tomas tarda menos que esto en cada tramo, en el orden en que pasa</p></div></div><div class="panel-b">${
+		r.measured
+			? `<ol class="hbars">${r.steps
+					.map((x) => {
+						const [name, sub] = RADAR_STEP[x.key]
+						const share = total && x.p50 != null ? Math.round((x.p50 / total) * 100) : null
+						return `<li><div class="hb-l"><b>${name}</b><small>${sub}</small></div><div class="hb-t"><i style="width:${(((x.p50 ?? 0) / top) * 100).toFixed(1)}%"></i></div><div class="hb-v"><b>${ms(x.p50)}</b><small>${share == null ? 'sin medir' : `${share}% · 9 de 10: ${ms(x.p90)}`}</small></div></li>`
+					})
+					.join('')}</ol><p class="note">${num(r.measured)} tomas medidas de punta a punta${r.paused ? ` · ${num(r.paused)} encontraron la oferta en pausa` : ''}.</p>`
+			: '<p class="empty">Se mide desde el 20 nov: aparece con las primeras tomas de quien ya recargó el terminal.</p>'
+	}</div></section>`
+	const users = r.users.length
+		? `<div class="wrap"><table class="left"><thead><tr><th>Cuenta</th><th class="num">Tomas</th><th class="num">Avisos</th><th class="num">Encendido</th><th>Último uso</th></tr></thead><tbody>${r.users
+				.slice(0, 15)
+				.map(
+					(u) =>
+						`<tr><td><a href="/admin/pro?u=${encodeURIComponent(u.user)}">@${esc(u.user)}</a></td><td class="num">${num(u.taken)}</td><td class="num">${num(u.alerts)}</td><td class="num">${u.minutes ? (u.minutes < 60 ? `${num(u.minutes)} min` : `${num(u.minutes / 60, 1)} h`) : '<span class="note">—</span>'}</td><td>${longDay(cubaDate(u.last))}</td></tr>`,
+				)
+				.join('')}</tbody></table></div>`
+		: '<p class="empty">Nadie usó el radar en el periodo.</p>'
+	return `<div class="sec-h"><h2>Radar</h2><p>El radar del modo Pro: avisa y toma ofertas solo</p></div>
+${tiles}
+<div class="grid-2">${daily}${timing}</div>
+<section class="panel"><div class="panel-h"><div><h2>Quién lo usa</h2><p>Por cuenta, en el periodo. «Encendido» se guarda desde el 19 nov</p></div><div class="panel-a"><a class="btn" href="/admin/pro?view=envivo">En vivo</a></div></div><div class="panel-b flush">${users}</div></section>`
 }
 
 // Estilos y script de esta parte (el resto del panel usa los de admin.ts)
@@ -564,7 +716,13 @@ table.cohort td.empty-cell{background:transparent}
 details.more{margin-top:28px;border-top:1px solid var(--line);padding-top:14px}details.more>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;color:var(--text);font-weight:600;font-size:14px}
 details.more>summary::-webkit-details-marker{display:none}details.more>summary::before{content:'›';display:inline-block;transition:transform .15s;color:var(--muted);font-size:18px;line-height:1}details.more[open]>summary::before{transform:rotate(90deg)}
 details.more>summary small{color:var(--muted);font-weight:400;font-size:12.5px}
-@media (max-width:1000px){.grid-2{grid-template-columns:minmax(0,1fr)}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.minis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpis.k4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.sec-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px;margin:34px 0 12px;padding-top:22px;border-top:1px solid var(--line)}.sec-h h2{font-size:19px;font-weight:700;margin:0}.sec-h p{margin:0;color:var(--text2);font-size:13px}
+.hbars{list-style:none;margin:0;padding:0;display:grid;gap:16px}.hbars li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;align-items:end}.hb-t{grid-column:1/-1;grid-row:2}
+.hb-l b{display:block;font-size:13.5px;font-weight:600}.hb-l small,.hb-v small{display:block;font-size:12px;color:var(--text2)}
+.hb-t{height:10px;border-radius:5px;background:var(--raised);overflow:hidden}.hb-t i{display:block;height:100%;border-radius:5px;background:var(--s1);min-width:3px}
+.hb-v{text-align:right;min-width:96px}.hb-v b{font-variant-numeric:tabular-nums;font-size:14px}
+@media (max-width:1000px){.grid-2{grid-template-columns:minmax(0,1fr)}.kpis,.kpis.k4{grid-template-columns:repeat(2,minmax(0,1fr))}.minis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:860px){.kpi{min-height:118px;padding:12px 14px}.kpi-v{font-size:22px}.spark{position:static;order:5;width:100%;height:22px;margin-top:10px}.chart{height:200px}td.barcell{min-width:150px}.minibar{width:70px}}
 `
 
