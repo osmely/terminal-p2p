@@ -396,7 +396,8 @@ export class LiveBook {
 				if (!this.synced.has(k) || (!this.feedOn() && Date.now() - (this.readAt.get(k) ?? 0) > POLL_MS)) this.want.add(k)
 			}
 		}
-		if (this.want.size && !this.streaming) await this.soon(200)
+		// En staging la alarma se para sin nadie conectado: quien se suscribe la vuelve a poner en marcha
+		if ((this.want.size || this.env.STAGING) && !this.streaming) await this.soon(200)
 	}
 
 	async webSocketClose(ws: WebSocket, code: number) {
@@ -592,6 +593,9 @@ export class LiveBook {
 		await this.periodic()
 		const stream = !this.env.STAGING && this.creds() && Date.now() >= this.streamPauseUntil
 		if (stream) await this.stream()
+		// En staging, sin nadie conectado ni nada por leer, el objeto se duerme (despierto todo el día gastaba el tope
+		// diario de Durable Objects de la cuenta). Lo despierta quien se conecte o pida el libro
+		if (this.env.STAGING && !this.want.size && !this.ctx.getWebSockets().length) return
 		await this.ctx.storage.setAlarm(Date.now() + (stream ? 1000 : this.want.size ? 2000 : ALARM_MS))
 	}
 
