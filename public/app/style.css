@@ -393,6 +393,8 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .spread.crossed { color: var(--warn); background: var(--warn-bg); }
 .book-foot { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); flex: none; white-space: nowrap; }
 .book-count { margin-left: auto; }
+.anon-hint { display: block; width: 100%; margin: 0 0 6px; padding: 7px 10px; border: 0; border-radius: 8px; background: var(--accent-bg); color: var(--accent); font: inherit; font-size: 12px; font-weight: 600; text-align: left; cursor: pointer; }
+.anon-hint[hidden] { display: none; }
 .legend { display: inline-flex; align-items: center; gap: 6px; }
 .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
 .sw.ask { background: var(--ask); }

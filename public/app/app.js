@@ -447,6 +447,7 @@ function render() {
 	const offline = !b.live && !b.ask.levels.length && !b.bid.levels.length
 	document.querySelector('.area-book').classList.toggle('offline', offline)
 	if (offline) {
+		$('anonHint').hidden = true
 		const msg = `<div class="empty">${tl('app.bookNeedsAccount')}</div>`
 		$('asks').innerHTML = msg
 		$('bids').innerHTML = ''
@@ -461,6 +462,11 @@ function render() {
 		return
 	}
 	renderStatus(b)
+	// Sin cuenta: el libro público con los nombres tapados, y una línea para conectarla
+	if ($('anonHint').hidden === !!b.anon) {
+		$('anonHint').hidden = !b.anon
+		$('anonHint').textContent = tl('app.anonBook')
+	}
 	renderStats(b, asks, bids)
 	renderBook(b, asks, bids)
 	renderInsight(b, asks, bids)
@@ -1892,6 +1898,7 @@ function bind() {
 			}
 		})
 
+	$('anonHint').addEventListener('click', () => typeof showConnect === 'function' && showConnect())
 	$('themeBtn').addEventListener('click', () => {
 		const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
 		document.documentElement.dataset.theme = next
@@ -1962,6 +1969,8 @@ function bind() {
 			// Sin dueño aún («—»: QvaPay todavía no dijo quién la publicó), abre la oferta, que sí lo dice
 			const who = e.target.closest('.who em')
 			if (who && who.textContent.trim() !== '—' && typeof showPeer === 'function') return showPeer(who.textContent)
+			// Sin cuenta (libro público): el mismo aviso que al tocar Publicar
+			if (state.book?.anon && typeof toast === 'function') return toast(tl('app.connectToOffers'), true)
 			// broker.js abre la oferta para tomarla; sin él, se abre en QvaPay
 			if (typeof showTakeOffer === 'function') showTakeOffer(row.dataset.uuid, row.dataset.side)
 			else window.open(`https://www.qvapay.com/p2p/${row.dataset.uuid}`, '_blank', 'noopener')

@@ -283,6 +283,9 @@ function showBlocked(msg) {
 // title: por qué se pide (p. ej. al venir de la web a probar Pro)
 // after: lo que se hace al conectar (p. ej. volver a la oferta que se iba a tomar)
 function showConnect(title = tl('broker.connectTitle'), after = null) {
+	// Como manejador de un clic llega el evento: entonces, el título de siempre
+	if (typeof title !== 'string') title = tl('broker.connectTitle')
+	if (typeof after !== 'function') after = null
 	openModal(`<div class="stack">
 		<h3>${esc(title)}</h3>
 		<p class="muted">${tl('broker.connectIntro')}</p>

@@ -7,7 +7,7 @@
 
 import { Broker, json } from '../src/broker/routes.ts'
 import { QvaPayClient } from '../src/qvapay/client.ts'
-import { COINS, Market, type LiveStats, type Tick, type Watch, type WatchedSide } from '../src/terminal/market.ts'
+import { COINS, Market, type Level, type LiveStats, type Tick, type Watch, type WatchedSide } from '../src/terminal/market.ts'
 import { bestCross } from '../src/terminal/arbitrage.ts'
 import { CRITERIA, positions, rank, userStats } from '../src/terminal/ranking.ts'
 import { BrowserAccounts, TOKEN_KEY } from './accounts.ts'
@@ -222,7 +222,9 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 		market.touch(coin)
 		syncLive()
 		wake()
-		return json(200, market.snapshot(coin))
+		const snap = market.snapshot(coin)
+		if (snap.live || (await accounts.reader())) return json(200, snap)
+		return json(200, (await publicBook(coin, snap)) ?? snap)
 	}
 	// Ranking de usuarios con los libros que ha leído este navegador (?coin=TICK para un mercado,
 	// ?side=ask|bid para un lado). Los puestos de cada usuario son siempre de todos los mercados
@@ -242,6 +244,55 @@ async function api(input: string, init?: RequestInit): Promise<Response> {
 	}
 	return json(404, { error: tl('web.notFound') })
 }
+
+// ── Libro sin cuenta ─────────────────────────────────────────────────────
+// Sin cuenta conectada, el libro público del servidor (el mismo que la mini app de QvaPay): se ve el mercado, con los
+// nombres tapados. Para tomar o publicar se pide la cuenta. El servidor lo guarda 5 s: no se pide más seguido
+const PUBLIC_BOOK_MS = 5_000
+type PublicSide = { total: number; levels: Partial<Level>[] }
+const publicBooks = new Map<Tick, { at: number; sides: { ask: PublicSide; bid: PublicSide; at: number } | null; pending: Promise<void> | null }>()
+async function publicBook(coin: Tick, snap: ReturnType<Market['snapshot']>) {
+	const e = publicBooks.get(coin) ?? { at: 0, sides: null, pending: null }
+	publicBooks.set(coin, e)
+	if (Date.now() - e.at > PUBLIC_BOOK_MS && !e.pending)
+		e.pending = fetch(`/data/book?coin=${coin}`)
+			.then((r) => (r.ok ? r.json() : null))
+			.then((d) => {
+				if (d?.ask && d?.bid) e.sides = { ask: d.ask, bid: d.bid, at: d.at }
+			})
+			.catch(() => {})
+			.finally(() => {
+				e.at = Date.now()
+				e.pending = null
+			})
+	if (!e.sides && e.pending) await e.pending
+	if (!e.sides) return null
+	const side = (s: PublicSide): SideOf => ({ levels: s.levels.map(anonLevel), total: s.total ?? s.levels.length, updatedAt: e.sides!.at, error: null })
+	return { ...snap, ask: side(e.sides.ask), bid: side(e.sides.bid), live: true, anon: true }
+}
+type SideOf = ReturnType<Market['snapshot']>['ask']
+const anonLevel = (l: Partial<Level>): Level => ({
+	uuid: l.uuid ?? '',
+	price: l.price ?? 0,
+	usd: l.usd ?? 0,
+	kind: l.kind ?? 'fixed',
+	orderMin: l.orderMin ?? null,
+	orderMax: l.orderMax ?? null,
+	user: '—',
+	image: null,
+	ops: l.ops ?? 0,
+	rating: l.rating ?? null,
+	kyc: l.kyc ?? false,
+	vip: l.vip ?? false,
+	gold: l.gold ?? false,
+	vipOnly: l.vipOnly ?? false,
+	requirements: l.requirements ?? null,
+	requirementsMet: null,
+	createdAt: l.createdAt ?? null,
+	updatedAt: l.updatedAt ?? null,
+	promoted: l.promoted ?? false,
+	outlier: l.outlier ?? false,
+})
 
 // Lo que vigila el libro desde el módulo Pro (el radar, mantener tu oferta la primera): cada uno dice qué lados y a
 // quién pasarle cada lectura nueva; el mercado vigila todos juntos y a cada uno le llega solo lo suyo

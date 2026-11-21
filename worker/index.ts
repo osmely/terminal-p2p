@@ -771,7 +771,7 @@ async function assets(req: Request, url: URL, env: Env) {
 	return out
 }
 
-// El libro de un mercado para la mini app de QvaPay (solo mirar, sin cuenta): las 30 mejores de cada lado, como un
+// El libro de un mercado para la mini app de QvaPay y el terminal sin cuenta (solo mirar): las 30 mejores de cada lado, como un
 // terminal sin Pro, con la Tasa QvaPay y lo atípico marcado. 5 s en la caché del borde: todos ven lo mismo y el libro
 // en vivo no recibe una consulta por cada móvil
 const BOOK_TTL_S = 5
@@ -790,7 +790,27 @@ async function book(url: URL, env: Env, ctx: ExecutionContext) {
 	const side = (s: 'ask' | 'bid') => ({
 		ready: live[s].ready,
 		total: live[s].total,
-		levels: live[s].levels.map((l) => ({ uuid: l.uuid, price: l.price, usd: l.usd, user: l.user, kind: l.kind, orderMin: l.orderMin, orderMax: l.orderMax, vipOnly: l.vipOnly, outlier: isOutlier(l.price, ref[s], s) })),
+		levels: live[s].levels.map((l) => ({
+			uuid: l.uuid,
+			price: l.price,
+			usd: l.usd,
+			user: l.user,
+			kind: l.kind,
+			orderMin: l.orderMin,
+			orderMax: l.orderMax,
+			vipOnly: l.vipOnly,
+			outlier: isOutlier(l.price, ref[s], s),
+			// Para el libro del terminal sin cuenta (los nombres los tapa el terminal)
+			ops: l.ops,
+			rating: l.rating,
+			kyc: l.kyc,
+			vip: l.vip,
+			gold: l.gold,
+			promoted: l.promoted,
+			requirements: l.requirements,
+			createdAt: l.createdAt,
+			updatedAt: l.updatedAt,
+		})),
 	})
 	const data = { coin, at: live.at, version: live.version ?? null, rate: r?.median ?? null, rateAt: r?.t ?? null, ask: side('ask'), bid: side('bid'), markets: COINS.map((c) => ({ tick: c.tick, name: c.name, unit: c.unit })) }
 	const ready = live.ask.ready && live.bid.ready

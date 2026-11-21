@@ -146,6 +146,8 @@
 	'app.pairSub': 'Price in {unit} per USD of QvaPay balance',
 	'app.loading': 'Loading…',
 	'app.bookNeedsAccount': 'Connect your QvaPay account to see the offers in the book.',
+	'app.anonBook': 'Connect your QvaPay account to see who posts and take offers',
+	'app.connectToOffers': 'Connect your QvaPay account (top right) to access the offers',
 	'app.noLiveBook': 'No live book',
 	'app.connectForLive': 'Connect your account to see the live book',
 	'app.noBookAccess': 'This account can\'t read the book',

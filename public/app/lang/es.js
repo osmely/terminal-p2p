@@ -146,6 +146,8 @@
 	'app.pairSub': 'Precio en {unit} por cada USD de saldo QvaPay',
 	'app.loading': 'Cargando…',
 	'app.bookNeedsAccount': 'Las ofertas del libro se ven con tu cuenta de QvaPay conectada.',
+	'app.anonBook': 'Conecta tu cuenta de QvaPay para ver quién publica y tomar ofertas',
+	'app.connectToOffers': 'Conecta tu cuenta de QvaPay (arriba a la derecha) para acceder a las ofertas',
 	'app.noLiveBook': 'Sin libro en vivo',
 	'app.connectForLive': 'Conecta tu cuenta para ver el libro en vivo',
 	'app.noBookAccess': 'Sin acceso al libro con esta cuenta',
