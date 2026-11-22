@@ -259,7 +259,7 @@ function proMarkup(res: Response, on: boolean) {
 		.on('[data-price]', {
 			element: (el) => {
 				const p = PLANS[el.getAttribute('data-price') as Plan]
-				if (p) el.setInnerContent(`${p.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD`)
+				if (p) el.setInnerContent(`${p.usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} QUSD`)
 			},
 		})
 		.transform(res)

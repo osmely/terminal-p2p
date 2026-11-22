@@ -31,6 +31,7 @@ const PRO_FEATURES = [
 	['📲', tl('pro.f.offerAlerts'), tl('pro.f.offerAlertsSub')],
 	['🔔', tl('pro.f.rateAlerts'), tl('pro.f.rateAlertsSub')],
 	['📊', tl('pro.f.flow'), tl('pro.f.flowSub')],
+	['🫧', tl('pro.f.offers'), tl('pro.f.offersSub')],
 	['🕯️', tl('pro.f.candles'), tl('pro.f.candlesSub')],
 ]
 // La web del mismo entorno (staging.… desde app.staging.…)

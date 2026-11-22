@@ -99,7 +99,7 @@ async function loadStats() {
 		const n = s.day[k]
 		sec.querySelector(`[data-day="${k}"]`).innerHTML = n ? tl('site.last24h', { n: `+${whole(n)}` }) : ''
 	}
-	sec.querySelector('[data-day="volume"]').innerHTML = s.day.volume ? tl('site.last24h', { n: `+${whole(s.day.volume)} USD` }) : ''
+	sec.querySelector('[data-day="volume"]').innerHTML = s.day.volume ? tl('site.last24h', { n: `+${whole(s.day.volume)} QUSD` }) : ''
 	// Un día por barra, desde la primera acción (al menos una semana y como mucho 30 días), con los días sin nada en 0
 	const vol = new Map(s.byDay.map((d) => [d.day, d]))
 	const now = Date.now()
@@ -110,7 +110,7 @@ async function loadStats() {
 		.map((d) => {
 			const v = vol.get(d)
 			const usd = v?.volume ?? 0
-			const tip = `${dayName(d)}: ${v ? `${tl('site.dayTrades', { n: v.completed, count: whole(v.completed) })} · ${whole(usd)} USD` : tl('site.noTrades')}`
+			const tip = `${dayName(d)}: ${v ? `${tl('site.dayTrades', { n: v.completed, count: whole(v.completed) })} · ${whole(usd)} QUSD` : tl('site.noTrades')}`
 			return `<i class="${usd ? (usd === max ? 'top' : '') : 'zero'}" style="--h:${usd ? Math.max(6, (usd / max) * 100) : 0}%" title="${tip}"></i>`
 		})
 		.join('')

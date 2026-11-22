@@ -1739,8 +1739,10 @@ const proSplit = () => !!(window.TPPro?.enabled && window.TPPro?.active && (stat
 const volLine = () => proSplit() && !!state.history.volume?.bars?.some((b) => b.usd != null)
 
 let candlesLicensed = null
-function candlesUpsell() {
-	openModal(`<div class="stack"><h3>${tl('app.candlesTitle')}</h3><p class="muted">${tl('app.candlesText')}</p><button class="btn primary block" id="candlesPro">${tl('app.candlesBtn')}</button></div>`)
+// La ventana del modo Pro al tocar una gráfica de Pro sin tenerlo: las velas o las ofertas
+function candlesUpsell(name = 'candles') {
+	const k = name === 'offers' ? 'offers' : 'candles'
+	openModal(`<div class="stack"><h3>${tl(`app.${k}Title`)}</h3><p class="muted">${tl(`app.${k}Text`)}</p><button class="btn primary block" id="candlesPro">${tl('app.candlesBtn')}</button></div>`)
 	$('candlesPro').onclick = () => {
 		closeModal()
 		showPro()
@@ -1755,8 +1757,10 @@ document.addEventListener('tp:pro', () => {
 	if (license !== candlesLicensed) {
 		candlesLicensed = license
 		state.candles = null
-		if (store.get('chart') === 'candles' && license) showChart('candles', true)
-		else if (state.chart === 'candles' && !license) showChart('depth', true)
+		// Lo mismo con las ofertas, que también son de Pro
+		const wanted = store.get('chart')
+		if (PRO_CHARTS.has(wanted) && license) showChart(wanted, true)
+		else if (PRO_CHARTS.has(state.chart) && !license) showChart('depth', true)
 	}
 	historyDrawn = null
 	// Si cambia si tienes Pro, se piden de nuevo (con o sin el reparto)
@@ -1803,12 +1807,14 @@ function drawActive() {
 	} else drawHistory()
 }
 
-// quiet: sin guardarla ni avisar (al arrancar o al cambiar Pro). Las velas, solo con Pro: sin él, la ventana del modo
-// Pro; y si se estaba en ellas (al arrancar o al acabarse Pro), la profundidad, sin olvidar que se querían las velas
+// quiet: sin guardarla ni avisar (al arrancar o al cambiar Pro). Las velas y las ofertas, solo con Pro: sin él, la
+// ventana del modo Pro; y si se estaba en ellas (al arrancar o al acabarse Pro), la profundidad, sin olvidar que se
+// querían
+const PRO_CHARTS = new Set(['candles', 'offers'])
 function showChart(name, quiet = false) {
-	if (name === 'candles' && !candlesPro()) {
-		if (!quiet) candlesUpsell()
-		if (state.chart !== 'candles') return
+	if (PRO_CHARTS.has(name) && !candlesPro()) {
+		if (!quiet) candlesUpsell(name)
+		if (state.chart !== name) return
 		name = 'depth'
 	}
 	state.chart = name
