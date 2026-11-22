@@ -1122,6 +1122,211 @@ function drawCompleted() {
 	$('chartNote').title = $('chartNote').textContent
 }
 
+// ── Ofertas ─────────────────────────────────────────────────────────────
+// Cada oferta del libro es una burbuja: su altura es el precio (ventas arriba, compras abajo), de izquierda a derecha
+// cuánto lleva publicada (a la derecha, las que acaban de salir) y su tamaño, los QUSD. Una línea con el precio de
+// ahora (lo cerrado) y las líneas de precio del mercado abierto (TPChartLines), que se arrastran si traen drag.
+// Tocar una burbuja abre la oferta para tomarla
+let offerView = null
+let offerDrag = null
+// Al soltar una línea, el clic que llega después no abre la burbuja que quedó debajo
+let offerDragged = false
+const OFFER_RANGE = 0.04
+// Hasta dónde llega el eje de la antigüedad: una semana; las más viejas se quedan en el borde
+const OFFER_AGE_MAX = 7 * 24 * 60
+const ageX = (min, maxMin) => Math.log1p(Math.min(min, maxMin)) / Math.log1p(maxMin)
+function drawOffers() {
+	const { ctx, width, height } = setupCanvas($('offers'))
+	offerView = null
+	const b = state.book
+	if (!b) return
+	const clean = (xs) => xs.filter((l) => !l.outlier && l.price > 0)
+	const asks = clean(filtered(b.ask.levels, 'ask'))
+	const bids = clean(filtered(b.bid.levels, 'bid'))
+	if (!asks.length && !bids.length) return emptyChart(ctx, width, height, tl('app.noOffers'))
+	const done = b.completed?.offers?.length ? median(b.completed.offers) : null
+	const ref = done ?? (asks[0] && bids[0] ? (asks[0].price + bids[0].price) / 2 : (asks[0] ?? bids[0]).price)
+	const lines = [...linesHere('ask'), ...linesHere('bid')].map((l) => (offerDrag && l.drag?.id === offerDrag.id ? { ...l, price: offerDrag.price, title: offerDrag.title, note: offerDrag.note } : l))
+	// Lo de ±4 % de lo cerrado, ampliado para que quepan la mejor venta, la mejor compra y las líneas (si no están lejísimos)
+	let lo = ref * (1 - OFFER_RANGE)
+	let hi = ref * (1 + OFFER_RANGE)
+	for (const p of [asks[0]?.price, bids[0]?.price, ...lines.map((l) => l.price)])
+		if (p > ref * 0.75 && p < ref * 1.25) (lo = Math.min(lo, p * 0.995)), (hi = Math.max(hi, p * 1.005))
+	const pad = { l: 10, r: 66, t: 14, b: 24 }
+	const W = width - pad.l - pad.r
+	const H = height - pad.t - pad.b
+	const y = (p) => pad.t + ((hi - p) / (hi - lo)) * H
+	const priceAt = (py) => hi - ((py - pad.t) / H) * (hi - lo)
+	const now = b.serverTime ?? Date.now()
+	const ageMin = (l) => Math.max(0, (now - (l.updatedAt ?? l.createdAt ?? now)) / 60_000)
+	const all = [...asks.map((l) => ({ l, side: 'ask' })), ...bids.map((l) => ({ l, side: 'bid' }))].filter((d) => d.l.price >= lo && d.l.price <= hi)
+	const maxMin = Math.max(60, Math.min(OFFER_AGE_MAX, Math.max(...all.map((d) => ageMin(d.l)), 0)))
+	const x = (min) => pad.l + (1 - ageX(min, maxMin)) * W
+	const maxUsd = Math.max(...all.map((d) => d.l.usd), 1)
+
+	// Precios a la derecha y la antigüedad abajo
+	ctx.strokeStyle = css('--line')
+	ctx.fillStyle = css('--muted')
+	ctx.lineWidth = 1
+	ctx.textAlign = 'left'
+	for (let i = 0; i <= 4; i++) {
+		const p = lo + ((hi - lo) / 4) * i
+		ctx.beginPath()
+		ctx.moveTo(pad.l, y(p))
+		ctx.lineTo(width - pad.r, y(p))
+		ctx.stroke()
+		ctx.fillText(fmtP(p), width - pad.r + 6, y(p) + 4)
+	}
+	ctx.textAlign = 'center'
+	for (const [min, label] of [[0, tl('app.offNew')], [60, '1 h'], [1440, tl('app.offDay')], [10080, tl('app.offWeek')]])
+		if (min <= maxMin) ctx.fillText(label, Math.min(Math.max(x(min), pad.l + 16), width - pad.r - 16), height - 8)
+
+	// El precio de ahora
+	ctx.strokeStyle = css('--accent')
+	ctx.lineWidth = 2
+	ctx.beginPath()
+	ctx.moveTo(pad.l, y(ref))
+	ctx.lineTo(width - pad.r, y(ref))
+	ctx.stroke()
+
+	// Las burbujas: las grandes primero, así las pequeñas quedan encima y se pueden tocar
+	const dots = all
+		.map((d) => ({ ...d, x: x(ageMin(d.l)), y: y(d.l.price), r: 4 + 14 * Math.sqrt(d.l.usd / maxUsd) }))
+		.sort((a, b2) => b2.r - a.r)
+	for (const d of dots) {
+		const color = css(d.side === 'ask' ? '--ask' : '--bid')
+		ctx.globalAlpha = d.l.vipOnly ? 0.25 : 0.55
+		ctx.fillStyle = color
+		ctx.beginPath()
+		ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2)
+		ctx.fill()
+		ctx.globalAlpha = 1
+		ctx.strokeStyle = color
+		ctx.lineWidth = 1
+		ctx.stroke()
+		if (d.r >= 12) {
+			ctx.fillStyle = '#fff'
+			ctx.fillText(fmtU(Math.round(d.l.usd)), d.x, d.y + 4)
+		}
+	}
+
+	// Las líneas de precio (tu radar, tus ofertas): discontinuas, con su título a la izquierda; las que se arrastran,
+	// más gruesas y con su asa
+	const drawn = []
+	for (const l of lines) {
+		if (l.price < lo || l.price > hi) continue
+		const ly = y(l.price)
+		const color = css(l.tone === 'bid' ? '--bid' : '--ask')
+		ctx.strokeStyle = color
+		ctx.lineWidth = l.drag ? 2 : 1
+		ctx.setLineDash([6, 4])
+		ctx.beginPath()
+		ctx.moveTo(pad.l, ly)
+		ctx.lineTo(width - pad.r, ly)
+		ctx.stroke()
+		ctx.setLineDash([])
+		let tx = pad.l + 4
+		if (l.drag) {
+			ctx.fillStyle = color
+			ctx.fillRect(pad.l + 2, ly - 12, 28, 24)
+			ctx.fillStyle = '#fff'
+			ctx.fillText('⇅', pad.l + 16, ly + 4)
+			tx = pad.l + 36
+		}
+		const text = `${l.title ?? ''} ${fmtP(l.price)}${l.note ? ` · ${l.note}` : ''}`.trim()
+		ctx.textAlign = 'left'
+		const tw = ctx.measureText(text).width + 10
+		ctx.fillStyle = color
+		ctx.fillRect(tx, ly - 9, tw, 18)
+		ctx.fillStyle = '#fff'
+		ctx.fillText(text, tx + 5, ly + 4)
+		ctx.textAlign = 'center'
+		drawn.push({ l, y: ly })
+	}
+
+	// El precio de ahora en el eje, encima de todo para que se lea (a la derecha están las ofertas recién salidas)
+	ctx.textAlign = 'left'
+	ctx.fillStyle = css('--accent')
+	ctx.fillRect(width - pad.r + 1, y(ref) - 9, pad.r - 2, 18)
+	ctx.fillStyle = '#fff'
+	ctx.fillText(fmtP(ref), width - pad.r + 5, y(ref) + 4)
+	ctx.textAlign = 'center'
+
+	offerView = { dots: dots.reverse(), lines: drawn, priceAt, top: pad.t, bottom: pad.t + H }
+	$('chartNote').textContent = tl('app.offNote')
+	$('chartNote').title = $('chartNote').textContent
+}
+
+// Lo que hay bajo el puntero: una línea que se arrastra (si está a menos de 14 px) o una burbuja
+function offerHit(e) {
+	if (!offerView) return null
+	const r = $('offers').getBoundingClientRect()
+	const px = e.clientX - r.left
+	const py = e.clientY - r.top
+	const line = offerView.lines.find((d) => d.l.drag && Math.abs(d.y - py) <= 14)
+	if (line) return { line }
+	const dot = offerView.dots.find((d) => Math.hypot(d.x - px, d.y - py) <= d.r + 3)
+	return dot ? { dot } : null
+}
+function bindOffers() {
+	const cv = $('offers')
+	const tip = $('tip')
+	cv.addEventListener('pointerdown', (e) => {
+		const hit = offerHit(e)
+		if (!hit?.line) return
+		e.preventDefault()
+		cv.setPointerCapture(e.pointerId)
+		const l = hit.line.l
+		offerDrag = { id: l.drag.id, price: l.price, title: l.title, l }
+		tip.hidden = true
+	})
+	cv.addEventListener('pointermove', (e) => {
+		if (offerDrag) {
+			const r = cv.getBoundingClientRect()
+			const py = Math.min(Math.max(e.clientY - r.top, offerView.top), offerView.bottom)
+			const p = offerView.priceAt(py)
+			if (!(p > 0)) return
+			offerDrag.price = p >= 100 ? Math.round(p) : Math.round(p * 100) / 100
+			// preview da el título ({ title, note } o un texto) que tendría la línea en ese precio
+			const pv = offerDrag.l.drag.preview?.(offerDrag.price)
+			offerDrag.title = (typeof pv === 'object' ? pv?.title : pv) ?? offerDrag.l.title
+			offerDrag.note = typeof pv === 'object' ? pv?.note : ''
+			return drawOffers()
+		}
+		if (e.pointerType !== 'mouse') return
+		const hit = offerHit(e)
+		cv.style.cursor = hit?.line ? 'ns-resize' : hit?.dot ? 'pointer' : ''
+		if (!hit?.dot) return void (tip.hidden = true)
+		tip.innerHTML = tooltip(hit.dot.l, hit.dot.side)
+		tip.hidden = false
+		tip.style.left = `${Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8)}px`
+		tip.style.top = `${Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8)}px`
+	})
+	cv.addEventListener('pointerleave', () => !offerDrag && (tip.hidden = true))
+	const release = async () => {
+		if (!offerDrag) return
+		const { l, price } = offerDrag
+		offerDrag = null
+		offerDragged = true
+		try {
+			if (price !== l.price) await l.drag.drop(price)
+		} finally {
+			drawOffers()
+		}
+	}
+	cv.addEventListener('pointerup', release)
+	cv.addEventListener('pointercancel', release)
+	cv.addEventListener('click', (e) => {
+		if (offerDragged) return void (offerDragged = false)
+		const hit = offerHit(e)
+		if (!hit?.dot) return
+		tip.hidden = true
+		if (state.book?.anon && typeof toast === 'function') return toast(tl('app.connectToOffers'), true)
+		if (typeof showTakeOffer === 'function') showTakeOffer(hit.dot.l.uuid, hit.dot.side)
+		else window.open(`https://www.qvapay.com/p2p/${hit.dot.l.uuid}`, '_blank', 'noopener')
+	})
+}
+
 let historyChart = null
 let bidSeries = null
 let askSeries = null
@@ -1267,7 +1472,8 @@ function drawHistory() {
 
 // Líneas de precio en la gráfica de la tasa, cada pieza con su nombre: set(nombre, [{ coin, price, tone: 'ask' | 'bid',
 // title, style }]). Las pone «Mis operaciones» (tus ofertas publicadas) y el módulo Pro (el radar). Solo se ven las
-// del mercado abierto. style: 1 punteada, 2 discontinua (por defecto)
+// del mercado abierto. style: 1 punteada, 2 discontinua (por defecto). Con drag ({ id, preview(price), drop(price) }) se
+// pueden arrastrar en la gráfica «Ofertas»
 const chartLines = new Map()
 let chartLineHandles = []
 const linesHere = (tone) => [...chartLines.values()].flat().filter((l) => l.coin === state.coin && l.price > 0 && (l.tone === 'bid') === (tone === 'bid'))
@@ -1404,6 +1610,7 @@ window.TPChartLines = {
 		if (lines?.length) chartLines.set(key, lines)
 		else chartLines.delete(key)
 		drawChartLines()
+		if (state.chart === 'offers' && !offerDrag) drawOffers()
 	},
 }
 
@@ -1588,6 +1795,7 @@ function themeHistory() {
 
 function drawActive() {
 	if (state.chart === 'depth') drawDepth()
+	else if (state.chart === 'offers') drawOffers()
 	else if (state.chart === 'completed') drawCompleted()
 	else if (state.chart === 'candles') {
 		if (state.candles?.coin !== state.coin || state.candles?.tf !== state.frame) loadCandles()
@@ -1612,6 +1820,7 @@ function showChart(name, quiet = false) {
 	$('opsLegend').hidden = true
 	if (name !== 'history') $('volTags').innerHTML = ''
 	$('depth').hidden = name !== 'depth'
+	$('offers').hidden = name !== 'offers'
 	$('completed').hidden = name !== 'completed'
 	$('history').hidden = name !== 'history'
 	$('candles').hidden = name !== 'candles'
@@ -1977,6 +2186,7 @@ function bind() {
 		})
 	}
 	window.addEventListener('resize', () => drawActive())
+	bindOffers()
 }
 
 bind()

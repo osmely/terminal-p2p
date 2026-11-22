@@ -419,6 +419,8 @@ body { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-are
 .area-chart .panel-note { flex: 1 1 220px; }
 .mrow .num.avg { color: var(--muted); font-style: italic; }
 .chart { width: 100%; height: 100%; display: block; }
+/* Ofertas: el dedo arrastra las líneas del radar sin mover la página */
+#offers { touch-action: none; }
 
 /* ══ Lectura y actividad ══════════════════════════════════════════════ */
 .pane { padding: 12px 14px; overflow-y: auto; max-height: 300px; }
