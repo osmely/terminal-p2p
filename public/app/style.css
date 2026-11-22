@@ -1276,3 +1276,7 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 	.stk-region { margin: 12px 12px 0; }
 	.stk-pf-sum { grid-template-columns: 1fr; }
 }
+
+/* La nota pública de una oferta (la ponen las cuentas GOLD) */
+.offer-msg { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--accent); font-size: 14px; overflow-wrap: anywhere; }
+.tip-msg { max-width: 240px; white-space: normal; overflow-wrap: anywhere; }

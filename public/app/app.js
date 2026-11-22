@@ -679,7 +679,7 @@ const markOf = (uuid) => {
 function levelRow(l, side, cum, maxCum) {
 	const color = side === 'ask' ? 'var(--ask-bg)' : 'var(--bid-bg)'
 	const w = maxCum ? Math.max(2, (cum / maxCum) * 100) : 0
-	const flags = [l.promoted ? '★' : '', l.kind === 'flexible' ? '↔' : '', l.requirements ? '🔒' : '', l.vipOnly ? '👑' : '', l.outlier ? '⚠️' : '']
+	const flags = [l.promoted ? '★' : '', l.kind === 'flexible' ? '↔' : '', l.requirements ? '🔒' : '', l.vipOnly ? '👑' : '', l.outlier ? '⚠️' : '', l.message ? '💬' : '']
 		.filter(Boolean)
 		.join('')
 	// Tus propias ofertas se marcan en el libro (broker.js sabe quién eres)
@@ -1956,6 +1956,7 @@ function tooltip(l, side) {
 			: '',
 		req ? `<div>${tl('app.tipReq', { req: esc(req) })}</div>` : '',
 		l.vipOnly ? `<div>${tl('app.tipVipOnly')}</div>` : '',
+		l.message ? `<div class="tip-msg">💬 ${esc(l.message)}</div>` : '',
 		l.promoted ? `<div>${tl('app.tipPromoted')}</div>` : '',
 		l.outlier ? `<div style="color:var(--warn)">${tl('app.tipOutlier')}</div>` : '',
 		`<div class="muted">${tl('app.tipClick')}</div>`,

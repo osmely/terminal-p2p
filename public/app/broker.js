@@ -1881,6 +1881,7 @@ async function showTakeOfferById(uuid, amount) {
 		requirementsMet: o.requirementsMet,
 		requirementsMissing: o.requirementsMissing,
 		vipOnly: o.onlyVip,
+		message: o.message || undefined,
 		user: o.owner?.username ?? '—',
 		image: o.owner?.image ?? null,
 		ops: o.owner?.ops ?? null,
@@ -2008,6 +2009,7 @@ function renderTake(uuid, side, l, coin, preset) {
 			${req ? `<span>${tl('broker.kvReq')}</span><b>${esc(req)}</b><span></span>` : ''}
 			${l.vipOnly ? `<span>${tl('broker.tkOnly')}</span><b>${tl('broker.tkVipAccounts')}</b><span></span>` : ''}
 		</div>
+		${l.message ? `<p class="offer-msg">💬 ${esc(l.message)}</p>` : ''}
 		${flex ? `<label class="field">${tl(youBuy ? 'broker.tkHowManyBuy' : 'broker.tkHowManySell')}<input class="input" id="tkAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${start}" /></label>` : ''}
 		<p class="hint" id="tkTotal"></p>
 		<p class="notice">${youBuy ? tl('broker.tkNoteBuy') : tl('broker.tkNoteSell')}</p>

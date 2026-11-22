@@ -70,6 +70,8 @@ export interface Level {
 	promoted: boolean
 	// A más de OUTLIER_PCT de la referencia: casi siempre un error de tipeo
 	outlier: boolean
+	// La nota pública del anunciante (solo la ponen las cuentas GOLD): en efectivo, casi siempre el lugar
+	message?: string
 }
 
 // new/gone: comparando dos lecturas del libro (no se sabe si una que sale la tomaron o la retiraron). Del feed, a través
@@ -561,6 +563,7 @@ export function toLevel(o: P2POffer, promoted: boolean, ref: number | null): Lev
 		updatedAt: ts(o.updated_at) ?? ts(o.created_at),
 		promoted,
 		outlier: isOutlier(price, ref, o.type === 'sell' ? 'ask' : 'bid'),
+		...(o.message?.trim() ? { message: o.message.trim() } : {}),
 	}
 }
 

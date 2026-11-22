@@ -118,6 +118,8 @@ export interface LiveOffer {
 	ownerVip: boolean
 	onlyVip: boolean
 	requirements: Record<string, number> | null
+	// La nota pública (solo la trae el listado, no el aviso en vivo)
+	message?: string
 	createdAt: number
 	updatedAt: number
 }
@@ -268,6 +270,7 @@ export class Book {
 				ownerVip: !!d.owner_vip,
 				onlyVip: !!d.only_vip,
 				requirements: d.requirements && Object.keys(d.requirements).length ? d.requirements : null,
+				message: had?.message,
 				createdAt: had?.createdAt ?? at,
 				updatedAt: at,
 			}
@@ -397,7 +400,8 @@ export class Book {
 			seen.add(o.uuid)
 			const had = this.offers.get(o.uuid)
 			const at = ts(o.updated_at) || ts(o.created_at) || now
-			if (had && (had.updatedAt > at || (had.updatedAt === at && had.usd === usd))) continue
+			const message = o.message === undefined ? had?.message : o.message?.trim() || undefined
+			if (had && (had.updatedAt > at || (had.updatedAt === at && had.usd === usd && had.message === message))) continue
 			this.changed.add(o.uuid)
 			this.offers.set(o.uuid, {
 				uuid: o.uuid,
@@ -412,6 +416,7 @@ export class Book {
 				ownerVip: !!u?.vip,
 				onlyVip: !!o.only_vip,
 				requirements: o.requirements && Object.keys(o.requirements).length ? o.requirements : null,
+				message,
 				createdAt: ts(o.created_at) || had?.createdAt || at,
 				updatedAt: at,
 			})
@@ -502,6 +507,7 @@ export class Book {
 				order_max: o.orderMax == null ? undefined : String(o.orderMax),
 				only_vip: o.onlyVip,
 				requirements: o.requirements ?? undefined,
+				message: o.message,
 				created_at: new Date(o.createdAt).toISOString(),
 				updated_at: new Date(o.updatedAt).toISOString(),
 				status: 'open',
