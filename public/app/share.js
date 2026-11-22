@@ -81,7 +81,7 @@ async function fillSimilar(coin, side, exclude) {
 		<div class="similar">${list
 			.map(
 				(l) =>
-					`<button type="button" class="similar-row" data-similar="${l.uuid}"><b class="num ${side}">${fmtP(l.price)} ${unit}</b><span class="num">${l.kind === 'flexible' && l.orderMax ? tl('share.upTo', { usd: fmtM(Math.min(l.orderMax, l.usd)) }) : fmtM(l.usd)} USD</span><span class="muted">@${esc(l.user)}</span></button>`,
+					`<button type="button" class="similar-row" data-similar="${l.uuid}"><b class="num ${side}">${fmtP(l.price)} ${unit}</b><span class="num">${l.kind === 'flexible' && l.orderMax ? tl('share.upTo', { usd: fmtM(Math.min(l.orderMax, l.usd)) }) : fmtM(l.usd)} QUSD</span><span class="muted">@${esc(l.user)}</span></button>`,
 			)
 			.join('')}</div>`
 			: ''

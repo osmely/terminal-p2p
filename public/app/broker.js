@@ -232,7 +232,7 @@ async function refreshBalance(force = false) {
 		if (r.balance === bk.acct.balance) return
 		bk.acct.balance = r.balance
 		const el = document.querySelector('#account .acct-bal')
-		if (el) el.textContent = `${fmtM(r.balance ?? 0)} USD`
+		if (el) el.textContent = `${fmtM(r.balance ?? 0)} QUSD`
 		document.dispatchEvent(new Event('tp:balance'))
 	} catch {
 	} finally {
@@ -249,7 +249,7 @@ function renderAccount() {
 			<div class="acct">
 				<button type="button" class="acct-open" id="acctOpen" title="${tl('broker.myAccount')}">
 					${avatar(a.username, a.image)}
-					<div><div class="acct-name">@${esc(a.username)}${a.gold ? ' <span class="badge warn">GOLD</span>' : ''}</div><div class="acct-bal">${fmtM(a.balance ?? 0)} USD</div></div>
+					<div><div class="acct-name">@${esc(a.username)}${a.gold ? ' <span class="badge warn">GOLD</span>' : ''}</div><div class="acct-bal">${fmtM(a.balance ?? 0)} QUSD</div></div>
 				</button>
 				<button class="icon-btn small" id="disconnectBtn" title="${tl('broker.disconnectTitle')}" aria-label="${tl('broker.disconnectTitle')}">
 					<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -424,7 +424,7 @@ function renderTrades() {
 	const who = (t) =>
 		t.counterparty ? `<span class="who-ava">${avatar(t.counterparty.username, t.counterparty.image, 'sm')}<span>@${esc(t.counterparty.username)} <span class="muted">· ${tl('broker.opsShort', { n: String(t.counterparty.ops) })}</span></span></span>` : '<span class="muted">—</span>'
 	const head = (cols) => `<thead><tr>${cols.map(([c, cls]) => `<th class="${cls ?? ''}">${c}</th>`).join('')}</tr></thead>`
-	const common = [[tl('broker.colSide')], [tl('broker.colMarket')], ['USD', 'r'], [tl('broker.colPrice'), 'r'], [tl('broker.colTotal'), 'r']]
+	const common = [[tl('broker.colSide')], [tl('broker.colMarket')], ['QUSD', 'r'], [tl('broker.colPrice'), 'r'], [tl('broker.colTotal'), 'r']]
 
 	let html = ''
 	if (bk.tab === 'active') {
@@ -435,7 +435,7 @@ function renderTrades() {
 						const clock = t.status === 'processing' && t.expiresAt ? `<span class="countdown" data-expires="${esc(t.expiresAt)}" title="${tl('broker.payDeadline')}"></span>` : ''
 						return `<tr data-offer="${t.offerUuid}" data-order="${t.order ?? ''}">
 							<td class="c-side">${side(t)}</td><td class="c-mkt">${esc(nameOf(t.coin))}</td>
-							<td class="r num c-usd" data-l="USD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(t.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
+							<td class="r num c-usd" data-l="QUSD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(t.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
 							<td class="c-who">${who(t)}</td><td class="c-status"><span class="chip ${t.status}">${STATUS[t.status] ?? t.status}</span></td>
 							<td class="next c-next ${next?.[1] ? 'act' : ''}">${next ? next[0] : '—'}${clock}</td></tr>`
 					})
@@ -447,7 +447,7 @@ function renderTrades() {
 					.map(
 						(o) => `<tr data-offer="${o.offerUuid}">
 							<td class="c-side">${side(o)}</td><td class="c-mkt">${esc(nameOf(o.coin))}</td>
-							<td class="r num c-usd" data-l="USD">${fmtM(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(o.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
+							<td class="r num c-usd" data-l="QUSD">${fmtM(o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(o.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM((o.kind === 'flexible' ? (o.available ?? o.usd) : o.usd) * o.price)} ${esc(unitOf(o.coin))}</td>
 							<td class="c-status">${o.pause ? `<span class="chip revision" title="${esc(pauseText(o.pause))}">${o.pause.reason === 'taker_left' && o.pause.until ? tl('broker.pausedUntil', { time: cubaFmt(o.pause.until, { hour: '2-digit', minute: '2-digit' }) }) : tl('broker.paused')}</span>` : `<span class="chip open">${tl('broker.onMarket')}</span>`}${o.kind === 'flexible' ? ` <span class="chip">${tl('broker.byParts')}</span>` : ''}${o.isPrivate ? ` <span class="chip">${tl('broker.private')}</span>` : ''}${window.TPProKeep?.chip(o) ?? ''}</td>
 							<td class="muted c-date">${o.updatedAt ? cubaFmt(o.updatedAt, { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
 							<td class="r c-act"><button class="btn danger sm" data-cancel-btn="${o.offerUuid}" ${bk.cancelling.has(o.offerUuid) ? `disabled>${tl('broker.cancelling')}` : `>${tl('common.cancel')}`}</button></td></tr>`,
@@ -460,7 +460,7 @@ function renderTrades() {
 					.map(
 						(t) => `<tr data-offer="${t.offerUuid}" data-order="${t.order ?? ''}">
 							<td class="c-side">${side(t)}</td><td class="c-mkt">${esc(nameOf(t.coin))}</td>
-							<td class="r num c-usd" data-l="USD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(t.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
+							<td class="r num c-usd" data-l="QUSD">${fmtM(t.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(t.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM(t.coinAmount)} ${esc(unitOf(t.coin))}</td>
 							<td class="c-who">${who(t)}</td><td class="muted c-date">${t.updatedAt ? cubaFmt(t.updatedAt, { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`,
 					)
 					.join('')}</tbody></table>`
@@ -653,7 +653,7 @@ function renderDetail(t) {
 		const rows = t.parts
 			.map(
 				(p) =>
-					`<button type="button" class="part-row" data-part="${esc(p.order)}"><span class="who-ava">${p.counterparty ? `${avatar(p.counterparty, p.image, 'sm')}<span class="link peer-link" role="link" tabindex="0" data-part-peer="${esc(p.counterparty)}" data-peer-id="${esc(p.counterpartyUuid ?? '')}">@${esc(p.counterparty)}</span>` : '@—'}</span><span>${fmtM(p.usd)} USD</span>${
+					`<button type="button" class="part-row" data-part="${esc(p.order)}"><span class="who-ava">${p.counterparty ? `${avatar(p.counterparty, p.image, 'sm')}<span class="link peer-link" role="link" tabindex="0" data-part-peer="${esc(p.counterparty)}" data-peer-id="${esc(p.counterpartyUuid ?? '')}">@${esc(p.counterparty)}</span>` : '@—'}</span><span>${fmtM(p.usd)} QUSD</span>${
 						p.status !== 'completed' ? `<span class="chip ${p.status}">${STATUS[p.status] ?? p.status}</span>` : p.rated ? `<span class="muted">${'★'.repeat(p.rated)}</span>` : `<b>${tl('broker.rate')}</b>`
 					}</button>`,
 			)
@@ -1570,12 +1570,12 @@ async function showCreateOffer(preset = null) {
 		$('ofConfirm').hidden = false
 		$('ofConfirm').innerHTML = `<h3>${tl('broker.reviewTitle')}</h3>
 			<div class="kv">
-				<span>${type === 'sell' ? tl('broker.kvSell') : tl('broker.kvBuy')}</span><b>${fmtM(f.amount)} USD</b><span></span>
+				<span>${type === 'sell' ? tl('broker.kvSell') : tl('broker.kvBuy')}</span><b>${fmtM(f.amount)} QUSD</b><span></span>
 				<span>${tl('broker.colPrice')}</span><b>${fmtP(f.price)} ${unit}</b><span></span>
 				<span>${type === 'sell' ? tl('broker.kvReceive') : tl('broker.kvPay')}</span><b>${fmtM(total)} ${unit}</b><span></span>
-				${type === 'buy' && feeOf(f.amount) ? `<span>${tl('broker.kvNet')}</span><b>${fmtM(f.amount - feeOf(f.amount))} USD</b><span class="muted">${tl('broker.kvAfterFee')}</span>` : ''}
+				${type === 'buy' && feeOf(f.amount) ? `<span>${tl('broker.kvNet')}</span><b>${fmtM(f.amount - feeOf(f.amount))} QUSD</b><span class="muted">${tl('broker.kvAfterFee')}</span>` : ''}
 				<span>${tl('broker.colMarket')}</span><b>${esc(nameOf(f.coin))}</b><span></span>
-				${f.kind === 'flexible' ? `<span>${tl('broker.kvParts')}</span><b>${fmtM(f.orderMin)}–${fmtM(f.orderMax)} USD</b><span></span>` : ''}
+				${f.kind === 'flexible' ? `<span>${tl('broker.kvParts')}</span><b>${fmtM(f.orderMin)}–${fmtM(f.orderMax)} QUSD</b><span></span>` : ''}
 				${f.keep ? `<span>${tl('broker.keepTitle')}</span><b>${fmtP(f.keep.min)}–${fmtP(f.keep.max)} ${unit}</b><span class="muted">${tl('broker.kvKeepLimits')}</span>` : ''}
 				${req ? `<span>${tl('broker.kvReq')}</span><b>${esc(req)}</b><span></span>` : ''}
 				<span>${tl('broker.kvVis')}</span><b>${f.private ? tl('broker.private') : tl('broker.kvPublicTg')}${f.onlyVip ? tl('broker.kvVipOnly') : ''}</b><span></span>
@@ -1665,7 +1665,7 @@ function renderManage(o) {
 			editable
 				? `<div class="stack tight"><p class="hint">${tl('broker.edTitle')}</p>
 				<div class="grid2">
-					<label class="field">${flex ? tl('broker.edAvailable') : tl('broker.amount')} (USD)<input class="input" id="edAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${amount}" /></label>
+					<label class="field">${flex ? tl('broker.edAvailable') : tl('broker.amount')} (QUSD)<input class="input" id="edAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${amount}" /></label>
 					<label class="field">${tl('broker.pricePerUsd')} (${unit})<input class="input" id="edPrice" inputmode="decimal" data-num autocomplete="off" value="${Math.round(o.price * 10000) / 10000}" /></label>
 				</div>
 				<p class="hint" id="edTotal"></p><div id="edWarn"></div>
@@ -1716,7 +1716,7 @@ function renderManage(o) {
 				? `<div><p class="hint">${tl('broker.orders')}</p><table class="otable"><tbody>${orders
 						.map(
 							(x) =>
-								`<tr data-order-row="${x.order}"><td class="num">${fmtM(x.usd)} USD</td><td class="num">${fmtM(x.coinAmount)} ${unit}</td><td>@${esc(x.taker ?? '—')}</td><td><span class="chip ${x.status}">${STATUS[x.status] ?? x.status}</span></td></tr>`,
+								`<tr data-order-row="${x.order}"><td class="num">${fmtM(x.usd)} QUSD</td><td class="num">${fmtM(x.coinAmount)} ${unit}</td><td>@${esc(x.taker ?? '—')}</td><td><span class="chip ${x.status}">${STATUS[x.status] ?? x.status}</span></td></tr>`,
 						)
 						.join('')}</tbody></table></div>`
 				: ''
@@ -2003,8 +2003,8 @@ function renderTake(uuid, side, l, coin, preset) {
 			<p class="muted who-ava">${avatar(l.user, l.image, 'sm')}${esc(nameOf(coin))} · <button type="button" class="link peer-link" data-peer="${esc(l.user)}">@${esc(l.user)}</button>${l.ops != null ? ` · ${tl('broker.nOps', { n: String(l.ops) })}` : ''}${l.rating ? ` · ⭐ ${l.rating.toFixed(2)}` : l.ops != null ? ` · ${tl('broker.noRatings')}` : ''}${l.kyc ? ' · KYC' : ''}</p>
 			${typeof rankText === 'function' && rankText(l.user) ? `<p class="rank-line">🏆 ${tl('broker.rankingLine', { rank: esc(rankText(l.user)) })}</p>` : ''}</div>
 		<div class="kv">
-			<span>${youBuy ? tl('broker.tkSells') : tl('broker.tkBuys')}</span><b>${fmtM(l.usd)} USD</b><span></span>
-			${flex ? `<span>${tl('broker.tkPerOrder')}</span><b>${min ? `${fmtM(min)}–${fmtM(max)}` : tl('broker.tkUpTo', { max: fmtM(max) })} USD</b><span></span>` : ''}
+			<span>${youBuy ? tl('broker.tkSells') : tl('broker.tkBuys')}</span><b>${fmtM(l.usd)} QUSD</b><span></span>
+			${flex ? `<span>${tl('broker.tkPerOrder')}</span><b>${min ? `${fmtM(min)}–${fmtM(max)}` : tl('broker.tkUpTo', { max: fmtM(max) })} QUSD</b><span></span>` : ''}
 			${req ? `<span>${tl('broker.kvReq')}</span><b>${esc(req)}</b><span></span>` : ''}
 			${l.vipOnly ? `<span>${tl('broker.tkOnly')}</span><b>${tl('broker.tkVipAccounts')}</b><span></span>` : ''}
 		</div>
@@ -2164,7 +2164,7 @@ async function showPeer(user, peerId = null) {
 				<span class="po-side ${o.type === 'sell' ? 'ask' : 'bid'}">${o.type === 'sell' ? tl('broker.tkSells') : tl('broker.tkBuys')}</span>
 				<span class="po-mkt">${esc(nameOf(o.coin))}${o.vipOnly ? tl('broker.kvVipOnly') : ''}${o.paused ? tl('broker.poPaused') : ''}</span>
 				<span class="po-price mono">${fmtP(o.price)} <small>${esc(unit)}</small></span>
-				<span class="po-usd mono">${range} USD</span>
+				<span class="po-usd mono">${range} QUSD</span>
 				<span class="po-age">${t ? tl('broker.ago', { t: ago(now - t) }) : ''}</span>
 			</button>`
 		})
@@ -2201,7 +2201,7 @@ async function showPeer(user, peerId = null) {
 				? ''
 				: `<div><p class="hint">${tl('broker.historyWith', { user: esc(name) })}</p>${
 						together.length
-							? `<p class="small">${tl('broker.historyCount', { n: together.length })} · ${tl('broker.historyDone', { n: done.length })}${vol ? ` · ${fmtM(vol)} USD` : ''}</p><div class="peer-trades">${history}</div>`
+							? `<p class="small">${tl('broker.historyCount', { n: together.length })} · ${tl('broker.historyDone', { n: done.length })}${vol ? ` · ${fmtM(vol)} QUSD` : ''}</p><div class="peer-trades">${history}</div>`
 							: `<p class="muted small">${tl('broker.historyNone')}</p>`
 					}</div>`
 		}
@@ -2287,7 +2287,7 @@ async function showBuy() {
 			<div class="swap-row"><span>${tl('broker.kvBuy')}</span></div>
 			<div class="swap-main">
 				<input class="swap-input mono" id="swAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${sw.amount}" aria-label="${tl('broker.swBuyAria')}" />
-				<span class="swap-asset"><span class="swap-coin usd">$</span>USD QvaPay</span>
+				<span class="swap-asset"><span class="swap-coin usd">$</span>QUSD</span>
 			</div>
 		</div>
 		<div class="swap-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -2314,7 +2314,7 @@ async function showBuy() {
 			.slice(0, 4)
 			.map((o) => {
 				const target = o.kind === 'flexible' ? Math.min(Math.max(amount() || 0, o.orderMin ?? 0), o.orderMax ?? o.usd) : o.usd
-				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} USD` : tl('broker.swExact', { usd: fmtM(o.usd) })
+				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} QUSD` : tl('broker.swExact', { usd: fmtM(o.usd) })
 				return `<button type="button" class="chip-btn" data-sw-pick="${target}">${tl('broker.swPick', { range, price: fmtP(o.price) })}</button>`
 			})
 			.join('')
@@ -2335,7 +2335,7 @@ async function showBuy() {
 		else if (!best) html = `<p class="notice warn">${a > 0 ? tl('broker.swNoSellerFor', { usd: fmtM(a) }) : tl('broker.swHowManyBuy')} ${tl('broker.swPossible')}</p><div class="swap-picks">${options(q.offers)}</div>`
 		else
 			html = `<div class="kv swap-kv">
-				<span>${tl('broker.colPrice')}</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
+				<span>${tl('broker.colPrice')}</span><b>1 QUSD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
 				<span>${tl('broker.tkSells')}</span><b>@${esc(best.user)}${best.vip ? ' <span class="badge ok">VIP</span>' : ''}${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
 				<span>${tl('broker.reputation')}</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : tl('broker.noRatings')}${best.ops != null ? ` · ${tl('broker.nOps', { n: best.ops })}` : ''}</b><span></span>
 			</div>`
@@ -2394,7 +2394,7 @@ async function showBuy() {
 		const ok = await askConfirm(
 			tl('broker.swConfirmBuy'),
 			`<div class="kv">
-				<span>${tl('broker.kvBuy')}</span><b>${fmtM(a)} USD</b><span></span>
+				<span>${tl('broker.kvBuy')}</span><b>${fmtM(a)} QUSD</b><span></span>
 				<span>${tl('broker.kvPay')}</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
 				<span>${tl('broker.swWith')}</span><b>${esc(nameOf(sw.coin))}</b><span></span>
 				<span>${tl('broker.tkSells')}</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>
@@ -2472,7 +2472,7 @@ async function showSwap(mode) {
 			<div class="swap-row"><span>${tl('broker.kvSell')}</span>${bk.acct.connected ? `<button type="button" class="link small" id="swMax">${tl('broker.balanceLink', { bal: fmtM(bk.acct.balance ?? 0) })}</button>` : ''}</div>
 			<div class="swap-main">
 				<input class="swap-input mono" id="swAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${sw.amount}" aria-label="${tl('broker.swSellAria')}" />
-				<span class="swap-asset"><span class="swap-coin usd">$</span>USD QvaPay</span>
+				<span class="swap-asset"><span class="swap-coin usd">$</span>QUSD</span>
 			</div>
 		</div>
 		<div class="swap-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M6 13l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -2563,7 +2563,7 @@ async function showSwap(mode) {
 			.slice(0, 4)
 			.map((o) => {
 				const target = o.kind === 'flexible' ? Math.min(Math.max(amount() || 0, o.orderMin ?? 0), o.orderMax ?? o.usd, maxUsd()) : o.usd
-				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} USD` : tl('broker.swExact', { usd: fmtM(o.usd) })
+				const range = o.kind === 'flexible' ? `${o.orderMin ? fmtM(o.orderMin) : '0'}–${fmtM(o.orderMax ?? o.usd)} QUSD` : tl('broker.swExact', { usd: fmtM(o.usd) })
 				return `<button type="button" class="chip-btn" data-sw-pick="${target}">${tl('broker.swPick', { range, price: fmtP(o.price) })}</button>`
 			})
 			.join('')
@@ -2587,7 +2587,7 @@ async function showSwap(mode) {
 			html = `<p class="notice warn">${a > 0 ? tl('broker.swNoBuyerFor', { usd: fmtM(a) }) : tl('broker.swHowManySell')} ${tl('broker.swPossible')}</p><div class="swap-picks">${options(q.offers)}</div>`
 		else {
 			html = `<div class="kv swap-kv">
-				<span>${tl('broker.colPrice')}</span><b>1 USD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
+				<span>${tl('broker.colPrice')}</span><b>1 QUSD = ${fmtP(best.price)} ${esc(unit())}</b><span></span>
 				<span>${tl('broker.tkBuys')}</span><b>@${esc(best.user)}${best.vip ? ' <span class="badge ok">VIP</span>' : ''}${best.gold ? ' <span class="badge warn">GOLD</span>' : ''}</b><span></span>
 				<span>${tl('broker.reputation')}</span><b>${best.rating ? `⭐ ${best.rating.toFixed(2)}` : tl('broker.noRatings')}${best.ops != null ? ` · ${tl('broker.nOps', { n: best.ops })}` : ''}</b><span></span>
 			</div>`
@@ -2661,7 +2661,7 @@ async function showSwap(mode) {
 		const ok = await askConfirm(
 			tl('broker.swConfirmSell'),
 			`<div class="kv">
-				<span>${tl('broker.kvSell')}</span><b>${fmtM(a)} USD</b><span></span>
+				<span>${tl('broker.kvSell')}</span><b>${fmtM(a)} QUSD</b><span></span>
 				<span>${tl('broker.kvReceive')}</span><b>${fmtM(total)} ${esc(unit())}</b><span></span>
 				<span>${tl('broker.swIn')}</span><b>${esc(nameOf(sw.coin))}</b><span></span>
 				<span>${tl('broker.tkBuys')}</span><b>@${esc(best.user)}${best.vip ? ' (VIP)' : ''}</b><span></span>

@@ -42,7 +42,7 @@ export function offerNotice(e: FeedEvent, trade: Trade | null, now = Date.now())
 	const price = amount > 0 ? num(d.receive) / amount : 0
 	if (!(price > 0)) return null
 	const market = `${tgEsc(c.name)}`
-	const at_ = `a <b>${priceOf(price)} ${tgEsc(c.unit)}</b> por USD`
+	const at_ = `a <b>${priceOf(price)} ${tgEsc(c.unit)}</b> por QUSD`
 	const next = sell ? 'Espera el pago y libera solo cuando veas el dinero en tu cuenta.' : 'Te toca pagar dentro del plazo: los datos de pago están en el terminal.'
 	const say = (kind: string, text: string): Notice => ({ owner: d.owner_uuid!, key: `${d.uuid}:${kind}:${d.updated_at ?? e.sent_at ?? ''}`, text })
 
@@ -53,23 +53,23 @@ export function offerNotice(e: FeedEvent, trade: Trade | null, now = Date.now())
 		if (trade.ops > 0)
 			return say(
 				'taken',
-				`🤝 <b>Te tomaron ${usdOf(trade.usd)} USD</b> de tu ${what} por rango · ${market}\n${at_}. ${
-					e.event === 'p2p.range_closed' ? 'Era lo que quedaba: la oferta salió del libro.' : `Quedan ${usdOf(left)} USD publicados.`
+				`🤝 <b>Te tomaron ${usdOf(trade.usd)} QUSD</b> de tu ${what} por rango · ${market}\n${at_}. ${
+					e.event === 'p2p.range_closed' ? 'Era lo que quedaba: la oferta salió del libro.' : `Quedan ${usdOf(left)} QUSD publicados.`
 				}\n\n${next}`,
 			)
-		return say('returned', `↩️ <b>Volvieron ${usdOf(trade.usd)} USD a tu ${what} por rango</b> · ${market}\nQuien los tomó no completó la operación. ${tgEsc(autoPauseNote(d.pause))} Precio: ${at_}.`)
+		return say('returned', `↩️ <b>Volvieron ${usdOf(trade.usd)} QUSD a tu ${what} por rango</b> · ${market}\nQuien los tomó no completó la operación. ${tgEsc(autoPauseNote(d.pause))} Precio: ${at_}.`)
 	}
 	const usd = usdOf(amount)
 	if (e.event === 'p2p.applied')
-		return say('applied', `🤝 <b>Tomaron tu ${sell ? 'venta' : 'compra'}</b> · ${market}\n${usd} USD ${at_}.\n\n${next}`)
+		return say('applied', `🤝 <b>Tomaron tu ${sell ? 'venta' : 'compra'}</b> · ${market}\n${usd} QUSD ${at_}.\n\n${next}`)
 	// Quien marca pagado en tu compra eres tú: solo se avisa en tus ventas
 	if (e.event === 'p2p.paid' && sell)
-		return say('paid', `💸 <b>Te marcaron pagada tu venta</b> · ${market}\n${usd} USD ${at_}.\n\nComprueba que te llegó el dinero y libera desde el terminal.`)
+		return say('paid', `💸 <b>Te marcaron pagada tu venta</b> · ${market}\n${usd} QUSD ${at_}.\n\nComprueba que te llegó el dinero y libera desde el terminal.`)
 	// Al completarse una venta, liberaste tú: solo se avisa en tus compras
 	if (e.event === 'p2p.completed' && !sell && d.status === 'completed')
-		return say('completed', `✅ <b>Te liberaron ${usd} USD</b> · ${market}\nSe completó tu compra ${at_}.`)
+		return say('completed', `✅ <b>Te liberaron ${usd} QUSD</b> · ${market}\nSe completó tu compra ${at_}.`)
 	if (e.event === 'p2p.reopened')
-		return say('reopened', `↩️ <b>Tu ${sell ? 'venta' : 'compra'} quedó libre otra vez</b> · ${market}\nQuien la tomó la canceló o se le acabó el plazo. ${tgEsc(autoPauseNote(d.pause))} Sigue publicada: ${usd} USD ${at_}.`)
+		return say('reopened', `↩️ <b>Tu ${sell ? 'venta' : 'compra'} quedó libre otra vez</b> · ${market}\nQuien la tomó la canceló o se le acabó el plazo. ${tgEsc(autoPauseNote(d.pause))} Sigue publicada: ${usd} QUSD ${at_}.`)
 	return null
 }
 

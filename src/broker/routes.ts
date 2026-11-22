@@ -580,7 +580,7 @@ export class Broker {
 		// Vendiendo, el comprador recibe tus datos por el chat
 		let chatSent: boolean | undefined
 		if (side === 'sell') {
-			const text = `Hola. Vendo ${t.amount} USD desde Terminal P2P. Págame aquí:\n${details.map((d) => `${d.label}: ${d.value}`).join('\n')}`
+			const text = `Hola. Vendo ${t.amount} QUSD desde Terminal P2P. Págame aquí:\n${details.map((d) => `${d.label}: ${d.value}`).join('\n')}`
 			chatSent = await acc.client
 				.sendChat(t.offer, text.slice(0, 599), held.order ?? undefined, urgent)
 				.then(() => true)
@@ -857,7 +857,7 @@ export class Broker {
 		this.swapQuotes.delete(`sell:${o.coin}`)
 		const order = r.order ?? undefined
 		// Si el chat falla, la orden ya está tomada: se avisa para que los mande a mano
-		const text = `Hola. Vendo ${amount} USD desde Terminal P2P. Págame aquí:\n${details.map((d: { label: string; value: string }) => `${d.label}: ${d.value}`).join('\n')}`
+		const text = `Hola. Vendo ${amount} QUSD desde Terminal P2P. Págame aquí:\n${details.map((d: { label: string; value: string }) => `${d.label}: ${d.value}`).join('\n')}`
 		const chatSent = await acc.client
 			.sendChat(o.uuid, text.slice(0, 599), order)
 			.then(() => true)

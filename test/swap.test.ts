@@ -264,14 +264,14 @@ test('orden inteligente vendiendo: dos tomas, tus datos a cada comprador y nunca
 	const sell = { side: 'sell', coin: 'BANK_CUP', price: 1040, takes: [{ offer: 'b1', amount: 50 }, { offer: 'b2', amount: 30 }], offer: { ...rest, amount: 20 }, details }
 	const poor = await post({ ...sell, offer: { ...rest, amount: 230 } })
 	assert.equal(poor.nothingDone, true)
-	assert.match(poor.error, /necesitas 310 USD/)
+	assert.match(poor.error, /necesitas 310 QUSD/)
 	assert.equal(fake.calls.length, 0)
 	const r = await post(sell)
 	assert.deepEqual(statuses(r), ['taken', 'taken'])
 	assert.equal(r.chatSent, true)
 	assert.equal(fake.calls[0], 'apply:b1:undefined')
-	assert.match(fake.calls[1], /^chat:b1:Hola\. Vendo 50 USD[\s\S]*Tarjeta: 9200 1111/)
-	assert.match(fake.calls[3], /^chat:b2:Hola\. Vendo 30 USD/)
+	assert.match(fake.calls[1], /^chat:b1:Hola\. Vendo 50 QUSD[\s\S]*Tarjeta: 9200 1111/)
+	assert.match(fake.calls[3], /^chat:b2:Hola\. Vendo 30 QUSD/)
 	assert.equal(fake.calls[4], 'create:20')
 	noCancels(fake.calls)
 })
@@ -327,11 +327,11 @@ test('radar vendiendo: pide tus datos, nunca más que tu saldo y se los manda al
 	const details = [{ label: 'Tarjeta', value: '9200 1111' }]
 	const poor = (await post({ ...sell, amount: 400, details })).body
 	assert.equal(poor.ok, false)
-	assert.match(poor.error, /necesitas 400 USD/)
+	assert.match(poor.error, /necesitas 400 QUSD/)
 	const r = (await post({ ...sell, details })).body
 	assert.deepEqual([r.ok, r.chatSent], [true, true])
 	assert.equal(fake.calls[0], 'apply:b1:undefined')
-	assert.match(fake.calls[1], /^chat:b1:Hola\. Vendo 50 USD[\s\S]*Tarjeta: 9200 1111/)
+	assert.match(fake.calls[1], /^chat:b1:Hola\. Vendo 50 QUSD[\s\S]*Tarjeta: 9200 1111/)
 	noCancels(fake.calls)
 })
 

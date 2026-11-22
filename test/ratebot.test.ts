@@ -141,7 +141,7 @@ test('por privado: /dolar contesta sin citar ni apuntar el chat; /start sin cód
 	assert.equal((r.reply_markup as typeof z).inline_keyboard[0][0].web_app?.url, 'https://terminalp2p.com/mini/?tg')
 	assert.equal((s.db.prepare('SELECT COUNT(*) AS n FROM bot_groups').get() as { n: number }).n, 0)
 	const start = await s.send({ message: { message_id: 4, text: '/start', chat: { id: 55, type: 'private' } } })
-	assert.match(String(start.text), /\/dolar · el USD en CUP/)
+	assert.match(String(start.text), /\/dolar · el QUSD en CUP/)
 	assert.match(JSON.stringify(start.reply_markup), /"web_app":\{"url":"https:\/\/terminalp2p\.com\/mini\/\?tg"\}/)
 	assert.match(String((await s.send({ message: { message_id: 5, text: 'hola', chat: { id: 55, type: 'private' } } })).text), /solo contesto comandos/)
 })

@@ -107,18 +107,18 @@ export function ownerPush(e: FeedEvent, trade: Trade | null, now = Date.now()): 
 		if (!trade) return null
 		if (trade.ops > 0) {
 			const left = num(d.available_amount ?? 0)
-			const rest = e.event === 'p2p.range_closed' ? 'Era lo que quedaba.' : `Quedan ${usdOf(left)} USD publicados.`
-			return say('taken', `Te tomaron ${usdOf(trade.usd)} USD de tu ${what}`, `${c.name} a ${rate}. ${rest} ${next}`, !sell)
+			const rest = e.event === 'p2p.range_closed' ? 'Era lo que quedaba.' : `Quedan ${usdOf(left)} QUSD publicados.`
+			return say('taken', `Te tomaron ${usdOf(trade.usd)} QUSD de tu ${what}`, `${c.name} a ${rate}. ${rest} ${next}`, !sell)
 		}
-		return say('left', `Volvieron ${usdOf(trade.usd)} USD a tu ${what}`, `${c.name}: quien los tomó no completó la operación. ${autoPauseNote(d.pause)}`)
+		return say('left', `Volvieron ${usdOf(trade.usd)} QUSD a tu ${what}`, `${c.name}: quien los tomó no completó la operación. ${autoPauseNote(d.pause)}`)
 	}
 	const usd = usdOf(amount)
-	if (e.event === 'p2p.applied') return say('taken', `Tomaron tu ${what} de ${usd} USD`, `${c.name} a ${rate}. ${next}`, !sell)
+	if (e.event === 'p2p.applied') return say('taken', `Tomaron tu ${what} de ${usd} QUSD`, `${c.name} a ${rate}. ${next}`, !sell)
 	// Quien marca pagado en tu compra eres tú: solo se avisa en tus ventas
-	if (e.event === 'p2p.paid' && sell) return say('paid', 'Te pagaron: comprueba y libera', `${usd} USD · ${c.name} a ${rate}. Mira tu cuenta antes de liberar.`, true)
+	if (e.event === 'p2p.paid' && sell) return say('paid', 'Te pagaron: comprueba y libera', `${usd} QUSD · ${c.name} a ${rate}. Mira tu cuenta antes de liberar.`, true)
 	// Al completarse una venta, liberaste tú: solo se avisa en tus compras
-	if (e.event === 'p2p.completed' && !sell && d.status === 'completed') return say('released', `Te liberaron ${usd} USD`, `Se completó tu compra · ${c.name} a ${rate}.`)
-	if (e.event === 'p2p.reopened') return say('left', `Tu ${what} quedó libre otra vez`, `${c.name}: quien la tomó la canceló o se le acabó el plazo. ${autoPauseNote(d.pause)} ${usd} USD a ${rate}.`)
+	if (e.event === 'p2p.completed' && !sell && d.status === 'completed') return say('released', `Te liberaron ${usd} QUSD`, `Se completó tu compra · ${c.name} a ${rate}.`)
+	if (e.event === 'p2p.reopened') return say('left', `Tu ${what} quedó libre otra vez`, `${c.name}: quien la tomó la canceló o se le acabó el plazo. ${autoPauseNote(d.pause)} ${usd} QUSD a ${rate}.`)
 	return null
 }
 
@@ -135,12 +135,12 @@ export function takerPush(e: FeedEvent, now = Date.now()): PushNotice | null {
 		msg: { title, body, tag: `tp:${d.uuid}:${kind}`, url: URL_OPS, urgent, offer: d.uuid, kind },
 		end,
 	})
-	if (e.event === 'p2p.paid' && !sell) return say('paid', 'Te pagaron: comprueba y libera', `${usd} USD · ${c.name} a ${rate}. Mira tu cuenta antes de liberar.`, true)
+	if (e.event === 'p2p.paid' && !sell) return say('paid', 'Te pagaron: comprueba y libera', `${usd} QUSD · ${c.name} a ${rate}. Mira tu cuenta antes de liberar.`, true)
 	// En una venta tuya liberaste tú: no hay nada que avisar
 	if (e.event === 'p2p.completed')
-		return sell && d.status === 'completed' ? say('released', `Te liberaron ${usd} USD`, `Se completó tu compra · ${c.name} a ${rate}.`, false, true) : { offer: d.uuid, key: `t:${d.uuid}:end:${b.stamp}`, msg: null, end: true }
+		return sell && d.status === 'completed' ? say('released', `Te liberaron ${usd} QUSD`, `Se completó tu compra · ${c.name} a ${rate}.`, false, true) : { offer: d.uuid, key: `t:${d.uuid}:end:${b.stamp}`, msg: null, end: true }
 	if (e.event === 'p2p.reopened' || e.event === 'p2p.cancelled')
-		return say('left', `Se canceló tu ${sell ? 'compra' : 'venta'} de ${usd} USD`, `${c.name}: la operación se canceló o venció el plazo de pago.`, false, true)
+		return say('left', `Se canceló tu ${sell ? 'compra' : 'venta'} de ${usd} QUSD`, `${c.name}: la operación se canceló o venció el plazo de pago.`, false, true)
 	return null
 }
 

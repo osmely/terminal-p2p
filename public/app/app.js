@@ -520,7 +520,7 @@ function renderStats(b, asks, bids) {
 		[tl('app.statMid'), fmtP(mid), ''],
 		[tl('app.statMedian'), fmtP(doneMedian), '', tl('app.statMedianShort')],
 		[tl('app.statOps', { h: done?.window_hours ?? 48 }), done ? done.count.toLocaleString('en-US') : '—', ''],
-		[tl('app.statDepth'), mid ? `${fmtU(within(bids, 'bid'))} / ${fmtU(within(asks, 'ask'))}<small class="unit"> USD</small>` : '—', '', tl('app.statDepthShort')],
+		[tl('app.statDepth'), mid ? `${fmtU(within(bids, 'bid'))} / ${fmtU(within(asks, 'ask'))}<small class="unit"> QUSD</small>` : '—', '', tl('app.statDepthShort')],
 	]
 	$('stats').innerHTML = items
 		// En el móvil, una etiqueta más corta si la hay (con tres columnas no caben las largas)
@@ -747,7 +747,7 @@ function groupTip(g, side) {
 	const hi = side === 'ask' ? g.price : g.price + g.step
 	const best = g.members[0]
 	return [
-		`<div><b>${fmtP(lo)} – ${fmtP(hi)}</b> ${unit}/USD</div>`,
+		`<div><b>${fmtP(lo)} – ${fmtP(hi)}</b> ${unit}/QUSD</div>`,
 		`<div>${tl(side === 'ask' ? 'app.grpAsk' : 'app.grpBid', { n: g.members.length, usd: fmtU(g.usd) })}</div>`,
 		g.members.length > 1 ? `<div>${tl('app.grpPrices', { lo: fmtP(Math.min(...prices)), hi: fmtP(Math.max(...prices)) })}</div>` : '',
 		`<div>${tl('app.grpBest', { user: esc(best.user), price: fmtP(best.price), usd: fmtU(best.usd) })}</div>`,
@@ -964,7 +964,7 @@ function renderActivity(b) {
 					const t = `${cubaFmt(a.t, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}.${String(new Date(a.t).getUTCMilliseconds()).padStart(3, '0')}`
 					const what = text.replace('{s}', tl(a.side === 'ask' ? 'app.actSell' : 'app.actBuy'))
 					const who = a.user && a.user !== '—' ? ` · ${peerLink(a.user)}` : ''
-					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} USD${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
+					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} QUSD${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
 				})
 				.join('')
 		: `<li><span></span><span class="muted">${tl('app.actWaiting')}</span><span></span></li>`
@@ -1377,7 +1377,7 @@ function candleNote(over) {
 		const ops = tl('app.nTradesRaw', { n: over.ops, raw: String(over.ops) })
 		const ohlc = tl('app.ohlc', { o: fmtP(over.o), h: fmtP(over.h), l: fmtP(over.l), c: fmtP(over.c) })
 		const prices = over.o == null ? tl('app.noBookShot') : over.book ? tl('app.bookBestAskOhlc', { ohlc }) : ohlc
-		note.textContent = `${when} · ${prices}${over.ops || over.usd ? ` · ${ops} · ${fmtU(over.usd)} USD` : ''}`
+		note.textContent = `${when} · ${prices}${over.ops || over.usd ? ` · ${ops} · ${fmtU(over.usd)} QUSD` : ''}`
 		return
 	}
 	note.textContent = ''
@@ -1455,7 +1455,7 @@ function volTags(ms) {
 				{ v: bar.buy + bar.sell, s: opsSeries, text: tl('app.nSells', { n: bar.sell }), cls: 'ask' },
 			]
 		: [{ v: bar.ops, s: opsSeries, text: tl('app.nOpsShort', { n: bar.ops }), cls: 'ops' }]
-	if (volLine() && bar.usd != null) tags.push({ v: bar.usd, s: volSeries, text: `${fmtU(bar.usd)} USD`, cls: 'usd' })
+	if (volLine() && bar.usd != null) tags.push({ v: bar.usd, s: volSeries, text: `${fmtU(bar.usd)} QUSD`, cls: 'usd' })
 	const el = $('history')
 	const axis = historyChart.priceScale('right').width()
 	const pane = el.clientHeight - historyChart.timeScale().height()
@@ -1670,7 +1670,7 @@ function rankMedal(user) {
 function rankValue(c, u) {
 	switch (c) {
 		case 'liquidity':
-			return [`${fmtU(u.usdAsk + u.usdBid)} USD`, `${tl('app.nOffers', { n: u.offers })} · ${tl('app.nMarkets', { n: u.markets.length })}`]
+			return [`${fmtU(u.usdAsk + u.usdBid)} QUSD`, `${tl('app.nOffers', { n: u.offers })} · ${tl('app.nMarkets', { n: u.markets.length })}`]
 		case 'experience':
 			return [tl('app.nTrades', { n: u.ops }), u.rating ? `⭐ ${u.rating.toFixed(2)}` : tl('app.noRatings')]
 		case 'reputation':
@@ -1678,7 +1678,7 @@ function rankValue(c, u) {
 		case 'best':
 			return [tl('app.nSides', { n: u.best }), u.markets.map(nameOfTick).join(', ')]
 		case 'maker':
-			return [`${fmtU(u.usdBid)} / ${fmtU(u.usdAsk)} USD`, tl('app.bidAsk')]
+			return [`${fmtU(u.usdBid)} / ${fmtU(u.usdAsk)} QUSD`, tl('app.bidAsk')]
 		case 'active':
 			return [tl('app.nOffers24h', { n: u.recent }), u.lastUpdate ? tl('app.lastAgo', { ago: ago(nowMs() - u.lastUpdate) }) : '']
 	}

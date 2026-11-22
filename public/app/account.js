@@ -34,7 +34,7 @@ function acctSummary() {
 	const fee = feeOf(100) ? tl('acct.feeBuy', { pct }) : tl('acct.noFee')
 	$('acctBody').innerHTML = `<div class="stack">
 		<div class="peer-stats">
-			${stat(tl('acct.balance'), `${fmtM(a.balance ?? 0)}`, 'USD')}
+			${stat(tl('acct.balance'), `${fmtM(a.balance ?? 0)}`, 'QUSD')}
 			${stat(tl('acct.verification'), a.kyc ? '✓ KYC' : tl('acct.noKyc'), a.kyc ? tl('acct.kycOk') : tl('acct.kycNeeded'))}
 			${stat(tl('acct.p2pFee'), a.gold ? 'GOLD' : pct, fee)}
 		</div>
@@ -78,9 +78,9 @@ async function acctPro() {
 					: ''
 			// Sin devoluciones (salvo error en el pago, que decidimos nosotros): si le hicimos una, cómo va
 			const state = r
-				? `<span class="chip ${r.status === 'rejected' ? 'cancelled' : r.status === 'transferred' ? 'completed' : 'paid'}">${ACCT_REFUND[r.status]}${r.usd != null && r.status !== 'rejected' ? ` · ${fmtM(r.usd)} USD` : ''}</span>${r.note ? `<small class="muted">${esc(r.note)}</small>` : ''}${sent}`
+				? `<span class="chip ${r.status === 'rejected' ? 'cancelled' : r.status === 'transferred' ? 'completed' : 'paid'}">${ACCT_REFUND[r.status]}${r.usd != null && r.status !== 'rejected' ? ` · ${fmtM(r.usd)} QUSD` : ''}</span>${r.note ? `<small class="muted">${esc(r.note)}</small>` : ''}${sent}`
 				: ''
-			return `<li><div><b>${tl('acct.purchaseDays', { n: p.days })}</b> · ${fmtM(p.amount)} USD<small class="muted"> · ${acctDay(p.at)}</small></div><div class="acct-refund">${state}</div></li>`
+			return `<li><div><b>${tl('acct.purchaseDays', { n: p.days })}</b> · ${fmtM(p.amount)} QUSD<small class="muted"> · ${acctDay(p.at)}</small></div><div class="acct-refund">${state}</div></li>`
 		})
 		.join('')
 	const moves = d.moves
@@ -277,8 +277,8 @@ async function acctStats() {
 			<p class="sec-box-t">${tl('acct.yourTrades')}</p>
 			<div class="peer-stats">
 				${stat(tl('acct.completed'), String(s.completed), tl('acct.ofFinished', { rate }))}
-				${stat(tl('acct.bought'), `${fmtM(s.usdBought)}`, 'USD')}
-				${stat(tl('acct.sold'), `${fmtM(s.usdSold)}`, 'USD')}
+				${stat(tl('acct.bought'), `${fmtM(s.usdBought)}`, 'QUSD')}
+				${stat(tl('acct.sold'), `${fmtM(s.usdSold)}`, 'QUSD')}
 			</div>
 			<p class="small muted">${tl('acct.split', { owner: String(s.asOwner), taker: String(s.asTaker), cancelled: String(s.cancelled) })}</p>
 		</section>

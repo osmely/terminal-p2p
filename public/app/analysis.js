@@ -141,7 +141,7 @@
 		const s = Math.abs(x * 100).toFixed(digits)
 		return `${Number(s) === 0 ? '' : x > 0 ? '+' : '−'}${s}%`
 	}
-	const usdK = (n) => `${fmtU(Math.round(n))} USD`
+	const usdK = (n) => `${fmtU(Math.round(n))} QUSD`
 	const tone = (x) => (x > 0 ? 'up' : x < 0 ? 'down' : '')
 	const unitOf = (tick) => state.overview.find((c) => c.tick === tick)?.unit ?? ''
 	const nameOf = (tick) => TPI18N.coin(tick, state.overview.find((c) => c.tick === tick)?.name ?? tick)

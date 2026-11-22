@@ -83,7 +83,7 @@ export async function buildDailyPost(env: CommunityEnv, now: number) {
 	if (cup.count && (cup.window_h ?? 24) === 24) lines.push(`🔁 ${fmt(cup.count)} operaciones en 24 h`)
 
 	const others = OTHER.map(([tick, label, f]) => (by.get(tick)?.median ? `${label}: ${f(by.get(tick)!.median!)}` : '')).filter(Boolean)
-	if (others.length) lines.push('', 'Por cada USD de saldo:', ...others)
+	if (others.length) lines.push('', 'Por cada QUSD:', ...others)
 
 	if (inf?.usd) {
 		lines.push('', `Mercado informal (elTOQUE): USD ${fmt(inf.usd)}${inf.usdt ? ` · USDT ${fmt(inf.usdt)}` : ''}${inf.mlc ? ` · MLC ${fmt(inf.mlc)}` : ''} CUP`)

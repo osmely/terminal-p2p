@@ -29,14 +29,14 @@ const ev = (event: string, d: Partial<FeedEvent['data']> = {}, s = 0): FeedEvent
 
 test('push: lo que se le avisa al dueño de la oferta', () => {
 	const t = (e: FeedEvent, trade: unknown = null) => ownerPush(e, trade as never, T)?.msg
-	assert.deepEqual(t(ev('p2p.applied')), { title: 'Tomaron tu venta de 20.00 USD', body: 'CUP Transferencia a 1,110.00 CUP. Espera el pago y libera solo cuando veas el dinero en tu cuenta.', tag: 'tp:o1:taken', url: '/#ops', urgent: false, offer: 'o1', kind: 'taken' })
+	assert.deepEqual(t(ev('p2p.applied')), { title: 'Tomaron tu venta de 20.00 QUSD', body: 'CUP Transferencia a 1,110.00 CUP. Espera el pago y libera solo cuando veas el dinero en tu cuenta.', tag: 'tp:o1:taken', url: '/#ops', urgent: false, offer: 'o1', kind: 'taken' })
 	assert.equal(t(ev('p2p.applied', { type: 'buy' }))?.body, 'CUP Transferencia a 1,110.00 CUP. Te toca pagar dentro del plazo.')
 	assert.equal(t(ev('p2p.applied', { type: 'buy' }))?.urgent, true)
 	assert.equal(t(ev('p2p.paid'))?.title, 'Te pagaron: comprueba y libera')
 	// En tu compra quien marca pagado eres tú, y en tu venta quien libera eres tú
 	assert.equal(t(ev('p2p.paid', { type: 'buy' })), undefined)
 	assert.equal(t(ev('p2p.completed', { status: 'completed' })), undefined)
-	assert.equal(t(ev('p2p.completed', { type: 'buy', status: 'completed' }))?.title, 'Te liberaron 20.00 USD')
+	assert.equal(t(ev('p2p.completed', { type: 'buy', status: 'completed' }))?.title, 'Te liberaron 20.00 QUSD')
 	assert.equal(t(ev('p2p.reopened', { status: 'open' }))?.title, 'Tu venta quedó libre otra vez')
 	assert.match(t(ev('p2p.reopened', { status: 'open' }))!.body, /unos minutos en pausa para que revises la tasa/)
 	assert.equal(t(ev('p2p.paused', { status: 'open', pause: { reason: 'owner', until: null } })), undefined)
@@ -44,9 +44,9 @@ test('push: lo que se le avisa al dueño de la oferta', () => {
 	assert.equal(t(ev('p2p.created', { status: 'open' })), undefined)
 	// De rango: lo tomado y lo que vuelve
 	const range = ev('p2p.range_updated', { offer_kind: 'flexible', amount: '100', receive: '111000', available_amount: '70', change: 'taken' })
-	assert.equal(t(range, { ops: 1, usd: 30 })?.title, 'Te tomaron 30.00 USD de tu venta')
-	assert.match(t(range, { ops: 1, usd: 30 })!.body, /Quedan 70\.00 USD publicados/)
-	assert.equal(t(range, { ops: -1, usd: 30 })?.title, 'Volvieron 30.00 USD a tu venta')
+	assert.equal(t(range, { ops: 1, usd: 30 })?.title, 'Te tomaron 30.00 QUSD de tu venta')
+	assert.match(t(range, { ops: 1, usd: 30 })!.body, /Quedan 70\.00 QUSD publicados/)
+	assert.equal(t(range, { ops: -1, usd: 30 })?.title, 'Volvieron 30.00 QUSD a tu venta')
 	// Una parte que vuelve llega con la pausa automática: se dice a qué hora vuelve sola (hora de Cuba)
 	const back = ev('p2p.range_closed', { offer_kind: 'flexible', amount: '100', receive: '111000', available_amount: '100', change: 'paused', pause: { reason: 'taker_left', until: '2026-10-27T20:10:00.000Z' } })
 	assert.match(t(back, { ops: -1, usd: 30 })!.body, /vuelve sola al libro a las 16:10/)
@@ -61,14 +61,14 @@ test('push: lo que se le avisa al dueño de la oferta', () => {
 
 test('push: lo que se le avisa a quien tomó la oferta desde el terminal', () => {
 	// Tomó una venta: compra USD, le liberan
-	assert.equal(takerPush(ev('p2p.completed', { status: 'completed' }), T)?.msg?.title, 'Te liberaron 20.00 USD')
+	assert.equal(takerPush(ev('p2p.completed', { status: 'completed' }), T)?.msg?.title, 'Te liberaron 20.00 QUSD')
 	assert.equal(takerPush(ev('p2p.completed', { status: 'completed' }), T)?.end, true)
 	assert.equal(takerPush(ev('p2p.paid'), T), null)
 	// Tomó una compra: vende USD, le pagan; al completarse liberó él (no se avisa, pero se deja de vigilar)
 	assert.equal(takerPush(ev('p2p.paid', { type: 'buy' }), T)?.msg?.title, 'Te pagaron: comprueba y libera')
 	const done = takerPush(ev('p2p.completed', { type: 'buy', status: 'completed' }), T)!
 	assert.deepEqual([done.msg, done.end], [null, true])
-	assert.equal(takerPush(ev('p2p.reopened', { status: 'open' }), T)?.msg?.title, 'Se canceló tu compra de 20.00 USD')
+	assert.equal(takerPush(ev('p2p.reopened', { status: 'open' }), T)?.msg?.title, 'Se canceló tu compra de 20.00 QUSD')
 	assert.equal(takerPush(ev('p2p.range_updated', { offer_kind: 'flexible' }), T), null)
 })
 
@@ -177,7 +177,7 @@ test('push: el aviso llega a todos los navegadores de la cuenta; uno que ya no e
 test('push: el evento inventado de las pruebas lleva tu cuenta de dueño y pasa por el mismo aviso', () => {
 	const e = simEvent(OWNER, 'paid', 'sell', T)!
 	assert.equal(ownerPush(e, null, T)?.msg?.title, 'Te pagaron: comprueba y libera')
-	assert.equal(ownerPush(simEvent(OWNER, 'released', 'buy', T)!, null, T)?.msg?.title, 'Te liberaron 10.00 USD')
+	assert.equal(ownerPush(simEvent(OWNER, 'released', 'buy', T)!, null, T)?.msg?.title, 'Te liberaron 10.00 QUSD')
 	assert.equal(simEvent(OWNER, 'otro', 'sell', T), null)
 })
 

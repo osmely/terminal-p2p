@@ -1008,14 +1008,14 @@ test('avisos al usuario por Telegram: se conecta desde «Mi cuenta» y recibe su
 
 	// Compra: el aviso al grupo y la confirmación al usuario
 	const { checkout } = await buy(s, P1, 'month', 'ana')
-	assert.match(toUser()[0].text, /Pago confirmado[\s\S]*Recibimos tus 3.99 USD: <b>30 días de Pro<\/b> para @ana/)
+	assert.match(toUser()[0].text, /Pago confirmado[\s\S]*Recibimos tus 3.99 QUSD: <b>30 días de Pro<\/b> para @ana/)
 	// Devolución: pedida (no se le avisa: ya lo ve en «Mi cuenta»), aprobada y transferida
 	await oldRequest(s, 'ana', checkout.id, 'no la uso')
 	const admin = (fields: Record<string, string>) =>
 		proAdmin(new Request('https://app.terminalp2p.com/admin/pro', { method: 'POST', headers: { Origin: 'https://app.terminalp2p.com', Authorization: `Basic ${btoa('x:panel')}` }, body: new URLSearchParams(fields) }), s.env, s.now(), s.q.fetcher).then((r) => r.text())
 	const id = (s.db.prepare('SELECT id FROM pro_refunds').get() as { id: string }).id
 	await admin({ action: 'refund-approve', id })
-	assert.match(toUser()[1].text, /Devolución aprobada[\s\S]*3.99 USD<\/b> a la cuenta de QvaPay @ana/)
+	assert.match(toUser()[1].text, /Devolución aprobada[\s\S]*3.99 QUSD<\/b> a la cuenta de QvaPay @ana/)
 	await admin({ action: 'refund-transfer', id, ref: 'TX-9' })
 	assert.match(toUser()[2].text, /Devolución enviada[\s\S]*Referencia: <code>TX-9<\/code>/)
 
@@ -1173,22 +1173,22 @@ test('radar: avisa por Telegram solo con Pro, una vez por oferta, con el texto e
 	// Sin saber de quién es (oferta recién llegada por el feed) o con un nombre raro: sale igual, sin el nombre
 	const fresh = { ...hit, offer: '0b0e1c2d-3e4f-4a5b-8c6d-bbbbbbbbbbbb' }
 	assert.deepEqual((await s.post('/pro/radar/alert', { print: P1, ...fresh, peer: '—' })).body, { ok: true, sent: true })
-	assert.match(toUser()[0].text, /Puedes comprar <b>50 USD<\/b>[\s\S]*de alguien con oferta recién publicada\./)
+	assert.match(toUser()[0].text, /Puedes comprar <b>50 QUSD<\/b>[\s\S]*de alguien con oferta recién publicada\./)
 	await s.post('/pro/radar/alert', { print: P1, ...fresh, offer: '0b0e1c2d-3e4f-4a5b-8c6d-cccccccccccc', peer: '<b>hola</b>' })
 	assert.doesNotMatch(toUser()[1].text, /hola/)
 	s.q.telegram.length = 0
 	const r = await s.post('/pro/radar/alert', { print: P1, ...hit })
 	assert.deepEqual(r.body, { ok: true, sent: true })
-	assert.match(toUser()[0].text, /Radar: oferta para ti[\s\S]*Puedes comprar <b>50 USD<\/b> a <b>478 CUP<\/b> por USD en CUP Transferencia, de @leo\.[\s\S]*Tu límite: 480/)
+	assert.match(toUser()[0].text, /Radar: oferta para ti[\s\S]*Puedes comprar <b>50 QUSD<\/b> a <b>478 CUP<\/b> por QUSD en CUP Transferencia, de @leo\.[\s\S]*Tu límite: 480/)
 	assert.equal(toUser()[0].url, `https://app.terminalp2p.com/#p2p/${offer}`)
 	// La misma oferta desde otra pestaña: no se repite. Tomada después: ese aviso sí sale
 	assert.equal((await s.post('/pro/radar/alert', { print: P1, ...hit })).body.repeated, true)
 	await s.post('/pro/radar/alert', { print: P1, ...hit, kind: 'taken', pay: 23900, payBy: Date.parse('2026-10-25T16:30:00Z') })
-	assert.match(toUser()[1].text, /tomé una oferta por ti[\s\S]*Compraste <b>50 USD<\/b>[\s\S]*Págale <b>23,900 CUP<\/b> antes de las <b>12:30<\/b> \(hora de Cuba\)/)
+	assert.match(toUser()[1].text, /tomé una oferta por ti[\s\S]*Compraste <b>50 QUSD<\/b>[\s\S]*Págale <b>23,900 CUP<\/b> antes de las <b>12:30<\/b> \(hora de Cuba\)/)
 	assert.equal(toUser().length, 2)
 	// De una oferta por rango más grande: se dice cuánto tiene
 	await s.post('/pro/radar/alert', { print: P1, ...hit, offer: '0b0e1c2d-3e4f-4a5b-8c6d-aaaaaaaaaaaa', total: 500 })
-	assert.match(toUser()[2].text, /Puedes comprar <b>50 USD<\/b>[\s\S]*\(oferta por rango de 500 USD\)/)
+	assert.match(toUser()[2].text, /Puedes comprar <b>50 QUSD<\/b>[\s\S]*\(oferta por rango de 500 QUSD\)/)
 	// Tope por hora
 	for (let i = 0; i < 40; i++) await s.post('/pro/radar/alert', { print: P1, ...hit, offer: `0b0e1c2d-3e4f-4a5b-8c6d-${String(i).padStart(12, '0')}` })
 	// 30 por hora: estos y los dos del principio
@@ -1577,13 +1577,13 @@ test('avisos de tus ofertas por Telegram: se activan con Pro y la cuenta confirm
 		data: { uuid: 'o1', type: 'sell', coin: 'BANK_CUP', amount: '100', receive: '113500', status: 'open', updated_at: at, offer_kind: 'fixed', owner_uuid: 'u-ana', ...d },
 	}) as never
 	const text = (event: string, d?: Record<string, unknown>, trade: unknown = null) => offerNotice(ev(event, d), trade as never, now)?.text ?? null
-	assert.match(text('p2p.applied')!, /Tomaron tu venta<\/b> · CUP Transferencia\n100.00 USD a <b>1,135.00 CUP<\/b>[\s\S]*Espera el pago y libera/)
+	assert.match(text('p2p.applied')!, /Tomaron tu venta<\/b> · CUP Transferencia\n100.00 QUSD a <b>1,135.00 CUP<\/b>[\s\S]*Espera el pago y libera/)
 	assert.match(text('p2p.applied', { type: 'buy' })!, /Tomaron tu compra[\s\S]*Te toca pagar/)
 	assert.match(text('p2p.paid')!, /Te marcaron pagada tu venta[\s\S]*libera desde el terminal/)
 	// Lo que hizo el dueño no se le avisa: marcar pagada su compra o liberar su venta
 	assert.equal(text('p2p.paid', { type: 'buy' }), null)
 	assert.equal(text('p2p.completed', { status: 'completed' }), null)
-	assert.match(text('p2p.completed', { type: 'buy', status: 'completed' })!, /Te liberaron 100.00 USD/)
+	assert.match(text('p2p.completed', { type: 'buy', status: 'completed' })!, /Te liberaron 100.00 QUSD/)
 	assert.match(text('p2p.reopened')!, /Tu venta quedó libre otra vez[\s\S]*unos minutos en pausa para que revises la tasa[\s\S]*Sigue publicada/)
 	// La pausa y la vuelta al libro no se avisan (la automática ya va en el aviso de arriba; la suya la hizo él)
 	assert.equal(text('p2p.paused', { pause: { reason: 'taker_left', until: '2026-10-27T20:10:00.000Z' } }), null)
@@ -1592,9 +1592,9 @@ test('avisos de tus ofertas por Telegram: se activan con Pro y la cuenta confirm
 	assert.equal(text('p2p.cancelled'), null)
 	// Rango: lo que te tomaron y lo que queda; lo que vuelve; sin cambio de lo tomado, nada
 	const range = { offer_kind: 'flexible', amount: '300', receive: '340500', available_amount: '250', change: 'taken' }
-	assert.match(text('p2p.range_updated', range, { t: now, side: 'ask', ops: 1, usd: 50 })!, /Te tomaron 50.00 USD<\/b> de tu venta por rango[\s\S]*Quedan 250.00 USD publicados/)
+	assert.match(text('p2p.range_updated', range, { t: now, side: 'ask', ops: 1, usd: 50 })!, /Te tomaron 50.00 QUSD<\/b> de tu venta por rango[\s\S]*Quedan 250.00 QUSD publicados/)
 	assert.match(text('p2p.range_closed', { ...range, available_amount: '0' }, { t: now, side: 'ask', ops: 1, usd: 250 })!, /Era lo que quedaba/)
-	assert.match(text('p2p.range_updated', { ...range, change: 'returned' }, { t: now, side: 'ask', ops: -1, usd: 50 })!, /Volvieron 50.00 USD a tu venta por rango/)
+	assert.match(text('p2p.range_updated', { ...range, change: 'returned' }, { t: now, side: 'ask', ops: -1, usd: 50 })!, /Volvieron 50.00 QUSD a tu venta por rango/)
 	assert.equal(text('p2p.range_updated', range), null)
 	// Un evento viejo (tras un corte del feed) o sin dueño: nada
 	assert.equal(text('p2p.applied', { updated_at: new Date(now - 3600_000).toISOString() }), null)

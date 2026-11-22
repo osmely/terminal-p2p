@@ -18,15 +18,15 @@ export interface Market {
 	digits: number
 }
 
-// Lo que se pregunta con cada comando. CUP Transferencia es «el dólar»; los demás, por cada USD de saldo
+// Lo que se pregunta con cada comando. CUP Transferencia es «el dólar»; los demás, por cada QUSD
 const MARKETS: Record<string, Market> = {
 	BANK_CUP: { tick: 'BANK_CUP', title: '💵 Dólar (saldo QvaPay) a CUP por transferencia', short: '💵 Dólar en CUP', unit: 'CUP', digits: 0 },
-	ETECSA: { tick: 'ETECSA', title: '📱 Saldo ETECSA por cada USD de saldo', short: '📱 Saldo ETECSA', unit: 'CUP', digits: 0 },
-	CLASICA: { tick: 'CLASICA', title: '💳 Tarjeta Clásica por cada USD de saldo', short: '💳 Clásica', unit: 'USD', digits: 2 },
-	BANK_MLC: { tick: 'BANK_MLC', title: '🏦 MLC por cada USD de saldo', short: '🏦 MLC', unit: 'MLC', digits: 2 },
-	ZELLE: { tick: 'ZELLE', title: '🇺🇸 Zelle por cada USD de saldo', short: '🇺🇸 Zelle', unit: 'USD', digits: 2 },
-	BANDECPREPAGO: { tick: 'BANDECPREPAGO', title: '💳 Bandec Prepago (USD Tropical) por cada USD de saldo', short: '💳 Bandec Prepago', unit: 'USD', digits: 2 },
-	TROPIPAY: { tick: 'TROPIPAY', title: '💶 TropiPay por cada USD de saldo', short: '💶 TropiPay', unit: 'EUR', digits: 2 },
+	ETECSA: { tick: 'ETECSA', title: '📱 Saldo ETECSA por cada QUSD', short: '📱 Saldo ETECSA', unit: 'CUP', digits: 0 },
+	CLASICA: { tick: 'CLASICA', title: '💳 Tarjeta Clásica por cada QUSD', short: '💳 Clásica', unit: 'USD', digits: 2 },
+	BANK_MLC: { tick: 'BANK_MLC', title: '🏦 MLC por cada QUSD', short: '🏦 MLC', unit: 'MLC', digits: 2 },
+	ZELLE: { tick: 'ZELLE', title: '🇺🇸 Zelle por cada QUSD', short: '🇺🇸 Zelle', unit: 'USD', digits: 2 },
+	BANDECPREPAGO: { tick: 'BANDECPREPAGO', title: '💳 Bandec Prepago (USD Tropical) por cada QUSD', short: '💳 Bandec Prepago', unit: 'USD', digits: 2 },
+	TROPIPAY: { tick: 'TROPIPAY', title: '💶 TropiPay por cada QUSD', short: '💶 TropiPay', unit: 'EUR', digits: 2 },
 }
 
 // Comando → mercado. Varios nombres para lo mismo: cada uno lo pide como le sale
@@ -49,10 +49,10 @@ export const COMMANDS: Record<string, string> = {
 export const BOT_MENU = [
 	{ command: 'dolar', description: 'El dólar de QvaPay en CUP, ahora' },
 	{ command: 'tasas', description: 'Todos los mercados de un vistazo' },
-	{ command: 'mlc', description: 'MLC por cada USD de saldo' },
-	{ command: 'zelle', description: 'Zelle por cada USD de saldo' },
-	{ command: 'clasica', description: 'Tarjeta Clásica por cada USD de saldo' },
-	{ command: 'etecsa', description: 'Saldo ETECSA por cada USD' },
+	{ command: 'mlc', description: 'MLC por cada QUSD' },
+	{ command: 'zelle', description: 'Zelle por cada QUSD' },
+	{ command: 'clasica', description: 'Tarjeta Clásica por cada QUSD' },
+	{ command: 'etecsa', description: 'Saldo ETECSA por cada QUSD' },
 	{ command: 'tropical', description: 'Bandec Prepago (USD Tropical)' },
 	{ command: 'ayuda', description: 'Qué puedo contestar' },
 ]
@@ -131,7 +131,7 @@ export async function allText(db: D1, now: number) {
 		if (r && now - r.t <= FRESH_MS) out.push(`${m.short}: <b>${fmt(r.median, m.digits)} ${m.unit}</b>`)
 	}
 	if (out.length === 2) out.push('Ahora mismo no hay tasas recientes.')
-	out.push('', '<i>Por cada USD de saldo QvaPay, a partir de las operaciones cerradas en el P2P</i>')
+	out.push('', '<i>Por cada QUSD (saldo QvaPay), a partir de las operaciones cerradas en el P2P</i>')
 	return out.join('\n')
 }
 
@@ -139,7 +139,7 @@ export const HELP = `🤖 <b>El bot de Terminal P2P</b>
 
 Te digo a cómo se está pagando el saldo de QvaPay ahora mismo, a partir de las operaciones que de verdad se cerraron en su P2P:
 
-/dolar · el USD en CUP por transferencia
+/dolar · el QUSD en CUP por transferencia
 /tasas · todos los mercados de un vistazo
 /mlc · /zelle · /clasica · /etecsa · /tropical
 

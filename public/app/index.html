@@ -82,7 +82,7 @@
 		<div class="ticker-pair">
 			<!-- Sin la columna de mercados (móvil y pantallas medianas), el par abre la lista en una hoja desde abajo -->
 			<h1><button class="pair-btn" id="pairBtn" aria-haspopup="dialog" aria-controls="marketList"><span class="pair-ic" id="pairIcon"></span><span id="pairName">QUSD / CUP Transferencia</span><svg class="pair-caret" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg></button></h1>
-			<p id="pairSub" data-i18n="html.pairSub">Precio en CUP por cada USD de saldo QvaPay</p>
+			<p id="pairSub" data-i18n="html.pairSub">Precio en CUP por cada QUSD (saldo QvaPay)</p>
 		</div>
 		<div class="ticker-stats" id="stats"></div>
 		<div class="intent off" id="intent" role="img" aria-label="Intención del mercado" data-i18n-aria-label="html.intent"></div>
@@ -149,7 +149,7 @@
 				<div id="history" class="chart" hidden></div>
 				<div id="candles" class="chart" hidden></div>
 				<div class="ops-legend" id="opsLegend" hidden></div>
-				<!-- Etiquetas en el eje derecho, como las de compra y venta: operaciones (o compras y ventas) y USD operados -->
+				<!-- Etiquetas en el eje derecho, como las de compra y venta: operaciones (o compras y ventas) y QUSD operados -->
 				<div class="vol-tags" id="volTags" aria-hidden="true"></div>
 			</div>
 		</section>
@@ -194,9 +194,9 @@
 						<label class="field"><span data-i18n="html.fUsd">Monto mínimo</span>
 							<select class="input" id="fUsd">
 								<option value="0" data-i18n="html.any">Cualquiera</option>
-								<option value="10">10+ USD</option>
-								<option value="50">50+ USD</option>
-								<option value="100">100+ USD</option>
+								<option value="10">10+ QUSD</option>
+								<option value="50">50+ QUSD</option>
+								<option value="100">100+ QUSD</option>
 							</select>
 						</label>
 						<button class="link small" id="filterReset" data-i18n="html.filterReset">Restablecer filtros</button>
@@ -205,13 +205,13 @@
 				</div>
 			</div>
 			<button type="button" class="anon-hint" id="anonHint" hidden></button>
-			<div class="book-cols"><span data-i18n="html.colPrice">Precio</span><span>USD</span><span data-i18n="html.colTotal">Acumulado</span><span id="bookWho" data-i18n="html.colWho">Contraparte</span></div>
+			<div class="book-cols"><span data-i18n="html.colPrice">Precio</span><span>QUSD</span><span data-i18n="html.colTotal">Acumulado</span><span id="bookWho" data-i18n="html.colWho">Contraparte</span></div>
 			<div class="book-side asks" id="asks"></div>
 			<div class="spread" id="spread">—</div>
 			<div class="book-side bids" id="bids"></div>
 			<div class="book-foot">
-				<span class="legend"><i class="sw ask"></i><span data-i18n="html.legendAsk">Venden USD</span></span>
-				<span class="legend"><i class="sw bid"></i><span data-i18n="html.legendBid">Compran USD</span></span>
+				<span class="legend"><i class="sw ask"></i><span data-i18n="html.legendAsk">Venden QUSD</span></span>
+				<span class="legend"><i class="sw bid"></i><span data-i18n="html.legendBid">Compran QUSD</span></span>
 				<span class="book-count" id="bookCount"></span>
 			</div>
 		</section>
@@ -229,16 +229,16 @@
 			<div class="pane" id="rankingPane" hidden>
 				<div class="rank-controls">
 					<div class="rank-crits" id="rankCrits" role="tablist" aria-label="Tipo de ranking" data-i18n-aria-label="html.rankType">
-						<button class="rank-crit" data-crit="liquidity" title="USD que ofrece ahora, sumando todas sus ofertas" data-i18n-title="html.critLiquidityTitle" data-i18n="html.critLiquidity">Liquidez</button>
+						<button class="rank-crit" data-crit="liquidity" title="QUSD que ofrece ahora, sumando todas sus ofertas" data-i18n-title="html.critLiquidityTitle" data-i18n="html.critLiquidity">Liquidez</button>
 						<button class="rank-crit" data-crit="experience" title="Operaciones completadas en QvaPay" data-i18n-title="html.critExperienceTitle" data-i18n="html.critExperience">Experiencia</button>
 						<button class="rank-crit" data-crit="reputation" title="Valoración ajustada por número de operaciones: un 5.0 con pocas operaciones pesa menos" data-i18n-title="html.critReputationTitle" data-i18n="html.critReputation">Reputación</button>
 						<button class="rank-crit" data-crit="best" title="En cuántos lados de mercado tiene el mejor precio ahora" data-i18n-title="html.critBestTitle" data-i18n="html.critBest">Mejor precio</button>
-						<button class="rank-crit" data-crit="maker" title="Compra y vende a la vez; ordena por el lado con menos USD" data-i18n-title="html.critMakerTitle" data-i18n="html.critMaker">Ambos lados</button>
+						<button class="rank-crit" data-crit="maker" title="Compra y vende a la vez; ordena por el lado con menos QUSD" data-i18n-title="html.critMakerTitle" data-i18n="html.critMaker">Ambos lados</button>
 						<button class="rank-crit" data-crit="active" title="Ofertas publicadas o actualizadas en las últimas 24 h" data-i18n-title="html.critActiveTitle" data-i18n="html.critActive">Más activos</button>
 					</div>
 					<div class="rank-scope">
 						<select id="rankScope" aria-label="Mercados" data-i18n-aria-label="html.markets"><option value="all" data-i18n="html.scopeAll">Todos los mercados</option><option value="coin" data-i18n="html.scopeCoin">Este mercado</option></select>
-						<select id="rankSide" aria-label="Lado" data-i18n-aria-label="html.side"><option value="" data-i18n="html.sideBoth">Compran y venden</option><option value="ask" data-i18n="html.sideAsk">Solo venden USD</option><option value="bid" data-i18n="html.sideBid">Solo compran USD</option></select>
+						<select id="rankSide" aria-label="Lado" data-i18n-aria-label="html.side"><option value="" data-i18n="html.sideBoth">Compran y venden</option><option value="ask" data-i18n="html.sideAsk">Solo venden QUSD</option><option value="bid" data-i18n="html.sideBid">Solo compran QUSD</option></select>
 					</div>
 				</div>
 				<ol class="rank-list" id="rankList"></ol>

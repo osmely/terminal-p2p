@@ -18,7 +18,7 @@ const SIM_URL = /\.terminalp2p\.com$/.test(location.hostname)
 let proPlans = []
 // Los días gratis: los dice el servidor con el estado de Pro
 let proTrialDays = 7
-const usdText = (n) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
+const usdText = (n) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} QUSD`
 // Lo que suma el modo Pro, en corto: el detalle está en la entrada del blog (PRO_INFO_URL)
 const PRO_FEATURES = [
 	['⚡', tl('pro.f.smartOrder'), tl('pro.f.smartOrderSub')],

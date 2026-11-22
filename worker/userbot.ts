@@ -82,13 +82,13 @@ export async function tellUser(env: BotEnv, license: string, text: string, reply
 const openApp = (env: AlertEnv, text = 'Abrir el terminal') => button(text, appUrl(env))
 
 export const paidText = (username: string, days: number, amount: number, until: number) =>
-	`✅ <b>Pago confirmado</b>\n\nRecibimos tus ${amount.toLocaleString('en-US')} USD: <b>${daysText(days)} de Pro</b> para @${tgEsc(username)}.\nTienes Pro hasta el <b>${day(until)}</b>.\n\nGracias por confiar en Terminal P2P 🙌`
+	`✅ <b>Pago confirmado</b>\n\nRecibimos tus ${amount.toLocaleString('en-US')} QUSD: <b>${daysText(days)} de Pro</b> para @${tgEsc(username)}.\nTienes Pro hasta el <b>${day(until)}</b>.\n\nGracias por confiar en Terminal P2P 🙌`
 
 export const tellPaid = (env: BotEnv, license: string, username: string, days: number, amount: number, until: number, fetcher: typeof fetch = fetch) =>
 	tellUser(env, license, paidText(username, days, amount, until), openApp(env), fetcher)
 
 export const tellRefund = (env: BotEnv, r: { license: string; amount: number; payee: string; status: string; decision_note?: string | null; transfer_ref?: string | null }, fetcher: typeof fetch = fetch) => {
-	const usd = `${r.amount.toLocaleString('en-US')} USD`
+	const usd = `${r.amount.toLocaleString('en-US')} QUSD`
 	const text =
 		r.status === 'approved'
 			? `↩️ <b>Devolución aprobada</b>\n\nVamos a transferirte <b>${usd}</b> a la cuenta de QvaPay @${tgEsc(r.payee)}. Los días de esa compra que no usaste ya se quitaron de tu cuenta.\n\nTe escribimos de nuevo en cuanto esté hecha.`
@@ -243,14 +243,14 @@ const clock = (ms: number) => inCuba(ms).toLocaleTimeString('es', { timeZone: 'U
 export function radarText(h: RadarHit) {
 	const m = RADAR_MARKETS[h.coin]
 	const who = h.peer ? `@${tgEsc(h.peer)}` : 'alguien con oferta recién publicada'
-	const at = `<b>${money(h.price)} ${m.unit}</b> por USD`
+	const at = `<b>${money(h.price)} ${m.unit}</b> por QUSD`
 	if (h.kind === 'found')
-		return `📡 <b>Radar: oferta para ti</b>\n\nPuedes ${h.side === 'buy' ? 'comprar' : 'vender'} <b>${money(h.usd)} USD</b> a ${at} en ${m.name}, ${h.side === 'buy' ? 'de' : 'a'} ${who}${h.total ? ` (oferta por rango de ${money(h.total)} USD)` : ''}.\nTu límite: ${money(h.limit)}.\n\nÁbrela en el terminal para tomarla.`
+		return `📡 <b>Radar: oferta para ti</b>\n\nPuedes ${h.side === 'buy' ? 'comprar' : 'vender'} <b>${money(h.usd)} QUSD</b> a ${at} en ${m.name}, ${h.side === 'buy' ? 'de' : 'a'} ${who}${h.total ? ` (oferta por rango de ${money(h.total)} QUSD)` : ''}.\nTu límite: ${money(h.limit)}.\n\nÁbrela en el terminal para tomarla.`
 	const next =
 		h.side === 'buy'
 			? `Págale <b>${money(h.pay ?? h.usd * h.price)} ${m.unit}</b>${h.payBy ? ` antes de las <b>${clock(h.payBy)}</b> (hora de Cuba)` : ''} y marca el pago en «Mis operaciones».`
-			: 'Le mandamos tus datos de pago por el chat. Libera los USD solo cuando veas el pago.'
-	return `⚡ <b>Radar: tomé una oferta por ti</b>\n\n${h.side === 'buy' ? 'Compraste' : 'Vendiste'} <b>${money(h.usd)} USD</b> a ${at} ${h.side === 'buy' ? 'a' : 'con'} ${who} en ${m.name}.\n\n${next}`
+			: 'Le mandamos tus datos de pago por el chat. Libera los QUSD solo cuando veas el pago.'
+	return `⚡ <b>Radar: tomé una oferta por ti</b>\n\n${h.side === 'buy' ? 'Compraste' : 'Vendiste'} <b>${money(h.usd)} QUSD</b> a ${at} ${h.side === 'buy' ? 'a' : 'con'} ${who} en ${m.name}.\n\n${next}`
 }
 
 export const radarButton = (env: AlertEnv, h: RadarHit) => (h.kind === 'found' ? button('Abrir la oferta', `${appUrl(env)}/#p2p/${h.offer}`) : openApp(env, 'Ver mis operaciones'))
