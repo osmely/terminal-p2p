@@ -1357,32 +1357,21 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 /* Completadas: el historial entero, el resumen de cada mes y el CSV */
 .hist-status { display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 14px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .hist-status.bad { color: var(--ask); }
-.hist-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px 0; }
-.hist-bar .sec-box-t { margin: 0; }
-.hist-legend { margin: 4px 14px 8px; }
-.hist-months { list-style: none; margin: 0; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 6px; }
-.hm { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); }
-.hm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px 12px; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .hm-title { font-weight: 600; font-size: 13.5px; }
 .hm-title::first-letter { text-transform: uppercase; }
-.hm-title small { font-weight: 400; }
-.hm-sum { font-size: 13px; white-space: nowrap; }
-.hm-sum .bid { color: var(--bid); }
-.hm-sum .ask { color: var(--ask); margin-left: 6px; }
-.hm-body { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 12px; }
-.hm-coin-t { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
-.hm-side { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; }
-.hm-side > span { min-width: 72px; color: var(--muted); }
-.hist-ops-t { margin: 6px 14px 6px; }
 .hist-more { display: block; width: 100%; padding: 11px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--accent); font: 600 13px var(--sans); cursor: pointer; }
-/* Descargar tus operaciones: todas o las de un mes */
-.dl-months { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; max-height: 52dvh; overflow-y: auto; }
-.dl-month { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-2); }
-.dl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.dl-head small { flex-basis: 100%; }
-.dl-nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 10px; border-radius: 8px; background: var(--surface); }
-.dl-nums div { display: flex; flex-direction: column; gap: 2px; }
-.dl-nums b { font-size: 14px; }
-.dl-nums .bid { color: var(--bid); }
-.dl-nums .ask { color: var(--ask); }
-.dl-btn { align-self: flex-end; }
+/* Estadísticas: tus meses en una tabla con su propio scroll */
+#acctMonths .hist-status { padding: 6px 0; border: 0; }
+.hm-scroll { max-height: 260px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.hm-table { margin: 0; }
+.hm-table thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.hm-table th, .hm-table td { padding: 4px 3px; vertical-align: middle; white-space: nowrap; font-size: 12px; }
+.hm-table th:first-child, .hm-table td:first-child { padding-left: 8px; }
+.hm-table th:last-child, .hm-table td:last-child { padding-right: 4px; }
+.hm-table td.hm-title { font-weight: 500; }
+.hm-table .bid { color: var(--bid); }
+.hm-table .ask { color: var(--ask); }
+.hm-table tr.now .hm-title { color: var(--accent); }
+.hm-table .dl-btn { width: 24px; height: 24px; border: 0; background: none; }
+.hm-table { width: 100%; }
+.hist-scroll { max-height: max(320px, calc(100dvh - 330px)); overflow-y: auto; overscroll-behavior: contain; }

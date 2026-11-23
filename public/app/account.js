@@ -260,10 +260,6 @@ async function acctStats() {
 	}
 	const stat = (label, value, sub = '') => `<div class="peer-stat"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
 	const rate = s.completed + s.cancelled ? Math.round((s.completed / (s.completed + s.cancelled)) * 100) : 0
-	const months = s.months
-		.slice(0, 6)
-		.map((m) => `<tr><td>${acctMonth(m.month)}</td><td class="r num">${m.ops}</td><td class="r num bid">${fmtM(m.usdBought)}</td><td class="r num ask">${fmtM(m.usdSold)}</td></tr>`)
-		.join('')
 	const markets = s.markets
 		.map(
 			(m) =>
@@ -282,7 +278,7 @@ async function acctStats() {
 			</div>
 			<p class="small muted">${tl('acct.split', { owner: String(s.asOwner), taker: String(s.asTaker), cancelled: String(s.cancelled) })}</p>
 		</section>
-		<section class="sec-box"><p class="sec-box-t">${tl('acct.byMonth')}</p><table class="acct-table"><tr><th>${tl('acct.month')}</th><th class="r">Ops</th><th class="r">${tl('acct.buys')}</th><th class="r">${tl('acct.sells')}</th></tr>${months}</table></section>
+		<section class="sec-box" id="acctMonths">${histMonthsHtml()}</section>
 		<section class="sec-box"><p class="sec-box-t">${tl('acct.avgByMarket')}</p><table class="acct-table"><tr><th>${tl('acct.market')}</th><th class="r">Ops</th><th class="r">${tl('acct.boughtAt')}</th><th class="r">${tl('acct.soldAt')}</th></tr>${markets}</table></section>
 		${peers ? `<section class="sec-box"><p class="sec-box-t">${tl('acct.topPeers')}</p><div class="chips-row">${peers}</div></section>` : ''}
 		<p class="hint">${tl(r.partial ? 'acct.basisPartial' : 'acct.basisAll')}${s.since ? tl('acct.since', { date: acctDay(Date.parse(s.since)) }) : ''}${tl('acct.basisEnd')}</p></div>`

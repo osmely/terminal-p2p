@@ -455,9 +455,7 @@ function renderTrades() {
 					.join('')}</tbody></table>`
 			: `<div class="empty">${tl('broker.noOffers')}</div>`
 	} else if (bk.tab === 'done') {
-		// Otra cuenta en este navegador: su propio historial
-		if (hist.user !== bk.acct.username) Object.assign(hist, { user: bk.acct.username, rows: null, page: 0, pages: 0, error: null, show: HIST_SHOW, open: new Set() })
-		if (hist.rows === null && !hist.loading) queueMicrotask(loadHistory)
+		histFor()
 		html = historyHtml(done)
 	} else {
 		html = done.length
@@ -471,7 +469,9 @@ function renderTrades() {
 					.join('')}</tbody></table>`
 			: `<div class="empty">${tl('broker.noDone')}</div>`
 	}
+	const keep = $('histScroll')?.scrollTop
 	$('myTrades').innerHTML = html
+	if (keep && $('histScroll')) $('histScroll').scrollTop = keep
 	tickClocks()
 }
 
@@ -513,6 +513,7 @@ async function loadHistory() {
 			const complete = cache.complete || !r.more
 			store.setMine(HIST_KEY, { v: 1, rows, finals: [...finals], complete, next: r.more ? page + 1 : 1 })
 			hist.rows = rows
+			paintHistMonths()
 			if (!r.more || (cache.complete && known)) break
 			page++
 			await new Promise((ok) => setTimeout(ok, HIST_PAUSE_MS))
@@ -523,6 +524,7 @@ async function loadHistory() {
 	} finally {
 		hist.loading = false
 		renderTrades()
+		paintHistMonths()
 	}
 }
 
@@ -562,36 +564,32 @@ function historyMonths(rows) {
 	return months
 }
 
-function historyHtml(recent) {
-	const rows = historyRows(recent)
-	const status = hist.loading
+const paintHistMonths = () => {
+	const box = $('acctMonths')
+	if (box) box.innerHTML = histMonthsHtml()
+}
+const histStatus = () =>
+	hist.loading
 		? `<p class="hist-status">${hist.pages ? tl('broker.histReading', { page: String(hist.page), pages: String(hist.pages) }) : tl('broker.histStart')}</p>`
 		: hist.error
 			? `<p class="hist-status bad">${esc(hist.error)} · <button class="link" data-hist-retry>${tl('broker.histRetry')}</button></p>`
 			: ''
+
+// Otra cuenta en este navegador: su propio historial (y, si aún no se leyó, se lee)
+function histFor() {
+	if (hist.user !== bk.acct.username) Object.assign(hist, { user: bk.acct.username, rows: null, page: 0, pages: 0, error: null, show: HIST_SHOW, open: new Set() })
+	if (hist.rows === null && !hist.loading) queueMicrotask(loadHistory)
+}
+
+function historyHtml(recent) {
+	const rows = historyRows(recent)
+	const status = histStatus()
 	if (!rows.length) return `${status}<div class="empty">${hist.loading ? '' : tl('broker.noDone')}</div>`
 
-	const months = historyMonths(rows)
-	const sideLine = (label, x, coin) =>
-		x.n ? `<div class="hm-side"><span>${label}</span><b class="mono">${fmtM(x.usd)} QUSD</b><small class="muted">${tl('broker.histAt', { price: fmtP(x.amt / x.usd), total: `${fmtM(x.amt)} ${esc(unitOf(coin))}` })}</small></div>` : ''
-	const monthCard = ([m, mo]) => {
-		const open = hist.open.has(m)
-		return `<li class="hm ${open ? 'open' : ''}">
-			<button type="button" class="hm-head" data-hist-month="${m}" aria-expanded="${open}">
-				<span class="hm-title">${esc(histMonthName(m))}<small class="muted"> · ${tl(mo.n === 1 ? 'broker.histOne' : 'broker.histOps', { n: String(mo.n) })}</small></span>
-				<span class="hm-sum mono"><span class="bid">+${fmtM(mo.buy)}</span> <span class="ask">−${fmtM(mo.sell)}</span></span>
-			</button>
-			${open ? `<div class="hm-body">${[...mo.coins].map(([coin, c]) => `<div class="hm-coin"><p class="hm-coin-t">${esc(nameOf(coin))}</p>${sideLine(tl('broker.histBought'), c.buy, coin)}${sideLine(tl('broker.histSold'), c.sell, coin)}</div>`).join('')}</div>` : ''}
-		</li>`
-	}
 	const list = rows.slice(0, hist.show)
 	const side = (r) => `<span class="side-${r.side}">${r.side === 'buy' ? tl('broker.sideBuy') : tl('broker.sideSell')}</span>`
 	return `${status}
-		<div class="hist-bar"><p class="sec-box-t">${tl('broker.histMonths')}</p><button class="btn sm" data-hist-dl>${tl('broker.histCsv')}</button></div>
-		<p class="hint hist-legend">${tl('broker.histLegend')}</p>
-		<ul class="hist-months">${[...months].map(monthCard).join('')}</ul>
-		<p class="sec-box-t hist-ops-t">${tl('broker.histAll', { n: String(rows.length) })}</p>
-		<table class="otable"><thead><tr><th>${tl('broker.colSide')}</th><th>${tl('broker.colMarket')}</th><th class="r">QUSD</th><th class="r">${tl('broker.colPrice')}</th><th class="r">${tl('broker.colTotal')}</th><th>${tl('broker.colWho')}</th><th>${tl('broker.colDate')}</th></tr></thead><tbody>${list
+		<div class="hist-scroll" id="histScroll"><table class="otable"><thead><tr><th>${tl('broker.colSide')}</th><th>${tl('broker.colMarket')}</th><th class="r">QUSD</th><th class="r">${tl('broker.colPrice')}</th><th class="r">${tl('broker.colTotal')}</th><th>${tl('broker.colWho')}</th><th>${tl('broker.colDate')}</th></tr></thead><tbody>${list
 			.map(
 				(r) => `<tr data-offer="${esc(r.offer)}" data-order="${esc(r.order ?? '')}">
 				<td class="c-side">${side(r)}</td><td class="c-mkt">${esc(nameOf(r.coin))}</td>
@@ -599,35 +597,38 @@ function historyHtml(recent) {
 				<td class="c-who">${r.peer ? `@${esc(r.peer)}` : '<span class="muted">—</span>'}</td><td class="muted c-date">${cubaFmt(r.at, { dateStyle: 'short', timeStyle: 'short' })}</td></tr>`,
 			)
 			.join('')}</tbody></table>
-		${rows.length > hist.show ? `<button class="hist-more" data-hist-more>${tl('broker.histMore')}</button>` : ''}`
+		${rows.length > hist.show ? `<button class="hist-more" data-hist-more>${tl('broker.histMore')}</button>` : ''}</div>`
 }
 
-// Descargar tus operaciones: todas o las de un mes, en CSV (como los estados de cuenta de QvaPay, pero del P2P)
-function showHistoryDownload() {
+// «Mi cuenta → Estadísticas»: tus operaciones mes a mes (de todo tu historial) en una tabla con su propio scroll, y en
+// cada mes el icono para bajarlo en CSV (como los estados de cuenta de QvaPay, pero del P2P)
+function histMonthsHtml() {
+	histFor()
 	const rows = historyRows(bk.trades.filter((t) => t.status === 'completed'))
 	const months = historyMonths(rows)
-	const ops = (n) => tl(n === 1 ? 'broker.histOne' : 'broker.histOps', { n: String(n) })
 	const now = histMonth(Date.now())
-	openModal(`<div class="stack dl-sheet">
-		<div><h3>${tl('broker.dlTitle')}</h3><p class="muted">${tl('broker.dlSub')}</p></div>
-		${hist.loading ? `<p class="hint">${tl('broker.dlLoading')}</p>` : ''}
-		<button class="btn primary block" data-dl="all">${tl('broker.dlAll', { ops: ops(rows.length) })}</button>
-		<ul class="dl-months">${[...months]
-			.map(
-				([m, mo]) => `<li class="dl-month">
-				<div class="dl-head"><b class="hm-title">${esc(histMonthName(m))}</b>${m === now ? `<span class="chip open">${tl('broker.dlNow')}</span>` : ''}<small class="muted">${ops(mo.n)}</small></div>
-				<div class="dl-nums"><div><small class="muted">${tl('broker.histBought')}</small><b class="mono bid">+${fmtM(mo.buy)}</b></div><div><small class="muted">${tl('broker.histSold')}</small><b class="mono ask">−${fmtM(mo.sell)}</b></div><div><small class="muted">${tl('broker.dlNet')}</small><b class="mono">${mo.buy - mo.sell >= 0 ? '+' : '−'}${fmtM(Math.abs(mo.buy - mo.sell))}</b></div></div>
-				<button class="btn sm dl-btn" data-dl="${m}">${tl('broker.dlCsv')}</button>
-			</li>`,
-			)
-			.join('')}</ul>
-		<p class="hint">${tl('broker.dlNote')}</p>
-	</div>`)
-	$('modalBody').querySelector('.dl-sheet').addEventListener('click', (e) => {
-		const b = e.target.closest('[data-dl]')
-		if (b) historyCsv(b.dataset.dl === 'all' ? null : b.dataset.dl)
-	})
+	const body = [...months]
+		.map(([m, mo]) => {
+			const net = mo.buy - mo.sell
+			const name = histMonthName(m)
+			const [y, mo2] = m.split('-').map(Number)
+			const short = new Date(Date.UTC(y, mo2 - 1, 15)).toLocaleDateString(TPI18N.locale, { month: 'short', year: '2-digit', timeZone: 'UTC' }).replace('.', '')
+			return `<tr${m === now ? ' class="now"' : ''}><td class="hm-title">${esc(short)}</td><td class="r num">${mo.n}</td><td class="r num bid">${fmtM(mo.buy)}</td><td class="r num ask">${fmtM(mo.sell)}</td><td class="r num">${net >= 0 ? '+' : '−'}${fmtM(Math.abs(net))}</td>
+				<td class="r"><button type="button" class="icon-btn small dl-btn" data-dl="${m}" title="${tl('broker.dlMonth', { month: esc(name) })}" aria-label="${tl('broker.dlMonth', { month: esc(name) })}"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></td></tr>`
+		})
+		.join('')
+	return `<p class="sec-box-t">${tl('acct.byMonth')}</p>
+		${histStatus()}
+		${rows.length ? `<div class="hm-scroll"><table class="acct-table hm-table"><thead><tr><th>${tl('acct.month')}</th><th class="r">Ops</th><th class="r">${tl('broker.hmBuy')}</th><th class="r">${tl('broker.hmSell')}</th><th class="r">${tl('broker.dlNet')}</th><th></th></tr></thead><tbody>${body}</tbody></table></div>` : hist.loading ? '' : `<p class="muted small">${tl('broker.noDone')}</p>`}`
 }
+
+// Los clics del bloque de meses (en «Mi cuenta», que se repinta: se escucha en el documento)
+document.addEventListener('click', (e) => {
+	if (!e.target.closest('#acctMonths')) return
+	const dl = e.target.closest('[data-dl]')
+	if (dl) return historyCsv(dl.dataset.dl)
+	if (e.target.closest('[data-hist-retry]')) loadHistory()
+})
 
 // El historial en CSV (para Excel o Google Sheets): números sin separador de miles, fechas en hora de Cuba
 function historyCsv(month = null) {
@@ -3082,19 +3083,24 @@ function bindBroker() {
 	for (const b of document.querySelectorAll('[data-new-offer]')) b.addEventListener('click', () => showCreateOffer())
 	for (const b of document.querySelectorAll('[data-swap]')) b.addEventListener('click', showSwap)
 	renderAlertsBtn()
+	$('myTrades').addEventListener(
+		'scroll',
+		(e) => {
+			const box = e.target
+			if (box.id !== 'histScroll' || !box.querySelector('[data-hist-more]')) return
+			if (box.scrollTop + box.clientHeight >= box.scrollHeight - 120) {
+				hist.show += HIST_SHOW
+				renderTrades()
+			}
+		},
+		true,
+	)
 	$('myTrades').addEventListener('click', async (e) => {
-		// Completadas: abrir o cerrar un mes, ver más, CSV y reintentar
-		const month = e.target.closest('[data-hist-month]')
-		if (month) {
-			const m = month.dataset.histMonth
-			hist.open.has(m) ? hist.open.delete(m) : hist.open.add(m)
-			return renderTrades()
-		}
+		// Completadas: ver más y reintentar
 		if (e.target.closest('[data-hist-more]')) {
 			hist.show += HIST_SHOW
 			return renderTrades()
 		}
-		if (e.target.closest('[data-hist-dl]')) return showHistoryDownload()
 		if (e.target.closest('[data-hist-retry]')) return loadHistory()
 		const cancel = e.target.closest('[data-cancel-btn]')
 		if (cancel) {
