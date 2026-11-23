@@ -1323,6 +1323,10 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 	/* El pie del libro sin cortar */
 	.book-foot { flex-wrap: wrap; white-space: normal; row-gap: 4px; }
 
+	/* Acciones de QvaPay: sin los precios del P2P ni «Más»; debajo del nombre, su precio y su cambio */
+	body.stk-on .ticker .ticker-stats, body.stk-on .ticker .intent, body.stk-on .ticker .pulse, body.stk-on .ticker .ticker-more { display: none; }
+	body.stk-on .ticker:not(.open) #pairSub { display: block; }
+	body.stk-on .ticker:not(.open) .ticker-pair { grid-area: 1 / 1 / 2 / 5; }
 	/* Mis operaciones son de todos los mercados: sin el par ni sus precios arriba */
 	body[data-view='orders'] .ticker { display: none; }
 	/* Pestañas fijas abajo, al alcance del dedo */
