@@ -1341,6 +1341,8 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 }
 
 /* La ficha de una oferta al tocarla sin cuenta (en el teléfono no hay tooltips) */
+/* La primera línea no pasa por debajo de la ✕ de cerrar */
+.offer-sheet .tip-lines > :first-child { padding-right: 44px; }
 .offer-sheet .tip-lines { display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.45; }
 .offer-sheet .tip-lines .tip-msg { max-width: none; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--accent); }
 
