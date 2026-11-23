@@ -258,12 +258,31 @@ export class LiveBook {
 			}
 		}
 		if (ch?.act) this.addAct(ch.coin, ch.act)
+		if (ch?.speed && ch.act) await this.addSpeed(ch.coin, ch.act, ch.speed)
 		if (ch?.trade) await this.addVolume(ch.coin, ch.trade)
 		if (ch?.trade) await this.addCandle(ch.coin, ch.trade)
 		await this.save()
 		if (unknown && this.streaming) void this.periodic().catch(() => {})
 		else if (this.want.size && !this.streaming) await this.soon(unknown ? 100 : 1500)
 		return true
+	}
+
+	// Una oferta tomada entera: cuánto duró en el libro, para saber qué tan rápido cazan las ofertas (ver take_speed).
+	// Una fila por toma y, una vez al día, se borra lo de más de 30 días
+	private speedPrunedAt = 0
+	private async addSpeed(coin: string, a: Act, sp: { ms: number; rxMs: number | null }) {
+		const owner = a.user || this.book.owners.get(a.owner)?.username || ''
+		try {
+			await this.env.DB.prepare('INSERT INTO take_speed (t, coin, side, usd, price, owner, ms, rx_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+				.bind(a.t, coin, a.side, a.usd, a.price, owner, sp.ms, sp.rxMs)
+				.run()
+			if (Date.now() - this.speedPrunedAt > 86_400_000) {
+				this.speedPrunedAt = Date.now()
+				await this.env.DB.prepare('DELETE FROM take_speed WHERE t < ?').bind(Date.now() - 30 * 86_400_000).run()
+			}
+		} catch (err) {
+			console.error(`take_speed: ${(err as Error).message}`)
+		}
 	}
 
 	// Si el dueño de la oferta activó los avisos de sus ofertas, se le escribe por Telegram (sin esperar: el libro sigue)

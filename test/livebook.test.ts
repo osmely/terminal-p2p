@@ -378,3 +378,22 @@ test('feed: pausas en una oferta por rango. range_closed paused la saca (y lo qu
 	assert.deepEqual([back.changed, back.act?.kind, back.trade], [true, 'resumed', null])
 	assert.equal(b.levels('BANK_CUP', 'ask')[0].usd, 100)
 })
+
+test('velocidad de toma: cuánto duró una fija desde que se pudo tomar, con las horas de QvaPay y las nuestras', () => {
+	const b = new Book()
+	b.apply(ev('p2p.created', {}, 0), T + 30)
+	// Un cambio de la misma oferta no reinicia el reloj
+	b.apply(ev('p2p.created', {}, 0.1), T + 120)
+	const a = b.apply(ev('p2p.applied', {}, 0.08), T + 110)
+	assert.equal(a, null) // más vieja que lo que sabemos: no cuenta
+	const t = b.apply(ev('p2p.applied', {}, 0.2), T + 230)!
+	assert.deepEqual(t.speed, { ms: 200, rxMs: 200 })
+	// Reabierta: el reloj empieza de nuevo
+	b.apply(ev('p2p.reopened', {}, 9), T + 9_050)
+	assert.deepEqual(b.apply(ev('p2p.applied', {}, 9.5), T + 9_600)!.speed, { ms: 500, rxMs: 550 })
+	// Cancelada por su dueño, o una que no vimos aparecer: sin velocidad
+	b.apply(ev('p2p.created', { uuid: 'o2' }, 20), T)
+	assert.equal(b.apply(ev('p2p.cancelled', { uuid: 'o2', status: 'cancelled' }, 21), T)!.speed, undefined)
+	b.merge('BANK_CUP', 'ask', [{ uuid: 'lista', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10500', status: 'open', updated_at: at(30), User: ana }] as P2POffer[], T + 31_000, true, new Set())
+	assert.equal(b.apply(ev('p2p.applied', { uuid: 'lista' }, 32), T + 32_000)?.speed, undefined)
+})
