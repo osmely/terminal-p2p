@@ -55,7 +55,7 @@ const urlCoin = (() => {
 
 const state = {
 	coin: urlCoin ?? store.get('coin', 'BANK_CUP'),
-	chart: store.get('chart', 'depth'),
+	chart: store.get('chart', 'history'),
 	range: store.get('range', 7),
 	frame: store.get('frame', '1h'),
 	candles: null,
@@ -422,6 +422,7 @@ function showView(name) {
 	state.view = name
 	store.set('view', name)
 	$('layout').dataset.view = name
+	document.body.dataset.view = name
 	for (const t of document.querySelectorAll('[data-view]')) {
 		t.classList.toggle('active', t.dataset.view === name)
 		t.setAttribute('aria-selected', String(t.dataset.view === name))

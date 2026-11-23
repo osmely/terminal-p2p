@@ -1323,6 +1323,8 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 	/* El pie del libro sin cortar */
 	.book-foot { flex-wrap: wrap; white-space: normal; row-gap: 4px; }
 
+	/* Mis operaciones son de todos los mercados: sin el par ni sus precios arriba */
+	body[data-view='orders'] .ticker { display: none; }
 	/* Pestañas fijas abajo, al alcance del dedo */
 	.view-tabs { position: fixed; top: auto; bottom: 0; left: 0; right: 0; z-index: 30; gap: 2px; padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-bottom: 0; border-top: 1px solid var(--line); overflow: visible; }
 	.view-tab { position: relative; flex: 1 1 0; min-width: 0; flex-direction: column; gap: 2px; padding: 6px 2px; font-size: 11px; font-weight: 600; }
