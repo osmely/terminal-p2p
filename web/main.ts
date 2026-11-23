@@ -90,6 +90,9 @@ let livePro = false
 let liveRetry = 0
 let liveSubs = ''
 let liveRadar = false
+// «Actividad» con todos los mercados: si se pidió y si ya se le dijo al servidor en esta conexión
+let liveAll = false
+let liveAllSent = false
 let liveFeed = false
 // Mercados pedidos de los que ya llegó el libro completo: esos dejan de leerse con el token
 let liveReady = new Set<string>()
@@ -99,6 +102,7 @@ function liveConnect() {
 	ws = s
 	liveSubs = ''
 	liveRadar = false
+	liveAllSent = false
 	s.onopen = () => {
 		liveRetry = 0
 		syncLive()
@@ -117,6 +121,11 @@ function liveConnect() {
 		if (m.t === 'stats' && isTick(m.coin ?? null)) {
 			market.setStats(m.coin!, m as unknown as LiveStats)
 			window.dispatchEvent(new CustomEvent('tp:live', { detail: m.coin }))
+			return
+		}
+		if (m.t === 'actall') {
+			;(window as unknown as { TPActAll?: unknown[] }).TPActAll = Array.isArray(m.items) ? m.items : []
+			window.dispatchEvent(new CustomEvent('tp:actall'))
 			return
 		}
 		if (m.t === 'act' && isTick(m.coin ?? null)) {
@@ -166,10 +175,11 @@ function syncLive() {
 	const key = subs.join()
 	// También si el radar está encendido (para el panel: cuándo lo tuvo cada cuenta)
 	const radarOn = watchers.has('radar')
-	if (key === liveSubs && radarOn === liveRadar) return
+	if (key === liveSubs && radarOn === liveRadar && liveAll === liveAllSent) return
 	liveSubs = key
 	liveRadar = radarOn
-	ws.send(JSON.stringify({ sub: subs, radar: radarOn }))
+	liveAllSent = liveAll
+	ws.send(JSON.stringify({ sub: subs, radar: radarOn, all: liveAll }))
 	liveReady = new Set([...liveReady].filter((c) => subs.includes(c)))
 	market.setLiveCoins([...liveReady])
 }
@@ -194,6 +204,11 @@ const live = {
 		market.setLiveCoins([])
 	},
 	state: () => ({ connected: ws?.readyState === WebSocket.OPEN, feed: liveFeed, pro: livePro }),
+	// «Actividad» con todos los mercados (app.js): el servidor la manda mientras esté pedida
+	all(on: boolean) {
+		liveAll = on
+		syncLive()
+	},
 }
 function wake() {
 	if (nextAt - Date.now() <= WAKE_IF_FURTHER_THAN_MS) return

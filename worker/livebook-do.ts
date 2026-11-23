@@ -23,6 +23,8 @@ const DONE_EVERY_MS = 5 * 60_000
 // Las mejores de cada lado que ve la mini app
 const BOOK_TOP = 30
 const TAKES_KEEP_MS = 30 * 60_000
+// Las líneas de «Actividad» con todos los mercados
+const ACT_ALL = 40
 // Los otros mercados (othermarkets.ts) se guardan en D1 cada tanto, y el umbral se mira cada hora
 const OTHER_SAVE_MS = 60_000
 const OTHER_ALERT_MS = 60 * 60_000
@@ -35,6 +37,8 @@ interface Sock {
 	at?: number
 	// Si tiene el radar encendido (lo dice el terminal con cada lista de mercados)
 	radar?: boolean
+	// Si en «Actividad» eligió «Todos los mercados»
+	all?: boolean
 }
 
 export class LiveBook {
@@ -372,7 +376,7 @@ export class LiveBook {
 	// El terminal dice qué mercados quiere (el que mira y los del radar): se le manda su libro y desde entonces cada cambio
 	async webSocketMessage(ws: WebSocket, msg: string | ArrayBuffer) {
 		if (typeof msg !== 'string' || msg.length > 1000) return
-		let m: { sub?: unknown; radar?: unknown }
+		let m: { sub?: unknown; radar?: unknown; all?: unknown }
 		try {
 			m = JSON.parse(msg)
 		} catch {
@@ -382,9 +386,11 @@ export class LiveBook {
 		const subs = [...new Set(m.sub.map(String).filter((c) => TICKS.has(c)))].slice(0, TICKS.size)
 		const was = ws.deserializeAttachment() as Sock | null
 		const before = new Set(was?.subs ?? [])
-		ws.serializeAttachment({ ...was, subs, pro: !!was?.pro, radar: m.radar === true } satisfies Sock)
+		ws.serializeAttachment({ ...was, subs, pro: !!was?.pro, radar: m.radar === true, all: m.all === true } satisfies Sock)
 		// La lista de mercados siempre va al día (el mejor precio de cada uno)
 		if (!before.size) ws.send(this.topMsg())
+		// La actividad de todos los mercados, al elegirla
+		if (m.all === true && !was?.all) ws.send(this.allActMsg())
 		for (const coin of subs) {
 			if (before.has(coin)) continue
 			ws.send(this.actMsg(coin))
@@ -410,6 +416,13 @@ export class LiveBook {
 		// ready: el lado está completo (si no, el terminal sigue leyéndolo con su token)
 		const ready = this.synced.has(sideKey(coin, side))
 		return JSON.stringify({ t: 'side', coin, side, ready, levels: ready ? this.book.levels(coin, side) : [], total: this.book.count(coin, side), at: Date.now(), feed: this.feedOn() })
+	}
+
+	// La actividad de todos los mercados juntos (lo último de cada uno, con su mercado)
+	private allActMsg() {
+		const items = [...this.acts].flatMap(([coin, list]) => list.slice(0, ACT_ALL).map((a) => ({ ...a, coin })))
+		items.sort((x, y) => y.t - x.t)
+		return JSON.stringify({ t: 'actall', items: this.book.named(items.slice(0, ACT_ALL)) })
 	}
 
 	private actMsg(coin: string) {
@@ -533,6 +546,17 @@ export class LiveBook {
 			try {
 				ws.send(msg)
 			} catch {}
+		const all = this.ctx.getWebSockets().filter((w) => {
+			const k = w.deserializeAttachment() as Sock | null
+			return k?.pro && k.all
+		})
+		if (all.length) {
+			const m = this.allActMsg()
+			for (const ws of all)
+				try {
+					ws.send(m)
+				} catch {}
+		}
 		this.pushStats(coin)
 	}
 
@@ -582,6 +606,8 @@ export class LiveBook {
 			if (to.length) send(this.statsMsg(coin), to)
 		}
 		if (this.topDirty && all.length) send(this.topMsg(), all)
+		const allActs = this.freeActs.size ? free.filter((ws) => (ws.deserializeAttachment() as Sock | null)?.all) : []
+		if (allActs.length) send(this.allActMsg(), allActs)
 		this.freePending.clear()
 		this.freeActs.clear()
 		this.freeStats.clear()

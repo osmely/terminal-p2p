@@ -70,6 +70,7 @@ const state = {
 	overview: [],
 	informal: null,
 	ranking: null,
+	actScope: store.get('actScope', 'coin') === 'all' ? 'all' : 'coin',
 	rank: { crit: store.get('rankCrit', 'liquidity'), scope: store.get('rankScope', 'all'), side: store.get('rankSide', '') },
 }
 
@@ -945,7 +946,31 @@ const ACT = {
 	gone: ['out', ...actText('gone')],
 }
 const ACT_OUT = new Set(['gone', 'taken', 'partial', 'cancelled', 'paused', 'autopaused'])
+// «Todos los mercados»: la manda el servidor del libro en vivo (solo con la cuenta conectada)
+function renderActivityAll() {
+	const live = window.TPApi?.live?.state?.().connected
+	const items = live ? window.TPActAll : null
+	const key = `all|${live}|${(items ?? []).map((a) => `${a.coin}:${a.t}:${a.kind}:${a.user}:${a.price}:${a.usd}`).join('|')}`
+	if ($('activity').dataset.key === key) return
+	$('activity').dataset.key = key
+	if (!live) return ($('activity').innerHTML = `<li><span></span><span class="muted">${tl('app.actAllConnect')}</span><span></span></li>`)
+	if (!items?.length) return ($('activity').innerHTML = `<li><span></span><span class="muted">${tl('app.actWaiting')}</span><span></span></li>`)
+	$('activity').innerHTML = items.map((a) => actRow(a, a.coin)).join('')
+}
+
+function actRow(a, coin) {
+	const [icon, text, tip] = ACT[a.kind] ?? ACT.gone
+	// Con milisegundos: lo que pasa en el libro va a ritmo de bots
+	const t = `${cubaFmt(a.t, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}.${String(new Date(a.t).getUTCMilliseconds()).padStart(3, '0')}`
+	const what = text.replace('{s}', tl(a.side === 'ask' ? 'app.actSell' : 'app.actBuy'))
+	const who = a.user && a.user !== '—' ? ` · ${peerLink(a.user)}` : ''
+	// Con todos los mercados, cada línea dice de cuál es
+	const mkt = coin ? ` · <b class="act-mkt">${esc(TPI18N.coin(coin, state.overview.find((c) => c.tick === coin)?.name ?? coin))}</b>` : ''
+	return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} QUSD${mkt}${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
+}
+
 function renderActivity(b) {
+	if (state.actScope === 'all') return renderActivityAll()
 	const items = b.activity.slice(0, 40)
 	// Solo se repinta si cambió algo: repintar con cada lectura del libro haría perder el clic en un nombre
 	const key = `${b.activitySource}|${items.map((a) => `${a.t}:${a.kind}:${a.user}:${a.price}:${a.usd}`).join('|')}`
@@ -956,17 +981,7 @@ function renderActivity(b) {
 			? `<li class="act-note">${tl('app.actNoteFeed')}</li>`
 			: `<li class="act-note">${tl('app.actNoteDiff')}</li>`
 	$('activity').innerHTML = items.length
-		? note +
-			items
-				.map((a) => {
-					const [icon, text, tip] = ACT[a.kind] ?? ACT.gone
-					// Con milisegundos: lo que pasa en el libro va a ritmo de bots
-					const t = `${cubaFmt(a.t, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}.${String(new Date(a.t).getUTCMilliseconds()).padStart(3, '0')}`
-					const what = text.replace('{s}', tl(a.side === 'ask' ? 'app.actSell' : 'app.actBuy'))
-					const who = a.user && a.user !== '—' ? ` · ${peerLink(a.user)}` : ''
-					return `<li title="${tip}"><time>${t}</time><span class="act"><i class="act-ic ${ACT_OUT.has(a.kind) ? 'gone' : ''} ${a.side}">${actIcon(ACT_PATH[icon])}</i><span>${what} · ${fmtU(a.usd)} QUSD${who}</span></span><span class="px ${a.side}">${fmtP(a.price)}</span></li>`
-				})
-				.join('')
+		? note + items.map((a) => actRow(a)).join('')
 		: `<li><span></span><span class="muted">${tl('app.actWaiting')}</span><span></span></li>`
 }
 
@@ -2076,6 +2091,16 @@ function bind() {
 		const li = e.target.closest('li[data-user]')
 		if (li && typeof showPeer === 'function') showPeer(li.dataset.user)
 	})
+	// Actividad: este mercado o todos (esa la manda el servidor mientras esté elegida)
+	$('actScope').value = state.actScope
+	window.TPApi?.live?.all?.(state.actScope === 'all')
+	$('actScope').addEventListener('change', (e) => {
+		state.actScope = e.target.value
+		store.set('actScope', state.actScope)
+		window.TPApi?.live?.all?.(state.actScope === 'all')
+		if (state.book) renderActivity(state.book)
+	})
+	window.addEventListener('tp:actall', () => state.actScope === 'all' && renderActivityAll())
 	$('rankScope').addEventListener('change', (e) => {
 		state.rank.scope = e.target.value
 		store.set('rankScope', state.rank.scope)

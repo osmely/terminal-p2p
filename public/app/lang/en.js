@@ -249,6 +249,7 @@
 	'app.actSell': 'sell offer',
 	'app.actBuy': 'buy offer',
 	'app.actWaiting': 'Waiting for changes in the book…',
+	'app.actAllConnect': 'Connect your QvaPay account to see activity in all markets.',
 	'app.noOffers': 'No offers',
 	'app.depthMid': 'mid {p}',
 	'app.depthNote': 'Cumulative QUSD within ±{r}% of the mid price',

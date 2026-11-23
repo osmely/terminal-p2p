@@ -227,7 +227,10 @@
 				</div>
 			</div>
 			<div class="pane" id="insight"></div>
-			<div class="pane" id="activityPane" hidden><ul id="activity" class="feed"></ul></div>
+			<div class="pane" id="activityPane" hidden>
+				<div class="rank-scope act-scope"><select id="actScope" aria-label="Mercados" data-i18n-aria-label="html.markets"><option value="coin" data-i18n="html.scopeCoin">Este mercado</option><option value="all" data-i18n="html.scopeAll">Todos los mercados</option></select></div>
+				<ul id="activity" class="feed"></ul>
+			</div>
 			<div class="pane" id="rankingPane" hidden>
 				<div class="rank-controls">
 					<div class="rank-crits" id="rankCrits" role="tablist" aria-label="Tipo de ranking" data-i18n-aria-label="html.rankType">
