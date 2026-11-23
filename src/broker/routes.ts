@@ -12,7 +12,7 @@ import { COINS, type Market } from '../terminal/market.ts'
 import { pendingCount, tradeAlerts } from './alerts.ts'
 import { inCuba } from '../../worker/rates.ts'
 import { tradeStats } from './stats.ts'
-import { orderTrades, paymentDetails, peerProfile, toTrades, type Trade } from './trades.ts'
+import { FINAL, orderTrades, paymentDetails, peerProfile, toTrades, type Trade } from './trades.ts'
 
 const STATS_MS = 10 * 60_000
 
@@ -137,6 +137,8 @@ export class Broker {
 					return await this.trades(acc)
 				case 'GET /stats':
 					return await this.stats(acc)
+				case 'GET /history':
+					return await this.history(ctx, acc)
 				case 'GET /trade':
 					return await this.trade(ctx, acc)
 				case 'POST /trade/action':
@@ -291,6 +293,30 @@ export class Broker {
 			.filter((t) => t.status === 'completed')
 			.map((t) => ({ at: t.updatedAt, coin: t.coin, side: t.side, offerType: t.offerType, role: t.role, usd: t.usd, coinAmount: t.coinAmount, price: t.price, peer: t.counterparty?.username ?? null }))
 		return json(200, { stats: tradeStats(trades), partial: more, done })
+	}
+
+	// «Completadas» con todo tu historial: una página de tus ofertas y tomas de QvaPay (el terminal las pide todas, una
+	// tras otra, y las guarda). Las partes que otros tomaron de tus ofertas por rango solo vienen en su detalle
+	private async history({ url }: Ctx, acc: Account) {
+		const page = Math.min(1000, Math.max(1, Math.floor(Number(url.searchParams.get('page')) || 1)))
+		const list = await acc.client.listOffers({ my: true, take: HISTORY_TAKE, page })
+		const { trades } = toTrades(list.data, acc.me.uuid)
+		const flex = list.data.filter((o) => o.offer_kind === 'flexible' && o.User?.uuid === acc.me.uuid)
+		const parts = await Promise.all(
+			flex.map((o) =>
+				acc.client
+					.getOffer(o.uuid)
+					.then((d) => orderTrades(d, acc.me.uuid))
+					.catch(() => null),
+			),
+		)
+		const flexIds = new Set(flex.map((o) => o.uuid))
+		const done = [...trades.filter((t) => !(t.role === 'owner' && flexIds.has(t.offerUuid))), ...parts.flatMap((p) => p ?? [])]
+			.filter((t) => t.status === 'completed')
+			.map((t) => ({ id: t.id, offer: t.offerUuid, order: t.order, at: t.updatedAt, coin: t.coin, side: t.side, usd: t.usd, coinAmount: t.coinAmount, price: t.price, peer: t.counterparty?.username ?? null }))
+		// Las ofertas que ya no cambian (y cuyo detalle se pudo leer): al actualizar, el terminal para al llegar a ellas
+		const offers = list.data.map((o) => ({ uuid: o.uuid, final: FINAL.has(o.status) && (!flexIds.has(o.uuid) || parts[flex.indexOf(o)] !== null) }))
+		return json(200, { page, total: list.total, more: page * HISTORY_TAKE < list.total, done, offers })
 	}
 
 	private async trades(acc: Account) {
@@ -1063,6 +1089,7 @@ function payDetails(v: unknown) {
 
 // Páginas de 50 que lee «Mi cuenta» para las estadísticas
 const STATS_PAGES = 4
+const HISTORY_TAKE = 50
 
 // El radar compra sin la lectura previa si vio la oferta hace como mucho FAST_MS
 export const FAST_MS = 3000

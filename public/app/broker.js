@@ -454,6 +454,11 @@ function renderTrades() {
 					)
 					.join('')}</tbody></table>`
 			: `<div class="empty">${tl('broker.noOffers')}</div>`
+	} else if (bk.tab === 'done') {
+		// Otra cuenta en este navegador: su propio historial
+		if (hist.user !== bk.acct.username) Object.assign(hist, { user: bk.acct.username, rows: null, page: 0, pages: 0, error: null, show: HIST_SHOW, open: new Set() })
+		if (hist.rows === null && !hist.loading) queueMicrotask(loadHistory)
+		html = historyHtml(done)
 	} else {
 		html = done.length
 			? `<table class="otable">${head([...common, [tl('broker.colWho')], [tl('broker.colDate')]])}<tbody>${done
@@ -468,6 +473,180 @@ function renderTrades() {
 	}
 	$('myTrades').innerHTML = html
 	tickClocks()
+}
+
+// ── Completadas: todo tu historial del P2P, el resumen de cada mes y el CSV ──
+// Se lee una vez entero (página a página, con calma para no gastar el límite de QvaPay) y se guarda en este navegador.
+// Después, al abrir la pestaña, solo se leen las páginas nuevas: se para al llegar a ofertas ya cerradas y conocidas
+const HIST_KEY = 'p2pHistory'
+const HIST_PAUSE_MS = 2500
+const HIST_SHOW = 50
+const hist = { user: null, rows: null, loading: false, page: 0, pages: 0, error: null, show: HIST_SHOW, open: new Set() }
+const histCache = () => {
+	const c = store.getMine(HIST_KEY, null)
+	return c && c.v === 1 ? c : { v: 1, rows: [], finals: [], complete: false, next: 1 }
+}
+async function loadHistory() {
+	if (!bk.acct.connected || hist.loading) return
+	const user = bk.acct.username
+	const cache = histCache()
+	hist.rows = cache.rows
+	hist.loading = true
+	hist.error = null
+	renderTrades()
+	const byId = new Map(cache.rows.map((r) => [r.id, r]))
+	const finals = new Set(cache.finals)
+	// Sin el historial entero, se sigue donde se quedó; con él, se empieza por lo más nuevo
+	let page = cache.complete ? 1 : cache.next || 1
+	try {
+		for (;;) {
+			hist.page = page
+			renderTrades()
+			const r = await api(`/history?page=${page}`)
+			// Se cambió de cuenta mientras leía: lo leído no es de la de ahora
+			if (bk.acct.username !== user) break
+			hist.pages = Math.max(1, Math.ceil(r.total / 50))
+			for (const row of r.done) byId.set(row.id, row)
+			const known = r.offers.every((o) => o.final && finals.has(o.uuid))
+			for (const o of r.offers) if (o.final) finals.add(o.uuid)
+			const rows = [...byId.values()].sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
+			const complete = cache.complete || !r.more
+			store.setMine(HIST_KEY, { v: 1, rows, finals: [...finals], complete, next: r.more ? page + 1 : 1 })
+			hist.rows = rows
+			if (!r.more || (cache.complete && known)) break
+			page++
+			await new Promise((ok) => setTimeout(ok, HIST_PAUSE_MS))
+			if (!bk.acct.connected) break
+		}
+	} catch (e) {
+		hist.error = e.message
+	} finally {
+		hist.loading = false
+		renderTrades()
+	}
+}
+
+// Mes de Cuba de una fecha: «2026-11»
+const histMonth = (at) => {
+	const d = inCuba(new Date(at).getTime())
+	return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+const histMonthName = (m) => {
+	const [y, mo] = m.split('-').map(Number)
+	return new Date(Date.UTC(y, mo - 1, 15)).toLocaleDateString(TPI18N.locale, { month: 'long', year: 'numeric', timeZone: 'UTC' })
+}
+
+function historyRows(recent) {
+	// Las completadas recientes (de la lectura de cada 5 s) entran ya, aunque el historial aún no las tenga
+	const byId = new Map((hist.rows ?? []).map((r) => [r.id, r]))
+	for (const t of recent)
+		if (!byId.has(t.id)) byId.set(t.id, { id: t.id, offer: t.offerUuid, order: t.order, at: t.updatedAt, coin: t.coin, side: t.side, usd: t.usd, coinAmount: t.coinAmount, price: t.price, peer: t.counterparty?.username ?? null })
+	return [...byId.values()].filter((r) => r.at).sort((a, b) => String(b.at).localeCompare(String(a.at)))
+}
+
+// El resumen de cada mes: por mercado, lo comprado y lo vendido (QUSD, lo pagado o cobrado y el precio medio)
+function historyMonths(rows) {
+	const months = new Map()
+	for (const r of rows) {
+		const m = histMonth(r.at)
+		const mo = months.get(m) ?? { n: 0, buy: 0, sell: 0, coins: new Map() }
+		mo.n++
+		mo[r.side] += r.usd
+		const c = mo.coins.get(r.coin) ?? { buy: { usd: 0, amt: 0, n: 0 }, sell: { usd: 0, amt: 0, n: 0 } }
+		c[r.side].usd += r.usd
+		c[r.side].amt += r.coinAmount
+		c[r.side].n++
+		mo.coins.set(r.coin, c)
+		months.set(m, mo)
+	}
+	return months
+}
+
+function historyHtml(recent) {
+	const rows = historyRows(recent)
+	const status = hist.loading
+		? `<p class="hist-status">${hist.pages ? tl('broker.histReading', { page: String(hist.page), pages: String(hist.pages) }) : tl('broker.histStart')}</p>`
+		: hist.error
+			? `<p class="hist-status bad">${esc(hist.error)} · <button class="link" data-hist-retry>${tl('broker.histRetry')}</button></p>`
+			: ''
+	if (!rows.length) return `${status}<div class="empty">${hist.loading ? '' : tl('broker.noDone')}</div>`
+
+	const months = historyMonths(rows)
+	const sideLine = (label, x, coin) =>
+		x.n ? `<div class="hm-side"><span>${label}</span><b class="mono">${fmtM(x.usd)} QUSD</b><small class="muted">${tl('broker.histAt', { price: fmtP(x.amt / x.usd), total: `${fmtM(x.amt)} ${esc(unitOf(coin))}` })}</small></div>` : ''
+	const monthCard = ([m, mo]) => {
+		const open = hist.open.has(m)
+		return `<li class="hm ${open ? 'open' : ''}">
+			<button type="button" class="hm-head" data-hist-month="${m}" aria-expanded="${open}">
+				<span class="hm-title">${esc(histMonthName(m))}<small class="muted"> · ${tl(mo.n === 1 ? 'broker.histOne' : 'broker.histOps', { n: String(mo.n) })}</small></span>
+				<span class="hm-sum mono"><span class="bid">+${fmtM(mo.buy)}</span> <span class="ask">−${fmtM(mo.sell)}</span></span>
+			</button>
+			${open ? `<div class="hm-body">${[...mo.coins].map(([coin, c]) => `<div class="hm-coin"><p class="hm-coin-t">${esc(nameOf(coin))}</p>${sideLine(tl('broker.histBought'), c.buy, coin)}${sideLine(tl('broker.histSold'), c.sell, coin)}</div>`).join('')}</div>` : ''}
+		</li>`
+	}
+	const list = rows.slice(0, hist.show)
+	const side = (r) => `<span class="side-${r.side}">${r.side === 'buy' ? tl('broker.sideBuy') : tl('broker.sideSell')}</span>`
+	return `${status}
+		<div class="hist-bar"><p class="sec-box-t">${tl('broker.histMonths')}</p><button class="btn sm" data-hist-dl>${tl('broker.histCsv')}</button></div>
+		<p class="hint hist-legend">${tl('broker.histLegend')}</p>
+		<ul class="hist-months">${[...months].map(monthCard).join('')}</ul>
+		<p class="sec-box-t hist-ops-t">${tl('broker.histAll', { n: String(rows.length) })}</p>
+		<table class="otable"><thead><tr><th>${tl('broker.colSide')}</th><th>${tl('broker.colMarket')}</th><th class="r">QUSD</th><th class="r">${tl('broker.colPrice')}</th><th class="r">${tl('broker.colTotal')}</th><th>${tl('broker.colWho')}</th><th>${tl('broker.colDate')}</th></tr></thead><tbody>${list
+			.map(
+				(r) => `<tr data-offer="${esc(r.offer)}" data-order="${esc(r.order ?? '')}">
+				<td class="c-side">${side(r)}</td><td class="c-mkt">${esc(nameOf(r.coin))}</td>
+				<td class="r num c-usd" data-l="QUSD">${fmtM(r.usd)}</td><td class="r num c-price" data-l="${tl('broker.colPrice')}">${fmtP(r.price)}</td><td class="r num c-total" data-l="${tl('broker.colTotal')}">${fmtM(r.coinAmount)} ${esc(unitOf(r.coin))}</td>
+				<td class="c-who">${r.peer ? `@${esc(r.peer)}` : '<span class="muted">—</span>'}</td><td class="muted c-date">${cubaFmt(r.at, { dateStyle: 'short', timeStyle: 'short' })}</td></tr>`,
+			)
+			.join('')}</tbody></table>
+		${rows.length > hist.show ? `<button class="hist-more" data-hist-more>${tl('broker.histMore')}</button>` : ''}`
+}
+
+// Descargar tus operaciones: todas o las de un mes, en CSV (como los estados de cuenta de QvaPay, pero del P2P)
+function showHistoryDownload() {
+	const rows = historyRows(bk.trades.filter((t) => t.status === 'completed'))
+	const months = historyMonths(rows)
+	const ops = (n) => tl(n === 1 ? 'broker.histOne' : 'broker.histOps', { n: String(n) })
+	const now = histMonth(Date.now())
+	openModal(`<div class="stack dl-sheet">
+		<div><h3>${tl('broker.dlTitle')}</h3><p class="muted">${tl('broker.dlSub')}</p></div>
+		${hist.loading ? `<p class="hint">${tl('broker.dlLoading')}</p>` : ''}
+		<button class="btn primary block" data-dl="all">${tl('broker.dlAll', { ops: ops(rows.length) })}</button>
+		<ul class="dl-months">${[...months]
+			.map(
+				([m, mo]) => `<li class="dl-month">
+				<div class="dl-head"><b class="hm-title">${esc(histMonthName(m))}</b>${m === now ? `<span class="chip open">${tl('broker.dlNow')}</span>` : ''}<small class="muted">${ops(mo.n)}</small></div>
+				<div class="dl-nums"><div><small class="muted">${tl('broker.histBought')}</small><b class="mono bid">+${fmtM(mo.buy)}</b></div><div><small class="muted">${tl('broker.histSold')}</small><b class="mono ask">−${fmtM(mo.sell)}</b></div><div><small class="muted">${tl('broker.dlNet')}</small><b class="mono">${mo.buy - mo.sell >= 0 ? '+' : '−'}${fmtM(Math.abs(mo.buy - mo.sell))}</b></div></div>
+				<button class="btn sm dl-btn" data-dl="${m}">${tl('broker.dlCsv')}</button>
+			</li>`,
+			)
+			.join('')}</ul>
+		<p class="hint">${tl('broker.dlNote')}</p>
+	</div>`)
+	$('modalBody').querySelector('.dl-sheet').addEventListener('click', (e) => {
+		const b = e.target.closest('[data-dl]')
+		if (b) historyCsv(b.dataset.dl === 'all' ? null : b.dataset.dl)
+	})
+}
+
+// El historial en CSV (para Excel o Google Sheets): números sin separador de miles, fechas en hora de Cuba
+function historyCsv(month = null) {
+	const rows = historyRows(bk.trades.filter((t) => t.status === 'completed')).filter((r) => !month || histMonth(r.at) === month)
+	const q = (v) => (/[",\n;]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v))
+	const day = (at) => {
+		const d = inCuba(new Date(at).getTime())
+		return d.toISOString().slice(0, 16).replace('T', ' ')
+	}
+	const head = tl('broker.histCsvHead').split('|')
+	const lines = rows.map((r) => [day(r.at), nameOf(r.coin), r.side === 'buy' ? tl('broker.sideBuy') : tl('broker.sideSell'), r.usd, Math.round(r.price * 10000) / 10000, r.coinAmount, unitOf(r.coin), r.peer ?? '', r.offer].map(q).join(','))
+	const blob = new Blob([`\ufeff${[head.map(q).join(','), ...lines].join('\r\n')}`], { type: 'text/csv;charset=utf-8' })
+	const a = document.createElement('a')
+	a.href = URL.createObjectURL(blob)
+	a.download = `terminalp2p-${(bk.acct.username ?? 'cuenta').toLowerCase()}-${month ?? tl('broker.dlAllFile')}.csv`
+	document.body.appendChild(a)
+	a.click()
+	a.remove()
+	setTimeout(() => URL.revokeObjectURL(a.href), 5000)
 }
 
 // ── Detalle de una operación ──────────────────────────────────────────
@@ -2904,6 +3083,19 @@ function bindBroker() {
 	for (const b of document.querySelectorAll('[data-swap]')) b.addEventListener('click', showSwap)
 	renderAlertsBtn()
 	$('myTrades').addEventListener('click', async (e) => {
+		// Completadas: abrir o cerrar un mes, ver más, CSV y reintentar
+		const month = e.target.closest('[data-hist-month]')
+		if (month) {
+			const m = month.dataset.histMonth
+			hist.open.has(m) ? hist.open.delete(m) : hist.open.add(m)
+			return renderTrades()
+		}
+		if (e.target.closest('[data-hist-more]')) {
+			hist.show += HIST_SHOW
+			return renderTrades()
+		}
+		if (e.target.closest('[data-hist-dl]')) return showHistoryDownload()
+		if (e.target.closest('[data-hist-retry]')) return loadHistory()
 		const cancel = e.target.closest('[data-cancel-btn]')
 		if (cancel) {
 			e.stopPropagation()
@@ -2935,6 +3127,7 @@ function bindBroker() {
 		t.addEventListener('click', () => {
 			bk.tab = t.dataset.tab
 			renderTrades()
+			if (bk.tab === 'done') loadHistory()
 		})
 }
 

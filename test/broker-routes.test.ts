@@ -405,3 +405,34 @@ test('marcar pagado: sin referencia solo con tu comprobante', async () => {
 	assert.equal(e.status, 400)
 	assert.match(e.body.error, /referencia de tu transferencia o sube antes el comprobante/)
 })
+
+test('historial: las completadas de una página, con las partes de tus ofertas por rango', async () => {
+	const { fake, get } = await setup()
+	const me = { uuid: 'me', username: 'yo' }
+	const other = { uuid: 's1', username: 'otro' }
+	// Una tomada y completada, una en curso y una oferta tuya por rango cerrada con dos partes (una cancelada)
+	Object.assign(fake.offers, {
+		c1: { uuid: 'c1', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '11300', status: 'completed', updated_at: '2026-11-02T10:00:00Z', User: other, Peer: me },
+		f1: {
+			uuid: 'f1', type: 'buy', coin: 'BANK_MLC', offer_kind: 'flexible', amount: '50', receive: '80', status: 'completed', updated_at: '2026-10-20T10:00:00Z', User: me,
+			Orders: [
+				{ uuid: 'o1', amount: '20', receive: '32', status: 'completed', created_at: '2026-10-19T10:00:00Z', Taker: other },
+				{ uuid: 'o2', amount: '5', receive: '8', status: 'cancelled', created_at: '2026-10-19T11:00:00Z', Taker: other },
+			],
+		},
+	})
+	const { status, body } = await get('/history?page=1')
+	assert.equal(status, 200)
+	const ids = body.done.map((r: { id: string }) => r.id).sort()
+	assert.deepEqual(ids, ['c1', 'f1:o1'])
+	const part = body.done.find((r: { id: string }) => r.id === 'f1:o1')
+	assert.equal(part.side, 'buy')
+	assert.equal(part.usd, 20)
+	assert.equal(part.peer, 'otro')
+	// c1 y f1 ya no cambian; las dos en curso sí
+	const finals = Object.fromEntries(body.offers.map((o: { uuid: string; final: boolean }) => [o.uuid, o.final]))
+	assert.equal(finals.c1, true)
+	assert.equal(finals.f1, true)
+	assert.equal(finals.a1, false)
+	assert.equal(body.more, false)
+})

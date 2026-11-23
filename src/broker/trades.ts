@@ -46,7 +46,7 @@ export interface ChatSummary {
 	lastText: string | null
 }
 
-const FINAL = new Set(['completed', 'cancelled'])
+export const FINAL = new Set(['completed', 'cancelled'])
 
 // La ficha de un usuario (GET /peer) sale de sus ofertas abiertas; sin ninguna, de quien opera contigo
 export function peerProfile(u: P2PUser | undefined | null) {
