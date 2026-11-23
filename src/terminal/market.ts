@@ -72,6 +72,8 @@ export interface Level {
 	outlier: boolean
 	// La nota pública del anunciante (solo la ponen las cuentas GOLD): en efectivo, casi siempre el lugar
 	message?: string
+	// El banco de la tarjeta en CUP, MLC y Tropical (BANDEC, BPA o METROPOLITANO), según QvaPay
+	bank?: string
 }
 
 // new/gone: comparando dos lecturas del libro (no se sabe si una que sale la tomaron o la retiraron). Del feed, a través
@@ -564,8 +566,12 @@ export function toLevel(o: P2POffer, promoted: boolean, ref: number | null): Lev
 		promoted,
 		outlier: isOutlier(price, ref, o.type === 'sell' ? 'ask' : 'bid'),
 		...(o.message?.trim() ? { message: o.message.trim() } : {}),
+		...(bankOf(o.bank) ? { bank: bankOf(o.bank) } : {}),
 	}
 }
+
+// El banco como lo manda QvaPay, en mayúsculas y sin espacios de más (sin banco: undefined)
+export const bankOf = (b?: string | null) => (typeof b === 'string' && b.trim() ? b.trim().toUpperCase().slice(0, 30) : undefined)
 
 // ¿Precio raro? Una venta (ask) es buena para quien la toma si es barata; una compra (bid), si es cara
 export function isOutlier(price: number, ref: number | null, side: 'ask' | 'bid') {

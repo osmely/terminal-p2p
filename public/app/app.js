@@ -64,7 +64,7 @@ const state = {
 	marketsClosed: store.get('marketsClosed', false),
 	// Lo que enseña la columna de mercados: los del P2P ('p2p') o las acciones de QvaPay ('stocks', stocks.js)
 	marketKind: store.get('marketKind', 'p2p'),
-	filters: { vip: true, outlier: true, take: false, ops: 0, usd: 0, ageH: 0, ...store.get('filters', {}) },
+	filters: { vip: true, outlier: true, take: false, ops: 0, usd: 0, ageH: 0, bank: '', ...store.get('filters', {}) },
 	book: null,
 	history: [],
 	overview: [],
@@ -137,8 +137,15 @@ async function loadPlatform() {
 
 // Con el lado, también «Solo las que puedo tomar» (canTake, en broker.js); sin él (referencias de precio, puesto de una
 // oferta tuya), ese filtro no aplica
+// Las tarjetas de CUP, MLC y Tropical son de un banco (QvaPay lo dice en cada oferta): se ve en el libro y se puede filtrar
+const BANK_MARKETS = new Set(['BANK_CUP', 'BANK_MLC', 'BANDECPREPAGO'])
+const BANK_NAMES = { BANDEC: 'BANDEC', BPA: 'BPA', METROPOLITANO: 'Metropolitano' }
+const bankName = (b) => BANK_NAMES[b] ?? b
+const bankShort = (b) => (b === 'METROPOLITANO' ? 'METRO' : b)
+
 function filtered(levels, side) {
 	const f = state.filters
+	const bank = f.bank && BANK_MARKETS.has(state.coin) ? f.bank : ''
 	const take = f.take && side && typeof canTake === 'function'
 	// Antigüedad medida contra el reloj del servidor, no el del navegador
 	const now = state.book?.serverTime ?? Date.now()
@@ -150,6 +157,7 @@ function filtered(levels, side) {
 			l.ops >= f.ops &&
 			l.usd >= f.usd &&
 			(l.updatedAt == null || now - l.updatedAt <= maxAge) &&
+			(!bank || l.bank === bank) &&
 			(!take || canTake(l, side)),
 	)
 }
@@ -442,6 +450,7 @@ function render() {
 		$('pairIcon').innerHTML = coinIcon(iconOf)
 	}
 	$('pairSub').textContent = tl('app.pairSub', { unit: meta.unit })
+	$('fBankRow').hidden = !BANK_MARKETS.has(state.coin)
 	if (window.TPStocks?.on) window.TPStocks.pair()
 	if (!b) {
 		$('asks').innerHTML = $('bids').innerHTML = `<div class="empty">${tl('app.loading')}</div>`
@@ -687,6 +696,7 @@ function levelRow(l, side, cum, maxCum) {
 	const flags = [l.promoted ? '★' : '', l.kind === 'flexible' ? '↔' : '', l.requirements ? '🔒' : '', l.vipOnly ? '👑' : '', l.outlier ? '⚠️' : '', l.message ? '💬' : '']
 		.filter(Boolean)
 		.join('')
+	const bank = l.bank ? `<span class="bank-tag" title="${tl('app.tipBank', { bank: esc(bankName(l.bank)) })}">${esc(bankShort(l.bank))}</span>` : ''
 	// Tus propias ofertas se marcan en el libro (broker.js sabe quién eres)
 	const mine = typeof myUsername === 'function' && myUsername() === l.user
 	const medal = rankMedal(l.user)
@@ -694,7 +704,7 @@ function levelRow(l, side, cum, maxCum) {
 	return `<div class="lvl ${l.outlier || l.vipOnly ? 'dim' : ''} ${mine ? 'mine' : ''} ${mark?.cls ?? ''}" data-uuid="${l.uuid}" data-side="${side}"
 		style="${mark?.style ?? ''}background-image:linear-gradient(to left, ${color} ${w}%, transparent ${w}%)">
 		<span class="p">${fmtP(l.price)}</span><span class="u">${fmtU(l.usd)}</span><span class="c">${fmtU(cum)}</span>
-		<span class="who">${mine ? `<b class="you">${tl('app.you')}</b>` : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="${tl('app.seeProfileOf', { user: esc(l.user) })}"`}>${esc(l.user)}</em>${isPlatform(l.user) ? ` <span class="plat" title="${tl('app.platTitle')}">🏦</span>` : ''} ${l.ops}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
+		<span class="who">${mine ? `<b class="you">${tl('app.you')}</b>` : ''}${medal}<em${l.user === '—' ? ' class="anon"' : `${mine ? '' : onlineAttr(l.user)}${!mine && onlineCls(l.user) ? ` class="${onlineCls(l.user).trim()}"` : ''} title="${tl('app.seeProfileOf', { user: esc(l.user) })}"`}>${esc(l.user)}</em>${isPlatform(l.user) ? ` <span class="plat" title="${tl('app.platTitle')}">🏦</span>` : ''} ${l.ops}${bank}${flags ? `<span class="flag">${flags}</span>` : ''}</span></div>`
 }
 
 // ── Libro agrupado por rangos de precio ───────────────────────────────
@@ -1983,6 +1993,7 @@ function tooltip(l, side, sheet = false) {
 			: '',
 		req ? `<div>${tl('app.tipReq', { req: esc(req) })}</div>` : '',
 		l.vipOnly ? `<div>${tl('app.tipVipOnly')}</div>` : '',
+		l.bank ? `<div>💳 ${tl('app.tipBank', { bank: esc(bankName(l.bank)) })}</div>` : '',
 		l.message ? `<div class="tip-msg">💬 ${esc(l.message)}</div>` : '',
 		l.promoted ? `<div>${tl('app.tipPromoted')}</div>` : '',
 		l.outlier ? `<div style="color:var(--warn)">${tl('app.tipOutlier')}</div>` : '',
@@ -2029,7 +2040,7 @@ function renderTakeHint() {
 
 function renderFilterCount() {
 	const f = state.filters
-	const n = [!f.vip, !f.outlier, f.take, f.ops > 0, f.usd > 0, f.ageH > 0].filter(Boolean).length
+	const n = [!f.vip, !f.outlier, f.take, f.ops > 0, f.usd > 0, f.ageH > 0, !!f.bank && BANK_MARKETS.has(state.coin)].filter(Boolean).length
 	$('filterCount').hidden = !n
 	$('filterCount').textContent = String(n)
 }
@@ -2214,6 +2225,7 @@ function bind() {
 	$('fOps').value = String(f.ops)
 	$('fUsd').value = String(f.usd)
 	$('fAge').value = String(f.ageH)
+	$('fBank').value = f.bank ?? ''
 	const onFilter = () => {
 		state.filters = {
 			vip: $('fVip').checked,
@@ -2222,17 +2234,19 @@ function bind() {
 			ops: Number($('fOps').value),
 			usd: Number($('fUsd').value),
 			ageH: Number($('fAge').value),
+			bank: $('fBank').value,
 		}
 		store.set('filters', state.filters)
 		renderFilterCount()
 		render()
 	}
-	for (const id of ['fVip', 'fOutlier', 'fTake', 'fOps', 'fUsd', 'fAge']) $(id).addEventListener('change', onFilter)
+	for (const id of ['fVip', 'fOutlier', 'fTake', 'fOps', 'fUsd', 'fAge', 'fBank']) $(id).addEventListener('change', onFilter)
 	$('filterReset').addEventListener('click', () => {
 		$('fVip').checked = true
 		$('fOutlier').checked = true
 		$('fTake').checked = false
 		$('fOps').value = $('fUsd').value = $('fAge').value = '0'
+		$('fBank').value = ''
 		onFilter()
 	})
 	renderFilterCount()

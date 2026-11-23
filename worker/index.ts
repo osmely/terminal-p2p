@@ -809,6 +809,7 @@ async function book(url: URL, env: Env, ctx: ExecutionContext) {
 			promoted: l.promoted,
 			requirements: l.requirements,
 			...(l.message ? { message: l.message } : {}),
+			...(l.bank ? { bank: l.bank } : {}),
 			createdAt: l.createdAt,
 			updatedAt: l.updatedAt,
 		})),
@@ -882,7 +883,7 @@ async function offer(req: Request, url: URL, env: Env, ctx: ExecutionContext) {
 	let data: Record<string, unknown> = found
 	if (found.state === 'open') {
 		const l = found.level
-		data = { state: 'open', coin: found.coin, side: found.side, uuid: id, price: l.price, usd: l.usd, kind: l.kind, orderMin: l.orderMin, orderMax: l.orderMax, vipOnly: l.vipOnly, requirements: l.requirements, message: l.message ?? null, user: l.user, image: l.image ?? null, ops: l.ops, rating: l.rating, createdAt: l.createdAt, updatedAt: l.updatedAt }
+		data = { state: 'open', coin: found.coin, side: found.side, uuid: id, price: l.price, usd: l.usd, kind: l.kind, orderMin: l.orderMin, orderMax: l.orderMax, vipOnly: l.vipOnly, requirements: l.requirements, message: l.message ?? null, bank: l.bank ?? null, user: l.user, image: l.image ?? null, ops: l.ops, rating: l.rating, createdAt: l.createdAt, updatedAt: l.updatedAt }
 	}
 	const res = new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${BOOK_TTL_S}` } })
 	ctx.waitUntil(caches.default.put(key, res.clone()))

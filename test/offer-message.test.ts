@@ -11,3 +11,12 @@ test('la nota pública de la oferta llega al libro (sin espacios) y sin nota no 
 	assert.equal('message' in toLevel(offer('   '), false, null), false)
 	assert.equal('message' in toLevel(offer(), false, null), false)
 })
+
+test('el banco de la tarjeta llega al libro en mayúsculas; sin banco no hay campo', () => {
+	const withBank = (bank?: string | null) => ({ uuid: 'y', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '11300', status: 'open', bank }) as unknown as P2POffer
+	assert.equal(toLevel(withBank('BANDEC'), false, null).bank, 'BANDEC')
+	assert.equal(toLevel(withBank(' metropolitano '), false, null).bank, 'METROPOLITANO')
+	assert.equal('bank' in toLevel(withBank(null), false, null), false)
+	assert.equal('bank' in toLevel(withBank(''), false, null), false)
+	assert.equal('bank' in toLevel(withBank(), false, null), false)
+})

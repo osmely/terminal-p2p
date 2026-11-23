@@ -1375,3 +1375,6 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 .hm-table .dl-btn { width: 24px; height: 24px; border: 0; background: none; }
 .hm-table { width: 100%; }
 .hist-scroll { max-height: max(320px, calc(100dvh - 330px)); overflow-y: auto; overscroll-behavior: contain; }
+
+/* El banco de la tarjeta en el libro (CUP, MLC y Tropical) */
+.lvl .bank-tag { display: inline-block; margin-left: 5px; padding: 0 4px; border-radius: 4px; border: 1px solid var(--line-strong); font: 600 9.5px var(--sans); letter-spacing: 0.02em; color: var(--text-2); vertical-align: 1px; }

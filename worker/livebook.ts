@@ -5,7 +5,7 @@
 // las mismas de los cobros de Pro). Sin feed (o si se corta), esas credenciales leen el libro cada pocos segundos.
 // Solo ofertas públicas del mercado: nada de ningún usuario del terminal pasa por aquí
 
-import { COINS, isOutlier, toLevel, type Level } from '../src/terminal/market.ts'
+import { bankOf, COINS, isOutlier, toLevel, type Level } from '../src/terminal/market.ts'
 import { num, type P2POffer } from '../src/qvapay/types.ts'
 import { hex, hmac } from './crypto.ts'
 import { inCuba, type D1 } from './rates.ts'
@@ -120,6 +120,7 @@ export interface LiveOffer {
 	requirements: Record<string, number> | null
 	// La nota pública (solo la trae el listado, no el aviso en vivo)
 	message?: string
+	bank?: string
 	createdAt: number
 	updatedAt: number
 }
@@ -271,6 +272,7 @@ export class Book {
 				onlyVip: !!d.only_vip,
 				requirements: d.requirements && Object.keys(d.requirements).length ? d.requirements : null,
 				message: had?.message,
+				bank: had?.bank,
 				createdAt: had?.createdAt ?? at,
 				updatedAt: at,
 			}
@@ -401,7 +403,8 @@ export class Book {
 			const had = this.offers.get(o.uuid)
 			const at = ts(o.updated_at) || ts(o.created_at) || now
 			const message = o.message === undefined ? had?.message : o.message?.trim() || undefined
-			if (had && (had.updatedAt > at || (had.updatedAt === at && had.usd === usd && had.message === message))) continue
+			const bank = o.bank === undefined ? had?.bank : bankOf(o.bank)
+			if (had && (had.updatedAt > at || (had.updatedAt === at && had.usd === usd && had.message === message && had.bank === bank))) continue
 			this.changed.add(o.uuid)
 			this.offers.set(o.uuid, {
 				uuid: o.uuid,
@@ -417,6 +420,7 @@ export class Book {
 				onlyVip: !!o.only_vip,
 				requirements: o.requirements && Object.keys(o.requirements).length ? o.requirements : null,
 				message,
+				bank,
 				createdAt: ts(o.created_at) || had?.createdAt || at,
 				updatedAt: at,
 			})
@@ -508,6 +512,7 @@ export class Book {
 				only_vip: o.onlyVip,
 				requirements: o.requirements ?? undefined,
 				message: o.message,
+				bank: o.bank,
 				created_at: new Date(o.createdAt).toISOString(),
 				updated_at: new Date(o.updatedAt).toISOString(),
 				status: 'open',

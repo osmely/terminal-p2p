@@ -308,6 +308,7 @@ const anonLevel = (l: Partial<Level>): Level => ({
 	promoted: l.promoted ?? false,
 	outlier: l.outlier ?? false,
 	...(l.message ? { message: l.message } : {}),
+	...(l.bank ? { bank: l.bank } : {}),
 })
 
 // Lo que vigila el libro desde el módulo Pro (el radar, mantener tu oferta la primera): cada uno dice qué lados y a

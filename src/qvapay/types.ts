@@ -50,6 +50,8 @@ export interface P2POffer {
 	private?: boolean
 	// Mensaje público (lo pone una cuenta GOLD)
 	message?: string | null
+	// El banco de la tarjeta (CUP, MLC y Tropical): BANDEC, BPA o METROPOLITANO
+	bank?: string | null
 	offer_kind?: 'fixed' | 'flexible'
 	available_amount?: Num | null
 	reserved_amount?: Num | null

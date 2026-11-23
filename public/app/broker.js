@@ -2062,6 +2062,7 @@ async function showTakeOfferById(uuid, amount) {
 		requirementsMissing: o.requirementsMissing,
 		vipOnly: o.onlyVip,
 		message: o.message || undefined,
+		bank: o.bank || undefined,
 		user: o.owner?.username ?? '—',
 		image: o.owner?.image ?? null,
 		ops: o.owner?.ops ?? null,
@@ -2187,6 +2188,7 @@ function renderTake(uuid, side, l, coin, preset) {
 			<span>${youBuy ? tl('broker.tkSells') : tl('broker.tkBuys')}</span><b>${fmtM(l.usd)} QUSD</b><span></span>
 			${flex ? `<span>${tl('broker.tkPerOrder')}</span><b>${min ? `${fmtM(min)}–${fmtM(max)}` : tl('broker.tkUpTo', { max: fmtM(max) })} QUSD</b><span></span>` : ''}
 			${req ? `<span>${tl('broker.kvReq')}</span><b>${esc(req)}</b><span></span>` : ''}
+			${l.bank ? `<span>${tl('broker.kvBank')}</span><b>💳 ${esc(typeof bankName === 'function' ? bankName(l.bank) : l.bank)}</b><span></span>` : ''}
 			${l.vipOnly ? `<span>${tl('broker.tkOnly')}</span><b>${tl('broker.tkVipAccounts')}</b><span></span>` : ''}
 		</div>
 		${l.message ? `<p class="offer-msg">💬 ${esc(l.message)}</p>` : ''}

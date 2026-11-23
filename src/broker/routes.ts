@@ -8,7 +8,7 @@ import { logger } from '../log.ts'
 import { locale, tl } from '../i18n.ts'
 import { QvaPayError, type QvaPayClient } from '../qvapay/client.ts'
 import { num, type CreateOfferBody, type EditOfferBody, type Me, type P2POffer, type P2POrder, type P2PUser, type PaymentField, type Requirements } from '../qvapay/types.ts'
-import { COINS, type Market } from '../terminal/market.ts'
+import { bankOf, COINS, type Market } from '../terminal/market.ts'
 import { pendingCount, tradeAlerts } from './alerts.ts'
 import { inCuba } from '../../worker/rates.ts'
 import { tradeStats } from './stats.ts'
@@ -1221,6 +1221,7 @@ export function offerView(o: P2POffer, meUuid: string) {
 		isPrivate: !!o.private,
 		onlyVip: !!o.only_vip,
 		message: o.message ?? null,
+		bank: bankOf(o.bank) ?? null,
 		isOwner,
 		// El detalle de una oferta no siempre trae el conteo de operaciones: sin él, null (no un 0 falso)
 		owner: o.User
