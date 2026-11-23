@@ -63,6 +63,11 @@
 				<span class="inbox-n" hidden></span>
 			</button>
 		</div>
+		<!-- En el móvil, ayuda, idioma y tema van juntos aquí (app.js lo llena) -->
+		<details class="more-nav" id="moreNav">
+			<summary class="help-btn more-nav-btn" title="Más" aria-label="Más opciones" data-i18n-title="html.more" data-i18n-aria-label="html.moreAria"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></g></svg></summary>
+			<div class="help-menu more-nav-menu" id="moreNavMenu"></div>
+		</details>
 		<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema" data-i18n-title="html.theme" data-i18n-aria-label="html.theme">
 			<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 			<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
@@ -84,6 +89,8 @@
 			<h1><button class="pair-btn" id="pairBtn" aria-haspopup="dialog" aria-controls="marketList"><span class="pair-ic" id="pairIcon"></span><span id="pairName">QUSD / CUP Transferencia</span><svg class="pair-caret" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg></button></h1>
 			<p id="pairSub" data-i18n="html.pairSub">Precio en CUP por cada QUSD (saldo QvaPay)</p>
 		</div>
+		<!-- En el móvil: solo los tres precios; el resto, al tocar aquí -->
+		<button type="button" class="ticker-more" id="tickerMore" aria-expanded="false" aria-controls="stats"><span data-i18n="html.more">Más</span><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
 		<div class="ticker-stats" id="stats"></div>
 		<div class="intent off" id="intent" role="img" aria-label="Intención del mercado" data-i18n-aria-label="html.intent"></div>
 		<div class="pulse off" id="pulse" role="img" aria-label="Actividad del mercado" data-i18n-aria-label="html.pulse"></div>
@@ -91,10 +98,10 @@
 
 	<!-- En el móvil, una sección a la vez -->
 	<nav class="view-tabs" id="viewTabs" role="tablist" aria-label="Secciones" data-i18n-aria-label="html.sections">
-		<button class="view-tab" data-view="book" role="tab" data-i18n="html.viewBook">Libro</button>
-		<button class="view-tab" data-view="chart" role="tab" data-i18n="html.viewChart">Gráficos</button>
-		<button class="view-tab" data-view="insights" role="tab" data-i18n="html.viewInsights">Lectura</button>
-		<button class="view-tab" data-view="orders" role="tab"><span data-i18n="html.viewOrders">Mis operaciones</span> <span class="count" id="cntView" hidden></span></button>
+		<button class="view-tab" data-view="book" role="tab"><svg class="vt-ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 6h16M4 10h10M4 14h16M4 18h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="html.viewBook">Libro</span></button>
+		<button class="view-tab" data-view="chart" role="tab"><svg class="vt-ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 19V5M4 19h16M7 15l4-5 3 3 5-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="html.viewChart">Gráficos</span></button>
+		<button class="view-tab" data-view="insights" role="tab"><svg class="vt-ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3a6 6 0 00-3.5 10.9V17h7v-3.1A6 6 0 0012 3zM9.5 21h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="html.viewInsights">Lectura</span></button>
+		<button class="view-tab" data-view="orders" role="tab"><svg class="vt-ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M7 4v16M7 4L3 8M7 4l4 4M17 20V4M17 20l-4-4M17 20l4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="vt-lg" data-i18n="html.viewOrders">Mis operaciones</span><span class="vt-sh" data-i18n="html.viewOrdersShort">Operaciones</span> <span class="count" id="cntView" hidden></span></button>
 	</nav>
 
 	<main class="layout" id="layout">
@@ -208,9 +215,11 @@
 			</div>
 			<button type="button" class="anon-hint" id="anonHint" hidden></button>
 			<div class="book-cols"><span data-i18n="html.colPrice">Precio</span><span>QUSD</span><span data-i18n="html.colTotal">Acumulado</span><span id="bookWho" data-i18n="html.colWho">Contraparte</span></div>
+			<button type="button" class="book-more" data-more="asks" hidden data-i18n="html.moreAsks">Ver más ventas</button>
 			<div class="book-side asks" id="asks"></div>
 			<div class="spread" id="spread">—</div>
 			<div class="book-side bids" id="bids"></div>
+			<button type="button" class="book-more" data-more="bids" hidden data-i18n="html.moreBids">Ver más compras</button>
 			<div class="book-foot">
 				<span class="legend"><i class="sw ask"></i><span data-i18n="html.legendAsk">Venden QUSD</span></span>
 				<span class="legend"><i class="sw bid"></i><span data-i18n="html.legendBid">Compran QUSD</span></span>

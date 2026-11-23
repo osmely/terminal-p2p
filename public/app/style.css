@@ -1281,6 +1281,67 @@ body.stk-on .ticker-stats, body.stk-on .intent, body.stk-on .pulse { display: no
 .offer-msg { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--accent); font-size: 14px; overflow-wrap: anywhere; }
 .tip-msg { max-width: 240px; white-space: normal; overflow-wrap: anywhere; }
 
+/* ══ Móvil: cabecera corta, una sola barra para bajar, menú ⋯ y pestañas abajo ══ */
+.more-nav, .ticker-more, .book-more, .vt-ic, .vt-sh { display: none; }
+@media (max-width: 900px) {
+	/* Ayuda, idioma y tema van en el menú ⋯ */
+	.help, .lang, #themeBtn { display: none; }
+	.more-nav { display: block; position: static; }
+	.more-nav-btn { width: 34px; padding: 0; justify-content: center; }
+	.more-nav-menu { position: absolute; left: 12px; right: 12px; width: auto; top: calc(100% + 6px); }
+	.more-nav:not([open]) .more-nav-menu { display: none; }
+	.more-nav-menu .more-row { display: flex; gap: 6px; padding: 8px 6px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+	.more-nav-menu .more-row button { flex: 1; padding: 10px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: 600 13px var(--sans); }
+	.more-nav-menu .more-row button[aria-checked='true'] { border-color: var(--accent); color: var(--accent); }
+
+	/* Cabecera: el par y los tres precios; lo demás con «Más» */
+	.ticker-more { display: inline-flex; align-items: center; gap: 4px; order: 1; flex: none; height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2); font: 600 12.5px var(--sans); }
+	.ticker-more[aria-expanded='true'] svg { transform: rotate(180deg); }
+	/* Cerrada: el par y «Más» arriba; debajo, mejor venta, mejor compra, la intención y la actividad en una fila */
+	.ticker:not(.open) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto; align-items: end; gap: 10px 14px; }
+	.ticker:not(.open) .ticker-pair { grid-area: 1 / 1 / 2 / 4; align-self: center; }
+	.ticker:not(.open) .ticker-more { grid-area: 1 / 4; justify-self: end; align-self: center; }
+	.ticker:not(.open) .stat:nth-child(1) { grid-area: 2 / 1; }
+	.ticker:not(.open) .stat:nth-child(2) { grid-area: 2 / 2; }
+	.ticker:not(.open) .intent { grid-area: 2 / 3; }
+	.ticker:not(.open) .pulse { grid-area: 2 / 4; }
+	.ticker:not(.open) .ticker-stats { display: contents; }
+	.ticker:not(.open) .stat:nth-child(n+3), .ticker:not(.open) #pairSub { display: none; }
+	.ticker:not(.open) .intent, .ticker:not(.open) .pulse { align-items: flex-start; }
+	.ticker.open .intent, .ticker.open .pulse { order: 3; }
+
+	/* El libro baja con la página (una sola barra); los títulos de las columnas se quedan arriba */
+	.area-book, .layout[data-view='book'] > .area-book { height: auto; overflow: visible; }
+	.area-book .book-side { flex: none; min-height: 0; overflow: visible; }
+	.area-book .book-cols { position: sticky; top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+	.asks:not(.all) > .lvl:nth-child(n+11), .bids:not(.all) > .lvl:nth-child(n+16) { display: none; }
+	.book-more:not([hidden]) { display: block; width: 100%; padding: 11px; border: 0; background: none; color: var(--accent); font: 600 13px var(--sans); }
+	.book-more[data-more='asks'] { border-bottom: 1px solid var(--line); }
+	.book-more[data-more='bids'] { border-top: 1px solid var(--line); }
+	.lvl { height: 34px; }
+	.pair-q { display: none; }
+	/* El pie del libro sin cortar */
+	.book-foot { flex-wrap: wrap; white-space: normal; row-gap: 4px; }
+
+	/* Pestañas fijas abajo, al alcance del dedo */
+	.view-tabs { position: fixed; top: auto; bottom: 0; left: 0; right: 0; z-index: 30; gap: 2px; padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-bottom: 0; border-top: 1px solid var(--line); overflow: visible; }
+	.view-tab { position: relative; flex: 1 1 0; min-width: 0; flex-direction: column; gap: 2px; padding: 6px 2px; font-size: 11px; font-weight: 600; }
+	.view-tab > span:not(.count) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+	.view-tab.active { background: none; color: var(--accent); }
+	.vt-ic { display: block; }
+	.view-tab .vt-lg { display: none; }
+	.view-tab .vt-sh { display: inline; }
+	.area-chart { height: max(340px, calc(100dvh - 250px)); }
+	.view-tab .count { position: absolute; top: 2px; left: calc(50% + 6px); }
+	body { padding-bottom: calc(62px + env(safe-area-inset-bottom, 0px)); }
+	.toast { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+	.pro-nudge { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* La ficha de una oferta al tocarla sin cuenta (en el teléfono no hay tooltips) */
+.offer-sheet .tip-lines { display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.45; }
+.offer-sheet .tip-lines .tip-msg { max-width: none; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border-left: 3px solid var(--accent); }
+
 /* Actividad: este mercado o todos */
 .act-scope { padding: 8px 12px 4px; }
 .feed .act-mkt { font-weight: 600; color: var(--text-2); }

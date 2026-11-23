@@ -298,6 +298,8 @@ function selectCoin(tick, keepSheet = false) {
 	setMarketKind('p2p')
 	state.coin = tick
 	store.set('coin', tick)
+	$('asks').classList.remove('all')
+	$('bids').classList.remove('all')
 	state.book = null
 	state.history = null
 	closeMenus()
@@ -430,7 +432,8 @@ function showView(name) {
 function render() {
 	const b = state.book
 	const meta = b?.coin ?? state.overview.find((c) => c.tick === state.coin) ?? { name: state.coin, unit: '' }
-	$('pairName').textContent = `QUSD / ${TPI18N.coin(state.coin, meta.name)}`
+	// En el teléfono se ve solo el mercado (el «QUSD /» no cabía y cortaba el nombre)
+	$('pairName').innerHTML = `<span class="pair-q">QUSD / </span>${esc(TPI18N.coin(state.coin, meta.name))}`
 	// Se rehace al cambiar de mercado o al llegar su icono (al arrancar aún no está la lista de mercados)
 	const iconOf = state.overview.find((c) => c.tick === state.coin) ?? meta
 	if ($('pairIcon').dataset.key !== `${state.coin}:${iconOf.logo ?? ''}`) {
@@ -764,6 +767,15 @@ function renderGroupBtn(price) {
 	$('bookWho').textContent = state.grouped ? tl('app.whoGrouped') : tl('app.whoPeer')
 }
 
+// En el móvil el libro baja con la página: se ven las 10 ventas y 15 compras más cerca del precio, y «Ver más» enseña el resto
+const BOOK_SHOW = { asks: 10, bids: 15 }
+function paintBookMore() {
+	for (const b of document.querySelectorAll('.book-more')) {
+		const box = $(b.dataset.more)
+		b.hidden = box.classList.contains('all') || box.querySelectorAll(':scope > .lvl').length <= BOOK_SHOW[b.dataset.more]
+	}
+}
+
 function renderBook(b, asks, bids) {
 	diffBook(b)
 	// Mismo rango para los dos lados, según el primer precio del libro
@@ -793,6 +805,7 @@ function renderBook(b, asks, bids) {
 	}
 	$('asks').innerHTML = side(asks, 'ask')
 	$('bids').innerHTML = side(bids, 'bid')
+	paintBookMore()
 	renderGroupBtn(asks[0]?.price ?? bids[0]?.price)
 	const hidden = b.ask.levels.length + b.bid.levels.length - asks.length - bids.length
 	$('bookCount').textContent = `${tl('app.bookCount', { ask: String(b.ask.total), bid: String(b.bid.total) })}${hidden ? ` · ${tl('app.bookHidden', { n: String(hidden) })}` : ''}`
@@ -976,10 +989,8 @@ function renderActivity(b) {
 	const key = `${b.activitySource}|${items.map((a) => `${a.t}:${a.kind}:${a.user}:${a.price}:${a.usd}`).join('|')}`
 	if ($('activity').dataset.key === key) return
 	$('activity').dataset.key = key
-	const note =
-		b.activitySource === 'feed'
-			? `<li class="act-note">${tl('app.actNoteFeed')}</li>`
-			: `<li class="act-note">${tl('app.actNoteDiff')}</li>`
+	// Sin el feed de QvaPay, lo que sale del libro no se sabe si se tomó o se retiró: se avisa
+	const note = b.activitySource === 'feed' ? '' : `<li class="act-note">${tl('app.actNoteDiff')}</li>`
 	$('activity').innerHTML = items.length
 		? note + items.map((a) => actRow(a)).join('')
 		: `<li><span></span><span class="muted">${tl('app.actWaiting')}</span><span></span></li>`
@@ -1952,7 +1963,7 @@ function renderRanking() {
 }
 
 // ── Tooltip de cada oferta ────────────────────────────────────────────
-function tooltip(l, side) {
+function tooltip(l, side, sheet = false) {
 	const unit = state.book.coin.unit
 	const req = l.requirements
 		? Object.entries(l.requirements)
@@ -1962,7 +1973,7 @@ function tooltip(l, side) {
 	return [
 		`<div>${tl(side === 'ask' ? 'app.tipAsk' : 'app.tipBid', { price: fmtP(l.price), unit, usd: fmtU(l.usd) })}</div>`,
 		l.kind === 'flexible' ? `<div>${tl('app.tipRange', { min: fmtU(l.orderMin ?? 0), max: fmtU(l.orderMax ?? l.usd) })}</div>` : `<div>${tl('app.tipFixed')}</div>`,
-		`<div>@${esc(l.user)} · ${tl('app.tipOps', { n: String(l.ops) })} · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : tl('app.noRatings')}</div>`,
+		`<div>${l.user === '—' ? '' : `@${esc(l.user)} · `}${tl('app.tipOps', { n: String(l.ops) })} · ${l.rating ? `⭐ ${l.rating.toFixed(2)}` : tl('app.noRatings')}</div>`,
 		`<div>${[l.kyc ? 'KYC ✓' : tl('app.noKyc'), l.vip ? 'VIP' : '', l.gold ? 'GOLD' : ''].filter(Boolean).join(' · ')}</div>`,
 		isPlatform(l.user) ? `<div>🏦 ${tl('app.platTitle')}</div>` : '',
 		rankText(l.user) ? `<div>🏆 Ranking: ${rankText(l.user)}</div>` : '',
@@ -1974,8 +1985,16 @@ function tooltip(l, side) {
 		l.message ? `<div class="tip-msg">💬 ${esc(l.message)}</div>` : '',
 		l.promoted ? `<div>${tl('app.tipPromoted')}</div>` : '',
 		l.outlier ? `<div style="color:var(--warn)">${tl('app.tipOutlier')}</div>` : '',
-		`<div class="muted">${tl('app.tipClick')}</div>`,
+		sheet ? '' : `<div class="muted">${tl('app.tipClick')}</div>`,
 	].join('')
+}
+
+function showOfferSheet(uuid, side) {
+	const l = findLevel(uuid, side)
+	if (!l || typeof openModal !== 'function') return typeof toast === 'function' && toast(tl('app.connectToOffers'), true)
+	openModal(`<div class="stack offer-sheet"><div class="tip-lines">${tooltip(l, side, true)}</div>
+		<button class="btn primary block" id="osConnect">${tl(side === 'ask' ? 'broker.tkConnectBuy' : 'broker.tkConnectSell')}</button></div>`)
+	$('osConnect').addEventListener('click', () => showConnect(tl('broker.connectToTake'), () => showTakeOffer(uuid, side)))
 }
 
 function findLevel(uuid, side) {
@@ -2140,6 +2159,43 @@ function bind() {
 		})
 
 	$('anonHint').addEventListener('click', () => typeof showConnect === 'function' && showConnect())
+
+	// Móvil: la cabecera muestra los tres precios; «Más» enseña el resto (y se recuerda)
+	const paintTicker = (open) => {
+		document.querySelector('.ticker').classList.toggle('open', open)
+		$('tickerMore').setAttribute('aria-expanded', String(open))
+		$('tickerMore').firstElementChild.textContent = tl(open ? 'html.less' : 'html.more')
+	}
+	paintTicker(store.get('tickerOpen', false))
+	$('tickerMore').addEventListener('click', () => {
+		const open = !document.querySelector('.ticker').classList.contains('open')
+		store.set('tickerOpen', open)
+		paintTicker(open)
+	})
+	for (const b of document.querySelectorAll('.book-more'))
+		b.addEventListener('click', () => {
+			$(b.dataset.more).classList.add('all')
+			paintBookMore()
+		})
+
+	// Menú ⋯ del móvil: la ayuda, el idioma y el tema de la barra de arriba, juntos
+	const moreNav = $('moreNav')
+	const paintMoreNav = () => {
+		const light = document.documentElement.dataset.theme === 'light'
+		$('moreNavMenu').innerHTML = `${document.querySelector('.help-menu').innerHTML}
+			<div class="more-row">${TPI18N.langs.map((lg) => `<button type="button" data-lang="${lg}" aria-checked="${lg === TPI18N.lang}">${lg.toUpperCase()}</button>`).join('')}</div>
+			<div class="more-row"><button type="button" data-theme-go>${tl(light ? 'html.themeDark' : 'html.themeLight')}</button></div>`
+	}
+	moreNav.addEventListener('toggle', () => moreNav.open && paintMoreNav())
+	$('moreNavMenu').addEventListener('click', (e) => {
+		const lg = e.target.closest('[data-lang]')?.dataset.lang
+		if (lg) return lg === TPI18N.lang ? moreNav.removeAttribute('open') : TPI18N.set(lg)
+		if (e.target.closest('[data-theme-go]')) {
+			$('themeBtn').click()
+			moreNav.removeAttribute('open')
+		}
+	})
+	document.addEventListener('click', (e) => moreNav.open && !moreNav.contains(e.target) && moreNav.removeAttribute('open'))
 	$('themeBtn').addEventListener('click', () => {
 		const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
 		document.documentElement.dataset.theme = next
@@ -2211,7 +2267,7 @@ function bind() {
 			const who = e.target.closest('.who em')
 			if (who && who.textContent.trim() !== '—' && typeof showPeer === 'function') return showPeer(who.textContent)
 			// Sin cuenta (libro público): el mismo aviso que al tocar Publicar
-			if (state.book?.anon && typeof toast === 'function') return toast(tl('app.connectToOffers'), true)
+			if (state.book?.anon) return showOfferSheet(row.dataset.uuid, row.dataset.side)
 			// broker.js abre la oferta para tomarla; sin él, se abre en QvaPay
 			if (typeof showTakeOffer === 'function') showTakeOffer(row.dataset.uuid, row.dataset.side)
 			else window.open(`https://www.qvapay.com/p2p/${row.dataset.uuid}`, '_blank', 'noopener')
