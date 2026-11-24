@@ -1013,9 +1013,12 @@ a.icon-btn { text-decoration: none; }
 .radar-found { max-height: min(280px, 38dvh); overflow-y: auto; overscroll-behavior: contain; }
 .radar-btn .count { margin-left: 6px; }
 .radar-btn .count.new { background: var(--bid); color: #fff; }
-.radar-found li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; }
+/* Cada encontrada: arriba lo que es; abajo la hora y cómo quedó, y el botón a la derecha */
+.radar-found li { display: grid; grid-template-columns: 1fr auto; grid-template-areas: 'main main' 'meta btn'; gap: 4px 8px; align-items: center; padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); }
+.radar-found .rf-main { grid-area: main; line-height: 1.45; }
+.radar-found .rf-meta { grid-area: meta; display: flex; align-items: center; gap: 8px; }
+.radar-found li > .link { grid-area: btn; justify-self: end; }
 @media (max-width: 520px) {
-	.radar-found li { grid-template-columns: auto 1fr; }
 	.radar-rule { flex-direction: column; }
 }
 
