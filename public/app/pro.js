@@ -137,7 +137,7 @@ function applyPro(s) {
 	// se recarga para que la orden inteligente y el radar desaparezcan de la memoria
 	if (pro.loaded && !s.pro) return location.reload()
 	// Bloqueada desde el panel: Pro ni se ofrece
-	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null, ended: !s.pro && s.ended?.at ? s.ended : null, usage: !s.pro && s.canTrial && s.usage?.hours ? s.usage : null })
+	Object.assign(pro, { enabled: s.enabled === true && !s.blocked, active: !!s.pro, canTrial: !s.pro && s.canTrial === true, trialUsed: !s.pro && s.trialUsed === true, username: s.username ?? null, plan: s.plan ?? null, expiresAt: s.expiresAt ?? null, license: s.license ?? null, ended: !s.pro && s.ended?.at ? s.ended : null, usage: !s.pro && s.canTrial && s.usage?.hours ? s.usage : null, radarServer: !!s.pro && s.radarServer === true })
 	if (Array.isArray(s.plans)) proPlans = s.plans
 	if (s.trialDays > 0) proTrialDays = s.trialDays
 

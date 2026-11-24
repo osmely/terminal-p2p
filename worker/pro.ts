@@ -370,7 +370,10 @@ const daysOf = (db: D1, checkout: string, kind: DayKind) =>
 export async function statusOf(env: ProEnv, l: License | null, now: number) {
 	if (!l) return { pro: false, enabled: true, plans: planList(), trialDays: TRIAL_DAYS }
 	const license = await sign({ u: l.uuid, n: l.username, e: l.expires_at, x: now + LICENSE_MS }, env.PRO_KEY!)
-	return { pro: true, enabled: true, username: l.username, plan: l.plan, expiresAt: l.expires_at, license, plans: planList(), trialDays: TRIAL_DAYS }
+	// Radar en el servidor (en prueba): solo a las cuentas de la lista se les dice; el resto ni lo consulta
+	const beta = String((env as ProEnv & RadarServerEnv).RADAR_SERVER_USERS ?? '').toLowerCase().split(',').map((x) => x.trim())
+	const radarServer = beta.includes('*') || beta.includes(l.username.toLowerCase())
+	return { pro: true, enabled: true, username: l.username, plan: l.plan, expiresAt: l.expires_at, license, plans: planList(), trialDays: TRIAL_DAYS, ...(radarServer ? { radarServer: true } : {}) }
 }
 export const planList = () => (Object.keys(PLANS) as Plan[]).map((id) => ({ id, name: PLANS[id].name, usd: PLANS[id].usd, days: PLANS[id].days }))
 
@@ -1212,7 +1215,7 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			if (!live || !secret) return json(503, { error: 'El radar en el servidor aún no está disponible' })
 			// En prueba: solo las cuentas de RADAR_SERVER_USERS (separadas por comas; «*» para todas las Pro)
 			const beta = String((env as ProEnv & RadarServerEnv).RADAR_SERVER_USERS ?? '').toLowerCase().split(',').map((x) => x.trim())
-			if (!beta.includes('*') && !beta.includes(l.username.toLowerCase())) return json(403, { error: 'El radar en el servidor aún está en prueba', code: 'NOT_YET' })
+			if (!beta.includes('*') && !beta.includes(l.username.toLowerCase())) return (t.skip = true), json(403, { error: 'El radar en el servidor aún está en prueba', code: 'NOT_YET' })
 			const store = (m: Record<string, unknown>) =>
 				liveStub(env as ProEnv & LiveEnv)
 					.fetch('https://live/tokens', { method: 'POST', body: JSON.stringify({ ...m, username: l.username, until: l.expires_at }) })

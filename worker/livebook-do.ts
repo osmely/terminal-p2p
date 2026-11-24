@@ -163,9 +163,10 @@ export class LiveBook {
 		if (url.pathname === '/online' && req.method === 'POST') return Response.json(this.watchOnline(await req.json().catch(() => null), req.headers.get('x-ip') ?? ''))
 		if (url.pathname === '/snapshot' && req.method === 'POST') return Response.json(this.snapshot(((await req.json().catch(() => ({}))) as { refs?: BookRefs }).refs ?? {}))
 		if (url.pathname === '/tokens' && req.method === 'POST') {
-			const m = (await req.json().catch(() => ({}))) as { username?: unknown }
+			const m = (await req.json().catch(() => ({}))) as { username?: unknown; op?: unknown }
 			const r = await tokenStore(this.ctx.storage, m)
-			if (typeof m.username === 'string') await this.radar?.refresh(m.username)
+			// Solo lo que cambia algo (guardar, quitar, reglas) avisa a sus terminales; consultar no
+			if (typeof m.username === 'string') await this.radar?.refresh(m.username, m.op === 'set' || m.op === 'del' || m.op === 'rules')
 			return Response.json(r)
 		}
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
