@@ -15,6 +15,7 @@ import { addCandle, candlePrice, markCandlesFrom, ownRefs, SLOT_MS } from './can
 import { notify, type AlertEnv } from './alerts.ts'
 import { deliverPush, ownerPush, pushTargets, takerPush, TARGETS_TTL_MS, type PushEnv, type PushNotice } from './push.ts'
 import { Presence, type PresenceEnv } from '../pro/presence.ts'
+import { tokenStore } from '../pro/radarserver.ts'
 
 // Un terminal cuenta como en línea si su conexión dio señal de vida (cada 25 s) en este rato
 const TERMINAL_SEEN_MS = 90_000
@@ -146,6 +147,7 @@ export class LiveBook {
 		if (url.pathname === '/status') return Response.json(this.state())
 		if (url.pathname === '/online' && req.method === 'POST') return Response.json(this.watchOnline(await req.json().catch(() => null), req.headers.get('x-ip') ?? ''))
 		if (url.pathname === '/snapshot' && req.method === 'POST') return Response.json(this.snapshot(((await req.json().catch(() => ({}))) as { refs?: BookRefs }).refs ?? {}))
+		if (url.pathname === '/tokens' && req.method === 'POST') return Response.json(await tokenStore(this.ctx.storage, await req.json().catch(() => ({}))))
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
 		return new Response('no encontrado', { status: 404 })
 	}

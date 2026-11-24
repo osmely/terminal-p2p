@@ -19,7 +19,8 @@ import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tel
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
 import { COINS } from '../src/terminal/market.ts'
-import { liveClients, liveSimulate, liveStatus, type LagStats, type LiveClient, type LiveEnv, type LiveState } from './livebook.ts'
+import { checkToken, sealToken, type RadarServerEnv, type SealedToken } from '../pro/radarserver.ts'
+import { liveClients, liveSimulate, liveStatus, liveStub, type LagStats, type LiveClient, type LiveEnv, type LiveState } from './livebook.ts'
 import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
 import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS, stockOf } from './ratealerts.ts'
 import { offerAlertsOn, setOfferAlerts } from './offeralerts.ts'
@@ -1194,6 +1195,46 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			if (!sent) await db.prepare('DELETE FROM pro_radar_sent WHERE license = ? AND offer = ? AND kind = ?').bind(l.uuid, hit.offer, hit.kind).run()
 			t.detail += sent ? ' · enviado por Telegram' : ' · no salió por Telegram (sin chat conectado o Telegram falló)'
 			return json(200, { ok: true, sent })
+		}
+
+		// Radar en el servidor: conectar (comprueba el token con QvaPay, lo cifra y lo guarda en el libro en vivo), quitarlo
+		// o ver si está. Solo con Pro activo y desde un navegador con esa misma cuenta confirmada por QvaPay
+		if (route === 'POST /pro/radar/server') {
+			const b = await readBody(req)
+			const who = await readWho(req.headers.get('cookie'), printOf(b.print), env.PRO_KEY, now)
+			if (!who) return needWho('usar el radar en el servidor')
+			const l = await ownedBy(db, await licenseOfPrint(db, printOf(b.print), now), who)
+			Object.assign(t, { kind: 'radar', print: printOf(b.print), account: l?.username ?? who.username })
+			if (!l) return json(403, { error: 'El radar es parte de Pro' })
+			if ((await accessOf(db, { username: l.username }, now))?.level === 'blocked') return accessError('blocked')
+			const live = (env as ProEnv & LiveEnv).LIVE
+			const secret = (env as ProEnv & RadarServerEnv).RADAR_TOKEN_KEY
+			if (!live || !secret) return json(503, { error: 'El radar en el servidor aún no está disponible' })
+			// En prueba: solo las cuentas de RADAR_SERVER_USERS (separadas por comas; «*» para todas las Pro)
+			const beta = String((env as ProEnv & RadarServerEnv).RADAR_SERVER_USERS ?? '').toLowerCase().split(',').map((x) => x.trim())
+			if (!beta.includes('*') && !beta.includes(l.username.toLowerCase())) return json(403, { error: 'El radar en el servidor aún está en prueba', code: 'NOT_YET' })
+			const store = (m: Record<string, unknown>) =>
+				liveStub(env as ProEnv & LiveEnv)
+					.fetch('https://live/tokens', { method: 'POST', body: JSON.stringify({ ...m, username: l.username }) })
+					.then((r: Response) => r.json() as Promise<Record<string, unknown>>)
+			if (b.action === 'remove') {
+				t.detail = 'Radar en el servidor: quitó el token'
+				return json(200, await store({ op: 'del' }))
+			}
+			if (b.action !== 'connect') return json(200, await store({ op: 'get' }))
+			const check = await checkToken(String(b.token ?? ''), fetcher)
+			if (!check.ok) {
+				t.detail = `Radar en el servidor: token rechazado (${check.code})`
+				return json(400, { error: check.error, code: check.code })
+			}
+			if (check.username.toLowerCase() !== l.username.toLowerCase()) {
+				t.detail = 'Radar en el servidor: token de otra cuenta'
+				return json(400, { error: `Ese token es de @${check.username}, no de @${l.username}. Créalo con la cuenta que tiene Pro.`, code: 'OTHER_ACCOUNT' })
+			}
+			if (!check.kyc) return json(400, { error: 'Tu cuenta de QvaPay necesita el KYC aprobado para tomar ofertas.', code: 'KYC_REQUIRED' })
+			const entry: SealedToken = { username: l.username, uuid: check.uuid, sealed: await sealToken(String(b.token), l.username, secret), at: now, until: l.expires_at }
+			t.detail = 'Radar en el servidor: conectó su token (solo comprar)'
+			return json(200, await store({ op: 'set', entry }))
 		}
 
 		// Ya no se mandan diagnósticos desde el terminal: las dificultades se consultan en el grupo de Telegram (los terminales
