@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { test } from 'node:test'
 import type { P2POffer } from '../src/qvapay/types.ts'
-import { Book, feedSign, lagStats, feedSigned, feedWebhook, liveSocket, sseEvents, type FeedEvent, type LiveEnv } from '../worker/livebook.ts'
+import { Book, feedRow, feedSign, lagStats, feedSigned, feedWebhook, liveSocket, sseEvents, type FeedEvent, type LiveEnv } from '../worker/livebook.ts'
 import { liveRows } from '../worker/pro.ts'
 
 const T = Date.parse('2026-10-27T15:00:00Z')
@@ -379,21 +379,15 @@ test('feed: pausas en una oferta por rango. range_closed paused la saca (y lo qu
 	assert.equal(b.levels('BANK_CUP', 'ask')[0].usd, 100)
 })
 
-test('velocidad de toma: cuánto duró una fija desde que se pudo tomar, con las horas de QvaPay y las nuestras', () => {
-	const b = new Book()
-	b.apply(ev('p2p.created', {}, 0), T + 30)
-	// Un cambio de la misma oferta no reinicia el reloj
-	b.apply(ev('p2p.created', {}, 0.1), T + 120)
-	const a = b.apply(ev('p2p.applied', {}, 0.08), T + 110)
-	assert.equal(a, null) // más vieja que lo que sabemos: no cuenta
-	const t = b.apply(ev('p2p.applied', {}, 0.2), T + 230)!
-	assert.deepEqual(t.speed, { ms: 200, rxMs: 200 })
-	// Reabierta: el reloj empieza de nuevo
-	b.apply(ev('p2p.reopened', {}, 9), T + 9_050)
-	assert.deepEqual(b.apply(ev('p2p.applied', {}, 9.5), T + 9_600)!.speed, { ms: 500, rxMs: 550 })
-	// Cancelada por su dueño, o una que no vimos aparecer: sin velocidad
-	b.apply(ev('p2p.created', { uuid: 'o2' }, 20), T)
-	assert.equal(b.apply(ev('p2p.cancelled', { uuid: 'o2', status: 'cancelled' }, 21), T)!.speed, undefined)
-	b.merge('BANK_CUP', 'ask', [{ uuid: 'lista', type: 'sell', coin: 'BANK_CUP', amount: '10', receive: '10500', status: 'open', updated_at: at(30), User: ana }] as P2POffer[], T + 31_000, true, new Set())
-	assert.equal(b.apply(ev('p2p.applied', { uuid: 'lista' }, 32), T + 32_000)?.speed, undefined)
+test('historial del feed: cada aviso como una fila, con su hora de QvaPay, la de llegada y el usuario si se conoce', () => {
+	const r = feedRow({ ...ev('p2p.applied', { owner_vip: true, requirements: { min_ops: 5 } }, 2), sent_at: at(3) }, T + 3100, 'ana')!
+	assert.deepEqual(
+		[r.t, r.rx, r.sent, r.event, r.offer, r.coin, r.type, r.kind, r.status, r.amount, r.receive, r.avail, r.owner, r.username, r.vip, r.only_vip, r.req],
+		[T + 2000, T + 3100, T + 3000, 'applied', 'o1', 'BANK_CUP', 'sell', 'fixed', 'open', 20, 21000, null, 'u-ana', 'ana', 1, 0, '{"min_ops":5}'],
+	)
+	const f = feedRow(ev('p2p.range_updated', { offer_kind: 'flexible', available_amount: '12.5', order_min: '5', order_max: '10', change: 'taken', pause: { reason: 'taker_left', until: null } }), T, null)!
+	assert.deepEqual([f.event, f.kind, f.avail, f.omin, f.omax, f.change, f.pause, f.username], ['range_updated', 'flexible', 12.5, 5, 10, 'taken', 'taker_left', null])
+	// Sin hora de QvaPay: la de llegada. De un mercado que no es del terminal: nada
+	assert.equal(feedRow(ev('p2p.created', { updated_at: undefined }), T + 7, null)!.t, T + 7)
+	assert.equal(feedRow(ev('p2p.created', { coin: 'NADA' }), T, null), null)
 })

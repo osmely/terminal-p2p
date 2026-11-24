@@ -7,7 +7,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
-import { ACT_KEEP, ALARM_MS, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES, DEEP_TAKE, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, feedRow, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES, DEEP_TAKE, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
 import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
 import type { BotEnv } from './userbot.ts'
 import { alertOther, OtherMarkets, saveOther } from './othermarkets.ts'
@@ -242,6 +242,7 @@ export class LiveBook {
 		}
 		this.events++
 		this.lastEvent = Date.now()
+		this.logFeed(e)
 		this.addLag(e)
 		if (this.others.add(e)) await this.saveOthers()
 		const ch = this.book.apply(e)
@@ -258,7 +259,6 @@ export class LiveBook {
 			}
 		}
 		if (ch?.act) this.addAct(ch.coin, ch.act)
-		if (ch?.speed && ch.act) await this.addSpeed(ch.coin, ch.act, ch.speed)
 		if (ch?.trade) await this.addVolume(ch.coin, ch.trade)
 		if (ch?.trade) await this.addCandle(ch.coin, ch.trade)
 		await this.save()
@@ -267,22 +267,22 @@ export class LiveBook {
 		return true
 	}
 
-	// Una oferta tomada entera: cuánto duró en el libro, para saber qué tan rápido cazan las ofertas (ver take_speed).
-	// Una fila por toma y, una vez al día, se borra lo de más de 30 días
-	private speedPrunedAt = 0
-	private async addSpeed(coin: string, a: Act, sp: { ms: number; rxMs: number | null }) {
-		const owner = a.user || this.book.owners.get(a.owner)?.username || ''
-		try {
-			await this.env.DB.prepare('INSERT INTO take_speed (t, coin, side, usd, price, owner, ms, rx_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-				.bind(a.t, coin, a.side, a.usd, a.price, owner, sp.ms, sp.rxMs)
-				.run()
-			if (Date.now() - this.speedPrunedAt > 86_400_000) {
-				this.speedPrunedAt = Date.now()
-				await this.env.DB.prepare('DELETE FROM take_speed WHERE t < ?').bind(Date.now() - 30 * 86_400_000).run()
-			}
-		} catch (err) {
-			console.error(`take_speed: ${(err as Error).message}`)
-		}
+	// Historial del feed (feed_log, 30 días): sin esperar, para no frenar el libro. Una vez al día se borra lo viejo
+	private feedPrunedAt = 0
+	private logFeed(e: FeedEvent) {
+		const r = feedRow(e, Date.now(), this.book.owners.get(e.data?.owner_uuid ?? '')?.username ?? null)
+		if (!r) return
+		const cols = Object.keys(r)
+		const prune = Date.now() - this.feedPrunedAt > 86_400_000
+		if (prune) this.feedPrunedAt = Date.now()
+		this.ctx.waitUntil(
+			(async () => {
+				await this.env.DB.prepare(`INSERT OR IGNORE INTO feed_log (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
+					.bind(...Object.values(r))
+					.run()
+				if (prune) await this.env.DB.prepare('DELETE FROM feed_log WHERE t < ?').bind(Date.now() - 30 * 86_400_000).run()
+			})().catch((err) => console.error(`feed_log: ${(err as Error).message}`)),
+		)
 	}
 
 	// Si el dueño de la oferta activó los avisos de sus ofertas, se le escribe por Telegram (sin esperar: el libro sigue)

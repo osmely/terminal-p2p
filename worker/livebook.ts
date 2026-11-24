@@ -90,6 +90,38 @@ export interface FeedEvent {
 	}
 }
 
+// Una fila del historial del feed (tabla feed_log): el aviso tal cual, con la hora de llegada y el usuario del anunciante
+// si ya lo conocíamos. null si no es de un mercado del terminal
+export function feedRow(e: FeedEvent, rx: number, username: string | null) {
+	const d = e?.data
+	if (!d?.uuid || !TICKS.has(d.coin) || (d.type !== 'buy' && d.type !== 'sell') || typeof e.event !== 'string') return null
+	const n = (v: unknown) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null)
+	const sent = ts(e.sent_at) || null
+	return {
+		t: ts(d.updated_at) || sent || rx,
+		rx,
+		sent,
+		event: e.event.replace(/^p2p\./, '').slice(0, 30),
+		offer: d.uuid.slice(0, 40),
+		coin: d.coin,
+		type: d.type,
+		kind: d.offer_kind === 'flexible' || e.event.startsWith('p2p.range_') ? 'flexible' : 'fixed',
+		status: String(d.status ?? '').slice(0, 20),
+		change: d.change ? String(d.change).slice(0, 20) : null,
+		amount: n(d.amount) ?? 0,
+		receive: n(d.receive) ?? 0,
+		avail: n(d.available_amount),
+		omin: n(d.order_min),
+		omax: n(d.order_max),
+		owner: d.owner_uuid ? d.owner_uuid.slice(0, 40) : null,
+		username: username || null,
+		vip: d.owner_vip == null ? null : d.owner_vip ? 1 : 0,
+		only_vip: d.only_vip == null ? null : d.only_vip ? 1 : 0,
+		req: d.requirements && Object.keys(d.requirements).length ? JSON.stringify(d.requirements).slice(0, 300) : null,
+		pause: d.pause?.reason ? String(d.pause.reason).slice(0, 20) : null,
+	}
+}
+
 export interface Pause {
 	reason: 'owner' | 'taker_left' | string
 	until: string | null
@@ -121,9 +153,6 @@ export interface LiveOffer {
 	// La nota pública (solo la trae el listado, no el aviso en vivo)
 	message?: string
 	bank?: string
-	// Desde cuándo se puede tomar (hora de QvaPay) y cuándo nos llegó ese aviso: solo si lo vimos llegar por el feed
-	openAt?: number
-	seenAt?: number
 	createdAt: number
 	updatedAt: number
 }
@@ -163,7 +192,7 @@ export const OWNER_KEEP_DAYS = 30
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 28
+export const LIVE_VERSION = 29
 
 export interface Applied {
 	coin: string
@@ -172,8 +201,6 @@ export interface Applied {
 	unknownOwner: boolean
 	act: Act | null
 	trade: Trade | null
-	// Una oferta tomada entera que vimos aparecer: cuánto duró en el libro (con las horas de QvaPay y con las nuestras)
-	speed?: { ms: number; rxMs: number | null }
 }
 
 export interface Owner {
@@ -247,8 +274,8 @@ export class Book {
 		const act = (kind: ActKind, actUsd: number, actPrice = price): Act | null =>
 			actUsd > 0 && actPrice > 0 ? { t: at, kind, side, price: actPrice, usd: Math.round(actUsd * 100) / 100, owner: d.owner_uuid ?? '', user, uuid: d.uuid } : null
 		const trade = this.tradeOf(e, side, at, flexible, amount, price, had)
-		const out = (changed: boolean, a: Act | null, unknownOwner = false, speed?: Applied['speed']): Applied | null =>
-			changed || a || trade ? { coin: d.coin, side, changed, unknownOwner, act: a, trade, ...(speed ? { speed } : {}) } : null
+		const out = (changed: boolean, a: Act | null, unknownOwner = false): Applied | null =>
+			changed || a || trade ? { coin: d.coin, side, changed, unknownOwner, act: a, trade } : null
 
 		// Una operación que se completó: no cambia el libro (la oferta ya había salido al tomarla), pero es un precio real
 		if (e.event === 'p2p.completed') return out(false, act('done', amount))
@@ -278,7 +305,6 @@ export class Book {
 				requirements: d.requirements && Object.keys(d.requirements).length ? d.requirements : null,
 				message: had?.message,
 				bank: had?.bank,
-				...(had ? { openAt: had.openAt, seenAt: had.seenAt } : { openAt: at, seenAt: now }),
 				createdAt: had?.createdAt ?? at,
 				updatedAt: at,
 			}
@@ -310,8 +336,7 @@ export class Book {
 		const rest = had?.usd ?? (flexible ? num(d.available_amount ?? 0) || amount : amount)
 		// Una pausa de algo que no estaba en el libro (otra pausa encima, o ya fuera) no es noticia
 		if (pause) return out(!!had, had ? act(pause.reason === 'taker_left' ? 'autopaused' : 'paused', rest, had.price) : null)
-		const speed = taken && had?.kind === 'fixed' && had.openAt != null && at >= had.openAt ? { ms: at - had.openAt, rxMs: had.seenAt != null ? now - had.seenAt : null } : undefined
-		return out(!!had, converted ? null : act(taken ? 'taken' : 'cancelled', rest, had?.price ?? price), false, speed)
+		return out(!!had, converted ? null : act(taken ? 'taken' : 'cancelled', rest, had?.price ?? price))
 	}
 
 	// Lo que el evento suma o resta al volumen. Una fija, al completarse y una sola vez. Una de rango, lo que cambió lo
@@ -428,8 +453,6 @@ export class Book {
 				requirements: o.requirements && Object.keys(o.requirements).length ? o.requirements : null,
 				message,
 				bank,
-				openAt: had?.openAt,
-				seenAt: had?.seenAt,
 				createdAt: ts(o.created_at) || had?.createdAt || at,
 				updatedAt: at,
 			})
