@@ -609,6 +609,8 @@
 	'broker.kvParts': 'In parts',
 	'broker.kvKeepLimits': 'within those limits',
 	'broker.kvReq': 'Requirements',
+	'broker.kvFee': 'QvaPay fee',
+	'broker.kvPrice': 'Price',
 	'broker.kvBank': 'Bank',
 	'broker.kvVis': 'Visibility',
 	'broker.kvPublicTg': 'Public on Telegram',

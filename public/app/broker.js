@@ -2187,13 +2187,16 @@ function renderTake(uuid, side, l, coin, preset) {
 		<div class="kv">
 			<span>${youBuy ? tl('broker.tkSells') : tl('broker.tkBuys')}</span><b>${fmtM(l.usd)} QUSD</b><span></span>
 			${flex ? `<span>${tl('broker.tkPerOrder')}</span><b>${min ? `${fmtM(min)}–${fmtM(max)}` : tl('broker.tkUpTo', { max: fmtM(max) })} QUSD</b><span></span>` : ''}
-			${req ? `<span>${tl('broker.kvReq')}</span><b>${esc(req)}</b><span></span>` : ''}
+			<span>${tl('broker.kvPrice')}</span><b>${fmtP(l.price)} ${unit}</b><span></span>
+			<span>${tl('broker.kvPay')}</span><b id="tkPay"></b><span></span>
+			<span>${tl('broker.kvReceive')}</span><b id="tkGet"></b><span></span>
+			<span id="tkFeeK">${tl('broker.kvFee')}</span><b id="tkFee"></b><span></span>
 			${l.bank ? `<span>${tl('broker.kvBank')}</span><b>💳 ${esc(typeof bankName === 'function' ? bankName(l.bank) : l.bank)}</b><span></span>` : ''}
+			${req ? `<span>${tl('broker.kvReq')}</span><b>${esc(req)}</b><span></span>` : ''}
 			${l.vipOnly ? `<span>${tl('broker.tkOnly')}</span><b>${tl('broker.tkVipAccounts')}</b><span></span>` : ''}
 		</div>
 		${l.message ? `<p class="offer-msg">💬 ${esc(l.message)}</p>` : ''}
 		${flex ? `<label class="field">${tl(youBuy ? 'broker.tkHowManyBuy' : 'broker.tkHowManySell')}<input class="input" id="tkAmount" inputmode="decimal" data-num data-dec="2" autocomplete="off" value="${start}" /></label>` : ''}
-		<p class="hint" id="tkTotal"></p>
 		<p class="notice">${youBuy ? tl('broker.tkNoteBuy') : tl('broker.tkNoteSell')}</p>
 		${
 			bk.acct.connected
@@ -2205,8 +2208,15 @@ function renderTake(uuid, side, l, coin, preset) {
 	const amount = () => (flex ? num2($('tkAmount').value) : l.usd)
 	const upd = () => {
 		const a = amount()
-		const total = a * l.price
-		$('tkTotal').innerHTML = a > 0 ? `${tl(youBuy ? 'broker.tkPay' : 'broker.tkGet', { total: `${fmtM(total)} ${unit}`, usd: fmtM(a) })}${youBuy ? netNote(a) : ''}` : ''
+		const ok = a > 0
+		const total = `${fmtM(a * l.price)} ${unit}`
+		// Comprando: pagas en la moneda del mercado y te llegan los QUSD menos la comisión de QvaPay (las GOLD no la pagan).
+		// Vendiendo: entregas tus QUSD y recibes el pago
+		const fee = youBuy && ok ? feeOf(a) : 0
+		$('tkPay').textContent = ok ? (youBuy ? total : `${fmtM(a)} QUSD`) : '—'
+		$('tkGet').textContent = ok ? (youBuy ? `${fmtM(a - fee)} QUSD` : total) : '—'
+		$('tkFee').textContent = `${fmtM(fee)} QUSD`
+		$('tkFee').hidden = $('tkFeeK').hidden = !fee
 		if ($('tkGo')) $('tkGo').textContent = tl(youBuy ? 'broker.tkGoBuy' : 'broker.tkGoSell', { usd: fmtM(a) })
 	}
 	$('tkAmount')?.addEventListener('input', upd)
