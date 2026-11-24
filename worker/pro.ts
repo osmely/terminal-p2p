@@ -19,7 +19,7 @@ import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tel
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
 import { COINS } from '../src/terminal/market.ts'
-import { checkToken, sealToken, type RadarServerEnv, type SealedToken } from '../pro/radarserver.ts'
+import { checkToken, cleanRadar, sealToken, type RadarServerEnv, type SealedToken } from '../pro/radarserver.ts'
 import { liveClients, liveSimulate, liveStatus, liveStub, type LagStats, type LiveClient, type LiveEnv, type LiveState } from './livebook.ts'
 import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
 import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS, stockOf } from './ratealerts.ts'
@@ -1221,7 +1221,9 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 				t.detail = 'Radar en el servidor: quitó el token'
 				return json(200, await store({ op: 'del' }))
 			}
-			if (b.action !== 'connect') return json(200, await store({ op: 'get' }))
+			// Consultar y copiar las reglas pasa a cada rato: no va al registro de la cuenta
+			if (b.action === 'rules') return (t.skip = true), json(200, await store({ op: 'rules', radar: cleanRadar(b, new Set(COINS.map((c) => c.tick)), now) }))
+			if (b.action !== 'connect') return (t.skip = true), json(200, await store({ op: 'get' }))
 			const check = await checkToken(String(b.token ?? ''), fetcher)
 			if (!check.ok) {
 				t.detail = `Radar en el servidor: token rechazado (${check.code})`
