@@ -342,7 +342,7 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 		}
 	}
 
-	const radarTries = rows.filter((e) => e.source === 'relay' && e.event === 'take' && e.via === 'radar')
+	const radarTries = rows.filter((e) => e.source === 'relay' && e.event === 'take' && (e.via === 'radar' || e.via === 'radar-srv'))
 	const radarMs = radarTries.map((e) => e.ms).filter((v): v is number => v != null)
 	const step = (key: RadarStep['key'], pick: (e: MetricEvent) => number | null | undefined): RadarStep => {
 		const v = radarTries.map(pick).filter((x): x is number => x != null)

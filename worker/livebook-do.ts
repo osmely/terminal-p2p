@@ -15,7 +15,8 @@ import { addCandle, candlePrice, markCandlesFrom, ownRefs, SLOT_MS } from './can
 import { notify, type AlertEnv } from './alerts.ts'
 import { deliverPush, ownerPush, pushTargets, takerPush, TARGETS_TTL_MS, type PushEnv, type PushNotice } from './push.ts'
 import { Presence, type PresenceEnv } from '../pro/presence.ts'
-import { tokenStore } from '../pro/radarserver.ts'
+import { radarEngineFor, tokenStore } from '../pro/radarserver.ts'
+import { referenceOf } from '../src/terminal/stats.ts'
 
 // Un terminal cuenta como en línea si su conexión dio señal de vida (cada 25 s) en este rato
 const TERMINAL_SEEN_MS = 90_000
@@ -111,11 +112,16 @@ export class LiveBook {
 
 	private ctx: DurableObjectState
 	private env: LiveEnv
+	private radar: ReturnType<typeof radarEngineFor> = null
 
 	constructor(ctx: DurableObjectState, env: LiveEnv) {
 		this.ctx = ctx
 		this.env = env
 		this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
+		this.radar = radarEngineFor(ctx as never, env as never, {
+			owner: (uuid) => this.book.owners.get(uuid),
+			reference: (coin) => referenceOf(this.done.get(coin)?.data ?? null)?.sell ?? null,
+		})
 		// El libro se guarda oferta a oferta (o:uuid) y dueño a dueño (u:uuid): sobrevive a que el objeto se duerma
 		this.ctx.blockConcurrencyWhile(async () => {
 			for (const o of (await this.ctx.storage.list<LiveOffer>({ prefix: 'o:' })).values()) this.book.offers.set(o.uuid, o)
@@ -126,6 +132,7 @@ export class LiveBook {
 				this.acts.set(k.slice(2), a)
 				this.takes.set(k.slice(2), a.filter((x) => x.kind === 'taken' || x.kind === 'partial').map((x) => x.t))
 			}
+			await this.radar?.load()
 			this.recent = (await this.ctx.storage.get<FeedSample[]>('recent')) ?? []
 			const meta = await this.ctx.storage.get<{ events: number; lastEvent: number | null; synced?: string[] }>('meta')
 			if (meta) Object.assign(this, { events: meta.events, lastEvent: meta.lastEvent, synced: new Set(meta.synced ?? []) })
@@ -147,7 +154,12 @@ export class LiveBook {
 		if (url.pathname === '/status') return Response.json(this.state())
 		if (url.pathname === '/online' && req.method === 'POST') return Response.json(this.watchOnline(await req.json().catch(() => null), req.headers.get('x-ip') ?? ''))
 		if (url.pathname === '/snapshot' && req.method === 'POST') return Response.json(this.snapshot(((await req.json().catch(() => ({}))) as { refs?: BookRefs }).refs ?? {}))
-		if (url.pathname === '/tokens' && req.method === 'POST') return Response.json(await tokenStore(this.ctx.storage, await req.json().catch(() => ({}))))
+		if (url.pathname === '/tokens' && req.method === 'POST') {
+			const m = (await req.json().catch(() => ({}))) as { username?: unknown }
+			const r = await tokenStore(this.ctx.storage, m)
+			if (typeof m.username === 'string') await this.radar?.refresh(m.username)
+			return Response.json(r)
+		}
 		if (url.pathname === '/simulate' && req.method === 'POST') return this.simulate(String(((await req.json().catch(() => ({}))) as { coin?: string }).coin ?? 'BANK_CUP'))
 		return new Response('no encontrado', { status: 404 })
 	}
@@ -260,6 +272,7 @@ export class LiveBook {
 				this.want.add(sideKey(ch.coin, ch.side))
 			}
 		}
+		if (ch?.act) this.radar?.onAct(ch.act.kind, ch.act.uuid, this.book.offers.get(ch.act.uuid))
 		if (ch?.act) this.addAct(ch.coin, ch.act)
 		if (ch?.trade) await this.addVolume(ch.coin, ch.trade)
 		if (ch?.trade) await this.addCandle(ch.coin, ch.trade)
@@ -672,7 +685,8 @@ export class LiveBook {
 					if (feed ? age > RESYNC_MS : watched.has(coin) && age > POLL_MS) this.want.add(k)
 				}
 			// Las completadas de un mercado que se mira (públicas, sin credenciales), cada DONE_EVERY_MS; una por pasada
-			const doneDue = [...watched].filter((c) => now - (this.done.get(c)?.at ?? 0) > DONE_EVERY_MS).sort((a, b) => (this.done.get(a)?.at ?? 0) - (this.done.get(b)?.at ?? 0))[0]
+			// (y las de los mercados del radar del servidor, para sus reglas en %: solo una lectura pública, sin guardar nada)
+			const doneDue = [...new Set([...watched, ...(this.radar?.coins() ?? [])])].filter((c) => now - (this.done.get(c)?.at ?? 0) > DONE_EVERY_MS).sort((a, b) => (this.done.get(a)?.at ?? 0) - (this.done.get(b)?.at ?? 0))[0]
 			if (doneDue) await this.readDone(doneDue)
 			const due = [...this.want].sort((a, b) => (this.readAt.get(a) ?? 0) - (this.readAt.get(b) ?? 0))
 			this.reads = this.reads.filter((t) => now - t < 60_000)

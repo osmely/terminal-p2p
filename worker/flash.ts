@@ -81,8 +81,8 @@ export async function loadFlash(db: D1, days: number, salt: string | undefined, 
 		for (const e of ev) {
 			const id = prints.get(e.offer)!
 			const m = mine.get(id) ?? { radar: false, hand: false, lost: false }
-			if (e.status === 'ok') e.via === 'radar' ? (m.radar = true) : (m.hand = true)
-			else if (e.via === 'radar') m.lost = true
+			if (e.status === 'ok') e.via.startsWith('radar') ? (m.radar = true) : (m.hand = true)
+			else if (e.via.startsWith('radar')) m.lost = true
 			mine.set(id, m)
 		}
 	}
