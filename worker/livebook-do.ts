@@ -121,6 +121,14 @@ export class LiveBook {
 		this.radar = radarEngineFor(ctx as never, env as never, {
 			owner: (uuid) => this.book.owners.get(uuid),
 			reference: (coin) => referenceOf(this.done.get(coin)?.data ?? null)?.sell ?? null,
+			tell: (u, msg) => {
+				const text = JSON.stringify(msg)
+				for (const ws of this.ctx.getWebSockets())
+					if (String((ws.deserializeAttachment() as Sock | null)?.u ?? '').toLowerCase() === u)
+						try {
+							ws.send(text)
+						} catch {}
+			},
 		})
 		// El libro se guarda oferta a oferta (o:uuid) y dueño a dueño (u:uuid): sobrevive a que el objeto se duerma
 		this.ctx.blockConcurrencyWhile(async () => {
@@ -404,6 +412,8 @@ export class LiveBook {
 		server.serializeAttachment({ subs: [], pro, u, at: Date.now() } satisfies Sock)
 		server.send(JSON.stringify({ t: 'hello', feed: this.feedOn(), pro, every: pro ? 0 : FREE_EVERY_MS }))
 		server.send(this.onlineMsg())
+		const radar = this.radar?.hello(u)
+		if (radar) server.send(radar)
 		return new Response(null, { status: 101, webSocket: client })
 	}
 

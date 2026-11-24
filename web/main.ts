@@ -142,6 +142,11 @@ function liveConnect() {
 			window.dispatchEvent(new CustomEvent('tp:online'))
 			return
 		}
+		// Del radar en el servidor (Pro): lo que encontró para tu cuenta o que cambiaron tus reglas en otro dispositivo
+		if (m.t === 'radar') {
+			window.dispatchEvent(new CustomEvent('tp:radarsrv', { detail: m }))
+			return
+		}
 		// Mensaje nuevo en el buzón: el terminal lo pide con tu cuenta
 		if (m.t === 'inbox') {
 			window.dispatchEvent(new CustomEvent('tp:inbox'))
