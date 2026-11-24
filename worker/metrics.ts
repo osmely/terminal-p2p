@@ -349,7 +349,8 @@ export function summarize(rows: MetricEvent[], days: number): Summary {
 		return { key, n: v.length, p50: quantile(v, 0.5), p90: quantile(v, 0.9) }
 	}
 	// Perdidas: otro llegó antes (QvaPay dice que ya no está disponible)
-	const lostErr = (e: MetricEvent) => e.status === 'error' && /disponible|NOT_AVAILABLE|TAKEN/i.test(e.err ?? '')
+	// Otro llegó antes: QvaPay contesta BAD_REQUEST (o CONFLICT si llegan a la vez) cuando la oferta ya no está
+	const lostErr = (e: MetricEvent) => e.status === 'error' && /disponible|NOT_AVAILABLE|TAKEN|^BAD_REQUEST$|^CONFLICT$/i.test(e.err ?? '')
 
 	return {
 		days,
@@ -526,6 +527,19 @@ export const RADAR_STEP: Record<RadarStep['key'], [string, string]> = {
 	phone: ['El teléfono decide', 'de ver la oferta a pedir la toma'],
 	qp: ['QvaPay toma la oferta', 'lo que tarda QvaPay en contestar la toma'],
 }
+// La sección del radar del panel: sus tomas (logradas, perdidas, en pausa) y de dónde sale el tiempo
+export function radarHtml(r: Summary['radar']) {
+	const card = (label: string, value: string, sub = '') => `<div class="card"><span>${label}</span><b>${value}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
+	if (!r.tries) return '<p class="empty">El radar no intentó ninguna toma en este periodo.</p>'
+	return `<div class="cards">
+${card('Tomas del radar', `${n(r.ok)} de ${n(r.tries)}`, pct(r.ok, r.tries))}
+${card('Perdidas', n(r.lost), 'otro llegó antes')}
+${card('En pausa', n(r.paused), 'la oferta estaba pausada')}
+${card('El teléfono decide', r.p50 == null ? '—' : `${n(r.p50)} ms`, r.p90 == null ? '' : `9 de cada 10 en menos de ${n(r.p90)} ms`)}
+</div>
+${radarPanel(r)}`
+}
+
 function radarPanel(r: Summary['radar']) {
 	const ms = (v: number | null) => (v == null ? '<span class="note">—</span>' : v < 1000 ? `${n(v)} ms` : `${(v / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 })} s`)
 	const total = r.steps.reduce((t, x) => t + (x.p50 ?? 0), 0)
@@ -560,7 +574,6 @@ ${card('Operaciones completadas', n(s.completed), 'liberadas aquí o vistas comp
 ${card('Volumen completado', `${n(s.volume)} USD`)}
 ${card('Comprar ya', n(s.buys), `${n(s.buysCompleted)} completadas · ${n(s.buyVolume)} USD`)}
 ${card('Vender ya', n(s.swaps), `${n(s.swapsCompleted)} completadas · ${n(s.swapVolume)} USD`)}
-${s.radar.tries ? card('Tomas del radar', `${n(s.radar.ok)} de ${n(s.radar.tries)}`, s.radar.p50 != null ? `de ver la oferta a pedirla: ${n(s.radar.p50)} ms la mitad, ${n(s.radar.p90 ?? 0)} ms el 90 %` : '') : ''}
 </div>
 <div class="funnels">
 <div class="funnel"><h3>Ofertas publicadas desde el terminal</h3><p>De las ofertas creadas aquí, cuántas tuvieron contraparte y cuántas llegaron a completar al menos una operación.</p><ol>
@@ -572,7 +585,6 @@ ${step('ventas empezadas', s.swaps, null)}${step('completadas', s.swapsCompleted
 <div class="funnel"><h3>Comprar ya</h3><p>Compras de USD a la oferta de venta más barata hechas con «Comprar» del botón de la cabecera, y cuántas se completaron.</p><ol>
 ${step('compras empezadas', s.buys, null)}${step('completadas', s.buysCompleted, s.buys)}</ol></div>
 </div>
-${s.radar.tries ? radarPanel(s.radar) : ''}
 ${panel(
 	'Por mercado',
 	table(['Mercado', 'Publicadas', 'Tomadas', 'Completadas', 'Volumen (USD)'], s.byCoin.map((c) => `<tr><td>${esc(coinName(c.coin))}</td><td>${n(c.created)}</td><td>${n(c.taken)}</td><td>${n(c.completed)}</td><td>${n(c.volume)}</td></tr>`).join('')),

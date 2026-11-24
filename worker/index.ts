@@ -8,7 +8,7 @@
 // Todo lo que depende de la cuenta del usuario corre en su navegador.
 
 import { cubaDate, informalSince, latestInformal, syncInformal } from './informal.ts'
-import { actionsHtml, authorized, clientEvent, loadPublicStats, loadSummary, rangesNav, relayEvent, saveEvent, stagingGate, startedHere } from './metrics.ts'
+import { actionsHtml, authorized, radarHtml, clientEvent, loadPublicStats, loadSummary, rangesNav, relayEvent, saveEvent, stagingGate, startedHere } from './metrics.ts'
 import { GROWTH_CSS, GROWTH_JS, growthHtml, loadGrowth } from './growth.ts'
 import { collect, inCuba, isCoin, query, RANGES, withoutPro, type RatesData } from './rates.ts'
 import { RELAY_PREFIX, relay } from './relay.ts'
@@ -37,6 +37,7 @@ import { ANALYSIS_KEY, isAnalysisTime, refreshAnalysis, refreshBook } from './an
 import { checkAlerts } from './ratealerts.ts'
 import { historySource, isStock, isTimeframe, loadHistory, loadQuote, loadQuotes, marketStatus, QUOTES_TTL_S, TIMEFRAMES, trimHistory, withIcon, type Quote } from './stocks.ts'
 import { LiveBook } from './livebook-do.ts'
+import { flashHtml, loadFlash } from './flash.ts'
 import { cleanupPush, pushApi, refreshLive, relayTaken, type PushEnv } from './push.ts'
 import { licenseOfPrint, ownedBy, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 import { TASA_KEY, TASA_PATH, tasaData, tasaPage, type TasaData } from './tasa.ts'
@@ -562,13 +563,21 @@ async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 7
-	const [growth, summary, hits, bot, other] = await Promise.all([loadGrowth(env.DB, days), loadSummary(env.DB, days), loadHits(env.DB, days), loadBot(env.DB, days), loadOther(env.DB)])
+	const [growth, summary, hits, bot, other, flash] = await Promise.all([
+		loadGrowth(env.DB, days),
+		loadSummary(env.DB, days),
+		loadHits(env.DB, days),
+		loadBot(env.DB, days),
+		loadOther(env.DB),
+		loadFlash(env.DB, days, env.METRICS_SALT).catch((err) => (console.error(`relámpago: ${(err as Error).message}`), null)),
+	])
 	const more = (title: string, sub: string, body: string) => `<details class="more"><summary>${title} <small>${sub}</small></summary>${body}</details>`
 	return adminPage(
 		'metrics',
 		'Métricas',
 		`${pageHead('Métricas', 'Cómo crece el terminal: cuentas, operaciones, de dónde llega la gente y Pro.', rangesNav(days))}<style>${GROWTH_CSS}</style>
 ${growthHtml(growth)}
+${more('Radar y ofertas relámpago', 'tomas del radar, de dónde sale el tiempo y quién se lleva las ofertas más rápidas', `${radarHtml(summary.radar)}<h2 class="sec-title">Ofertas relámpago</h2>${flash ? flashHtml(flash) : '<p class="empty">No se pudo leer el historial del feed.</p>'}`)}
 ${more('Acciones del P2P en detalle', 'por mercado, por día, embudos y errores de QvaPay', actionsHtml(summary))}
 ${more('Visitas en detalle', 'web, terminal y simulador, por enlace y por día', hitsHtml(hits))}
 ${more('Bot del dólar y otros mercados', '', botHtml(bot) + otherHtml(other, panel))}
