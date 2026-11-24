@@ -1215,7 +1215,7 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			if (!beta.includes('*') && !beta.includes(l.username.toLowerCase())) return json(403, { error: 'El radar en el servidor aún está en prueba', code: 'NOT_YET' })
 			const store = (m: Record<string, unknown>) =>
 				liveStub(env as ProEnv & LiveEnv)
-					.fetch('https://live/tokens', { method: 'POST', body: JSON.stringify({ ...m, username: l.username }) })
+					.fetch('https://live/tokens', { method: 'POST', body: JSON.stringify({ ...m, username: l.username, until: l.expires_at }) })
 					.then((r: Response) => r.json() as Promise<Record<string, unknown>>)
 			if (b.action === 'remove') {
 				t.detail = 'Radar en el servidor: quitó el token'
