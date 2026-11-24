@@ -192,7 +192,7 @@ export const OWNER_KEEP_DAYS = 30
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 35
+export const LIVE_VERSION = 36
 
 export interface Applied {
 	coin: string
@@ -749,6 +749,15 @@ export async function liveOnline(env: LiveEnv, users: { id: string; u: string }[
 	if (!env.LIVE) return null
 	const r = await liveStub(env).fetch('https://live/online', { method: 'POST', headers: { 'x-ip': ip }, body: JSON.stringify({ users }) })
 	return r.ok ? r.json() : null
+}
+
+// Dónde corre el libro en vivo y cuánto le tarda QvaPay en contestar (para el panel)
+export async function liveWhere(env: LiveEnv): Promise<{ colo: string | null; ms: number[] } | null> {
+	if (!env.LIVE) return null
+	return liveStub(env)
+		.fetch('https://live/where')
+		.then((r: Response) => (r.ok ? (r.json() as Promise<{ colo: string | null; ms: number[] }>) : null))
+		.catch(() => null)
 }
 
 export async function liveClients(env: LiveEnv): Promise<LiveClient[] | null> {

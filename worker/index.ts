@@ -25,7 +25,7 @@ import { dailyPost } from './community.ts'
 import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { loadOther, otherHtml } from './othermarkets.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
-import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveOnline, liveSocket, type LiveEnv } from './livebook.ts'
+import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveOnline, liveSocket, liveWhere, type LiveEnv } from './livebook.ts'
 import { peerStats, type PeerStatsEnv } from '../pro/peerstats.ts'
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { botHtml, loadBot } from './ratebot.ts'
@@ -563,21 +563,26 @@ async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
 	if (!(await authorized(req, env.METRICS_KEY))) return askKey()
 	const days = [7, 30, 90, 365].includes(Number(url.searchParams.get('days'))) ? Number(url.searchParams.get('days')) : 7
-	const [growth, summary, hits, bot, other, flash] = await Promise.all([
+	const [growth, summary, hits, bot, other, flash, where] = await Promise.all([
 		loadGrowth(env.DB, days),
 		loadSummary(env.DB, days),
 		loadHits(env.DB, days),
 		loadBot(env.DB, days),
 		loadOther(env.DB),
 		loadFlash(env.DB, days, env.METRICS_SALT).catch((err) => (console.error(`relámpago: ${(err as Error).message}`), null)),
+		liveWhere(env as unknown as LiveEnv),
 	])
+	// Dónde corre el libro en vivo y lo que le tarda QvaPay (lo más rápido y la mitad de las veces)
+	const whereHtml = where
+		? `<p class="hint">El libro en vivo corre en <b>${where.colo ?? '—'}</b>. ${where.ms.length ? `QvaPay le contesta en <b>${where.ms[0]} ms</b> lo más rápido y en ${where.ms[Math.floor(where.ms.length / 2)]} ms la mitad de las veces.` : 'QvaPay no contestó.'}</p>`
+		: ''
 	const more = (title: string, sub: string, body: string) => `<details class="more"><summary>${title} <small>${sub}</small></summary>${body}</details>`
 	return adminPage(
 		'metrics',
 		'Métricas',
 		`${pageHead('Métricas', 'Cómo crece el terminal: cuentas, operaciones, de dónde llega la gente y Pro.', rangesNav(days))}<style>${GROWTH_CSS}</style>
 ${growthHtml(growth)}
-${more('Radar y ofertas relámpago', 'tomas del radar, de dónde sale el tiempo y quién se lleva las ofertas más rápidas', `${radarHtml(summary.radar)}<h2 class="sec-title">Ofertas relámpago</h2>${flash ? flashHtml(flash) : '<p class="empty">No se pudo leer el historial del feed.</p>'}`)}
+${more('Radar y ofertas relámpago', 'tomas del radar, de dónde sale el tiempo y quién se lleva las ofertas más rápidas', `${whereHtml}${radarHtml(summary.radar)}<h2 class="sec-title">Ofertas relámpago</h2>${flash ? flashHtml(flash) : '<p class="empty">No se pudo leer el historial del feed.</p>'}`)}
 ${more('Acciones del P2P en detalle', 'por mercado, por día, embudos y errores de QvaPay', actionsHtml(summary))}
 ${more('Visitas en detalle', 'web, terminal y simulador, por enlace y por día', hitsHtml(hits))}
 ${more('Bot del dólar y otros mercados', '', botHtml(bot) + otherHtml(other, panel))}

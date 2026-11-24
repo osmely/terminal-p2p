@@ -157,6 +157,7 @@ export class LiveBook {
 		if (url.pathname === '/ws') return this.connect(url.searchParams.get('pro') === '1', url.searchParams.get('u') || null)
 		if (url.pathname === '/inbox' && req.method === 'POST') return Response.json(this.inboxPing(await req.json().catch(() => null)))
 		if (url.pathname === '/clients') return Response.json(this.clients())
+		if (url.pathname === '/where') return Response.json(await this.where())
 		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
 		if (url.pathname === '/offer') return Response.json(this.book.find(url.searchParams.get('id') ?? ''))
 		if (url.pathname === '/status') return Response.json(this.state())
@@ -208,6 +209,27 @@ export class LiveBook {
 
 	// Quién tiene el terminal abierto: la última señal es el último «ping» del terminal (cada 25 s), al que contesta
 	// Cloudflare sin despertar este objeto
+	// Dónde corre este objeto y cuánto le tarda QvaPay en contestar (una petición sin cuenta que llega a su servidor y
+	// vuelve con 401): para el panel. Se mide como mucho cada 10 min
+	private whereAt: { at: number; colo: string | null; ms: number[] } | null = null
+	private async where() {
+		if (this.whereAt && Date.now() - this.whereAt.at < 600_000) return this.whereAt
+		const colo = await fetch('https://www.cloudflare.com/cdn-cgi/trace')
+			.then((r) => r.text())
+			.then((t) => /^colo=(\w+)$/m.exec(t)?.[1] ?? null)
+			.catch(() => null)
+		const ms: number[] = []
+		for (let i = 0; i < 5; i++) {
+			const at = Date.now()
+			const ok = await fetch(`${QVAPAY}/p2p/00000000-0000-4000-8000-000000000000`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) })
+				.then((r) => r.body?.cancel().then(() => true) ?? true)
+				.catch(() => false)
+			if (ok) ms.push(Date.now() - at)
+		}
+		this.whereAt = { at: Date.now(), colo, ms: ms.sort((a, b) => a - b) }
+		return this.whereAt
+	}
+
 	private clients() {
 		return this.ctx.getWebSockets().map((ws) => {
 			const s = ws.deserializeAttachment() as Sock | null
@@ -251,8 +273,9 @@ export class LiveBook {
 
 	// Un evento del feed (del webhook o del stream): se apunta para el panel, entra al libro y sale hacia los terminales
 	private async ingest(raw: string, rejected: string | null) {
-		this.recent = [{ at: Date.now(), rejected, body: raw.slice(0, 4000) }, ...this.recent].slice(0, 15)
-		await this.ctx.storage.put('recent', this.recent)
+		const rx = Date.now()
+		this.recent = [{ at: rx, rejected, body: raw.slice(0, 4000) }, ...this.recent].slice(0, 15)
+		void this.ctx.storage.put('recent', this.recent)
 		if (rejected) {
 			this.lastRejected = { at: Date.now(), reason: rejected }
 			return false
@@ -269,6 +292,8 @@ export class LiveBook {
 		this.addLag(e)
 		if (this.others.add(e)) await this.saveOthers()
 		const ch = this.book.apply(e)
+		// Primero el radar del servidor (la toma sale ya), luego lo demás
+		if (ch?.act) this.radar?.onAct(ch.act.kind, ch.act.uuid, this.book.offers.get(ch.act.uuid), rx)
 		this.notice(e, ch?.trade ?? null)
 		this.push(e, ch?.trade ?? null)
 		let unknown = false
@@ -281,7 +306,6 @@ export class LiveBook {
 				this.want.add(sideKey(ch.coin, ch.side))
 			}
 		}
-		if (ch?.act) this.radar?.onAct(ch.act.kind, ch.act.uuid, this.book.offers.get(ch.act.uuid))
 		if (ch?.act) this.addAct(ch.coin, ch.act)
 		if (ch?.trade) await this.addVolume(ch.coin, ch.trade)
 		if (ch?.trade) await this.addCandle(ch.coin, ch.trade)
