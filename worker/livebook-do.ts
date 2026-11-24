@@ -16,6 +16,7 @@ import { notify, type AlertEnv } from './alerts.ts'
 import { deliverPush, ownerPush, pushTargets, takerPush, TARGETS_TTL_MS, type PushEnv, type PushNotice } from './push.ts'
 import { Presence, type PresenceEnv } from '../pro/presence.ts'
 import { radarEngineFor, tokenStore } from '../pro/radarserver.ts'
+import { measureQvaPay } from './probe.ts'
 import { referenceOf } from '../src/terminal/stats.ts'
 
 // Un terminal cuenta como en línea si su conexión dio señal de vida (cada 25 s) en este rato
@@ -207,29 +208,17 @@ export class LiveBook {
 		return Response.json(out)
 	}
 
-	// Quién tiene el terminal abierto: la última señal es el último «ping» del terminal (cada 25 s), al que contesta
-	// Cloudflare sin despertar este objeto
 	// Dónde corre este objeto y cuánto le tarda QvaPay en contestar (una petición sin cuenta que llega a su servidor y
 	// vuelve con 401): para el panel. Se mide como mucho cada 10 min
 	private whereAt: { at: number; colo: string | null; ms: number[] } | null = null
 	private async where() {
 		if (this.whereAt && Date.now() - this.whereAt.at < 600_000) return this.whereAt
-		const colo = await fetch('https://www.cloudflare.com/cdn-cgi/trace')
-			.then((r) => r.text())
-			.then((t) => /^colo=(\w+)$/m.exec(t)?.[1] ?? null)
-			.catch(() => null)
-		const ms: number[] = []
-		for (let i = 0; i < 5; i++) {
-			const at = Date.now()
-			const ok = await fetch(`${QVAPAY}/p2p/00000000-0000-4000-8000-000000000000`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) })
-				.then((r) => r.body?.cancel().then(() => true) ?? true)
-				.catch(() => false)
-			if (ok) ms.push(Date.now() - at)
-		}
-		this.whereAt = { at: Date.now(), colo, ms: ms.sort((a, b) => a - b) }
+		this.whereAt = { at: Date.now(), ...(await measureQvaPay()) }
 		return this.whereAt
 	}
 
+	// Quién tiene el terminal abierto: la última señal es el último «ping» del terminal (cada 25 s), al que contesta
+	// Cloudflare sin despertar este objeto
 	private clients() {
 		return this.ctx.getWebSockets().map((ws) => {
 			const s = ws.deserializeAttachment() as Sock | null

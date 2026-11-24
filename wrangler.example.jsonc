@@ -45,8 +45,8 @@
 	// uno solo (el de producción) y producción le reenvía cada evento: pon FEED_FORWARD en vars y el mismo secreto en los dos
 	// ("FEED_FORWARD": "https://app.staging.example.com/api/p2p/feed"). Con "LIVE_FREE": "1", el libro del servidor llega
 	// también a quien no tiene Pro (cada 10 s); sin él, solo a los Pro
-	"durable_objects": { "bindings": [{ "name": "LIVE", "class_name": "LiveBook" }] },
-	"migrations": [{ "tag": "v3", "new_sqlite_classes": ["LiveBook"] }],
+	"durable_objects": { "bindings": [{ "name": "LIVE", "class_name": "LiveBook" }, { "name": "PROBE", "class_name": "Probe" }] },
+	"migrations": [{ "tag": "v3", "new_sqlite_classes": ["LiveBook"] }, { "tag": "v4", "new_sqlite_classes": ["Probe"] }],
 	// ALERT_CHAT: el chat del grupo privado de avisos de Pro (con el bot dentro); el token del bot es secreto
 	// COMMUNITY_CHAT: el grupo público de la comunidad, donde sale la «Tasa QvaPay del día» (se enciende en el panel)
 	// (npx wrangler secret put TELEGRAM_BOT_TOKEN)

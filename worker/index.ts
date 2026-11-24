@@ -38,16 +38,18 @@ import { checkAlerts } from './ratealerts.ts'
 import { historySource, isStock, isTimeframe, loadHistory, loadQuote, loadQuotes, marketStatus, QUOTES_TTL_S, TIMEFRAMES, trimHistory, withIcon, type Quote } from './stocks.ts'
 import { LiveBook } from './livebook-do.ts'
 import { flashHtml, loadFlash } from './flash.ts'
+import { Probe, PROBE_REGIONS, type Where } from './probe.ts'
 import { cleanupPush, pushApi, refreshLive, relayTaken, type PushEnv } from './push.ts'
 import { licenseOfPrint, ownedBy, PLANS, type Plan, TRIAL_DAYS } from './pro.ts'
 import { TASA_KEY, TASA_PATH, tasaData, tasaPage, type TasaData } from './tasa.ts'
 import { nostrSyncOn, PLATFORM_KEEP_MS, readPlatform, syncQvaPayNostr } from './qpnostr.ts'
 
-// El libro en tiempo real de Pro (un Durable Object)
-export { LiveBook }
+// El libro en tiempo real de Pro (un Durable Object) y la pieza que mide a QvaPay desde otras regiones
+export { LiveBook, Probe }
 
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'>, Omit<LiveEnv, 'DB'>, PeerStatsEnv {
 	ASSETS: Fetcher
+	PROBE?: DurableObjectNamespace
 	DB: D1Database
 	// Clave de la API de tasas de elTOQUE (secreto del Worker). Sin ella no hay referencia informal
 	ELTOQUE_TOKEN?: string
@@ -558,6 +560,21 @@ async function hit(req: Request, url: URL, env: Env) {
 	return new Response(null, { status: 204 })
 }
 
+async function probesOf(env: Env): Promise<(Where & { region: string })[]> {
+	const ns = env.PROBE
+	if (!ns) return []
+	return Promise.all(
+		PROBE_REGIONS.map((region) =>
+			ns
+				.get(ns.idFromName(`probe-${region}`), { locationHint: region })
+				.fetch('https://probe/')
+				.then((r) => r.json() as Promise<Where>)
+				.then((w) => ({ ...w, region }))
+				.catch(() => ({ region, colo: null, ms: [] })),
+		),
+	)
+}
+
 // Panel privado de métricas, con HTTP Basic (cualquier usuario y la clave METRICS_KEY)
 async function metrics(req: Request, url: URL, env: Env) {
 	if (!env.METRICS_KEY) return jsonError(404, 'no encontrado')
@@ -572,17 +589,20 @@ async function metrics(req: Request, url: URL, env: Env) {
 		loadFlash(env.DB, days, env.METRICS_SALT).catch((err) => (console.error(`relámpago: ${(err as Error).message}`), null)),
 		liveWhere(env as unknown as LiveEnv),
 	])
+	// Lo mismo desde otras regiones (una pieza de prueba en cada una)
+	const probes = await probesOf(env)
 	// Dónde corre el libro en vivo y lo que le tarda QvaPay (lo más rápido y la mitad de las veces)
 	const whereHtml = where
 		? `<p class="hint">El libro en vivo corre en <b>${where.colo ?? '—'}</b>. ${where.ms.length ? `QvaPay le contesta en <b>${where.ms[0]} ms</b> lo más rápido y en ${where.ms[Math.floor(where.ms.length / 2)]} ms la mitad de las veces.` : 'QvaPay no contestó.'}</p>`
 		: ''
+	const probeHtml = probes.length ? `<p class="hint">Desde otras regiones: ${probes.map((p) => `<b>${p.region}</b> (${p.colo ?? '—'}) ${p.ms.length ? `${p.ms[0]} ms, la mitad ${p.ms[Math.floor(p.ms.length / 2)]} ms` : 'sin respuesta'}`).join(' · ')}</p>` : ''
 	const more = (title: string, sub: string, body: string) => `<details class="more"><summary>${title} <small>${sub}</small></summary>${body}</details>`
 	return adminPage(
 		'metrics',
 		'Métricas',
 		`${pageHead('Métricas', 'Cómo crece el terminal: cuentas, operaciones, de dónde llega la gente y Pro.', rangesNav(days))}<style>${GROWTH_CSS}</style>
 ${growthHtml(growth)}
-${more('Radar y ofertas relámpago', 'tomas del radar, de dónde sale el tiempo y quién se lleva las ofertas más rápidas', `${whereHtml}${radarHtml(summary.radar)}<h2 class="sec-title">Ofertas relámpago</h2>${flash ? flashHtml(flash) : '<p class="empty">No se pudo leer el historial del feed.</p>'}`)}
+${more('Radar y ofertas relámpago', 'tomas del radar, de dónde sale el tiempo y quién se lleva las ofertas más rápidas', `${whereHtml}${probeHtml}${radarHtml(summary.radar)}<h2 class="sec-title">Ofertas relámpago</h2>${flash ? flashHtml(flash) : '<p class="empty">No se pudo leer el historial del feed.</p>'}`)}
 ${more('Acciones del P2P en detalle', 'por mercado, por día, embudos y errores de QvaPay', actionsHtml(summary))}
 ${more('Visitas en detalle', 'web, terminal y simulador, por enlace y por día', hitsHtml(hits))}
 ${more('Bot del dólar y otros mercados', '', botHtml(bot) + otherHtml(other, panel))}
