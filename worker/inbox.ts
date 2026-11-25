@@ -3,6 +3,7 @@
 // terminal lo pide con su cuenta) y, si se elige, también al móvil por los avisos push. Solo se guarda el mensaje, a
 // quién va y si lo leyó; caduca a los 30 días y se borra
 
+import { liveName } from './livebook.ts'
 import { deliverPush, type PushEnv, type PushMsg } from './push.ts'
 import { inCuba, type D1 } from './rates.ts'
 
@@ -78,7 +79,7 @@ export interface NewMessage {
 // El libro en vivo avisa a los terminales abiertos de esas cuentas (o de todas) de que hay mensaje nuevo
 async function pingLive(env: InboxEnv, users: string[] | null) {
 	if (!env.LIVE) return 0
-	const r = await env.LIVE.get(env.LIVE.idFromName('book') as never)
+	const r = await env.LIVE.get(env.LIVE.idFromName(liveName(env as { LIVE_NAME?: string })) as never)
 		.fetch('https://live/inbox', { method: 'POST', body: JSON.stringify({ users }) })
 		.catch(() => null)
 	if (!r?.ok) {

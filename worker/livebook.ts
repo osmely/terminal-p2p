@@ -28,6 +28,8 @@ export interface LiveEnv {
 	// «1»: el libro del servidor llega también sin Pro (cada FREE_EVERY_MS). Si no, solo a los Pro
 	LIVE_FREE?: string
 	STAGING?: string
+	// El nombre del libro activo (por defecto «book», el de siempre). Ver liveName
+	LIVE_NAME?: string
 }
 
 export type Side = 'ask' | 'bid'
@@ -192,7 +194,7 @@ export const OWNER_KEEP_DAYS = 30
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 37
+export const LIVE_VERSION = 38
 
 export interface Applied {
 	coin: string
@@ -676,7 +678,50 @@ function timingSafe(a: string, b: string) {
 const REJECTED_GAP_MS = 10_000
 let lastRejected = -Infinity
 
-export const liveStub = (env: LiveEnv) => env.LIVE!.get(env.LIVE!.idFromName('book') as never)
+// El libro activo es el del nombre LIVE_NAME («book», el de siempre, si no se dice otro). Uno con otro nombre se queda
+// dormido: ni se conecta a QvaPay ni lee nada. Así se puede crear uno nuevo en otro sitio (nace cerca de quien lo pide
+// por primera vez), copiarle lo guardado y cambiar al nuevo con solo cambiar LIVE_NAME, y volver atrás igual
+export const LIVE_DEFAULT = 'book'
+export const liveName = (env: { LIVE_NAME?: string }) => env.LIVE_NAME || LIVE_DEFAULT
+// Si el objeto no sabe su nombre, se porta como siempre: activo solo si no se pidió otro
+export const liveActive = (name: string | undefined, env: { LIVE_NAME?: string }) => (name === undefined ? liveName(env) === LIVE_DEFAULT : name === liveName(env))
+export const liveStub = (env: LiveEnv) => env.LIVE!.get(env.LIVE!.idFromName(liveName(env)) as never)
+export const liveStubOf = (env: LiveEnv, name: string) => env.LIVE!.get(env.LIVE!.idFromName(name) as never)
+
+// Mudar el libro: lo guardado se lee por páginas (en orden de clave) y se escribe en el otro, de 128 en 128
+export const MOVE_PAGE = 500
+type MoveStorage = {
+	list<T = unknown>(o: { start?: string; prefix?: string; limit?: number }): Promise<Map<string, T>>
+	put(entries: Record<string, unknown>): Promise<void>
+}
+export async function exportPage(storage: MoveStorage, start: string | undefined, prefix: string | undefined, limit = MOVE_PAGE) {
+	const page = await storage.list({ ...(start ? { start } : {}), ...(prefix ? { prefix } : {}), limit })
+	const entries = [...page.entries()]
+	// La siguiente empieza justo después de la última clave de esta
+	return { entries, next: entries.length === limit ? `${entries.at(-1)![0]}\0` : null }
+}
+export async function importPage(storage: MoveStorage, entries: [string, unknown][]) {
+	for (let i = 0; i < entries.length; i += 128) await storage.put(Object.fromEntries(entries.slice(i, i + 128)))
+	return entries.length
+}
+// Copia todo (o lo que empieza por prefix) de un libro a otro, página a página
+export async function copyLive(from: { fetch(u: string, i?: RequestInit): Promise<Response> }, to: { fetch(u: string, i?: RequestInit): Promise<Response> }, prefix?: string) {
+	let start: string | undefined
+	let copied = 0
+	let pages = 0
+	for (;;) {
+		const q = new URLSearchParams({ ...(start ? { start } : {}), ...(prefix ? { prefix } : {}) })
+		const page = (await (await from.fetch(`https://live/move/export?${q}`)).json()) as { entries: [string, unknown][]; next: string | null }
+		if (page.entries.length) {
+			const r = await to.fetch('https://live/move/import', { method: 'POST', body: JSON.stringify({ entries: page.entries }) })
+			if (!r.ok) throw new Error(`el libro de destino no aceptó la copia (${r.status})`)
+			copied += page.entries.length
+		}
+		pages++
+		if (!page.next) return { copied, pages }
+		start = page.next
+	}
+}
 
 export async function feedWebhook(req: Request, env: LiveEnv, ctx: { waitUntil(p: Promise<unknown>): void }, now = Date.now()) {
 	if (!env.LIVE) return Response.json({ error: 'El feed aún no está configurado' }, { status: 503 })

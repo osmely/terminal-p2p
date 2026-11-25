@@ -7,7 +7,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
-import { ACT_KEEP, ALARM_MS, feedRow, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES, DEEP_TAKE, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, feedRow, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES, DEEP_TAKE, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, exportPage, importPage, liveActive, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
 import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
 import type { BotEnv } from './userbot.ts'
 import { alertOther, OtherMarkets, saveOther } from './othermarkets.ts'
@@ -159,6 +159,15 @@ export class LiveBook {
 		if (url.pathname === '/inbox' && req.method === 'POST') return Response.json(this.inboxPing(await req.json().catch(() => null)))
 		if (url.pathname === '/clients') return Response.json(this.clients())
 		if (url.pathname === '/where') return Response.json(await this.where())
+		// Mudanza (solo desde la ruta firmada del Worker): dónde está y si está activo, sacar lo guardado por páginas y,
+		// solo si está dormido, escribirlo
+		if (url.pathname === '/move/info') return Response.json({ name: this.ctx.id.name ?? null, active: this.active(), ...(await this.where()) })
+		if (url.pathname === '/move/export') return Response.json(await exportPage(this.ctx.storage, url.searchParams.get('start') ?? undefined, url.searchParams.get('prefix') ?? undefined))
+		if (url.pathname === '/move/import' && req.method === 'POST') {
+			if (this.active() || !this.ctx.id.name) return Response.json({ error: 'El libro activo no se sobrescribe' }, { status: 409 })
+			const { entries } = (await req.json()) as { entries: [string, unknown][] }
+			return Response.json({ written: await importPage(this.ctx.storage, entries) })
+		}
 		if (url.pathname === '/book') return this.bookOf(url.searchParams.get('coin') ?? '')
 		if (url.pathname === '/offer') return Response.json(this.book.find(url.searchParams.get('id') ?? ''))
 		if (url.pathname === '/status') return Response.json(this.state())
@@ -673,7 +682,14 @@ export class LiveBook {
 	}
 
 	// Cada pocos segundos: lo periódico y, en producción, escuchar el stream de QvaPay hasta que se corte
+	// El libro activo es el de LIVE_NAME; otro (uno nuevo que aún no se usa, o el viejo tras mudarlo) duerme
+	private active() {
+		return liveActive(this.ctx.id.name, this.env)
+	}
+
 	async alarm() {
+		// Dormido: ni lee ni se conecta a QvaPay, y no se vuelve a despertar solo
+		if (!this.active()) return
 		await this.periodic()
 		const stream = !this.env.STAGING && this.creds() && Date.now() >= this.streamPauseUntil
 		if (stream) await this.stream()

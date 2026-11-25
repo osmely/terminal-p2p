@@ -8,7 +8,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import { num } from '../src/qvapay/types.ts'
 import { accessOf } from './blocks.ts'
-import { autoPauseNote, type FeedEvent, type LiveNamespace, type Trade } from './livebook.ts'
+import { autoPauseNote, liveName, type FeedEvent, type LiveNamespace, type Trade } from './livebook.ts'
 import type { D1 } from './rates.ts'
 import { readWho, tokenPrint, type Who } from './session.ts'
 import { sendPush, vapidPublic, type PushSub, type Vapid } from './webpush.ts'
@@ -279,7 +279,7 @@ const PRINT = /^[0-9a-f]{64}$/
 
 // El libro en vivo relee quién tiene avisos (o hace llegar un evento inventado, en las pruebas)
 const live = (env: PushEnv, path: string, body?: unknown) =>
-	env.LIVE ? env.LIVE.get(env.LIVE.idFromName('book') as never).fetch(`https://live${path}`, { method: 'POST', body: JSON.stringify(body ?? {}) }).catch(() => null) : Promise.resolve(null)
+	env.LIVE ? env.LIVE.get(env.LIVE.idFromName(liveName(env as { LIVE_NAME?: string })) as never).fetch(`https://live${path}`, { method: 'POST', body: JSON.stringify(body ?? {}) }).catch(() => null) : Promise.resolve(null)
 
 // Un evento inventado del feed con tu cuenta de dueño, para probar el camino entero (solo en staging y en local)
 export function simEvent(owner: string, kind: string, side: 'sell' | 'buy', now: number, offer = `sim-${now}`): FeedEvent | null {

@@ -16,7 +16,7 @@ import { clientIp, readWho, tokenPrint, whoCookie } from './session.ts'
 import { cleanupLog, hourKey, logUser } from './userlog.ts'
 import { accessOf, profileAccess, relayAccess } from './blocks.ts'
 import { cleanupIncidents, relayIncident } from './incidents.ts'
-import { sha256, verify } from './crypto.ts'
+import { hex, hmac, same, sha256, verify } from './crypto.ts'
 import { adminPage, askKey, pageHead, panel } from './admin.ts'
 import { backupPro, cleanupPro, dailyDigest, proAdmin, proApi, reconcile, recordIssues, settlePending, type ProEnv } from './pro.ts'
 import { simAdmin, simApi, simCron, type SimEnv } from './sim.ts'
@@ -25,7 +25,7 @@ import { dailyPost } from './community.ts'
 import { cleanHit, hitsHtml, loadHits, saveHit } from './hits.ts'
 import { loadOther, otherHtml } from './othermarkets.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled } from './flags.ts'
-import { feedWebhook, liveBookOf, liveClients, liveOfferOf, liveOnline, liveSocket, liveWhere, type LiveEnv } from './livebook.ts'
+import { copyLive, feedWebhook, liveBookOf, liveClients, liveName, liveOfferOf, liveOnline, liveSocket, liveStub, liveStubOf, liveWhere, type LiveEnv } from './livebook.ts'
 import { peerStats, type PeerStatsEnv } from '../pro/peerstats.ts'
 import { COINS, isOutlier } from '../src/terminal/market.ts'
 import { botHtml, loadBot } from './ratebot.ts'
@@ -50,6 +50,7 @@ export { LiveBook, Probe }
 interface Env extends Omit<SimEnv, 'DB'>, Omit<ProEnv, 'DB' | 'METRICS_KEY'>, Omit<LiveEnv, 'DB'>, PeerStatsEnv {
 	ASSETS: Fetcher
 	PROBE?: DurableObjectNamespace
+	PROBE_KEY?: string
 	DB: D1Database
 	// Clave de la API de tasas de elTOQUE (secreto del Worker). Sin ella no hay referencia informal
 	ELTOQUE_TOKEN?: string
@@ -211,6 +212,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext) {
 	if (url.pathname === '/data/rates' && req.method === 'GET') return secure(await rates(req, url, env, ctx))
 	if (url.pathname === '/data/analysis' && req.method === 'GET') return secure(await marketAnalysis(url, env))
 	if (url.pathname === '/data/book' && req.method === 'GET') return secure(await book(url, env, ctx))
+	if (url.pathname === '/data/live-move' && req.method === 'GET') return secure(await liveMove(req, url, env))
 	if (url.pathname === '/data/informal' && req.method === 'GET') return secure(await informal(url, env, ctx))
 	if (url.pathname === '/data/candles' && req.method === 'GET') return secure(await candles(url, env, ctx))
 	if (url.pathname === '/data/stocks' && req.method === 'GET') return secure(await stocks(url, ctx))
@@ -268,7 +270,7 @@ function proMarkup(res: Response, on: boolean) {
 		.transform(res)
 }
 
-const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook', '/pro/telegram/webhook', '/api/p2p/feed'])
+const STAGING_OPEN = new Set(['/api/pro/webhook', '/pro/webhook', '/pro/telegram/webhook', '/api/p2p/feed', '/data/live-move'])
 // La mini app de Telegram se abre en un visor del propio Telegram, que no sabe pedir la contraseña: en staging quedan
 // abiertas su página y lo público que lee (el libro, el histórico y la librería del gráfico, lo mismo que en producción)
 const MINI_OPEN = new Set(['/mini', '/mini/', '/mini/mini.js', '/data/book', '/data/rates', '/favicon.svg', '/vendor/lightweight-charts.js'])
@@ -573,6 +575,29 @@ async function probesOf(env: Env): Promise<(Where & { region: string })[]> {
 				.catch(() => ({ region, colo: null, ms: [] })),
 		),
 	)
+}
+
+// Mudar el libro en vivo (ver liveName en livebook.ts), solo con una firma de PROBE_KEY que caduca (t=caduca.firma):
+// - op=info: crea (si no existe) el libro de nombre n y dice dónde quedó, si está activo y lo que le tarda QvaPay.
+//   Nace cerca de quien lo pide por primera vez
+// - op=copy: copia lo guardado del libro activo al libro n (dormido; el activo nunca se sobrescribe). Con p=rs, solo
+//   lo que empieza por «rs»
+async function liveMove(req: Request, url: URL, env: Env) {
+	const live = env as unknown as LiveEnv
+	const op = url.searchParams.get('op') ?? ''
+	const name = url.searchParams.get('n') ?? ''
+	const prefix = url.searchParams.get('p') ?? ''
+	const [exp, sig] = (url.searchParams.get('t') ?? '').split('.')
+	const now = Date.now()
+	const bad = () => jsonError(404, 'no encontrado')
+	if (!live.LIVE || !env.PROBE_KEY || !['info', 'copy'].includes(op) || !/^book(-[a-z0-9]{2,20})?$/.test(name) || !['', 'rs'].includes(prefix)) return bad()
+	if (!(Number(exp) > now && Number(exp) < now + 86_400_000) || !sig) return bad()
+	if (!same(sig, hex(await hmac(env.PROBE_KEY, `live:${op}:${name}:${prefix}:${exp}`)))) return bad()
+	const target = liveStubOf(live, name)
+	const edge = (req.cf as { colo?: string } | undefined)?.colo ?? null
+	if (op === 'info') return Response.json({ edge, ...(await (await target.fetch('https://live/move/info')).json()), activeName: liveName(live) })
+	if (name === liveName(live)) return jsonError(400, 'Ese es el libro activo')
+	return Response.json({ from: liveName(live), to: name, ...(await copyLive(liveStub(live), target, prefix || undefined)) })
 }
 
 // Panel privado de métricas, con HTTP Basic (cualquier usuario y la clave METRICS_KEY)

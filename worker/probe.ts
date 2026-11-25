@@ -28,7 +28,7 @@ export class Probe extends DurableObject {
 	private last: (Where & { at: number }) | null = null
 	async fetch() {
 		if (!this.last || Date.now() - this.last.at > 600_000) this.last = { ...(await measureQvaPay()), at: Date.now() }
-		return Response.json(this.last)
+		return Response.json({ ...this.last, name: this.ctx.id.name ?? null })
 	}
 }
 
