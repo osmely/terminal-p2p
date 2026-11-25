@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>Radar en el servidor: más rápido y aunque cierres el terminal · Terminal P2P</title>
+	<meta name="description" content="El radar de Terminal P2P Pro ahora toma desde el servidor: mucho más rápido y aunque cierres el terminal. Cómo activarlo con un token solo para comprar y cómo se protege tu cuenta." />
+	<meta property="og:title" content="Radar en el servidor: más rápido y aunque cierres el terminal · Terminal P2P" />
+	<meta property="og:description" content="El radar de Terminal P2P Pro ahora toma desde el servidor: mucho más rápido y aunque cierres el terminal. Cómo activarlo con un token solo para comprar y cómo se protege tu cuenta." />
+	<meta property="og:url" content="https://terminalp2p.com/blog/radar-en-el-servidor/" />
+	<meta property="og:type" content="article" />
+	<meta property="og:image" content="https://terminalp2p.com/img/modo-pro.jpg" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta property="article:published_time" content="2026-11-25" />
+	<link rel="canonical" href="https://terminalp2p.com/blog/radar-en-el-servidor/" />
+	<meta name="theme-color" content="#0a0d12" media="(prefers-color-scheme: dark)" />
+	<meta name="theme-color" content="#f6f8fb" media="(prefers-color-scheme: light)" />
+	<script src="/theme.js"></script>
+	<script src="/hit.js" defer></script>
+	<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	<link rel="stylesheet" href="/vendor/fonts.css" />
+	<link rel="stylesheet" href="/site.css" />
+	<script src="/site.js" defer></script>
+</head>
+<body>
+	<header class="nav">
+		<div class="wrap nav-in">
+			<a class="brand" href="/" aria-label="Terminal P2P">
+				<span class="brand-mark" aria-hidden="true">
+					<svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 16l4.5-5 3.5 3 7-8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</span>
+				<span>Terminal P2P</span>
+			</a>
+			<nav class="nav-links" aria-label="Secciones">
+				<a href="/#tasas">Tasas</a>
+				<a href="/#operar">Operar</a>
+				<a href="/#funciones">Funciones</a>
+				<a href="/#privacidad">Privacidad</a>
+				<a href="/#preguntas">Preguntas</a>
+				<a href="/blog/" aria-current="page">Blog</a>
+			</nav>
+			<div class="nav-actions">
+				<details class="help">
+					<summary class="help-btn" title="Ayuda" aria-label="Ayuda"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01"/></g></svg><span class="help-label">Ayuda</span></summary>
+					<div class="help-menu">
+						<a href="/blog/guia-primeros-pasos/"><b>Primeros pasos</b><span>Guía para nuevos usuarios: la pantalla, comprar, vender y operar seguro</span></a>
+						<a href="/blog/conectar-qvapay-token/"><b>Conectar tu cuenta</b><span>Crear el token de QvaPay paso a paso</span></a>
+						<a href="/blog/modo-pro/" data-pro><b>Modo Pro</b><span>Qué incluye, cuánto cuesta y cómo funciona</span></a>
+						<a class="help-tg" href="https://t.me/terminalp2p" target="_blank" rel="noopener">¿Otra duda? Pregunta en @terminalp2p</a>
+					</div>
+				</details>
+				<a class="icon-btn tg-icon" href="https://t.me/terminalp2p" target="_blank" rel="noopener" title="Grupo de Telegram @terminalp2p" aria-label="Grupo de Telegram @terminalp2p">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+				</a>
+				<a class="icon-btn hide-sm" href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener" title="Código fuente en GitHub" aria-label="Código fuente en GitHub">
+					<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.38-3.37-1.38-.46-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.04 1.03-2.76-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 015 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.64 1.03 2.76 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.26 10.26 0 0022 12.25C22 6.58 17.52 2 12 2z"/></svg>
+				</a>
+				<button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">
+					<svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+					<svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" /></svg>
+				</button>
+				<a class="btn primary" href="https://app.terminalp2p.com">Abrir<span class="hide-xs"> terminal</span></a>
+			</div>
+		</div>
+	</header>
+
+	<main>
+		<article>
+			<header class="article">
+				<div class="wrap narrow">
+					<p class="crumbs"><a href="/blog/">Blog</a></p>
+					<h1>Radar en el servidor: más rápido y aunque cierres el terminal</h1>
+					<p class="post-meta">Guía de Terminal P2P · <time datetime="2026-11-25">25 de noviembre de 2026</time> · 4 min de lectura</p>
+					<p class="dek">El radar de <a href="/blog/modo-pro/">Pro</a> vigila el libro y toma las ofertas que cumplen tus reglas. Hasta ahora lo hacía mientras tenías el terminal abierto. Con el <strong>radar en el servidor</strong> es <strong>mucho más rápido</strong> y sigue trabajando aunque bloquees el teléfono, cierres la app o te quedes sin conexión. Así se activa, y por qué usa un token aparte.</p>
+				</div>
+			</header>
+
+			<div class="wrap narrow prose">
+				<h2>Qué hace</h2>
+				<ul>
+					<li><strong>Mucho más rápido.</strong> Ya no depende de tu teléfono ni de tu conexión: en cuanto aparece una oferta que cumple tus reglas, la pide al instante. En las mejores ofertas, donde se compite por milésimas de segundo, eso marca la diferencia.</li>
+					<li><strong>Funciona con el terminal cerrado</strong>, el teléfono bloqueado o sin conexión.</li>
+					<li><strong>Toma por ti las ventas de QUSD</strong> que cumplen tus reglas de comprar con <strong>«⚡ Tomarla sola»</strong>, a cualquier hora.</li>
+					<li><strong>Te avisa por Telegram</strong> en cuanto toma una, con el monto a pagar y el plazo, para que pagues a tiempo desde el terminal.</li>
+					<li><strong>Las reglas que solo avisan</strong> también te llegan por Telegram, aunque el terminal esté cerrado.</li>
+					<li><strong>Tus reglas y tus límites son los mismos</strong> en todos tus dispositivos: los cambias en uno y el radar lo sabe al momento.</li>
+				</ul>
+				<p class="note">Por ahora el radar en el servidor solo <strong>compra</strong>. Las reglas de vender siguen funcionando como siempre, con el terminal abierto.</p>
+
+				<h2>Antes de empezar</h2>
+				<ul>
+					<li><strong>Modo Pro activo</strong> y tu cuenta de QvaPay <a href="/blog/conectar-qvapay-token/">conectada en el terminal</a>.</li>
+					<li><strong>Al menos una regla de comprar</strong> con «⚡ Tomarla sola» en el Radar.</li>
+					<li><strong>Los avisos de Telegram conectados</strong> en «Mi cuenta», para enterarte de lo que toma.</li>
+				</ul>
+
+				<h2>Paso 1 · Crea un token nuevo, solo para comprar</h2>
+				<p>Entra en <a href="https://www.qvapay.com/dev/tokens" target="_blank" rel="noopener">qvapay.com/dev/tokens</a> y pulsa <strong>«Crear token»</strong>. Ponle un nombre que lo distinga, por ejemplo <code>Radar Terminal P2P</code>, y marca <strong>solo estos dos permisos</strong>:</p>
+				<figure class="phone">
+					<img src="/img/guia/1-tokens.webp" width="590" height="880" alt="Página Tokens de API de QvaPay con el botón Crear token" loading="lazy" />
+					<figcaption>La página de tokens de QvaPay.</figcaption>
+				</figure>
+				<div class="tbl text"><table>
+					<thead><tr><th>Permiso</th><th>Para qué</th><th>¿Marcar?</th></tr></thead>
+					<tbody>
+						<tr><td><code>read</code> · Lectura</td><td>Saber que el token es de tu cuenta.</td><td class="yes">Sí</td></tr>
+						<tr><td><code>p2p:buy</code> · Comprar en P2P</td><td>Tomar las ventas que cumplen tus reglas.</td><td class="yes">Sí</td></tr>
+						<tr><td><code>p2p:sell</code> · Vender en P2P</td><td>El radar en el servidor no vende.</td><td class="no">No</td></tr>
+						<tr><td><code>transfer</code> · Transferir</td><td>Enviar saldo a otra cuenta.</td><td class="no">Nunca</td></tr>
+						<tr><td><code>withdraw</code> · Retirar</td><td>Sacar dinero de QvaPay.</td><td class="no">Nunca</td></tr>
+					</tbody>
+				</table></div>
+				<p>Elige la caducidad que quieras, escribe tu PIN y pulsa «Crear token». Copia el token: QvaPay lo muestra <strong>una sola vez</strong>.</p>
+				<figure class="phone">
+					<img src="/img/guia/4-token-creado.webp" width="590" height="330" alt="Recuadro Copia tu token ahora con el token oculto y el botón Copiar" loading="lazy" />
+					<figcaption>Copia el token. No lo compartas con nadie.</figcaption>
+				</figure>
+				<p class="note">Si el token tiene permiso para vender, transferir o retirar, <strong>el terminal no lo acepta</strong>. Lo comprueba con QvaPay antes de guardarlo.</p>
+
+				<h2>Paso 2 · Pégalo en el Radar</h2>
+				<p>En el terminal abre el <strong>Radar</strong>. En el recuadro <strong>«⚡ Radar en el servidor»</strong>, pega el token en <strong>«Token solo para comprar»</strong> y pulsa <strong>«Conectar»</strong>.</p>
+				<p>El terminal comprueba con QvaPay que el token es de tu misma cuenta y que solo puede leer y comprar. Si todo está bien, el recuadro pasa a decir <strong>«⚡ Radar en el servidor»</strong> con el botón <strong>«Quitar el token»</strong>. Desde ese momento ya puedes cerrar el terminal.</p>
+
+				<h2>Paso 3 · Ajusta tus límites</h2>
+				<p>En el Radar, en <strong>«Límites de la toma automática»</strong>:</p>
+				<ul>
+					<li><strong>Tope al día (QUSD):</strong> lo máximo que el radar puede tomar en un día.</li>
+					<li><strong>Operaciones del radar a la vez:</strong> cuántas operaciones puede tener abiertas sin terminar. Con <strong>2 o 3</strong>, si entran dos ofertas buenas juntas, va a por las dos.</li>
+				</ul>
+				<p>Cuando el radar toma una oferta, <strong>tienes que pagarle al vendedor dentro de su plazo</strong>. El aviso de Telegram te dice cuánto y hasta cuándo.</p>
+
+				<h2>¿Por qué otro token?</h2>
+				<p>El token con el que conectas tu cuenta <strong>vive solo en tu navegador</strong>: nunca sale de tu teléfono. Por eso el radar normal solo funciona con el terminal abierto.</p>
+				<p>Para que el radar trabaje sin ti delante, tiene que guardar un token. Por eso te pedimos uno <strong>aparte y con lo mínimo</strong>: solo puede ver tu cuenta y comprar. Así:</p>
+				<ul>
+					<li>Tu token de siempre sigue solo en tu navegador, como hasta ahora.</li>
+					<li>El del radar tiene justo lo que necesita y nada más.</li>
+					<li>Puedes quitar uno sin tocar el otro.</li>
+				</ul>
+
+				<h2>Tu cuenta, segura</h2>
+				<ul>
+					<li><strong>No puede sacar dinero.</strong> Sin permiso para transferir ni retirar, ese token no puede mover tu saldo a ningún lado. Y como no puede vender, tampoco bloquea tu saldo.</li>
+					<li><strong>Va cifrado y atado a tu cuenta.</strong> Se guarda cifrado, solo sirve para tu cuenta y no se muestra nunca: ni en el terminal ni en ningún registro.</li>
+					<li><strong>Solo toma lo que tú dijiste.</strong> Únicamente las ofertas que cumplen tus reglas con «Tomarla sola», dentro de tu tope del día y de tus operaciones a la vez. Nunca cancela nada.</li>
+					<li><strong>Lo cortas cuando quieras.</strong> En el Radar, con <strong>«Quitar el token»</strong>, o directamente en <a href="https://www.qvapay.com/dev/tokens" target="_blank" rel="noopener">qvapay.com/dev/tokens</a> con «Revocar»: deja de funcionar al instante, sin depender de nosotros.</li>
+					<li><strong>Si el token deja de servir</strong> (caducó o lo revocaste), el radar lo borra y te avisa por Telegram. Cuando se acaba tu Pro, deja de tomar.</li>
+				</ul>
+				<p class="note">Usa un token <strong>solo para esto</strong> y no lo pegues en ningún otro sitio.</p>
+
+				<h2>Si algo no funciona</h2>
+				<ul>
+					<li><strong>No acepta el token:</strong> revisa que tenga solo <code>read</code> y <code>p2p:buy</code>, y que sea de la misma cuenta que tienes conectada en el terminal.</li>
+					<li><strong>No toma nada:</strong> revisa que tu regla sea de comprar, tenga «⚡ Tomarla sola» y que el monto de la oferta esté entre tu mínimo y tu máximo. Mira también tu tope del día y tus operaciones abiertas.</li>
+					<li><strong>Otro llegó antes:</strong> en las mejores ofertas se compite por milésimas de segundo. El radar lo intenta al momento, pero a veces otro llega primero.</li>
+				</ul>
+				<p>¿Otra duda? Pregunta en el grupo de Telegram <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">@terminalp2p</a>.</p>
+
+				<aside class="article-cta">
+					<h2>Activa el radar en el servidor</h2>
+					<p>Más rápido y siempre encendido: crea el token, pégalo en el Radar y deja que trabaje por ti.</p>
+					<div class="cta-row">
+						<a class="btn primary lg" href="https://app.terminalp2p.com">Abrir terminal</a>
+						<a class="btn lg" href="/blog/modo-pro/">Ver el modo Pro</a>
+					</div>
+					<p class="tg-line"><a href="https://t.me/terminalp2p" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg><span>¿Preguntas o ideas? Únete al grupo de Telegram <b>@terminalp2p</b></span></a></p>
+				</aside>
+			</div>
+		</article>
+	</main>
+
+	<footer class="foot">
+		<div class="wrap foot-in">
+			<span>© 2026 <a href="https://github.com/osmely" target="_blank" rel="noopener">osmely</a> · <a href="https://github.com/osmely/terminal-p2p/blob/main/LICENSE" target="_blank" rel="noopener">Licencia Apache 2.0</a> · <a href="https://github.com/osmely/terminal-p2p" target="_blank" rel="noopener">GitHub</a> · <a href="/blog/">Blog</a> · <a href="https://t.me/terminalp2p" target="_blank" rel="noopener">Telegram</a></span>
+			<span>Proyecto independiente, no afiliado a QvaPay.</span>
+		</div>
+	</footer>
+</body>
+</html>
