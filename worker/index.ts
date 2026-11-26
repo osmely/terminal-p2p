@@ -620,6 +620,13 @@ async function metrics(req: Request, url: URL, env: Env) {
 	const whereHtml = where
 		? `<p class="hint">El libro en vivo corre en <b>${where.colo ?? '—'}</b>. ${where.ms.length ? `QvaPay le contesta en <b>${where.ms[0]} ms</b> lo más rápido y en ${where.ms[Math.floor(where.ms.length / 2)]} ms la mitad de las veces.` : 'QvaPay no contestó.'}</p>`
 		: ''
+	// Qué camino trae antes los avisos de QvaPay: el webhook o el stream (desde que arrancó el libro)
+	const r = where?.race
+	const lead = (x: { p50: number | null; p90: number | null }) => (x.p50 == null ? '' : ` (le saca ${x.p50} ms la mitad de las veces; 9 de cada 10, menos de ${x.p90} ms)`)
+	const raceHtml =
+		r && r.hook + r.stream + r.onlyHook + r.onlyStream > 0
+			? `<p class="hint">Los avisos de QvaPay llegan por dos caminos. Primero por el <b>stream</b>: ${r.stream}${lead(r.streamLead)}. Primero por el <b>webhook</b>: ${r.hook}${lead(r.hookLead)}.${r.onlyStream || r.onlyHook ? ` Solo por uno: stream ${r.onlyStream}, webhook ${r.onlyHook}.` : ''}</p>`
+			: ''
 	const probeHtml = probes.length ? `<p class="hint">Desde otras regiones: ${probes.map((p) => `<b>${p.region}</b> (${p.colo ?? '—'}) ${p.ms.length ? `${p.ms[0]} ms, la mitad ${p.ms[Math.floor(p.ms.length / 2)]} ms` : 'sin respuesta'}`).join(' · ')}</p>` : ''
 	const more = (title: string, sub: string, body: string) => `<details class="more"><summary>${title} <small>${sub}</small></summary>${body}</details>`
 	return adminPage(
@@ -627,7 +634,7 @@ async function metrics(req: Request, url: URL, env: Env) {
 		'Métricas',
 		`${pageHead('Métricas', 'Cómo crece el terminal: cuentas, operaciones, de dónde llega la gente y Pro.', rangesNav(days))}<style>${GROWTH_CSS}</style>
 ${growthHtml(growth)}
-${more('Radar y ofertas relámpago', 'tomas del radar, de dónde sale el tiempo y quién se lleva las ofertas más rápidas', `${whereHtml}${probeHtml}${radarHtml(summary.radar)}<h2 class="sec-title">Ofertas relámpago</h2>${flash ? flashHtml(flash) : '<p class="empty">No se pudo leer el historial del feed.</p>'}`)}
+${more('Radar y ofertas relámpago', 'tomas del radar, de dónde sale el tiempo y quién se lleva las ofertas más rápidas', `${whereHtml}${raceHtml}${probeHtml}${radarHtml(summary.radar)}<h2 class="sec-title">Ofertas relámpago</h2>${flash ? flashHtml(flash) : '<p class="empty">No se pudo leer el historial del feed.</p>'}`)}
 ${more('Acciones del P2P en detalle', 'por mercado, por día, embudos y errores de QvaPay', actionsHtml(summary))}
 ${more('Visitas en detalle', 'web, terminal y simulador, por enlace y por día', hitsHtml(hits))}
 ${more('Bot del dólar y otros mercados', '', botHtml(bot) + otherHtml(other, panel))}
