@@ -154,6 +154,27 @@ async function acctAlerts(d) {
 			}
 			<p class="hint">${tl('acct.tgWhat')}</p>
 		</section>
+		${d.sms ? `<section class="sec-box" id="smsBox">
+			<p class="sec-box-t">SMS</p>
+			${
+				d.sms.phone
+					? `<div class="acct-tg on"><span>${tl('acct.smsOn', { p: esc(d.sms.phone) })}</span><button class="link small" id="smsOff">${tl('acct.smsOff')}</button></div>
+			<button class="link small" id="smsChange">${tl('acct.smsChange')}</button>`
+					: ''
+			}
+			<div id="smsForm" ${d.sms.phone && !d.sms.pending ? 'hidden' : ''} class="stack tight">
+				<label class="field">${tl('acct.smsPhone')}<input class="input mono" id="smsPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+53 5123 4567" maxlength="16" /></label>
+				<button class="btn block" id="smsSend">${tl('acct.smsSend')}</button>
+				${
+					d.sms.pending
+						? `<p class="hint">${tl('acct.smsPending', { p: esc(d.sms.pending) })}</p>
+				<label class="field">${tl('acct.smsCode')}<input class="input mono" id="smsCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" /></label>
+				<button class="btn primary block" id="smsVerify">${tl('acct.smsVerify')}</button>`
+						: ''
+				}
+			</div>
+			<p class="hint">${tl('acct.smsWhat')}</p>
+		</section>` : ''}
 		<section class="sec-box">
 			<p class="sec-box-t">${tl('acct.yourOffers')}</p>
 			<label class="check"><input type="checkbox" id="alOffers" ${d.offers ? 'checked' : ''} /> ${tl('acct.offersCheck')}</label>
@@ -184,6 +205,22 @@ async function acctAlerts(d) {
 		$('alPrice').placeholder = r ? fmtP(r) : ''
 	}
 	$('alTg')?.addEventListener('click', acctTelegram)
+	// SMS: pedir el código, verificarlo, quitar el número
+	const sms = async (path, body, ok, btn) => {
+		if (btn) btn.disabled = true
+		try {
+			await proFetch(path, { print: TPPro.print, ...body })
+			if (ok) toast(tl(ok))
+			acctAlerts()
+		} catch (e) {
+			toast(e.message, true)
+			if (btn) btn.disabled = false
+		}
+	}
+	$('smsChange')?.addEventListener('click', () => ($('smsForm').hidden = false))
+	$('smsOff')?.addEventListener('click', () => sms('/pro/sms/off', {}, 'acct.smsRemoved'))
+	$('smsSend')?.addEventListener('click', (e) => (($('smsPhone').value.trim() ? sms('/pro/sms/code', { phone: $('smsPhone').value }, 'acct.smsSent', e.target) : $('smsPhone').focus())))
+	$('smsVerify')?.addEventListener('click', (e) => (($('smsCode').value.trim() ? sms('/pro/sms/verify', { code: $('smsCode').value }, 'acct.smsVerified', e.target) : $('smsCode').focus())))
 	$('tgOff')?.addEventListener('click', async () => {
 		try {
 			await proFetch('/pro/telegram/unlink', { print: TPPro.print })

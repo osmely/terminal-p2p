@@ -15,7 +15,7 @@ import { clearWho, clientIp, readWho, sessionCookie, sessionToken } from './sess
 import { alertsReady, notify, panelUrl, tgEsc, type AlertEnv } from './alerts.ts'
 import { seal, sendBackup, snapshot } from './backup.ts'
 import { GRACE_MS, INCIDENT_NAME, openIncidents, recordIncident, resolveIncident, type Incident } from './incidents.ts'
-import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarText, tellDays, tellPaid, tellRefund, tellUser, unlink, botWebhook } from './userbot.ts'
+import { cleanRadarHit, connectBot, linked, linkUrl, radarButton, radarSms, radarText, tellDays, tellPaid, tellRefund, tellUser, unlink, botWebhook } from './userbot.ts'
 import { ORDERS_PAUSED_MSG, ordersPaused, proEnabled, setOrdersPaused, setProEnabled } from './flags.ts'
 import { dailyPostOn, lastPosts, POST_HOUR, setDailyPost, testDailyPost } from './community.ts'
 import { COINS } from '../src/terminal/market.ts'
@@ -24,12 +24,16 @@ import { liveClients, liveSimulate, liveStatus, liveStub, type LagStats, type Li
 import { cubaDate, liveDay, SLOT_MS, type LiveDay } from './livehistory.ts'
 import { addAlert, deleteAlert, latestRates, listAlerts, MAX_ALERTS, stockOf } from './ratealerts.ts'
 import { offerAlertsOn, setOfferAlerts } from './offeralerts.ts'
+import { removeSms, sendCode, smsOn, smsState, smsUser, verifyCode, type SmsEnv } from './sms.ts'
 import { ACCESS_NAME, accessError, accessOf, activeBlocks, blockOf, isActive, liftBlock, setBlock, type AccessLevel, type Block } from './blocks.ts'
 import { BODY_MAX, ctaOf, hideMessages, isSegment, listInbox, markRead, retireMessage, SEGMENTS, segmentAccounts, sendInbox, sentMessages, TITLE_MAX, type InboxEnv } from './inbox.ts'
 import { diagOf, hourKey, logUser, timeline, type DiagEntry, type LogKind, type TimelineFilter, type TimelineRow } from './userlog.ts'
 
 export interface ProEnv extends AlertEnv {
 	DB: D1
+	// OTP Cuba: avisos del radar por SMS (sms.ts)
+	OTP_API_KEY?: string
+	OTP_TOKEN_SECRET?: string
 	// App de comerciante de QvaPay: facturas y quién pagó. Sin ellas no se puede comprar
 	QVAPAY_APP_ID?: string
 	QVAPAY_APP_SECRET?: string
@@ -919,6 +923,7 @@ export async function accountView(db: D1, license: string | null, now: number) {
 		moves,
 		purchases,
 		telegram: await linked(db, l.uuid),
+		sms: (await smsState(db, l.uuid)).phone,
 	}
 }
 
@@ -1101,7 +1106,7 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			t.print = print
 			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
 			if (!license) return needWho('ver tu cuenta')
-			return json(200, await accountView(db, license, now))
+			return json(200, { ...(await accountView(db, license, now)), smsOn: smsOn(env) })
 		}
 
 		// Ya no se piden devoluciones desde el terminal (los terminales viejos aún tienen el botón)
@@ -1155,7 +1160,32 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 			// Con la tasa de cada mercado y el precio de las acciones de sus avisos
 			const alerts = await listAlerts(db, license)
 			const stockKeys = [...new Set(alerts.map((x) => x.coin).filter((c) => stockOf(c)))]
-			return json(200, { alerts, offers: await offerAlertsOn(db, license), telegram: await linked(db, license), rates: await latestRates(db, [...COINS.map((c) => c.tick), ...stockKeys], now, fetcher), max: MAX_ALERTS })
+			return json(200, { alerts, offers: await offerAlertsOn(db, license), telegram: await linked(db, license), sms: smsOn(env) ? await smsState(db, license) : null, rates: await latestRates(db, [...COINS.map((c) => c.tick), ...stockKeys], now, fetcher), max: MAX_ALERTS })
+		}
+		// Avisos por SMS (sms.ts): mandar el código al número que pone en «Mi cuenta», comprobarlo y quitar el número.
+		// Solo con Pro activo
+		if (route === 'POST /pro/sms/code' || route === 'POST /pro/sms/verify' || route === 'POST /pro/sms/off') {
+			const b = await readBody(req)
+			const print = printOf(b.print)
+			const license = await deviceAccount(req, db, print, env.PRO_KEY, now)
+			Object.assign(t, { kind: 'telegram', print, account: license, detail: 'Avisos por SMS' })
+			if (!license) return needWho('recibir avisos')
+			const l = await db.prepare('SELECT expires_at, revoked FROM pro_licenses WHERE uuid = ? AND merged_into IS NULL').bind(license).first<{ expires_at: number; revoked: number }>()
+			if (!l || l.revoked || l.expires_at <= now) return json(403, { error: 'Los avisos por SMS son parte de Pro' })
+			const smsEnv = { ...env, DB: db } as SmsEnv
+			if (route === 'POST /pro/sms/off') {
+				await removeSms(db, license)
+				t.detail = 'Quitó los avisos por SMS'
+			} else if (route === 'POST /pro/sms/code') {
+				const err = await sendCode(smsEnv, license, b.phone, now, fetcher)
+				t.detail = err ? `Avisos por SMS: no se mandó el código (${err})` : 'Avisos por SMS: pidió el código'
+				if (err) return json(400, { error: err })
+			} else {
+				const err = await verifyCode(smsEnv, license, b.code, now, fetcher)
+				t.detail = err ? `Avisos por SMS: código no aceptado (${err})` : 'Avisos por SMS: verificó su número'
+				if (err) return json(400, { error: err })
+			}
+			return json(200, { sms: await smsState(db, license) })
 		}
 		if (route === 'POST /pro/telegram/webhook') {
 			t.skip = true
@@ -1193,10 +1223,14 @@ async function proRoute(req: Request, url: URL, env: ProEnv & { PRO_KEY: string 
 				t.detail += ' · ya avisada'
 				return json(200, { ok: true, sent: false, repeated: true })
 			}
-			const sent = await tellUser(env, l.uuid, radarText(hit), radarButton(env, hit), fetcher)
-			// Si no salió (sin chat conectado, Telegram caído), no cuenta como mandado
-			if (!sent) await db.prepare('DELETE FROM pro_radar_sent WHERE license = ? AND offer = ? AND kind = ?').bind(l.uuid, hit.offer, hit.kind).run()
+			// Por dónde lo quiere (las casillas del radar; los terminales viejos solo llaman con Telegram encendido)
+			const sent = b.tg !== false && (await tellUser(env, l.uuid, radarText(hit), radarButton(env, hit), fetcher))
+			// Lo que tomó, también por SMS si puso su teléfono (hay que pagar a tiempo)
+			const texted = hit.kind === 'taken' && b.sms !== false && (await smsUser({ ...env, DB: db } as SmsEnv, l.uuid, radarSms(hit), now, fetcher))
+			// Si no salió por ningún lado (sin chat ni teléfono, o fallaron), no cuenta como mandado
+			if (!sent && !texted) await db.prepare('DELETE FROM pro_radar_sent WHERE license = ? AND offer = ? AND kind = ?').bind(l.uuid, hit.offer, hit.kind).run()
 			t.detail += sent ? ' · enviado por Telegram' : ' · no salió por Telegram (sin chat conectado o Telegram falló)'
+			if (texted) t.detail += ' · y por SMS'
 			return json(200, { ok: true, sent })
 		}
 

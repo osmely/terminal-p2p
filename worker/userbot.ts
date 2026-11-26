@@ -253,6 +253,15 @@ export function radarText(h: RadarHit) {
 	return `⚡ <b>Radar: tomé una oferta por ti</b>\n\n${h.side === 'buy' ? 'Compraste' : 'Vendiste'} <b>${money(h.usd)} QUSD</b> a ${at} ${h.side === 'buy' ? 'a' : 'con'} ${who} en ${m.name}.\n\n${next}`
 }
 
+// La hora en Cuba como «08:36 p. m.»
+const clock12 = (ms: number) => inCuba(ms).toLocaleTimeString('es', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: true })
+
+// El mismo aviso por SMS (sms.ts): corto y al grano (hay que pagar a tiempo). Sin hora, que lo mire en el terminal
+export function radarSms(h: RadarHit) {
+	if (h.side === 'sell') return 'TerminalP2P: Aviso de Radar, libera solo cuando veas el pago'
+	return h.payBy ? `TerminalP2P: Aviso de Radar, Paga antes de las ${clock12(h.payBy)}` : 'TerminalP2P: Aviso de Radar, Paga a tiempo en Mis operaciones'
+}
+
 export const radarButton = (env: AlertEnv, h: RadarHit) => (h.kind === 'found' ? button('Abrir la oferta', `${appUrl(env)}/#p2p/${h.offer}`) : openApp(env, 'Ver mis operaciones'))
 
 // ── Lo que el usuario le escribe al bot ──────────────────────────────
