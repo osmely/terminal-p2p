@@ -7,7 +7,7 @@
 import { COINS } from '../src/terminal/market.ts'
 import type { CompletedRates, P2POffer } from '../src/qvapay/types.ts'
 import { intentOf } from '../src/terminal/stats.ts'
-import { ACT_KEEP, ALARM_MS, feedRow, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES, DEEP_TAKE, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, FeedRace, LIVE_VERSION, exportPage, importPage, liveActive, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
+import { ACT_KEEP, ALARM_MS, feedRow, LAG_KEEP, lagStats, Book, DEEP_EVERY_MS, DEEP_PAGES, DEEP_TAKE, FEED_IDLE_MS, feedSign, FREE_EVERY_MS, HOUR_MS, LIVE_VERSION, exportPage, importPage, liveActive, POLL_MS, QVAPAY, READS_PER_MIN, RESYNC_MS, sideKey, sseEvents, STREAM_MAX_MS, STREAM_STALL_MS, TAKE, TICKS, type Act, type BookRefs, type BookSnapshot, type FeedEvent, type FeedSample, type LiveEnv, type LiveOffer, type LiveState, type Owner, type Side, type Trade } from './livebook.ts'
 import { NOTICE_MAX_AGE_MS, NOTICES_PER_HOUR, offerNotice, offerWatchers, sendNotice, WATCH_TTL_MS, type Notice } from './offeralerts.ts'
 import type { BotEnv } from './userbot.ts'
 import { alertOther, OtherMarkets, saveOther } from './othermarkets.ts'
@@ -158,7 +158,7 @@ export class LiveBook {
 		if (url.pathname === '/ws') return this.connect(url.searchParams.get('pro') === '1', url.searchParams.get('u') || null)
 		if (url.pathname === '/inbox' && req.method === 'POST') return Response.json(this.inboxPing(await req.json().catch(() => null)))
 		if (url.pathname === '/clients') return Response.json(this.clients())
-		if (url.pathname === '/where') return Response.json({ ...(await this.where()), race: this.race.stats() })
+		if (url.pathname === '/where') return Response.json(await this.where())
 		// Mudanza (solo desde la ruta firmada del Worker): dónde está y si está activo, sacar lo guardado por páginas y,
 		// solo si está dormido, escribirlo
 		if (url.pathname === '/move/info') return Response.json({ name: this.ctx.id.name ?? null, active: this.active(), ...(await this.where()) })
@@ -266,12 +266,11 @@ export class LiveBook {
 		} catch {
 			return Response.json({ ok: false })
 		}
-		return Response.json({ ok: await this.ingest(String(m.raw ?? ''), m.rejected ?? null, 'hook') })
+		return Response.json({ ok: await this.ingest(String(m.raw ?? ''), m.rejected ?? null) })
 	}
 
 	// Un evento del feed (del webhook o del stream): se apunta para el panel, entra al libro y sale hacia los terminales
-	private race = new FeedRace()
-	private async ingest(raw: string, rejected: string | null, src: 'hook' | 'stream') {
+	private async ingest(raw: string, rejected: string | null) {
 		const rx = Date.now()
 		this.recent = [{ at: rx, rejected, body: raw.slice(0, 4000) }, ...this.recent].slice(0, 15)
 		void this.ctx.storage.put('recent', this.recent)
@@ -285,7 +284,6 @@ export class LiveBook {
 		} catch {
 			return false
 		}
-		this.race.add(e, src, rx)
 		this.events++
 		this.lastEvent = Date.now()
 		this.logFeed(e)
@@ -799,7 +797,7 @@ export class LiveBook {
 					}
 					if (!ev.event.startsWith('p2p.')) continue
 					this.streamEvents++
-					await this.ingest(ev.data, null, 'stream')
+					await this.ingest(ev.data, null)
 					await this.forward(ev.data)
 				}
 			}

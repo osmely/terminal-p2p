@@ -194,7 +194,7 @@ export const OWNER_KEEP_DAYS = 30
 export const HOUR_MS = 3_600_000
 // La versión del código del libro en vivo: la dicen el panel y /data/book (tras desplegar, el objeto puede seguir un rato
 // con el código anterior)
-export const LIVE_VERSION = 41
+export const LIVE_VERSION = 40
 
 export interface Applied {
 	coin: string
@@ -797,61 +797,11 @@ export async function liveOnline(env: LiveEnv, users: { id: string; u: string }[
 }
 
 // Dónde corre el libro en vivo y cuánto le tarda QvaPay en contestar (para el panel)
-// Qué camino trae antes cada aviso de QvaPay: el webhook o el stream (los dos traen los mismos). Por cada aviso que llega
-// por los dos: quién llegó primero y cuántos ms después el otro. Solo en memoria (se reinicia con el libro)
-export type FeedSrc = 'hook' | 'stream'
-export interface RaceStats {
-	hook: number
-	stream: number
-	onlyHook: number
-	onlyStream: number
-	// ms que le saca el primero al segundo: la mediana y lo que tarda 9 de cada 10, según quién ganó
-	hookLead: { p50: number | null; p90: number | null }
-	streamLead: { p50: number | null; p90: number | null }
-}
-export const RACE_KEEP = 400
-export const RACE_WAIT_MS = 60_000
-export class FeedRace {
-	private seen = new Map<string, { src: FeedSrc; rx: number }>()
-	private leads: { first: FeedSrc; ms: number }[] = []
-	private n = { hook: 0, stream: 0, onlyHook: 0, onlyStream: 0 }
-	// Un aviso que llegó por src a la hora rx
-	add(e: FeedEvent, src: FeedSrc, rx: number) {
-		const key = `${e.event}|${e.data?.uuid ?? ''}|${e.data?.updated_at ?? e.sent_at ?? ''}`
-		const prev = this.seen.get(key)
-		if (!prev) {
-			this.seen.set(key, { src, rx })
-			if (this.seen.size > 2000) this.expire(rx)
-			return
-		}
-		if (prev.src === src) return
-		this.seen.delete(key)
-		this.n[prev.src]++
-		this.leads = [...this.leads, { first: prev.src, ms: rx - prev.rx }].slice(-RACE_KEEP)
-	}
-	// Los que solo llegaron por un camino (pasado RACE_WAIT_MS sin el otro)
-	expire(now: number) {
-		for (const [k, v] of this.seen)
-			if (now - v.rx > RACE_WAIT_MS) {
-				this.seen.delete(k)
-				this.n[v.src === 'hook' ? 'onlyHook' : 'onlyStream']++
-			}
-	}
-	stats(now = Date.now()): RaceStats {
-		this.expire(now)
-		const pct = (src: FeedSrc) => {
-			const ms = this.leads.filter((x) => x.first === src).map((x) => x.ms).sort((a, b) => a - b)
-			return { p50: ms.length ? ms[Math.floor(ms.length / 2)] : null, p90: ms.length ? ms[Math.min(ms.length - 1, Math.floor(ms.length * 0.9))] : null }
-		}
-		return { ...this.n, hookLead: pct('hook'), streamLead: pct('stream') }
-	}
-}
-
-export async function liveWhere(env: LiveEnv): Promise<{ colo: string | null; ms: number[]; race?: RaceStats } | null> {
+export async function liveWhere(env: LiveEnv): Promise<{ colo: string | null; ms: number[] } | null> {
 	if (!env.LIVE) return null
 	return liveStub(env)
 		.fetch('https://live/where')
-		.then((r: Response) => (r.ok ? (r.json() as Promise<{ colo: string | null; ms: number[]; race?: RaceStats }>) : null))
+		.then((r: Response) => (r.ok ? (r.json() as Promise<{ colo: string | null; ms: number[] }>) : null))
 		.catch(() => null)
 }
 
