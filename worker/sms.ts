@@ -7,6 +7,7 @@ export interface SmsEnv {
 	DB: D1
 	OTP_API_KEY?: string
 	OTP_TOKEN_SECRET?: string
+	SMS_ON?: string
 }
 
 const OTP = 'https://otp.noxcreation.dev/api/v2'
@@ -15,7 +16,8 @@ export const SMS_DAILY = 10
 // Entre un código y el siguiente
 const CODE_GAP_MS = 60_000
 
-export const smsOn = (env: Partial<SmsEnv>) => !!(env.OTP_API_KEY && env.OTP_TOKEN_SECRET)
+// Encendido solo donde SMS_ON = 1 (y con las claves de OTP Cuba): así se puede probar en staging sin que salga en producción
+export const smsOn = (env: Partial<SmsEnv>) => env.SMS_ON === '1' && !!(env.OTP_API_KEY && env.OTP_TOKEN_SECRET)
 
 // Un móvil cubano: +53 y 8 dígitos que empiezan por 5 o 6 (con o sin +53, espacios o guiones)
 export function cleanPhone(v: unknown): string | null {
@@ -50,7 +52,8 @@ const rowOf = (db: D1, license: string) => db.prepare('SELECT phone, verified_at
 
 // Lo que ve «Mi cuenta»: el número verificado (tapado) y si hay uno esperando su código
 export async function smsState(db: D1, license: string) {
-	const r = await rowOf(db, license)
+	// Sin la tabla (aún sin migrar) o si falla, como si no tuviera número
+	const r = await rowOf(db, license).catch(() => null)
 	return { phone: r?.phone ? maskPhone(r.phone) : null, pending: r?.pending ? maskPhone(r.pending) : null }
 }
 

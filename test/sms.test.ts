@@ -34,7 +34,7 @@ function fakeOtp() {
 }
 
 const T = Date.parse('2026-11-25T20:00:00Z')
-const env = (): SmsEnv => ({ DB: memD1() as never, OTP_API_KEY: 'APP-x', OTP_TOKEN_SECRET: 'OTP-x' })
+const env = (): SmsEnv => ({ DB: memD1() as never, OTP_API_KEY: 'APP-x', OTP_TOKEN_SECRET: 'OTP-x', SMS_ON: '1' })
 
 test('sms: el número cubano se limpia, se tapa al enseñarlo y el texto va sin tildes y en 160', () => {
 	assert.equal(cleanPhone('+53 5123-4567'), '+5351234567')

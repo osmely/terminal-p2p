@@ -34,6 +34,7 @@ export interface ProEnv extends AlertEnv {
 	// OTP Cuba: avisos del radar por SMS (sms.ts)
 	OTP_API_KEY?: string
 	OTP_TOKEN_SECRET?: string
+	SMS_ON?: string
 	// App de comerciante de QvaPay: facturas y quién pagó. Sin ellas no se puede comprar
 	QVAPAY_APP_ID?: string
 	QVAPAY_APP_SECRET?: string
