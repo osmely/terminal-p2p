@@ -269,29 +269,44 @@ export class LiveBook {
 		return Response.json({ ok: await this.ingest(String(m.raw ?? ''), m.rejected ?? null) })
 	}
 
-	// Un evento del feed (del webhook o del stream): se apunta para el panel, entra al libro y sale hacia los terminales
+	// Un evento del feed (del webhook o del stream). Vía rápida: entra al libro y el radar del servidor lo ve al momento
+	// (la toma sale ya). Todo lo demás (panel, historial, terminales, avisos, volumen, velas, guardar) va después, en
+	// orden y sin frenar al siguiente aviso: así una oferta nueva no espera a lo que dejó pendiente la anterior
+	private tail: Promise<unknown> = Promise.resolve()
 	private async ingest(raw: string, rejected: string | null) {
 		const rx = Date.now()
+		let e: FeedEvent | null = null
+		if (!rejected)
+			try {
+				e = JSON.parse(raw)
+			} catch {
+				e = null
+			}
+		const ch = e ? this.book.apply(e) : null
+		if (e) {
+			if (ch?.act) this.radar?.onAct(ch.act.kind, ch.act.uuid, this.book.offers.get(ch.act.uuid), rx)
+			this.events++
+			this.lastEvent = Date.now()
+		}
+		const job = this.tail.then(() => this.afterIngest(raw, rejected, e, ch, rx)).catch((err) => console.error(`libro, después del aviso: ${(err as Error).message}`))
+		this.tail = job
+		this.ctx.waitUntil(job)
+		return !!e
+	}
+
+	// Lo que no corre prisa de cada aviso, en el orden en que llegaron
+	private async afterIngest(raw: string, rejected: string | null, e: FeedEvent | null, ch: ReturnType<Book['apply']>, rx: number) {
 		this.recent = [{ at: rx, rejected, body: raw.slice(0, 4000) }, ...this.recent].slice(0, 15)
-		void this.ctx.storage.put('recent', this.recent)
+		// Sin retener lo que sale (la toma del radar) hasta que se confirme: si se perdiera, solo es el panel
+		void this.ctx.storage.put('recent', this.recent, { allowUnconfirmed: true })
 		if (rejected) {
 			this.lastRejected = { at: Date.now(), reason: rejected }
-			return false
+			return
 		}
-		let e: FeedEvent
-		try {
-			e = JSON.parse(raw)
-		} catch {
-			return false
-		}
-		this.events++
-		this.lastEvent = Date.now()
+		if (!e) return
 		this.logFeed(e)
 		this.addLag(e)
 		if (this.others.add(e)) await this.saveOthers()
-		const ch = this.book.apply(e)
-		// Primero el radar del servidor (la toma sale ya), luego lo demás
-		if (ch?.act) this.radar?.onAct(ch.act.kind, ch.act.uuid, this.book.offers.get(ch.act.uuid), rx)
 		this.notice(e, ch?.trade ?? null)
 		this.push(e, ch?.trade ?? null)
 		let unknown = false
@@ -310,7 +325,6 @@ export class LiveBook {
 		await this.save()
 		if (unknown && this.streaming) void this.periodic().catch(() => {})
 		else if (this.want.size && !this.streaming) await this.soon(unknown ? 100 : 1500)
-		return true
 	}
 
 	// Historial del feed (feed_log, 30 días): sin esperar, para no frenar el libro. Una vez al día se borra lo viejo
@@ -419,8 +433,9 @@ export class LiveBook {
 		this.book.changedTrades.clear()
 		// De 128 en 128, lo más que deja guardar o borrar de una vez
 		const keys = Object.keys(puts)
-		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.put(Object.fromEntries(keys.slice(i, i + 128).map((k) => [k, puts[k]])))
-		for (let i = 0; i < dels.length; i += 128) await this.ctx.storage.delete(dels.slice(i, i + 128))
+		// Sin retener lo que sale (la toma del radar) hasta que se confirme: si se perdiera, el libro se vuelve a leer de QvaPay
+		for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.put(Object.fromEntries(keys.slice(i, i + 128).map((k) => [k, puts[k]])), { allowUnconfirmed: true })
+		for (let i = 0; i < dels.length; i += 128) await this.ctx.storage.delete(dels.slice(i, i + 128), { allowUnconfirmed: true })
 	}
 
 	private async soon(ms: number) {
@@ -798,7 +813,7 @@ export class LiveBook {
 					if (!ev.event.startsWith('p2p.')) continue
 					this.streamEvents++
 					await this.ingest(ev.data, null)
-					await this.forward(ev.data)
+					void this.forward(ev.data).catch(() => {})
 				}
 			}
 		} catch (e) {
